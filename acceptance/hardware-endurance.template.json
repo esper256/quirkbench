@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "kind": "hardware-endurance",
+  "status": "unqualified",
+  "device": "Acer SF14-61T; fill serial/hardware identifiers locally",
+  "duration_seconds": 0,
+  "required_events": ["controller_restart", "network_interruption", "agent_session_replacement", "pause_resume_1", "pause_resume_2", "storage_pressure", "human_recovery_classification"],
+  "observed_events": [],
+  "capabilities": {"usb_boot": "untested", "internal_storage_exclusion": "untested", "firmware_preservation": "untested", "watchdog": "untested", "kdump": "untested", "netconsole": "untested", "suspend_resume": "untested"},
+  "evidence": [],
+  "unresolved_attempts": [],
+  "operator": "",
+  "limitations": ["No hardware qualification has been performed."]
+}

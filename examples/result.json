@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "attempt_id": "attempt-001",
+  "outcome": "INCONCLUSIVE",
+  "summary": "The interruption occurred, but the evidence cannot establish whether the operation completed.",
+  "evidence": [],
+  "measurements": {"reconnect_count": 1},
+  "limitations": ["Requires an operator to review the target journal before retrying."]
+}

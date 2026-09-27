@@ -1,0 +1,366 @@
+"""Explicit, container-oriented build plans for the USB debug target.
+
+Importing this module never starts a build. All inputs and outputs are caller
+supplied; no command installs anything on the workstation.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from contextlib import contextmanager
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+from typing import Iterable
+
+
+# Storage drivers for the intended USB boot path are built in. Internal
+# controllers and firmware variable writes are intentionally unavailable.
+REQUIRED_CONFIG = {
+    "CONFIG_64BIT": "y",
+    "CONFIG_EFI": "y",
+    "CONFIG_EFI_STUB": "y",
+    "CONFIG_BLK_DEV_INITRD": "y",
+    "CONFIG_DEVTMPFS": "y",
+    "CONFIG_DEVTMPFS_MOUNT": "y",
+    "CONFIG_USB": "y",
+    "CONFIG_USB_XHCI_HCD": "y",
+    "CONFIG_USB_XHCI_PCI": "y",
+    "CONFIG_USB_STORAGE": "y",
+    "CONFIG_SCSI": "y",
+    "CONFIG_BLK_DEV_SD": "y",
+    "CONFIG_EXT4_FS": "y",
+    "CONFIG_EFI_PARTITION": "y",
+    "CONFIG_FAT_FS": "y",
+    "CONFIG_VFAT_FS": "y",
+    "CONFIG_EFIVAR_FS": "n",
+    "CONFIG_EFI_VARS": "n",
+    "CONFIG_EFI_VARS_PSTORE": "n",
+    "CONFIG_EFI_CAPSULE_LOADER": "n",
+    "CONFIG_EFI_TEST": "n",
+    "CONFIG_SCSI_LOWLEVEL": "n",
+    "CONFIG_VIRTIO_PCI": "n",
+    "CONFIG_VIRTIO_SCSI": "n",
+    "CONFIG_SWAP": "n",
+    "CONFIG_HIBERNATION": "n",
+    "CONFIG_DEVMEM": "n",
+    "CONFIG_KEXEC": "n",
+    "CONFIG_KEXEC_FILE": "n",
+    "CONFIG_BLK_DEV_NVME": "n",
+    "CONFIG_NVME_CORE": "n",
+    "CONFIG_ATA": "n",
+    "CONFIG_MMC": "n",
+    "CONFIG_VIRTIO_BLK": "n",
+}
+
+
+class BuildError(RuntimeError):
+    pass
+
+
+def _parse_config(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        raise BuildError(f"kernel config missing: {path}")
+    values: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        setting = re.fullmatch(r"(CONFIG_[A-Z0-9_]+)=(.*)", line)
+        disabled = re.fullmatch(r"# (CONFIG_[A-Z0-9_]+) is not set", line)
+        if setting:
+            values[setting.group(1)] = setting.group(2)
+        elif disabled:
+            values[disabled.group(1)] = "n"
+    return values
+
+
+def validate_kernel_config(path: Path) -> None:
+    """Reject a kernel that can address protected internal controllers."""
+    values = _parse_config(path)
+    mismatch = {key: (want, values.get(key, "missing"))
+                for key, want in REQUIRED_CONFIG.items()
+                if (values.get(key, "n") if want == "n" else values.get(key)) != want}
+    if mismatch:
+        detail = ", ".join(f"{key}: expected {want}, got {got}"
+                           for key, (want, got) in sorted(mismatch.items()))
+        raise BuildError(f"protected kernel config mismatch: {detail}")
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _safe_build_path(path: Path) -> None:
+    if not path.is_absolute() or path.is_symlink():
+        raise BuildError(f"build path must be absolute and not a symlink: {path}")
+    resolved = path.resolve()
+    forbidden = (Path("/"), Path("/dev"), Path("/proc"), Path("/sys"),
+                 Path("/run"), Path("/usr"), Path("/etc"), Path("/boot"),
+                 Path("/lib"), Path("/lib64"), Path("/var"), Path("/mnt"),
+                 Path("/media"))
+    if any(resolved == root or (root != Path("/") and root in resolved.parents) for root in forbidden):
+        raise BuildError(f"refusing system or mounted build path: {path}")
+
+
+def recommended_jobs() -> int:
+    """Use at most half of CPUs and half of available RAM, retaining 2 GiB."""
+    cpus = os.cpu_count()
+    if not cpus:
+        raise BuildError("CPU count unavailable; set jobs explicitly")
+    memory_available = None
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                memory_available = int(line.split()[1]) * 1024
+                break
+    except (OSError, ValueError):
+        pass
+    cgroup_limit = Path("/sys/fs/cgroup/memory.max")
+    cgroup_current = Path("/sys/fs/cgroup/memory.current")
+    try:
+        limit = cgroup_limit.read_text().strip()
+        if limit != "max":
+            cgroup_available = max(0, int(limit) - int(cgroup_current.read_text().strip()))
+            memory_available = min(memory_available, cgroup_available) if memory_available is not None else cgroup_available
+    except (OSError, ValueError):
+        pass
+    if memory_available is None:
+        raise BuildError("available memory unknown; set jobs explicitly after checking resources")
+    gib = 1024 ** 3
+    usable = min(memory_available // 2, memory_available - 2 * gib)
+    if usable < 2 * gib:
+        raise BuildError("less than 4 GiB available; defer kernel build")
+    return max(1, min(cpus // 2, usable // (2 * gib)))
+
+
+@contextmanager
+def build_lock(build_dir: Path):
+    """Serialize build stages sharing one object tree."""
+    _safe_build_path(build_dir)
+    build_dir.mkdir(parents=True, exist_ok=True)
+    with (build_dir / ".build.lock").open("w") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+@dataclass(frozen=True)
+class Command:
+    argv: tuple[str, ...]
+    cwd: Path
+
+
+@dataclass(frozen=True)
+class KernelBuild:
+    source: Path
+    build_dir: Path
+    sysroot: Path
+    output_dir: Path
+    jobs: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.jobs is not None and (self.jobs < 1 or self.jobs > 128):
+            raise ValueError("jobs must be between 1 and 128")
+        paths = [self.source, self.build_dir, self.sysroot, self.output_dir]
+        if any(not path.is_absolute() for path in paths):
+            raise ValueError("all build paths must be absolute")
+        if len({str(path.resolve()) for path in paths}) != len(paths):
+            raise ValueError("build paths must be distinct")
+        for path in paths:
+            _safe_build_path(path)
+
+    @property
+    def effective_jobs(self) -> int:
+        limit = recommended_jobs()
+        if self.jobs is not None and self.jobs > limit:
+            raise BuildError(f"requested jobs={self.jobs} exceeds resource limit {limit}")
+        return limit if self.jobs is None else self.jobs
+
+    def configure_plan(self) -> tuple[Command, ...]:
+        source, out = str(self.source), str(self.build_dir)
+        config = str(self.build_dir / ".config")
+        switches = []
+        for key, value in REQUIRED_CONFIG.items():
+            switches += ["-e" if value == "y" else "-d", key.removeprefix("CONFIG_")]
+        return (
+            Command(("make", "-C", source, f"O={out}", "ARCH=x86_64", "x86_64_defconfig"), self.source),
+            Command((str(self.source / "scripts/config"), "--file", config, *switches), self.source),
+            Command(("make", "-C", source, f"O={out}", "ARCH=x86_64", "olddefconfig"), self.source),
+        )
+
+    def compile_plan(self) -> tuple[Command, ...]:
+        source, out = str(self.source), str(self.build_dir)
+        common = ("make", "-C", source, f"O={out}", "ARCH=x86_64")
+        return (
+            Command((*common, f"-j{self.effective_jobs}", "bzImage", "modules", "vmlinux"), self.source),
+            Command((*common, "modules_install", f"INSTALL_MOD_PATH={self.sysroot}", "INSTALL_MOD_STRIP=1"), self.source),
+        )
+
+    def initramfs_plan(self, kernel_release: str, *,
+                       dracut_config: Path | None = None) -> tuple[Command, ...]:
+        if not re.fullmatch(r"[A-Za-z0-9._+-]+", kernel_release):
+            raise ValueError("invalid kernel release")
+        modules = self.sysroot / "lib/modules" / kernel_release
+        initramfs = self.output_dir / f"initramfs-{kernel_release}.img"
+        config_args: tuple[str, ...] = ()
+        if dracut_config is not None:
+            if not dracut_config.is_absolute() or not dracut_config.is_file():
+                raise BuildError("dracut config must be an existing absolute file")
+            config_args = ("--conf", str(dracut_config))
+        return (Command(("dracut", "--force", "--no-hostonly", "--sysroot", str(self.sysroot),
+                         *config_args, "--kmoddir", str(modules), "--kver", kernel_release,
+                         str(initramfs)), self.output_dir),)
+
+    def artifacts(self, kernel_release: str) -> dict[str, Path]:
+        return {"kernel": self.build_dir / "arch/x86/boot/bzImage",
+                "vmlinux": self.build_dir / "vmlinux",
+                "initramfs": self.output_dir / f"initramfs-{kernel_release}.img",
+                "config": self.build_dir / ".config"}
+
+
+def _require_container() -> None:
+    marker = Path("/etc/quirkbench-container")
+    if not marker.is_file() or marker.read_text().strip() != "quirkbench-fedora-rootless-build-v1":
+        raise BuildError("build execution requires the dedicated Fedora container")
+
+
+def _validate_command(command: Command) -> bool:
+    """Return whether protected config validation is required."""
+    if not command.argv:
+        raise BuildError("empty command")
+    _safe_build_path(command.cwd)
+    if not command.cwd.is_dir():
+        raise BuildError(f"working directory missing: {command.cwd}")
+    argv = command.argv
+    if argv[0] == "make":
+        if len(argv) < 6 or argv[1] != "-C" or argv[4] != "ARCH=x86_64":
+            raise BuildError("make command does not match target plan")
+        source = Path(argv[2])
+        if source != command.cwd or not argv[3].startswith("O="):
+            raise BuildError("make source or object path mismatch")
+        _safe_build_path(source)
+        _safe_build_path(Path(argv[3][2:]))
+        tail = argv[5:]
+        if tail in (("x86_64_defconfig",), ("olddefconfig",)):
+            return False
+        if (len(tail) == 4 and re.fullmatch(r"-j[1-9][0-9]*", tail[0])
+                and tail[1:] == ("bzImage", "modules", "vmlinux")):
+            return True
+        if (len(tail) == 3 and tail[0] == "modules_install"
+                and tail[1].startswith("INSTALL_MOD_PATH=")
+                and tail[2] == "INSTALL_MOD_STRIP=1"):
+            _safe_build_path(Path(tail[1].split("=", 1)[1]))
+            return True
+        raise BuildError("make target is not in the build allowlist")
+    if Path(argv[0]).name == "config":
+        if len(argv) < 4 or argv[1] != "--file" or not Path(argv[0]).is_absolute():
+            raise BuildError("scripts/config command does not match target plan")
+        if Path(argv[0]) != command.cwd / "scripts/config":
+            raise BuildError("scripts/config must come from the explicit source tree")
+        _safe_build_path(Path(argv[2]).parent)
+        if not all(argv[i] in ("-e", "-d") and re.fullmatch(r"[A-Z0-9_]+", argv[i + 1])
+                   for i in range(3, len(argv) - 1, 2)) or len(argv[3:]) % 2:
+            raise BuildError("scripts/config switches are not allowlisted")
+        return False
+    if argv[0] == "dracut":
+        if len(argv) < 10 or argv[1:4] != ("--force", "--no-hostonly", "--sysroot"):
+            raise BuildError("dracut command does not match target plan")
+        sysroot = Path(argv[4])
+        _safe_build_path(sysroot)
+        remainder = list(argv[5:])
+        if remainder[:1] == ["--conf"]:
+            if len(remainder) < 2 or not Path(remainder[1]).is_absolute():
+                raise BuildError("dracut config path invalid")
+            remainder = remainder[2:]
+        if (len(remainder) != 5 or remainder[0] != "--kmoddir"
+                or remainder[2] != "--kver"
+                or not re.fullmatch(r"[A-Za-z0-9._+-]+", remainder[3])):
+            raise BuildError("dracut target arguments invalid")
+        if Path(remainder[1]) != sysroot / "lib/modules" / remainder[3]:
+            raise BuildError("dracut module tree is outside target sysroot")
+        _safe_build_path(Path(remainder[4]).parent)
+        os_release = sysroot / "etc/os-release"
+        if not os_release.is_file() or not re.search(r"(?m)^ID=fedora$", os_release.read_text()):
+            raise BuildError("dracut sysroot must be the Fedora target rootfs")
+        return True
+    raise BuildError(f"command not in build allowlist: {argv[0]}")
+
+
+def run_commands(commands: Iterable[Command], *, config_to_validate: Path | None = None) -> None:
+    """Execute only exact target recipe forms in the dedicated container."""
+    _require_container()
+    planned = tuple(commands)
+    validations = [_validate_command(command) for command in planned]
+    needs_config = any(validations)
+    if needs_config and config_to_validate is None:
+        raise BuildError("kernel config validation is required before compilation or initramfs")
+    if config_to_validate is not None:
+        validate_kernel_config(config_to_validate)
+    for command in planned:
+        if shutil.disk_usage(command.cwd).free < 20 * 1024**3:
+            raise BuildError('20 GiB build free-space reserve reached')
+        subprocess.run(command.argv, cwd=command.cwd, check=True)
+
+
+def write_provenance(path: Path, *, source_archive: Path, config: Path,
+                     artifacts: dict[str, Path], base_image_digest: str,
+                     packages_lock: Path, commands: Iterable[Command],
+                     target_packages_lock: Path | None = None) -> None:
+    """Record resolved inputs and outputs; require an immutable base digest."""
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", base_image_digest):
+        raise BuildError("base image digest must be sha256:<64 lowercase hex>")
+    inputs = {"source_archive": source_archive, "config": config,
+              "packages_lock": packages_lock}
+    if target_packages_lock is not None:
+        inputs["target_packages_lock"] = target_packages_lock
+    for file in [*inputs.values(), *artifacts.values()]:
+        if not file.is_file():
+            raise BuildError(f"provenance input or output missing: {file}")
+    record = {
+        "schema": 1,
+        "base_image_digest": base_image_digest,
+        "inputs": {name: {"path": str(file), "sha256": sha256_file(file)} for name, file in inputs.items()},
+        "outputs": {name: {"path": str(file), "sha256": sha256_file(file)} for name, file in artifacts.items()},
+        "commands": [{"argv": list(item.argv), "cwd": str(item.cwd)} for item in commands],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+
+
+def capture_package_lock(path: Path) -> None:
+    """Capture exact RPM NEVRA versions inside the Fedora build container."""
+    _require_container()
+    _safe_build_path(path.parent)
+    if shutil.which("rpm") is None:
+        raise BuildError("rpm is required inside the Fedora build container")
+    listing = subprocess.check_output(
+        ("rpm", "-qa", "--qf", "%{NAME}\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\t%{ARCH}\n"),
+        text=True,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(sorted(listing.splitlines(keepends=True))))
+
+
+def capture_target_package_lock(sysroot: Path, path: Path) -> None:
+    """Capture the target Fedora rootfs RPM package set."""
+    _require_container()
+    _safe_build_path(sysroot)
+    _safe_build_path(path.parent)
+    if not (sysroot / "etc/quirkbench-rootfs").is_file():
+        raise BuildError("target rootfs marker missing")
+    listing = subprocess.check_output(
+        ("rpm", "--root", str(sysroot), "-qa", "--qf",
+         "%{NAME}\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\t%{ARCH}\n"),
+        text=True,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(sorted(listing.splitlines(keepends=True))))

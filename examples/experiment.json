@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "experiment_id": "network-interrupt-001",
+  "hypothesis": "After a network interruption, the target replays its pending evidence without rerunning the recipe.",
+  "recipe": "observe-network",
+  "artifacts": {},
+  "parameters": {"duration_s": 15},
+  "required_capabilities": ["network"],
+  "repetitions": 1,
+  "timeout_s": 120,
+  "baseline_id": null,
+  "provenance": {"submitted_by": "example"},
+  "success_criteria": "The result includes a reconnect observation and an acknowledged evidence digest."
+}

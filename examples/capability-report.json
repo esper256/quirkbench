@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "device_id": "quirkbench-target-01",
+  "boot_id": "boot-20260927-01",
+  "capabilities": ["network"],
+  "mode": "recovery",
+  "inventory": {"kernel": "example-kernel"}
+}
