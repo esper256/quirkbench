@@ -1,204 +1,93 @@
-# Build and boot prototype (M2 unfinished)
+# OSTree build and boot workflow
 
-**Do not commission this prototype as the finished USB lab.** The two-partition
-layout and recovery shell are scaffolding. M2 must supply fixed recovery, a
-separate GRUB state partition, journaled data, restartable expansion and the
-target service before hardware use. No image was built or booted during M1.
+The production deployment backend is minimal Fedora composed with rpm-ostree and published through a traditional signed OSTree repository. The old four-file kernel/initramfs bundle is retired. Historical artifacts remain available, but old images require rebuilding; there is no in-place image conversion.
 
-This recipe builds target artifacts in a rootless Fedora Distrobox container, constructs
-a **regular file** GPT image, and runs a UEFI trial in QEMU. It never writes a
-physical USB drive, mounts a host disk, installs a host kernel, invokes DKMS, or
-changes host EFI boot variables. Physical USB writing and hardware qualification
-are separate, unimplemented steps.
+The revised M2 build and VM gate is achieved. See [qualification observations](ostree-review.md) for exact identities, reports and physical integration limits.
 
-## Prerequisites and inputs
+## Build and compose on the controller
 
-The workstation must already have Podman and Distrobox for the build container.
-The container image provides `make`, `dracut`, `sgdisk`, `mtools`, `mkfs.ext4`,
-`grub-mkstandalone`, `grub-editenv`, and `dnf`. QEMU trials require
-`qemu-system-x86_64`, `qemu-img`, and explicit OVMF code and variables-template
-files. No credentials belong in the Containerfile, build arguments, rootfs, or
-provenance manifest.
+Use the versioned Fedora container environment, immutable base-image identity and recorded build/package/toolchain inputs. Podman and Distrobox are host prerequisites; all build packages and experimental installations stay inside the container. Persistent project state lives outside its disposable filesystem. Credentials, repository signing private keys and agent authentication must never enter a target filesystem, RPM payload, build log or exported source snapshot.
 
-Use a kernel source archive with a verified upstream checksum. Keep the archive,
-unpacked source, object tree, Fedora target sysroot, and output directory under the
-project workspace. Provide an **independently built and tested** recovery
-kernel, initramfs, and `.config`, as well as the debug kernel's `.config`.
-Both kernel configs must satisfy `validate_kernel_config`. In particular,
-NVMe, ATA, MMC, virtio PCI/SCSI/block, SCSI low-level controllers, swap,
-hibernation, kexec, /dev/mem, and EFI variable persistence support must be
-disabled in **both** kernels. USB xHCI, USB mass storage, SCSI disk, GPT, FAT,
-ext4, EFI, and initramfs support must be built in. A config file alone cannot
-prove that an arbitrary kernel binary was built from it; bind artifacts to the
-same source and build in the provenance record.
+Build kernels and modules in dedicated output trees. Stage userspace using `DESTDIR` and modules using `INSTALL_MOD_PATH`, preserve matching debug symbols and source archives in the controller artifact store, and package the experimental components as RPMs for composition. The composer produces one revision containing matching kernel, modules, initramfs, userspace and default configuration. Do not apply package overrides on the target. Capture exact source, configuration, package and toolchain identities in the deployment provenance.
 
-## Create the build container
+Default to one build at a time, no more than half host CPUs and RAM, and a 20 GiB free-space reserve. Report compiler output activity, measured object/byte counters where available and bounded phase deadlines. Cache reuse is an optimization; checkpoints and source identities remain recoverable without caches.
 
-Choose a verified immutable Fedora base digest and build the local image:
+### Capacity planning
+
+Use an existing suitable external USB SSD where possible. Budget approximately 32 GiB for recovery, active deployments and logs, plus twice the target's RAM for pending crash dumps, then leave at least 20% of the device free. A 250/256 GB SSD is a comfortable starting point; 500 GB adds headroom for retained evidence. This is capacity planning, not a claim that crash capture is already qualified. Unacknowledged evidence must never be deleted to free space for another experiment.
+
+Controller storage is separate: initially budget roughly 200 GiB for sources, builds, symbols, retained RPMs and evidence, in addition to the enforced 20 GiB free-space reserve. Keep enough extra capacity for independent backups; their OSTree objects do not share hardlinks with the source repository. A compact initial image can expand its existing data partition during commissioning to use the external device's available capacity.
+
+### CLI entry points
+
+Run these commands inside the appropriate isolated builder described in [the environment setup](../environments/README.md), with the persistent project mounted at `/workspace`. Replace the input paths with actual recorded files. The `build` command uses a build-input manifest; `compose` uses the separate `ComposeInputs` JSON contract documented in that environment guide, including source and symbol evidence maps. The illustrative `examples/deployment.json` is output-format documentation, not a compose input.
 
 ```sh
-podman build \
-  --build-arg BASE_IMAGE='fedora@sha256:<verified-64-hex-digest>' \
-  -t localhost/quirkbench-build:local \
-  -f environments/Containerfile .
-distrobox assemble create --file environments/assemble.ini
-distrobox enter quirkbench-build
+PYTHONPATH=src python3 -m quirkbench --state /workspace/.quirkbench/controller \
+  build /workspace/inputs/build.json --workspace /workspace/.quirkbench/build
+
+PYTHONPATH=src python3 -m quirkbench --state /workspace/.quirkbench/controller \
+  compose /workspace/inputs/compose.json \
+  --workspace /workspace/.quirkbench/compose \
+  --publish-repo /workspace/.quirkbench/published
 ```
 
-The `<...>` placeholder must be replaced. The Containerfile installs packages
-inside the container only. Capture the base image digest and installed package
-versions after resolution; repeatable rebuilds also require an RPM snapshot or
-package mirror that retains those exact versions. The provenance code rejects a
-mutable base image name in its record.
+Composition prints the deployment manifest and its retained artifact identity as JSON; phase reports go to stderr. Keep the manifest for the deployment qualification fixture. `compose` records the repository alias in the controller's `repositories.json` when none is configured. Use the same persistent state directory when serving that repository or backing it up. Add `--campaign CAMPAIGN_ID` to build/compose to expose their progress in an existing campaign's monitor.
 
-## Build in staged steps
+## Publish and prepare exact revisions
 
-Inside the container, use absolute paths for every argument. First construct
-the minimal Fedora target rootfs with an explicit Fedora release. Package
-installation requires UID 0 **inside the rootless container user namespace**;
-it never uses host `sudo` or the host package manager. Start the Distrobox,
-then run the script as container UID 0 via rootless Podman, passing the project
-path mounted in that container. The script refuses an existing output.
+The controller publishes a signed OSTree repository over authenticated HTTPS. The target requires Python GI and calls libostree’s strict signature verifier even for cached content; successful `ostree show` output is not sufficient signature authorization. Device credentials are distinct from AI credentials. The deployment manifest is stored in the ordinary content-addressed artifact store and references a configured repository identifier, exact commit and protection profile. Experiments refer to it using the `deployment` artifact role. Never authorize a moving branch or autonomous target update. Publication durably retains the manifest, its build-evidence closure and exact commit before experiment submission; published builds remain pinned until an explicit future cleanup operation.
+
+OSTree handles missing-object retrieval, verification and transactional deployment with synchronization enabled. Incomplete content must not become armable. Optional static deltas are deferred until transfer measurements justify them. Repository retention must protect all commits referenced by experiments or retained checkpoints. Complete backups include their independent object copies, SQLite, and the explicit build-evidence closure. Required evidence roles are `build_provenance`, `vmlinux`, `system_map`, `kernel_source`, `userspace_source`, `config`, and `modules`; dependency locks and additional debug data can be retained alongside them. Credentials and signing private keys are excluded; restoration requires separately configured repository locations and credentials.
+
+Each physical attempt gets a fresh deployment group and mutable state. Repeating preparation for that same attempt must converge on the same prepared deployment, not create another experiment. `/etc` starts from revision defaults and `/var` is not shared across attempts. Evidence is retained separately from disposable OS state.
+
+## Build the external image
+
+Image assembly writes regular files only; it does not write physical drives, change host firmware, install host kernels or invoke host package installation. Output a partitioned `.img` or `.img.xz` plus checksum for a normal writer such as Etcher.
+
+The image retains four partitions: fixed removable EFI bootloader/recovery files, read-only recovery root, a small GRUB one-shot state filesystem, and journaled ext4 data. Data holds the candidate OSTree sysroot and separately retained evidence. Only that existing data partition may expand, after strict positive identification of the external boot device and restartable geometry checks.
+
+Recovery remains independent of candidate deployments. OSTree generates candidate boot entries without regenerating the system bootloader; Quirkbench validates and translates the entry into the fixed USB boot control. GRUB clears, saves and verifies one-shot state before candidate handoff. If that fails it selects recovery. Candidate content never replaces fixed recovery or the bootloader. Do not invoke `grub-reboot` against the host installation or use `efibootmgr`.
+
+The `image` command accepts a separate JSON input. For a VM qualification image, use actual recovery outputs and the prepared data tree returned by [the deployment fixture](../acceptance/README.md):
+
+```json
+{
+  "output": "/workspace/output/quirkbench-qualification.img",
+  "recovery_kernel": "/workspace/recovery/vmlinuz",
+  "recovery_initramfs": "/workspace/recovery/initramfs.img",
+  "recovery_config": "/workspace/recovery/config",
+  "recovery_provenance": "/workspace/recovery/provenance.json",
+  "rootfs_dir": "/workspace/recovery/rootfs",
+  "prepared_data_tree": "/workspace/deployment-fixture/data",
+  "size_mib": 4096,
+  "root_mib": 1024,
+  "smoke": true
+}
+```
+
+All paths are placeholders. The output's parent must exist and the output must be new. Build the Fedora recovery root with `target-assets/build-rootfs.sh FEDORA_RELEASE ABSOLUTE_OUTPUT_DIRECTORY` as UID 0 inside the rootless builder; use its corresponding recorded kernel/initramfs build provenance. Set partition sizes to fit the actual recovery and deployment contents. The small initial image is distinct from the full external-device capacity budget; commissioning expands its data partition before real campaigns. Save the JSON as `/workspace/inputs/image.json`, then run:
 
 ```sh
-podman exec --user 0 quirkbench-build \
-  /absolute/path/to/quirkbench/target-assets/build-rootfs.sh \
-  <fedora-release-number> /absolute/path/to/quirkbench/work/rootfs
+PYTHONPATH=src python3 -m quirkbench image /workspace/inputs/image.json
 ```
 
-The following Python sketch runs the explicit kernel commands inside that
-container. Keep `PYTHONPATH` pointed at this project's `src` directory. The
-source tree must contain `scripts/config`. The target sysroot must be the
-Fedora rootfs just built, with its installed dracut userspace and systemd.
+The command produces the regular-file disk image, a `.sha256` checksum and an adjacent image manifest. Qualification uses `quirkbench qualify-image --help` or `make acceptance-qemu`; [the acceptance guide](../acceptance/README.md) lists its required inputs. `smoke: true` enables VM trial behavior and is not a commissioned hardware image. Hardware preparation must use `smoke: false` and pass its separate gates before writing with Etcher.
 
-```python
-from pathlib import Path
-import subprocess
-from quirkbench.build import (
-    KernelBuild, build_lock, capture_package_lock, capture_target_package_lock,
-    run_commands, validate_kernel_config, write_provenance,
-)
+## Protection and qualification
 
-project = Path('/absolute/path/to/quirkbench')
-work = project / 'work'
-build = KernelBuild(
-    source=work / 'linux-source',
-    build_dir=work / 'kernel-obj',
-    sysroot=work / 'rootfs',
-    output_dir=work / 'artifacts',
-)
-for directory in (build.build_dir, build.output_dir):
-    directory.mkdir(parents=True, exist_ok=True)
+The initial supported profile keeps internal-controller support excluded from recovery and candidate kernels, verifies source/configuration provenance, and allowlists USB destinations before privileged writes. Disable internal discovery, automount, swap/resume and firmware writes. Recovery and OSTree candidate roots require different boot verification; executable deployment storage must not be mounted with a blanket `noexec`, while evidence remains restricted. A replacement storage-protection mechanism needs reviewed equivalent tests.
 
-with build_lock(build.build_dir):
-    configure = build.configure_plan()
-    run_commands(configure)
-    validate_kernel_config(build.build_dir / '.config')
-    compile_commands = build.compile_plan()
-    run_commands(compile_commands, config_to_validate=build.build_dir / '.config')
-    release = subprocess.check_output(
-        ('make', '-C', str(build.source), f'O={build.build_dir}',
-         'ARCH=x86_64', 'kernelrelease'), text=True,
-    ).strip()
-    initramfs_commands = build.initramfs_plan(
-        release, dracut_config=project / 'target-assets/dracut.conf'
-    )
-    run_commands(initramfs_commands, config_to_validate=build.build_dir / '.config')
-capture_package_lock(work / 'artifacts/packages.lock')
-capture_target_package_lock(build.sysroot, work / 'artifacts/target-packages.lock')
-write_provenance(
-    work / 'artifacts/kernel-provenance.json',
-    source_archive=work / 'linux-source.tar.xz',
-    config=build.build_dir / '.config',
-    artifacts=build.artifacts(release),
-    base_image_digest='sha256:<verified-64-hex-digest>',
-    packages_lock=work / 'artifacts/packages.lock',
-    target_packages_lock=work / 'artifacts/target-packages.lock',
-    commands=(*configure, *compile_commands, *initramfs_commands),
-)
-```
+The current no-kexec policy does not support kdump. Review that policy and independently qualify the fixed capture kernel before enabling crash capture. Secure Boot is assumed disabled and must be verified. Owner-controlled USB boot selection and manual recovery of unsupported complete hangs remain explicit boundaries.
 
-`run_commands` refuses compilation or initramfs construction without protected
-config validation. `olddefconfig` can change requested switches, so validate
-the **resulting** `.config` after configure and again at the compile boundary.
-The resource planner caps jobs at half the CPUs and half the available RAM,
-with a 2 GiB reserve and about 2 GiB per compile job; it fails when it cannot
-verify enough memory. `build_lock` serializes stages sharing one object tree.
-`dracut --sysroot` uses the Fedora target userspace, not the workstation.
-Install this project's target service into that rootfs before imaging. The
-minimal rootfs contains no baked-in user credentials.
+QEMU proves infrastructure behavior, not Acer fixes. The revised M2 gate requires a clean-container compose, preserved state after container recreation, one revision changing kernel and userspace with matching modules, interrupted update fault cases, recovery/candidate/subsequent-recovery/failed-candidate boots, and unchanged sentinel disks, fixed recovery and settled persistent firmware settings. Record host package and boot configuration inventories before and after. A process exit, timeout or immutable OVMF template hash alone is not successful boot qualification.
 
-## Construct the regular-file image
+The hardware gate separately verifies actual storage protection, reset, diagnostic capture and evidence upload before unattended campaigns. See [recovery coverage](recovery-and-evidence.md). Unit tests and old bundle-based VM results must not be represented as completion of the OSTree M2 gate.
 
-`create_image` requires a new output path, a marked Fedora target rootfs with
-`/sbin/init`, two distinct kernel/initramfs pairs, and both protected configs:
+## References
 
-```python
-from pathlib import Path
-from quirkbench.image import ImageInputs, create_image
-
-work = Path('/absolute/path/to/quirkbench/work')
-manifest = create_image(ImageInputs(
-    output=work / 'artifacts/quirkbench-usb.img',
-    debug_kernel=work / 'kernel-obj/arch/x86/boot/bzImage',
-    debug_initramfs=work / 'artifacts/initramfs-<release>.img',
-    recovery_kernel=work / 'recovery/vmlinuz',
-    recovery_initramfs=work / 'recovery/initramfs.img',
-    rootfs_dir=work / 'rootfs',
-    debug_config=work / 'kernel-obj/.config',
-    recovery_config=work / 'recovery/.config',
-))
-print(manifest)
-```
-
-The image has a GPT, a FAT32 EFI System Partition with the removable UEFI path
-`/EFI/BOOT/BOOTX64.EFI`, and an ext4 root partition. The code uses sparse
-regular files and copies filesystem bytes into the image at calculated offsets.
-It uses no loop devices. It refuses an existing image or manifest and paths
-under `/dev`, `/proc`, `/sys`, `/run`, `/media`, or `/mnt`.
-
-GRUB starts at the fixed **Recovery** entry. The **Debug once** entry is
-selected only when `next_entry=debug` was set in the USB ESP's `grubenv` and
-GRUB can clear, save, and reload that setting. If the environment read/write
-check fails, it remains on Recovery. Recovery starts a local shell with
-`init=/bin/sh`; this deliberately does not require a stored password. To arm
-the next boot, edit the copied image's FAT ESP through a regular-file FAT tool
-or, after a controlled physical qualification step, use `grub-editenv` on the
-USB ESP's `EFI/BOOT/grubenv` to set `next_entry=debug`. Do not use `grub-reboot`
-against a host installation or use `efibootmgr`. Verify one-shot reset on the
-actual firmware before relying on it. The [GNU GRUB environment-block manual](https://www.gnu.org/software/grub/manual/grub/html_node/Environment-block.html)
-describes the storage limits for `save_env`.
-
-## UEFI trial and evidence
-
-`run_qemu` creates a disposable qcow2 overlay for the USB image, copies the
-OVMF variables template, and creates a 64 MiB internal-disk sentinel file.
-The QEMU command uses TCG and regular files only. It hashes the sentinel and
-template before and after the trial and raises an error if either changed.
-
-```python
-from pathlib import Path
-from quirkbench.qemu import QemuInputs, run_qemu
-
-work = Path('/absolute/path/to/quirkbench/work')
-trial = work / 'qemu-trial-001'
-trial.mkdir()
-result = run_qemu(QemuInputs(
-    image=work / 'artifacts/quirkbench-usb.img',
-    ovmf_code=Path('/absolute/path/to/OVMF_CODE.fd'),
-    ovmf_vars_template=Path('/absolute/path/to/OVMF_VARS.fd'),
-    work_dir=trial,
-    timeout_seconds=120,
-))
-print(result.serial_log, result.timed_out, result.exit_code)
-```
-
-A completed QEMU process or timeout alone is **not** a successful boot claim.
-Inspect `serial.log` for a target-produced boot marker, confirm the recovery
-entry boots first, arm `next_entry=debug` in a fresh overlay, and confirm that
-the next boot selects Debug once and the following boot returns to Recovery.
-The trial also needs to verify that the target reports no internal block
-devices and cannot write EFI variables. None of these guest observations have
-been performed in this repository environment. Secure Boot signing, USB media
-writing, firmware-specific behavior, power-loss recovery, and real hardware
-qualification remain unimplemented.
+- [rpm-ostree server composition](https://coreos.github.io/rpm-ostree/compose-server/)
+- [OSTree atomic upgrades](https://ostreedev.github.io/ostree/atomic-upgrades/)
+- [OSTree deployment state](https://ostreedev.github.io/ostree/deployment/)
+- [GRUB environment block requirements](https://www.gnu.org/software/grub/manual/grub/html_node/Environment-block.html)

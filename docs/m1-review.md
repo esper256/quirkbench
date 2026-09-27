@@ -1,6 +1,8 @@
 # Milestone 1 architecture review
 
-Status: executable software foundation, including progress visibility.
+Status: **M1 achieved**: executable software foundation, including progress visibility.
+
+This is the historical M1 review, not the current deployment specification. M2 now adopts OSTree; prototype bundle and image descriptions below record what was unqualified at M1. Current decisions are in architecture.md and milestones.md.
 
 Acceptance recorded on 2026-09-27: `make acceptance-m1` passed all 128 tests on Python 3.14.7 with no skips. The persistent CLI demo finished two attempts across pause/restart/resume. The terminal and JSON monitors were exercised. `doctor` found no Podman, Distrobox, dracut, GRUB or QEMU executable in this environment. Physical boot, build reproducibility and Acer qualification are not completed by this review.
 

@@ -41,10 +41,12 @@ def test_build_plan_is_staged_and_target_scoped(tmp_path: Path) -> None:
     assert "ATA" in configure[1].argv
     assert configure[-1].argv[-1] == "olddefconfig"
     assert any(arg == f"INSTALL_MOD_PATH={paths[2]}" for arg in compile_commands[1].argv)
+    assert not any(arg.startswith("INSTALL_MOD_STRIP=") for arg in compile_commands[1].argv)
     dracut_config = tmp_path / "dracut.conf"
     dracut_config.write_text('hostonly="no"\n')
     initrd = build.initramfs_plan("6.12.1-lab", dracut_config=dracut_config)[0]
     assert "--no-hostonly" in initrd.argv
+    assert "--reproducible" in initrd.argv
     assert str(paths[2] / "lib/modules/6.12.1-lab") in initrd.argv
     assert str(dracut_config) in initrd.argv
     with pytest.raises(ValueError):

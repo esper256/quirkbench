@@ -16,12 +16,7 @@ import uuid
 from .contracts import CapabilityReport, Experiment, Outcome, Result, canonical, digest, identifier
 
 
-class BootControl(Protocol):
-    """Hardware integration boundary; an implementation needs commissioning."""
-
-    def stage_candidate(self, artifact: bytes, expected_digest: str) -> None: ...
-    def reboot_to_candidate(self) -> None: ...
-    def recover(self) -> None: ...
+from .deployment import BootControl, DeploymentManifest
 
 
 @dataclass(frozen=True)
@@ -103,7 +98,7 @@ class TargetAgent:
     ):
         if report.device_id != client.device_id:
             raise ValueError("target report and client device differ")
-        if any(cap in report.capabilities for cap in ("candidate_boot", "kernel_boot", "boot_control")):
+        if any(cap in report.capabilities for cap in ("candidate_boot", "kernel_boot", "boot_control", "deployment_boot", "deployment.ostree.v1")):
             raise ValueError("boot capability unavailable until boot cycle is implemented")
         self.client = client
         self.report = report
@@ -327,10 +322,21 @@ class TargetAgent:
                 f"Recipe {experiment.recipe} is not installed on this target.",
                 limitations=["Only locally registered recipes may run."],
             )
+        elif "deployment" in experiment.artifacts:
+            # Physical handoff is deliberately gated until M3 reconciliation exists.
+            raw = self.client.artifact(experiment.artifacts["deployment"])
+            if digest(raw) != experiment.artifacts["deployment"]:
+                raise ValueError("deployment artifact digest mismatch")
+            DeploymentManifest.from_dict(json.loads(raw))
+            output = RecipeOutput(
+                Outcome.NEEDS_HUMAN,
+                "Deployment boot requires a commissioned physical handoff adapter.",
+                limitations=["No deployment was booted or recipe executed."],
+            )
         elif any(role in experiment.artifacts for role in ("kernel", "kernel_image", "candidate_kernel")):
             output = RecipeOutput(
                 Outcome.NEEDS_HUMAN,
-                "Candidate kernel boot cycle is not implemented.",
+                "Legacy kernel-only deployment requests are unsupported; supply a deployment manifest.",
                 limitations=["No candidate was booted, even if a BootControl adapter was supplied."],
             )
         else:

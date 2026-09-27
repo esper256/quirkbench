@@ -11,3 +11,4 @@ build/
 *.fd
 *.sqlite*
 
+environments/userspace-fixture/quirkbench-health

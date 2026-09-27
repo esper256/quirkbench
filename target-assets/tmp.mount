@@ -1,0 +1,13 @@
+[Unit]
+Description=Volatile recovery /tmp
+DefaultDependencies=no
+Before=local-fs.target
+
+[Mount]
+What=tmpfs
+Where=/tmp
+Type=tmpfs
+Options=mode=1777,nosuid,nodev,size=256M
+
+[Install]
+WantedBy=local-fs.target

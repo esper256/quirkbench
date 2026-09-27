@@ -25,10 +25,8 @@ class TargetTransport(Protocol):
 class CodingAgent(Protocol):
     def decide(self, context: dict) -> dict: ...
 
-# BootControl and RecipeOutput are defined alongside TargetAgent to avoid
-# importing any boot implementation into the controller process.
-
-from .target import BootControl, RecipeOutput
+from .deployment import BootControl, Composer, DeploymentBackend, DeploymentManifest, PreparedDeployment
+from .target import RecipeOutput
 
 class RecipeRunner(Protocol):
     def __call__(self, experiment: Experiment) -> RecipeOutput: ...

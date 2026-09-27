@@ -37,16 +37,19 @@ ALTER TABLE attempts ADD COLUMN created REAL;
 ALTER TABLE attempts ADD COLUMN started REAL;
 ALTER TABLE attempts ADD COLUMN last_heartbeat REAL;
 ALTER TABLE attempts ADD COLUMN finished REAL;
+""", """
+CREATE TABLE deployment_refs(owner TEXT NOT NULL, manifest_digest TEXT NOT NULL, repository TEXT NOT NULL, revision TEXT NOT NULL, PRIMARY KEY(owner,manifest_digest), FOREIGN KEY(owner,manifest_digest) REFERENCES refs(owner,digest));
 """]
 
 def uid():
     return uuid.uuid4().hex
 
 class Controller:
-    def __init__(self, root, clock=time.time, reserve_bytes=20 * 1024**3):
+    def __init__(self, root, clock=time.time, reserve_bytes=20 * 1024**3, deployment_repository=None):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.clock = clock
+        self.deployment_repository = deployment_repository
         self.store = ArtifactStore(self.root / 'artifacts', reserve_bytes=reserve_bytes)
         self.db_path = self.root / 'controller.sqlite'
         with self._connect() as db:
@@ -142,6 +145,8 @@ class Controller:
         spec = canonical(experiment.to_dict()).decode()
         for value in experiment.artifacts.values():
             self.store.verify(value)
+        deployment = self._deployment_manifest(experiment.artifacts["deployment"]) if "deployment" in experiment.artifacts else None
+        build_evidence = self._deployment_evidence(deployment) if deployment is not None else None
         with self.transaction() as db:
             self._campaign(db, campaign_id)
             previous = db.execute('SELECT spec FROM experiments WHERE id=?', (experiment.experiment_id,)).fetchone()
@@ -150,6 +155,8 @@ class Controller:
             db.execute('INSERT OR IGNORE INTO experiments VALUES(?,?)', (experiment.experiment_id, spec))
             for value in experiment.artifacts.values():
                 db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)', ('experiment:' + experiment.experiment_id, value))
+            if deployment is not None:
+                self._retain_deployment(db, "experiment:" + experiment.experiment_id, experiment.artifacts["deployment"], deployment, build_evidence)
             for repetition in range(experiment.repetitions):
                 db.execute("INSERT OR IGNORE INTO jobs(campaign,experiment,repetition,state) VALUES(?,?,?,'QUEUED')", (campaign_id, experiment.experiment_id, repetition))
 
@@ -342,16 +349,117 @@ class Controller:
             campaign['total_tokens'] = db.execute('SELECT COALESCE(SUM(tokens),0) FROM usage WHERE campaign=?', (campaign_id,)).fetchone()[0]
             return campaign
 
+    def _deployment_manifest(self, value):
+        from .deployment import DeploymentManifest
+        if self.store.verify(value) > 1024 * 1024:
+            raise ContractError('deployment manifest exceeds size limit')
+        try:
+            return DeploymentManifest.from_dict(json.loads(self.store.get(value)))
+        except (ValueError, TypeError) as exc:
+            raise ContractError('invalid deployment manifest') from exc
+
+    def retain_deployment_artifact(self, value):
+        """Pin a composed result before experiment submission; publication is immutable."""
+        manifest = self._deployment_manifest(value)
+        owner = 'deployment:' + value
+        evidence = self._deployment_evidence(manifest)
+        with self.transaction() as db:
+            db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)', (owner, value))
+            self._retain_deployment(db, owner, value, manifest, evidence)
+        return {'deployment': value, 'repository': manifest.repository, 'revision': manifest.revision}
+
+    def _deployment_evidence(self, manifest):
+        """Validate the explicit build-evidence closure; ordinary payload hashes are not refs."""
+        from .contracts import sha256
+        closure = manifest.provenance.get('build_evidence')
+        required = {'build_provenance', 'vmlinux', 'system_map', 'kernel_source',
+                    'userspace_source', 'config', 'modules'}
+        if (not isinstance(closure, dict) or set(closure) != {'schema_version', 'artifacts'}
+                or type(closure['schema_version']) is not int or closure['schema_version'] != 1
+                or not isinstance(closure['artifacts'], dict) or not required <= set(closure['artifacts'])):
+            raise ContractError('deployment requires a complete versioned build-evidence closure')
+        evidence = closure['artifacts']
+        for role, value in evidence.items():
+            identifier(role)
+            self.store.verify(sha256(value))
+        if self.store.path(evidence['build_provenance']).stat().st_size > 1024 * 1024:
+            raise ContractError('build provenance exceeds size limit')
+        try:
+            build = json.loads(self.store.get(evidence['build_provenance']))
+            if (type(build.get('schema')) is not int or build['schema'] != 1
+                    or not isinstance(build.get('kernel_release'), str) or not build['kernel_release']
+                    or build['kernel_release'] != manifest.provenance['kernel_release']):
+                raise ValueError('build identity mismatch')
+            for role in ('vmlinux', 'system_map', 'config', 'modules'):
+                if build['outputs'][role]['sha256'] != evidence[role]:
+                    raise ValueError('output identity mismatch')
+            for role, key in (('kernel_source', 'source_archive'), ('userspace_source', 'userspace_source_archive')):
+                if build['inputs'][key]['sha256'] != evidence[role]:
+                    raise ValueError('source identity mismatch')
+            recorded = manifest.provenance.get('build_provenance_sha256', evidence['build_provenance'])
+            if recorded != evidence['build_provenance']:
+                raise ValueError('provenance identity mismatch')
+            payloads = manifest.provenance.get('artifact_sha256', {})
+            for role in set(payloads) & set(evidence):
+                if payloads[role] != evidence[role]:
+                    raise ValueError('payload and evidence differ')
+        except (ValueError, TypeError, KeyError, AttributeError) as exc:
+            raise ContractError('build evidence does not match deployment provenance') from exc
+        return evidence
+
+    def _retain_deployment(self, db, owner, value, manifest, evidence):
+        if self.deployment_repository is None:
+            raise ContractError('deployment repository adapter is required to retain OS content')
+        # Expensive source/symbol hashing was completed before acquiring the DB writer.
+        for digest_value in evidence.values():
+            db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)', (owner, digest_value))
+        # Pin first: a crash may leave a harmless extra pin, never an unprotected DB reference.
+        self.deployment_repository.retain(manifest.repository, manifest.revision, owner)
+        db.execute('INSERT OR IGNORE INTO deployment_refs VALUES(?,?,?,?)',
+                   (owner, value, manifest.repository, manifest.revision))
+
+    @staticmethod
+    def _deployment_rows(db):
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='deployment_refs'").fetchone():
+            return []
+        return [dict(zip(('owner', 'manifest_digest', 'repository', 'revision'), row))
+                for row in db.execute('SELECT owner,manifest_digest,repository,revision FROM deployment_refs ORDER BY owner,manifest_digest')]
+
+    @staticmethod
+    def _repository_references(rows):
+        return [dict(repository=repository, revision=revision) for repository, revision in
+                sorted({(row['repository'], row['revision']) for row in rows})]
+
+    def deployment_references(self):
+        """Read retained revisions for audit/cleanup; an absent adapter cannot erase them."""
+        with self._connect() as db:
+            return self._deployment_rows(db)
+
     def checkpoint(self, checkpoint: Checkpoint):
+        deployments = {}
         for value in checkpoint.artifacts:
             self.store.verify(value)
+            # Source/symbol evidence can be large. Validate before the SQLite writer lock.
+            if self.store.path(value).stat().st_size <= 1024 * 1024:
+                try:
+                    document_value = json.loads(self.store.get(value))
+                    is_manifest = isinstance(document_value, dict) and document_value.get('backend') == 'ostree'
+                except (ValueError, UnicodeDecodeError):
+                    is_manifest = False
+                if is_manifest:
+                    manifest = self._deployment_manifest(value)
+                    deployments[value] = manifest, self._deployment_evidence(manifest)
         document = canonical(asdict(checkpoint))
         checkpoint_id = digest(document)
+        owner = 'checkpoint:' + checkpoint_id
         with self.transaction() as db:
             self._campaign(db, checkpoint.campaign_id)
             db.execute('INSERT OR IGNORE INTO checkpoints VALUES(?,?,?)', (checkpoint_id, checkpoint.campaign_id, document.decode()))
             for value in checkpoint.artifacts:
-                db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)', ('checkpoint:' + checkpoint_id, value))
+                db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)', (owner, value))
+                if value in deployments:
+                    manifest, evidence = deployments[value]
+                    self._retain_deployment(db, owner, value, manifest, evidence)
         return {'checkpoint_id': checkpoint_id}
 
     def record_decision(self, campaign_id, document, tokens=0, decision_id=None):
@@ -386,16 +494,27 @@ class Controller:
             try:
                 source.backup(target)
                 values = [row[0] for row in target.execute('SELECT DISTINCT digest FROM refs')]
+                deployments = self._deployment_rows(target)
             finally:
                 source.close(); target.close()
+            for row in deployments:
+                closure = self._deployment_evidence(self._deployment_manifest(row['manifest_digest']))
+                if not set(closure.values()) <= set(values):
+                    raise ContractError('backup is missing retained build-evidence references')
             for value in values:
                 self.store.verify(value)
                 shutil.copyfile(self.store.path(value), temporary / 'artifacts' / 'objects' / value)
+            if deployments:
+                if self.deployment_repository is None:
+                    raise ContractError('complete backup requires the deployment repository adapter')
+                references = self._repository_references(deployments)
+                self.deployment_repository.export(references, temporary / 'deployments')
+                self.deployment_repository.verify_export(references, temporary / 'deployments')
             for path in temporary.rglob('*'):
                 if path.is_file():
                     with path.open('rb') as handle:
                         os.fsync(handle.fileno())
-            atomic_write(temporary / 'manifest.json', canonical({'schema_version': 1, 'artifacts': sorted(values)}))
+            atomic_write(temporary / 'manifest.json', canonical({'schema_version': 2, 'artifacts': sorted(values), 'deployments': deployments}))
             for path in sorted((p for p in temporary.rglob('*') if p.is_dir()), key=lambda p: len(p.parts), reverse=True):
                 sync_directory(path)
             sync_directory(temporary)
@@ -417,19 +536,43 @@ class Controller:
             if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                 raise ContractError('backup database corrupt')
             references = {row[0] for row in db.execute('SELECT DISTINCT digest FROM refs')}
+            deployments = cls._deployment_rows(db)
         finally:
             db.close()
-        if manifest.get('schema_version') != 1 or references != set(manifest['artifacts']):
+        version = manifest.get('schema_version')
+        if version not in (1, 2) or references != set(manifest['artifacts']):
             raise ContractError('backup references do not match manifest')
+        if (version == 1 and deployments) or (version == 2 and manifest.get('deployments') != deployments):
+            raise ContractError('backup deployment references do not match manifest')
+        repository = kwargs.get('deployment_repository')
+        if deployments and repository is None:
+            raise ContractError('complete restore requires the deployment repository adapter')
         from .contracts import sha256
         import hashlib
         for value in references:
             with (backup / 'artifacts' / 'objects' / sha256(value)).open('rb') as handle:
                 if hashlib.file_digest(handle, 'sha256').hexdigest() != value:
                     raise ContractError('backup artifact corrupted')
+        if deployments:
+            from .deployment import DeploymentManifest
+            for row in deployments:
+                if row['manifest_digest'] not in references:
+                    raise ContractError('deployment manifest is missing from backup references')
+                deployment = DeploymentManifest.from_dict(json.loads((backup / 'artifacts' / 'objects' / row['manifest_digest']).read_bytes()))
+                if deployment.repository != row['repository'] or deployment.revision != row['revision']:
+                    raise ContractError('deployment identity differs from manifest')
+            repository_refs = cls._repository_references(deployments)
+            repository.verify_export(repository_refs, backup / 'deployments')
+            repository.restore(repository_refs, backup / 'deployments')
+            for row in deployments:
+                repository.retain(row['repository'], row['revision'], row['owner'])
         temporary = destination.with_name(destination.name + '.pending-' + uid())
         shutil.copytree(backup, temporary)
         controller = cls(temporary, **kwargs)
+        for row in deployments:
+            closure = controller._deployment_evidence(controller._deployment_manifest(row['manifest_digest']))
+            if not set(closure.values()) <= references:
+                raise ContractError('restore is missing retained build-evidence references')
         controller.startup()
         for path in temporary.rglob('*'):
             if path.is_file():

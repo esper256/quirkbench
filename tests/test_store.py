@@ -42,3 +42,14 @@ def test_empty_upload_and_corrupt_object(tmp_path):
     store.path(obj.sha256).write_bytes(b'tampered')
     with pytest.raises(ContractError): store.get(obj.sha256)
     with pytest.raises(ContractError): store.put(b'valid')
+
+
+def test_streamed_artifact_is_same_object_and_bad_hash_never_publishes(tmp_path):
+    store=ArtifactStore(tmp_path/'store',reserve_bytes=0)
+    source=tmp_path/'large';source.write_bytes(b'symbol'*500000)
+    artifact=store.put_file(source)
+    assert artifact.sha256==digest(source.read_bytes())
+    assert store.put_file(source)==artifact
+    source.write_bytes(b'changed')
+    with pytest.raises(ContractError):store.put_file(source,artifact.sha256)
+    assert len(list(store.objects.iterdir()))==1

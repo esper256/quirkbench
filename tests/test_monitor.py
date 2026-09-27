@@ -19,6 +19,24 @@ def activity(**changes):
 def health(c):
     return c.monitor('campaign')['progress']['activities'][0]['health']
 
+def test_composition_waiting_heartbeats_do_not_advance_or_extend_deadline(lab):
+    from quirkbench.monitor import PhaseReporter
+    c, now = lab
+    reporter = PhaseReporter(c, 'campaign')
+    reporter({'phase':'compose-tree','status':'running','timeout_s':60,'output_bytes':10})
+    now[0] += 5
+    reporter({'phase':'compose-tree','status':'waiting','output_bytes':10,'remaining_s':55})
+    first = c.monitor('campaign')['progress']['activities'][0]
+    assert first['state'] == 'WAITING'
+    now[0] += 20
+    reporter({'phase':'compose-tree','status':'waiting','output_bytes':10,'remaining_s':35})
+    second = c.monitor('campaign')['progress']['activities'][0]
+    assert second['last_report_age_s'] == 0
+    assert second['last_advance_age_s'] == 20
+    assert second['deadline_in_s'] == 35
+    reporter({'phase':'compose-tree','status':'complete','output_bytes':10})
+    assert c.monitor('campaign')['progress']['activities'][0]['state'] == 'COMPLETE'
+
 def test_progress_distinguishes_work_wait_contact_loss_stall_and_deadline(lab):
     c,now=lab
     report=activity(); c.progress(report)

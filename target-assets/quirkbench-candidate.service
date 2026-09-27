@@ -1,0 +1,20 @@
+[Unit]
+Description=Quirkbench OSTree identity and evidence preparation
+DefaultDependencies=no
+After=local-fs.target systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+Environment=PYTHONPATH=/usr/lib/quirkbench
+ExecStart=/usr/bin/python3 -m quirkbench.boot --config /etc/quirkbench/boot.json
+RemainAfterExit=yes
+TimeoutStartSec=90
+StandardOutput=kmsg+console
+StandardError=kmsg+console
+NoNewPrivileges=yes
+PrivateTmp=no
+
+[Install]
+WantedBy=multi-user.target

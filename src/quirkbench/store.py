@@ -140,3 +140,34 @@ class ArtifactStore:
                 self.fault_hook('after_publish')
                 return {'offset': size, 'complete': True, 'artifact': asdict(Artifact(expected_digest, size))}
             return {'offset': size, 'complete': False}
+
+    def put_file(self, path, expected_digest=None):
+        """Publish a large regular file without loading debug symbols into RAM."""
+        path=Path(path)
+        if path.is_symlink() or not path.is_file():
+            raise ContractError('artifact source must be a regular file')
+        if expected_digest is not None:
+            sha256(expected_digest)
+        with self.lock():
+            self.check_space(path.stat().st_size)
+            fd,name=tempfile.mkstemp(dir=self.objects,prefix='.pending-')
+            try:
+                state=hashlib.sha256();size=0
+                with path.open('rb') as source,os.fdopen(fd,'wb') as output:
+                    while block:=source.read(1024*1024):
+                        self.check_space(len(block))
+                        output.write(block);state.update(block);size+=len(block)
+                    output.flush();os.fsync(output.fileno())
+                value=state.hexdigest()
+                if expected_digest is not None and value!=expected_digest:
+                    raise ContractError('artifact digest mismatch')
+                destination=self.path(value)
+                if destination.exists():
+                    if self.verify(value)!=size:raise ContractError('artifact size mismatch')
+                else:
+                    self.fault_hook('before_publish')
+                    os.replace(name,destination);sync_directory(self.objects)
+                    self.fault_hook('after_publish')
+                return Artifact(value,size)
+            finally:
+                if os.path.exists(name):os.unlink(name)

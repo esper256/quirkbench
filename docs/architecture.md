@@ -4,7 +4,7 @@ This repository is a local, evidence-first laboratory for Linux experiments. The
 
 ## Trust and execution boundaries
 
-The controller is authoritative for campaign, job, attempt, lease, and evidence metadata in SQLite. Content-addressed blobs live in an immutable store keyed by SHA-256; their hashes are checked when read and transferred. State changes that authorize work or acknowledge evidence must commit durably before the controller responds. File publication uses a temporary file, flush/fsync, atomic rename, and directory fsync. A backup must capture a consistent database and all referenced blobs; restoring it must recheck the blob hashes. A copied SQLite file alone is not a complete backup.
+The controller is authoritative for campaign, job, attempt, lease, and evidence metadata in SQLite. Content-addressed blobs live in an immutable store keyed by SHA-256; their hashes are checked when read and transferred. State changes that authorize work or acknowledge evidence must commit durably before the controller responds. File publication uses a temporary file, flush/fsync, atomic rename, and directory fsync. A backup must capture a consistent database, all referenced blobs, and the complete OSTree content reachable from retained deployment revisions. Restoring verifies both artifact hashes and repository content. A database plus ordinary artifacts alone is not a complete backup when deployment references exist. Retained checkpoints protect deployment manifests and their referenced commits from cleanup.
 
 The target alone runs privileged recipes. The controller can offer artifacts and instructions through the target-facing protocol but cannot run those tasks on its own host. HTTPS uses a server certificate, a device bearer token, bounded request bodies, and a device-scoped artifact endpoint. Administrative operations remain local to the controller. A target journals an outbound operation before sending it; it removes that outbox item only after the server has durably committed and acknowledged it. Retries carry stable identities so a duplicate message is either an idempotent replay or a conflict, never a second execution.
 
@@ -26,7 +26,7 @@ Each session defaults to eight hours and one million recorded decision tokens. E
 
 ## Versioned wire records
 
-The six v1 record shapes have matching runtime validators in `src/quirkbench/contracts.py` and JSON Schema 2020-12 definitions in `schemas/`. They reject unknown fields, unsupported versions, invalid identifiers, and malformed digests. Omitted optional fields take the runtime defaults; when `schema_version` is supplied it must be the integer `1`. Each example in `examples/` is a valid shape illustration, not a certified recipe or outcome. JSON values in arbitrary `parameters`, `inventory`, `measurements`, `notes`, and `provenance` objects still have to be finite, serializable JSON.
+The six original v1 record shapes have matching runtime validators in `src/quirkbench/contracts.py` and JSON Schema 2020-12 definitions in `schemas/`. They reject unknown fields, unsupported versions, invalid identifiers, and malformed digests. Omitted optional fields take the runtime defaults; when `schema_version` is supplied it must be the integer `1`. Each example in `examples/` is a valid shape illustration, not a certified recipe or outcome. Deployment example digests are placeholders; use actual composer output and retained evidence for submission. JSON values in arbitrary `parameters`, `inventory`, `measurements`, `notes`, and `provenance` objects still have to be finite, serializable JSON.
 
 | Record | Purpose |
 | --- | --- |
@@ -36,16 +36,38 @@ The six v1 record shapes have matching runtime validators in `src/quirkbench/con
 | `Result` | Attempt identity, one outcome, concise interpretation, evidence digests, measurements, and limitations. |
 | `Checkpoint` | Campaign identity plus durable artifact references and operator notes. |
 | `Progress` | Activity/campaign identity, phase, sequence, measured counters, expected report interval, stall threshold and fixed deadline. |
+| `DeploymentManifest` | Backend, exact revision, configured repository identifier, build provenance and protection profile; stored as an immutable artifact. |
 
-The v1 field sets and outcome vocabulary are frozen for this milestone. Incompatible changes require a new schema version and migration/replay tests; adding an unknown field to a v1 message is intentionally rejected. This prevents an older target from silently ignoring a control or evidence field.
+The original v1 envelope field sets and outcome vocabulary remain frozen. `Experiment.artifacts["deployment"]` points to a deployment manifest without changing that envelope. Incompatible changes require a new schema version and migration/replay tests; adding an unknown field to a v1 message is intentionally rejected. This prevents an older target from silently ignoring a control or evidence field.
 
-## Boot and build boundary
+## Composition and deployment boundary
 
-The agreed target layout has fixed recovery files, a separate GRUB one-shot state partition, and journaled ext4 experiment/evidence storage. GRUB consumes candidate state before a full boot and defaults to recovery. Recovery is never automatically replaced by a candidate. Only the positively identified external data partition may expand during restartable commissioning. Internal storage controllers are excluded from both recovery and candidate kernels; disable automount, swap/resume, firmware updates, EFI writes and EFI-backed pstore. Secure Boot must be verified disabled. Owner boot selection and complete-hang manual recovery remain explicit boundaries.
+The production backend is minimal Fedora composed with rpm-ostree. The controller builds experimental RPMs inside a resource-bounded rootless Fedora container, then composes a complete filesystem revision. Kernels, modules, initramfs, userspace and default configuration travel together. Matching symbols and source/toolchain identities remain retained build evidence. No experimental package is installed on the controller host or assembled on the target.
 
-The current image module is an unqualified two-partition regular-file prototype, not the final target architecture. Its public API is not frozen. Its recovery shell, one-shot marker and staged kernel policies support future virtual trials, but no hardware deployment or completed boot claim follows from its existence. M2 must finish the separate state/data layout and all commissioning checks.
+A signed OSTree repository is served through authenticated HTTPS. Device credentials and repository trust configuration are distinct from agent credentials and signing private keys, which remain on the controller. An experiment authorizes an exact commit, never a moving branch. OSTree supplies object verification, incremental fetching and synchronized deployment transactions; optional static deltas are deferred until measurements justify them.
 
-The QEMU trial uses a copy-on-write USB overlay, a copy of the OVMF variables template, and a regular-file internal-disk sentinel. It compares sentinel/template hashes and also records before/after hashes of the guest's actual mutable firmware-variable copy. A pristine template alone cannot establish firmware preservation. A zero QEMU exit, timeout or unchanged sentinel does not prove guest boot behavior: serial assertions and a qualified firmware-variable baseline are required. Real USB boot, power loss, storage isolation and long duration operation require separate physical validation.
+| Interface | Responsibility |
+| --- | --- |
+| Composer | Build and publish an immutable deployment reference with provenance. |
+| Deployment backend | Prepare an attempt's revision, report installed/running identity, retain and remove deployments. |
+| Boot control | Arm one prepared deployment, reboot and report recovery state. |
+| Quirkbench core | Attempts, authorization, evidence, progress, reconciliation and checkpoints. |
+
+`DeploymentManifest.provenance.build_evidence` is a versioned closure with `schema_version: 1` and an `artifacts` mapping of role to CAS digest. Controller submission and checkpoint retention require build provenance, matching `vmlinux`, `system_map`, `config`, `modules`, and kernel/userspace source archives; the build provenance must bind those hashes and kernel release. The controller retains these blobs with the manifest. Composition publication pins an owner `deployment:<manifest-digest>` before any experiment is submitted, so a freshly composed result is included in backup. Such pinned builds remain retained until an explicit future cleanup operation releases them. Ordinary `artifact_sha256` payload identities do not implicitly become references. Missing evidence causes new submissions or backup completion to fail, while existing campaign history remains readable.
+
+Backend commands and filesystem paths stay behind adapters. A fake backend exercises shared behavior; the old four-file bundle is not a second supported deployment backend. Unsupported or legacy kernel-only execution must fail explicitly. Build artifacts may remain readable even when they cannot be deployed by the current adapter.
+
+## Boot and protection boundary
+
+The external image has a fixed EFI bootloader/recovery payload, read-only recovery root, dedicated GRUB state partition and expandable ext4 data. Candidate OSTree sysroots and evidence occupy separate directories on data. Recovery remains independently bootable; candidate composition cannot replace it or rewrite the fixed bootloader. Only the positively identified existing external data partition may expand during restartable commissioning.
+
+OSTree generates candidate boot entries without regenerating the system bootloader. Quirkbench validates those entries and integrates them with USB GRUB one-shot state. GRUB consumes and verifies cleared candidate state before handoff; recovery remains the permanent default. Normal experiments use full firmware reboots. A fresh deployment group and mutable state are created for every physical attempt, while preparation retries for that attempt are idempotent. Configuration starts from the commit defaults; neither shared `/var` nor modified `/etc` may contaminate a later attempt. Evidence lives outside that disposable state and remains until acknowledged.
+
+The protection requirement is that internal disks cannot be accidentally selected or mutated. The initial hardware profile retains internal-controller exclusion in both recovery and candidate kernels, combined with positive USB identity and allowlisted privileged destinations. Disable internal discovery, automount, swap/resume, firmware updates, EFI writes and EFI-backed pstore. Secure Boot must be verified disabled. Candidate data mounts must permit OS execution; evidence mounts remain restricted. Candidate roots follow OSTree semantics: read-only `/usr`, an exactly identified writable deployment root and attempt-local `/etc` and `/var`; recovery alone uses a wholly read-only root. Any replacement protection mechanism requires review and equivalent sentinel tests, not preservation of one implementation at all costs.
+
+M1 and the revised M2 OSTree build/VM qualification are achieved; [recorded results](ostree-review.md) define their scope. Old prototype image results do not qualify the replacement backend. See [recovery and evidence](recovery-and-evidence.md) for the separate selection, reset and diagnostic requirements. Current no-kexec policy means kdump is unavailable until reviewed and implemented.
+
+QEMU tests image assembly, deployment and fallback using disposable internal-disk sentinels and settled OVMF variable snapshots. The [reviewed firmware gate](m2-ostree-review.md) compares effective settings, permits only the exact firmware-owned MTC counter step, and retains raw snapshots. It does not establish Acer hardware behavior or physical recovery. Actual experiments boot directly on the laptop; complete hangs may require human reset.
 
 ## Human visibility
 

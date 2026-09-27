@@ -26,6 +26,14 @@ REQUIRED_CONFIG = {
     "CONFIG_EFI": "y",
     "CONFIG_EFI_STUB": "y",
     "CONFIG_BLK_DEV_INITRD": "y",
+    "CONFIG_MODULES": "y",
+    "CONFIG_MODULE_COMPRESS": "n",
+    "CONFIG_DEBUG_INFO": "y",
+    "CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT": "y",
+    "CONFIG_DEBUG_INFO_NONE": "n",
+    "CONFIG_DEBUG_INFO_REDUCED": "n",
+    "CONFIG_DEBUG_INFO_SPLIT": "n",
+    "CONFIG_KALLSYMS": "y",
     "CONFIG_DEVTMPFS": "y",
     "CONFIG_DEVTMPFS_MOUNT": "y",
     "CONFIG_USB": "y",
@@ -135,8 +143,8 @@ def recommended_jobs() -> int:
         raise BuildError("available memory unknown; set jobs explicitly after checking resources")
     gib = 1024 ** 3
     usable = min(memory_available // 2, memory_available - 2 * gib)
-    if usable < 2 * gib:
-        raise BuildError("less than 4 GiB available; defer kernel build")
+    if memory_available < 2 * gib:
+        raise BuildError("less than 2 GiB available; defer kernel build")
     return max(1, min(cpus // 2, usable // (2 * gib)))
 
 
@@ -202,7 +210,7 @@ class KernelBuild:
         common = ("make", "-C", source, f"O={out}", "ARCH=x86_64")
         return (
             Command((*common, f"-j{self.effective_jobs}", "bzImage", "modules", "vmlinux"), self.source),
-            Command((*common, "modules_install", f"INSTALL_MOD_PATH={self.sysroot}", "INSTALL_MOD_STRIP=1"), self.source),
+            Command((*common, "modules_install", f"INSTALL_MOD_PATH={self.sysroot}"), self.source),
         )
 
     def initramfs_plan(self, kernel_release: str, *,
@@ -216,13 +224,16 @@ class KernelBuild:
             if not dracut_config.is_absolute() or not dracut_config.is_file():
                 raise BuildError("dracut config must be an existing absolute file")
             config_args = ("--conf", str(dracut_config))
-        return (Command(("dracut", "--force", "--no-hostonly", "--sysroot", str(self.sysroot),
+        return (Command(("dracut", "--force", "--reproducible", "--no-hostonly",
+                         "--sysroot", str(self.sysroot),
                          *config_args, "--kmoddir", str(modules), "--kver", kernel_release,
                          str(initramfs)), self.output_dir),)
 
     def artifacts(self, kernel_release: str) -> dict[str, Path]:
         return {"kernel": self.build_dir / "arch/x86/boot/bzImage",
                 "vmlinux": self.build_dir / "vmlinux",
+                "module_symvers": self.build_dir / "Module.symvers",
+                "system_map": self.build_dir / "System.map",
                 "initramfs": self.output_dir / f"initramfs-{kernel_release}.img",
                 "config": self.build_dir / ".config"}
 
@@ -255,9 +266,8 @@ def _validate_command(command: Command) -> bool:
         if (len(tail) == 4 and re.fullmatch(r"-j[1-9][0-9]*", tail[0])
                 and tail[1:] == ("bzImage", "modules", "vmlinux")):
             return True
-        if (len(tail) == 3 and tail[0] == "modules_install"
-                and tail[1].startswith("INSTALL_MOD_PATH=")
-                and tail[2] == "INSTALL_MOD_STRIP=1"):
+        if (len(tail) == 2 and tail[0] == "modules_install"
+                and tail[1].startswith("INSTALL_MOD_PATH=")):
             _safe_build_path(Path(tail[1].split("=", 1)[1]))
             return True
         raise BuildError("make target is not in the build allowlist")
@@ -272,11 +282,11 @@ def _validate_command(command: Command) -> bool:
             raise BuildError("scripts/config switches are not allowlisted")
         return False
     if argv[0] == "dracut":
-        if len(argv) < 10 or argv[1:4] != ("--force", "--no-hostonly", "--sysroot"):
+        if len(argv) < 11 or argv[1:5] != ("--force", "--reproducible", "--no-hostonly", "--sysroot"):
             raise BuildError("dracut command does not match target plan")
-        sysroot = Path(argv[4])
+        sysroot = Path(argv[5])
         _safe_build_path(sysroot)
-        remainder = list(argv[5:])
+        remainder = list(argv[6:])
         if remainder[:1] == ["--conf"]:
             if len(remainder) < 2 or not Path(remainder[1]).is_absolute():
                 raise BuildError("dracut config path invalid")
@@ -295,8 +305,11 @@ def _validate_command(command: Command) -> bool:
     raise BuildError(f"command not in build allowlist: {argv[0]}")
 
 
-def run_commands(commands: Iterable[Command], *, config_to_validate: Path | None = None) -> None:
+def run_commands(commands: Iterable[Command], *, config_to_validate: Path | None = None,
+                 timeout_s: int = 8 * 3600) -> None:
     """Execute only exact target recipe forms in the dedicated container."""
+    if timeout_s < 1 or timeout_s > 24 * 3600:
+        raise BuildError("command timeout must be 1..86400 seconds")
     _require_container()
     planned = tuple(commands)
     validations = [_validate_command(command) for command in planned]
@@ -308,7 +321,7 @@ def run_commands(commands: Iterable[Command], *, config_to_validate: Path | None
     for command in planned:
         if shutil.disk_usage(command.cwd).free < 20 * 1024**3:
             raise BuildError('20 GiB build free-space reserve reached')
-        subprocess.run(command.argv, cwd=command.cwd, check=True)
+        subprocess.run(command.argv, cwd=command.cwd, check=True, timeout=timeout_s)
 
 
 def write_provenance(path: Path, *, source_archive: Path, config: Path,
@@ -364,3 +377,20 @@ def capture_target_package_lock(sysroot: Path, path: Path) -> None:
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(sorted(listing.splitlines(keepends=True))))
+
+
+def capture_toolchain_lock(path: Path) -> None:
+    """Capture the exact compiler/linker/build/initramfs version headers."""
+    _require_container()
+    _safe_build_path(path.parent)
+    commands = {"gcc": ("gcc", "--version"), "ld": ("ld", "--version"),
+                "make": ("make", "--version"), "dracut": ("dracut", "--version")}
+    versions = {}
+    for name, argv in commands.items():
+        lines = subprocess.check_output(argv, text=True, stderr=subprocess.STDOUT,
+                                        timeout=10).splitlines()
+        if not lines:
+            raise BuildError(f"toolchain {name} returned no version")
+        versions[name] = lines[0]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(versions, sort_keys=True, separators=(",", ":")) + "\n")

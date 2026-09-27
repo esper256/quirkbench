@@ -52,12 +52,12 @@ def render(status):
 
 class Activity:
     """Small adapter helper: periodic liveness is distinct from useful advancement."""
-    def __init__(self, controller, campaign_id, phase, message, *, total=None, timeout_s=3600, state='ACTIVE', interval_s=10):
+    def __init__(self, controller, campaign_id, phase, message, *, total=None, timeout_s=3600, state='ACTIVE', interval_s=10, unit='items'):
         from .contracts import Progress
         from .controller import uid
         import threading
         self.controller = controller
-        self.report = Progress(uid(),campaign_id,phase,state,message,0,completed=0 if total else None,total=total,timeout_s=timeout_s)
+        self.report = Progress(uid(),campaign_id,phase,state,message,0,completed=0 if total else None,total=total,timeout_s=timeout_s,unit=unit)
         self.interval_s = interval_s
         self.stop = threading.Event()
         self.lock = threading.Lock()
@@ -108,3 +108,35 @@ class Activity:
             if kind is None:
                 raise
         return False
+
+
+class PhaseReporter:
+    """Persist bounded command progress without counting heartbeat time as work."""
+    def __init__(self, controller=None, campaign_id=None, output=None):
+        self.controller, self.campaign_id, self.output = controller, campaign_id, output
+        self.activity = None
+
+    def __call__(self, record):
+        if self.output:
+            self.output(record)
+        if not self.controller or not self.campaign_id:
+            return
+        phase = record['phase']
+        waiting = record['status'] == 'waiting'
+        state = 'WAITING' if waiting else 'ACTIVE'
+        message = ('Waiting for output or completion: ' if waiting else 'Running ') + phase
+        if self.activity is None:
+            self.activity = Activity(self.controller, self.campaign_id, phase,
+                                     message, state=state, timeout_s=record.get('timeout_s', 3600), unit='output-bytes')
+            self.activity.__enter__()
+        elif self.activity.report.phase != phase:
+            raise ValueError('operation changed phase before completing its previous phase')
+        self.activity.update(message, completed=record.get('output_bytes', 0), state=state)
+        if record['status'] == 'complete':
+            self.activity.__exit__(None, None, None)
+            self.activity = None
+
+    def fail(self, error):
+        if self.activity:
+            self.activity.__exit__(type(error), error, error.__traceback__)
+            self.activity = None

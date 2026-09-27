@@ -274,3 +274,20 @@ def test_restored_controller_lower_upload_offset_is_reconciled(tmp_path):
     assert TargetAgent(client, tmp_path, report(), recipes={"large": large_recipe}).step() == "completed"
     assert len(client.uploads["attempt-1.0"]) == 700 * 1024
     assert len(client.evidence_refs) == 1
+
+
+def test_deployment_cannot_fall_through_to_an_ordinary_recipe(tmp_path):
+    from quirkbench.contracts import canonical, digest
+    from quirkbench.deployment import DeploymentManifest
+    manifest = DeploymentManifest('ostree', 'a' * 64, 'lab', {'kernel_release': 'test'}, 'usb-excluded-controllers-v1')
+    raw = canonical(manifest.to_dict())
+    client = FakeClient()
+    assigned = claim('count')
+    assigned['experiment']['artifacts'] = {'deployment': digest(raw)}
+    assigned['experiment']['parameters'] = {'marker': str(tmp_path / 'executed')}
+    client.claims.append(assigned)
+    client.artifact = lambda value: raw
+    TargetAgent(client, tmp_path / 'target', report(), recipes={'count': count_recipe}).step()
+    assert not (tmp_path / 'executed').exists()
+    assert client.results[0].outcome == Outcome.NEEDS_HUMAN
+    assert 'deployment was booted' in client.results[0].limitations[0]

@@ -2,20 +2,36 @@ export PYTHONPATH := $(CURDIR)/src
 
 PYTHON ?= .venv/bin/python
 
-.PHONY: test acceptance-m1 demo monitor acceptance-qemu acceptance-hardware acceptance-patch
+.PHONY: test acceptance-m1 demo monitor acceptance-qemu acceptance-hardware acceptance-patch acceptance-m2 acceptance-ostree-repository acceptance-ostree-signatures acceptance-ostree-deployment acceptance-ostree-controller-backup
 
 test:
 	$(PYTHON) -m pytest
 
-# A single explicit boot fixture. Run separate fixtures for recovery and debug
-# one-shot assertions; neither a timeout nor a zero exit proves a guest boot.
+# Real UEFI boot cycle: recovery, candidate, missing/load failure and panic fallback.
 acceptance-qemu:
-	@test -n "$(IMAGE)" || { echo "IMAGE must name an absolute regular-file USB image" >&2; exit 2; }
-	@test -n "$(OVMF_CODE)" || { echo "OVMF_CODE must name an absolute OVMF code file" >&2; exit 2; }
-	@test -n "$(OVMF_VARS)" || { echo "OVMF_VARS must name an absolute OVMF variables template" >&2; exit 2; }
-	@test -n "$(WORK_DIR)" || { echo "WORK_DIR must name an existing empty absolute directory" >&2; exit 2; }
-	@test -n "$(EXPECT_SERIAL)" || { echo "EXPECT_SERIAL must be an exact expected guest serial marker" >&2; exit 2; }
-	@IMAGE="$(IMAGE)" OVMF_CODE="$(OVMF_CODE)" OVMF_VARS="$(OVMF_VARS)" WORK_DIR="$(WORK_DIR)" EXPECT_SERIAL="$(EXPECT_SERIAL)" $(PYTHON) -c 'import os; from pathlib import Path; from quirkbench.qemu import QemuInputs, run_qemu; result = run_qemu(QemuInputs(Path(os.environ["IMAGE"]), Path(os.environ["OVMF_CODE"]), Path(os.environ["OVMF_VARS"]), Path(os.environ["WORK_DIR"]))); log = result.serial_log.read_text(errors="replace"); marker = os.environ["EXPECT_SERIAL"]; assert marker in log, f"expected serial marker absent: {marker!r}; inspect {result.serial_log}"; print(f"serial marker found: {marker!r}; internal sentinel unchanged; OVMF template unchanged; log={result.serial_log}")'
+	@test -n "$(IMAGE)" -a -n "$(OVMF_CODE)" -a -n "$(OVMF_VARS)" -a -n "$(WORK_DIR)" || { echo "IMAGE, OVMF_CODE, OVMF_VARS and empty WORK_DIR are required" >&2; exit 2; }
+	$(PYTHON) -m quirkbench qualify-image "$(IMAGE)" --manifest "$(IMAGE).json" --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)" --work "$(WORK_DIR)"
+
+acceptance-ostree-repository:
+	@test -n "$(REPOSITORY_WORK)" || { echo "REPOSITORY_WORK must name a new directory" >&2; exit 2; }
+	$(PYTHON) acceptance/qualify-ostree-repository.py --work "$(REPOSITORY_WORK)"
+
+acceptance-ostree-signatures:
+	@test -n "$(SIGNATURE_WORK)" || { echo "SIGNATURE_WORK must name a new directory" >&2; exit 2; }
+	$(PYTHON) acceptance/qualify-ostree-signatures.py --work "$(SIGNATURE_WORK)"
+
+acceptance-ostree-deployment:
+	@test -n "$(DEPLOYMENT_WORK)" -a -n "$(DEPLOYMENT_MANIFEST)" -a -n "$(OSTREE_REPO)" -a -n "$(PUBLIC_KEY)" || { echo "DEPLOYMENT_WORK, DEPLOYMENT_MANIFEST, OSTREE_REPO and PUBLIC_KEY are required" >&2; exit 2; }
+	$(PYTHON) acceptance/qualify-ostree-deployment.py --work "$(DEPLOYMENT_WORK)" --manifest "$(DEPLOYMENT_MANIFEST)" --repository "$(OSTREE_REPO)" --public-key "$(PUBLIC_KEY)" --repository-mode "$(DEPLOYMENT_REPO_MODE)"
+
+DEPLOYMENT_REPO_MODE ?= bare
+
+acceptance-ostree-controller-backup:
+	@test -n "$(CONTROLLER_STATE)" -a -n "$(BACKUP_WORK)" -a -n "$(DEPLOYMENT_MANIFEST)" -a -n "$(OSTREE_REPO)" || { echo "CONTROLLER_STATE, BACKUP_WORK, DEPLOYMENT_MANIFEST and OSTREE_REPO are required" >&2; exit 2; }
+	$(PYTHON) acceptance/qualify-ostree-controller-backup.py --controller "$(CONTROLLER_STATE)" --work "$(BACKUP_WORK)" --manifest "$(DEPLOYMENT_MANIFEST)" --repository "$(OSTREE_REPO)"
+
+# No blanket skips: these gates require actual tools and a composed image.
+acceptance-m2: acceptance-m1 acceptance-ostree-repository acceptance-ostree-signatures acceptance-ostree-deployment acceptance-ostree-controller-backup acceptance-qemu
 
 # No hardware cases are skipped inside this gate; separate qualification gates
 # fail visibly when their required real-world inputs are absent.

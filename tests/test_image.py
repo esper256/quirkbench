@@ -8,7 +8,7 @@ from quirkbench.build import REQUIRED_CONFIG
 
 def _inputs(tmp_path: Path) -> ImageInputs:
     files = []
-    for name in ("debug-kernel", "debug-initrd", "recovery-kernel", "recovery-initrd"):
+    for name in ("recovery-kernel", "recovery-initrd"):
         file = tmp_path / name
         file.write_bytes(name.encode())
         files.append(file)
@@ -19,7 +19,7 @@ def _inputs(tmp_path: Path) -> ImageInputs:
     (root / "etc/os-release").write_text("ID=fedora\n")
     (root / "etc/quirkbench-rootfs").write_text("quirkbench-fedora-target-v1\n")
     configs = []
-    for name in ("debug.config", "recovery.config"):
+    for name in ("recovery.config",):
         cfg = tmp_path / name
         cfg.write_text("\n".join(f"{key}={value}" if value != "n" else f"# {key} is not set" for key, value in REQUIRED_CONFIG.items()) + "\n")
         configs.append(cfg)
@@ -29,21 +29,149 @@ def _inputs(tmp_path: Path) -> ImageInputs:
 def test_image_requires_independent_recovery_and_new_regular_output(tmp_path: Path) -> None:
     inputs = _inputs(tmp_path)
     inputs.validate()
-    same = ImageInputs(inputs.output, inputs.debug_kernel, inputs.debug_initramfs,
-                       inputs.debug_kernel, inputs.recovery_initramfs, inputs.rootfs_dir,
-                       inputs.debug_config, inputs.recovery_config)
-    with pytest.raises(ImageError, match="independent"):
-        same.validate()
     inputs.output.write_text("existing")
     with pytest.raises(ImageError, match="overwrite"):
         inputs.validate()
 
 
-def test_grub_defaults_to_recovery_and_checks_one_shot_clear() -> None:
-    cfg = grub_config("01234567-89ab-cdef-0123-456789abcdef")
-    assert "set default=recovery" in cfg
-    assert "save_env --file=($esp)/EFI/BOOT/grubenv next_entry" in cfg
-    assert cfg.index("save_env") < cfg.index("unset next_entry") < cfg.index("load_env --file=($esp)/EFI/BOOT/grubenv next_entry", cfg.index("unset next_entry"))
-    assert 'if [ -z "$next_entry" ]; then' in cfg
-    assert "set default=debug" in cfg
-    assert "root=PARTUUID=01234567-89ab-cdef-0123-456789abcdef" in cfg
+def test_grub_defaults_to_recovery_and_checks_one_shot_clear():
+    cfg=grub_config("01234567-89ab-cdef-0123-456789abcdef")
+    assert "set default=0" in cfg
+    assert "set fallback=0" in cfg
+    assert not any(line.lstrip().startswith("search ") for line in cfg.splitlines())
+    assert '$root' in cfg
+    assert "^([^,)]+),gpt1$" in cfg
+    assert "save_env --file=$state/quirkbench/next.env next_entry candidate_id" in cfg
+    clear=cfg.index("save_env")
+    assert clear < cfg.index("unset next_entry") < cfg.index("load_env",cfg.index("unset next_entry"))
+    assert "set default=1" in cfg
+    assert '-a -f $data/quirkbench/boot/$chosen_candidate.cfg ]; then\n              set default=1' in cfg
+    assert "source $data/quirkbench/boot/$chosen_candidate.cfg" in cfg
+    assert "rootflags=noload fsck.mode=skip rd.skipfsck" in cfg
+    assert "init=/bin/sh" not in cfg
+    fallback=cfg[cfg.index("echo 'QUIRKBENCH_GRUB candidate-load-failed'"):]
+    assert 'linux $esp/vmlinuz-recovery' in fallback and 'initrd $esp/initramfs-recovery.img' in fallback
+    assert 'quirkbench.mode=recovery' in fallback and '\n    boot\n' in fallback
+
+
+def test_four_partitions_keep_state_separate_from_fixed_recovery():
+    from quirkbench.image import partition_layout
+    parts=partition_layout(4096,1024)
+    assert [p['number'] for p in parts]==[1,2,3,4]
+    assert [p['label'] for p in parts]==['QUIRKBENCH-ESP','QUIRKBENCH-RECOVERY','QUIRKBENCH-STATE','QUIRKBENCH-DATA']
+    assert all(a['end']<b['start'] for a,b in zip(parts,parts[1:]))
+    assert parts[2]['end']-parts[2]['start']+1==32*1024*1024//512
+
+
+def test_image_assembly_requires_provenance_before_any_external_command(tmp_path,monkeypatch):
+    import quirkbench.image as module
+    inputs=_inputs(tmp_path)
+    monkeypatch.setattr(module,'_tool',lambda name:name)
+    monkeypatch.setattr(module,'_run',lambda *args:pytest.fail('must refuse missing provenance before external writes'))
+    with pytest.raises(ImageError,match='provenance'):
+        module.create_image(inputs)
+
+
+def test_smoke_image_binds_expected_kernel_and_userspace_to_deployment(tmp_path):
+    from dataclasses import asdict, replace
+    from types import SimpleNamespace
+    import hashlib
+    import json
+    from test_boot import prepared, CONFIG
+    from quirkbench.deployment import DeploymentManifest
+    from quirkbench.image import _prepare_data
+    value=prepared(tmp_path)
+    manifest=DeploymentManifest('ostree',value.revision,'lab',{'kernel_release':'6.12-test'},'usb-excluded-controllers-v1')
+    value=replace(value,manifest_digest=manifest.sha256)
+    folder=tmp_path/'quirkbench/attempts'/value.attempt_id;folder.mkdir(parents=True)
+    (folder/'intent.json').write_text(json.dumps(manifest.to_dict()))
+    record=asdict(value);record['boot_entry']=str(value.boot_entry.relative_to(tmp_path))
+    (tmp_path/'quirkbench/prepared.json').write_text(json.dumps(record))
+    deployed=tmp_path/'ostree/deploy/attempt/deploy'/('b'*64+'.0')
+    modules=deployed/'usr/lib/modules/6.12-test';modules.mkdir(parents=True)
+    (modules/'modules.dep').touch()
+    (modules/'config').write_text('CONFIG_MAGIC_SYSRQ=y\n')
+    health=deployed/'usr/bin/quirkbench-health';health.parent.mkdir(parents=True);health.write_bytes(b'fixture')
+    result=_prepare_data(SimpleNamespace(smoke=True),tmp_path,CONFIG.to_dict())
+    assert result[:4]==(value.deployment_id,value.revision,'6.12-test',hashlib.sha256(b'fixture').hexdigest())
+    panic=(tmp_path/'quirkbench/boot'/(result[4]+'.cfg')).read_text()
+    assert 'quirkbench.smoke=1 quirkbench.fault=panic' in panic
+    failure=(tmp_path/'quirkbench/boot'/(result[5]+'.cfg')).read_text()
+    assert 'if initrd $data/quirkbench/qualification-missing-initrd; then' in failure
+    assert 'if linux $data/boot/ostree/fedora-test/vmlinuz ' in failure
+    record['manifest_digest']='e'*64
+    (tmp_path/'quirkbench/prepared.json').write_text(json.dumps(record))
+    with pytest.raises(ImageError,match='manifest'):
+        _prepare_data(SimpleNamespace(smoke=True),tmp_path,CONFIG.to_dict())
+
+
+def test_image_staging_preserves_hardlinks_and_logical_ostree_metadata(tmp_path):
+    import os
+    from quirkbench.image import _copy_tree
+    source=tmp_path/'source';source.mkdir()
+    first=source/'object';first.write_bytes(b'logical metadata fixture')
+    os.setxattr(first,'user.ostreemeta',b'logical-xattrs')
+    os.link(first,source/'checkout')
+    first.chmod(0o4755)
+    destination=tmp_path/'copied'
+    _copy_tree(source,destination)
+    copied=destination/'object'
+    assert copied.stat().st_ino==(destination/'checkout').stat().st_ino
+    assert copied.stat().st_uid==first.stat().st_uid
+    assert copied.stat().st_gid==first.stat().st_gid
+    assert copied.stat().st_mode==first.stat().st_mode
+    assert os.getxattr(copied,'user.ostreemeta')==b'logical-xattrs'
+
+
+def test_image_tool_silent_timeout_reaps_process(tmp_path):
+    import os,sys,time
+    from quirkbench.image import _run
+    pidfile=tmp_path/'pid'
+    script="import os,time; from pathlib import Path; Path(%r).write_text(str(os.getpid())); time.sleep(30)" % str(pidfile)
+    start=time.monotonic()
+    with pytest.raises(TimeoutError,match='deadline'):
+        _run(sys.executable,'-c',script,timeout_s=.15)
+    assert time.monotonic()-start<4
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pidfile.read_text()),0)
+
+
+def test_image_lock_wait_is_visible_and_bounded(tmp_path,capsys):
+    import fcntl,time
+    from quirkbench.image import image_lock
+    path=tmp_path/'image.lock'
+    with path.open('a') as first:
+        fcntl.flock(first,fcntl.LOCK_EX)
+        start=time.monotonic()
+        with pytest.raises(ImageError,match='lock deadline'):
+            with image_lock(path,timeout_s=.05):
+                pytest.fail('concurrent image writer acquired held lock')
+        assert time.monotonic()-start<1
+    assert '"status": "waiting"' in capsys.readouterr().err
+    with image_lock(path,timeout_s=.05):
+        pass
+
+
+def test_partition_copy_reports_measured_bytes(tmp_path,capsys):
+    from quirkbench.image import _copy_slice
+    source=tmp_path/'source';source.write_bytes(b'payload')
+    target=tmp_path/'target';target.write_bytes(b'0'*20)
+    _copy_slice(source,target,3)
+    assert target.read_bytes()==b'000payload0000000000'
+    assert '"copied_bytes": 7' in capsys.readouterr().err
+
+
+def test_interrupted_publication_rejects_changed_runtime_builder(tmp_path,monkeypatch):
+    import json
+    import quirkbench.image as module
+    from quirkbench.build import sha256_file
+    inputs=_inputs(tmp_path)
+    inputs.output.write_bytes(b'completed image awaiting manifest')
+    monkeypatch.setattr(module,'_builder_identity',lambda:'a'*64)
+    record={'input_identity':module._input_identity(inputs),'image_sha256':sha256_file(inputs.output),'builder_identity':'a'*64}
+    Path(str(inputs.output)+'.pending.json').write_text(json.dumps(record))
+    monkeypatch.setattr(module,'_builder_identity',lambda:'b'*64)
+    with pytest.raises(ImageError,match='retry inputs'):
+        module.create_image(inputs)
+    assert not Path(str(inputs.output)+'.json').exists()
+    assert inputs.output.read_bytes()==b'completed image awaiting manifest'

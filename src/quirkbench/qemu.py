@@ -7,6 +7,9 @@ import hashlib
 import os
 from pathlib import Path
 import shutil
+import selectors
+import signal
+import time
 import subprocess
 
 from .build import sha256_file
@@ -14,6 +17,55 @@ from .build import sha256_file
 
 class QemuError(RuntimeError):
     pass
+
+
+# EDK2 increments this firmware-owned counter in its driver entry point on boot.
+# No other variable, attribute or authentication metadata may change after setup.
+MTC_KEY = ('eb704011-1402-11d3-8e77-00a0c969723b', 'MTC')
+
+
+def firmware_variables(snapshot: Path, output: Path) -> dict:
+    """Decode a disposable OVMF snapshot using the maintained virt-firmware tool."""
+    import json
+    import uuid
+    subprocess.run(['virt-fw-vars', '--input', str(snapshot), '--output-json', str(output)],
+                   check=True, timeout=60, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    if output.stat().st_size > 8 * 1024**2:
+        raise QemuError('firmware variable report exceeds bound')
+    document = json.loads(output.read_bytes())
+    if document.get('version') != 2 or not isinstance(document.get('variables'), list):
+        raise QemuError('unsupported firmware variable report')
+    values = {}
+    for value in document['variables']:
+        if not isinstance(value, dict) or not isinstance(value.get('name'), str):
+            raise QemuError('invalid firmware variable')
+        key = (str(uuid.UUID(value['guid'])), value['name'])
+        if key in values or type(value.get('attr')) is not int:
+            raise QemuError('ambiguous firmware variable')
+        bytes.fromhex(value['data'])
+        values[key] = value
+    return values
+
+
+def compare_firmware_variables(before: dict, after: dict) -> list:
+    """Require identical settings, allowing only EDK2's exact boot-counter step."""
+    if before.keys() != after.keys():
+        raise QemuError('persistent firmware variable set changed')
+    maintenance = []
+    for key, value in before.items():
+        current = after[key]
+        if value == current:
+            continue
+        if key != MTC_KEY or {k:v for k,v in value.items() if k != 'data'} != {
+                k:v for k,v in current.items() if k != 'data'}:
+            raise QemuError('persistent firmware setting changed: ' + key[1])
+        first, last = bytes.fromhex(value['data']), bytes.fromhex(current['data'])
+        if (value['attr'] != 7 or len(first) != 4 or len(last) != 4
+                or int.from_bytes(last, 'little') != (int.from_bytes(first, 'little') + 1) % 2**32):
+            raise QemuError('unexpected firmware monotonic-counter change')
+        maintenance.append({'guid':key[0], 'name':key[1], 'before':value['data'],
+                            'after':current['data'], 'reason':'EDK2 firmware boot counter increment'})
+    return maintenance
 
 
 @dataclass(frozen=True)
@@ -59,13 +111,13 @@ def qemu_command(inputs: QemuInputs, *, vars_copy: Path,
         if not item.is_absolute() or item.parent != inputs.work_dir:
             raise QemuError("QEMU outputs must be direct children of work_dir")
     return (
-        "qemu-system-x86_64", "-machine", "q35,accel=tcg", "-m", str(inputs.memory_mib),
-        "-smp", "2", "-nodefaults", "-display", "none", "-serial", f"file:{serial_log}",
+        "qemu-system-x86_64", "-machine", "q35,accel=tcg", "-cpu", "max", "-m", str(inputs.memory_mib),
+        "-smp", "1", "-nodefaults", "-display", "none", "-monitor", "none", "-serial", "stdio",
         "-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={inputs.ovmf_code}",
         "-drive", f"if=pflash,format=raw,unit=1,file={vars_copy}",
         "-device", "qemu-xhci,id=xhci",
         "-drive", f"if=none,id=quirkbench_usb,file={usb_overlay},format=qcow2",
-        "-device", "usb-storage,drive=quirkbench_usb,bus=xhci.0",
+        "-device", "usb-storage,drive=quirkbench_usb,bus=xhci.0,bootindex=1",
         "-drive", f"if=none,id=internalsentinel,file={sentinel},format=raw",
         "-device", "virtio-blk-pci,drive=internalsentinel",
         "-no-reboot",
@@ -79,6 +131,90 @@ def _make_sentinel(path: Path) -> None:
         handle.write(b"INTERNAL DISK SENTINEL - MUST NOT CHANGE\n")
         handle.seek(64 * 1024 * 1024 - 4096)
         handle.write(b"END SENTINEL\n")
+
+
+def monitored_process(command, serial: Path, *, timeout_s: float, event=None,
+                      checkpoint=None, interval_s: float = 5,
+                      serial_limit: int = 64 * 1024**2,
+                      stderr_limit: int = 1024**2):
+    """Drain both pipes with hard log bounds and report measured liveness.
+
+    The caller routes QEMU serial to stdout. We own the only log writer, so a
+    runaway guest cannot fill the host disk between size-polling intervals.
+    """
+    if timeout_s <= 0 or interval_s <= 0 or serial_limit < 1 or stderr_limit < 1:
+        raise QemuError('invalid process monitoring bounds')
+    event = event or (lambda message: print(message, flush=True))
+    checkpoint = checkpoint or (lambda record: None)
+    start = time.monotonic()
+    last_output = None
+    last_report = start - interval_s
+    serial_bytes = 0
+    errors = bytearray()
+    process = None
+    status = 'running'
+    selector = selectors.DefaultSelector()
+    def report():
+        now = time.monotonic()
+        record = {'status': status, 'elapsed_s': round(now-start, 3),
+                  'remaining_s': round(max(0,timeout_s-(now-start)), 3),
+                  'serial_bytes': serial_bytes, 'stderr_bytes': len(errors),
+                  'last_serial_advance_age_s': None if last_output is None else round(now-last_output, 3),
+                  'pid': process.pid if process is not None else None}
+        checkpoint(record)
+        age = 'not observed' if last_output is None else f'{now-last_output:.1f}s ago'
+        event(f"{status}: elapsed {now-start:.1f}s; deadline in {record['remaining_s']:.1f}s; "
+              f"serial {serial_bytes} bytes; last serial advance {age}")
+    try:
+        with serial.open('xb') as output, serial.with_suffix('.stderr.log').open('xb') as diagnostics:
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                       start_new_session=True)
+            selector.register(process.stdout, selectors.EVENT_READ, 'serial')
+            selector.register(process.stderr, selectors.EVENT_READ, 'stderr')
+            try:
+                while selector.get_map() or process.poll() is None:
+                    now = time.monotonic()
+                    if now-start >= timeout_s:
+                        status = 'timed_out'
+                        raise subprocess.TimeoutExpired(command,timeout_s)
+                    if now-last_report >= interval_s:
+                        report(); last_report = now
+                    for key,_ in selector.select(timeout=min(.25,interval_s,max(.001,timeout_s-(now-start)))):
+                        block = os.read(key.fileobj.fileno(),65536)
+                        if not block:
+                            selector.unregister(key.fileobj)
+                            continue
+                        if key.data == 'serial':
+                            allowed = min(len(block),serial_limit-serial_bytes)
+                            output.write(block[:allowed]); output.flush()
+                            serial_bytes += allowed
+                            last_output = time.monotonic()
+                            if allowed < len(block):
+                                raise QemuError('guest serial output exceeded bounded log size')
+                        else:
+                            allowed = min(len(block),stderr_limit-len(errors))
+                            diagnostics.write(block[:allowed]); diagnostics.flush()
+                            errors.extend(block[:allowed])
+                            if allowed < len(block):
+                                raise QemuError('QEMU stderr exceeded bounded log size')
+                status = 'completed'
+                return subprocess.CompletedProcess(command,process.wait(),stderr=errors.decode(errors='replace'))
+            except BaseException as exc:
+                if status != 'timed_out':
+                    status = 'interrupted' if isinstance(exc,(KeyboardInterrupt,SystemExit)) else 'failed'
+                raise
+            finally:
+                if process.poll() is None or status != 'completed':
+                    try:os.killpg(process.pid,signal.SIGKILL)
+                    except ProcessLookupError:pass
+                process.wait(timeout=10)
+                output.flush();os.fsync(output.fileno())
+                diagnostics.flush();os.fsync(diagnostics.fileno())
+    finally:
+        selector.close()
+        if process is not None:
+            process.stdout.close();process.stderr.close()
+        report()
 
 
 def run_qemu(inputs: QemuInputs) -> QemuResult:
@@ -109,7 +245,7 @@ def run_qemu(inputs: QemuInputs) -> QemuResult:
     timed_out = False
     exit_code: int | None = None
     try:
-        completed = subprocess.run(command, timeout=inputs.timeout_seconds, check=False)
+        completed = monitored_process(command,serial,timeout_s=inputs.timeout_seconds)
         exit_code = completed.returncode
     except subprocess.TimeoutExpired:
         timed_out = True
@@ -122,3 +258,132 @@ def run_qemu(inputs: QemuInputs) -> QemuResult:
         raise QemuError("OVMF variables template changed during QEMU trial")
     return QemuResult(command, serial, timed_out, exit_code, internal_before,
                       internal_after, template_before, template_after, vars_guest_before, vars_guest_after)
+
+
+def verify_panic_proof(log: str, manifest: dict) -> None:
+    """Kernel evidence survives a panic that may drop queued userspace logs."""
+    panic='Kernel panic - not syncing: sysrq triggered crash'
+    required={"quirkbench.mode=candidate", "quirkbench.smoke=1", "quirkbench.fault=panic",
+              "quirkbench.candidate="+manifest['candidate_id'],
+              "quirkbench.revision="+manifest['candidate_revision']}
+    cmdlines=[line.split('Kernel command line:',1)[1].split() for line in log.splitlines() if 'Kernel command line:' in line]
+    versions=[line.split('Linux version ',1)[1].split()[0] for line in log.splitlines() if 'Linux version ' in line]
+    def exact_authorization(words):
+        return all([word for word in words if word.startswith(token.split('=',1)[0]+'=')]==[token] for token in required)
+    if panic not in log or versions != [manifest['candidate_kernel_release']] or not any(exact_authorization(words) for words in cmdlines):
+        raise QemuError('panic trial lacks actual kernel panic and exact authorized fault command line')
+
+
+def qualify_boot_cycle(inputs: QemuInputs, manifest_path: Path, *, event=None) -> Path:
+    """Real recovery/candidate/fallback trials on one disposable raw USB copy.
+
+    The first recovery boot settles firmware initialization. Subsequent trials
+    must preserve all effective settings; EDK2's boot counter is checked separately.
+    Raw stores and their hashes remain available for independent inspection. No host
+    block devices or network interfaces are attached.
+    """
+    import json
+    from dataclasses import asdict
+    from .image import _run as image_tool
+    from .store import atomic_write
+    from .contracts import canonical
+    inputs.validate()
+    event=event or (lambda phase,message: print(f'{phase}: {message}',flush=True))
+    manifest=json.loads(manifest_path.read_bytes())
+    if manifest.get('image_sha256')!=sha256_file(inputs.image):raise QemuError('image manifest does not match image bytes')
+    if not manifest.get('smoke'):raise QemuError('boot qualification requires QEMU smoke image')
+    if manifest.get('deployment_backend') != 'ostree' or not manifest.get('candidate_id') or not manifest.get('candidate_revision') or not manifest.get('candidate_kernel_release') or not manifest.get('candidate_health_sha256') or not manifest.get('panic_candidate_id') or not manifest.get('load_failure_candidate_id'):
+        raise QemuError('boot qualification requires a prepared OSTree candidate')
+    for tool in ('qemu-system-x86_64','mcopy','cp','virt-fw-vars'):
+        if shutil.which(tool) is None:raise QemuError('missing qualification tool: '+tool)
+    work=inputs.work_dir
+    if any(work.iterdir()):raise QemuError('qualification work directory must be empty')
+    trial=work/'usb-trial.img';variables=work/'OVMF_VARS.fd';sentinel=work/'internal-sentinel.img'
+    subprocess.run(['cp','--reflink=auto','--sparse=always',str(inputs.image),str(trial)],check=True)
+    shutil.copyfile(inputs.ovmf_vars_template,variables);_make_sentinel(sentinel)
+    sentinel_digest=sha256_file(sentinel)
+    template_digest=sha256_file(inputs.ovmf_vars_template)
+    code_digest=sha256_file(inputs.ovmf_code)
+    offset=manifest['partitions'][2]['start']*512
+    state_image=f'{trial}@@{offset}'
+    def arm(candidate_id):
+        env=work/'next.env'
+        image_tool('mcopy','-o','-i',state_image,'::/quirkbench/next.env',str(env))
+        image_tool('grub-editenv',str(env),'set','next_entry=candidate','candidate_id='+candidate_id)
+        image_tool('mcopy','-o','-i',state_image,str(env),'::/quirkbench/next.env')
+        with trial.open('rb') as handle:os.fsync(handle.fileno())
+    def state_consumed():
+        env=work/'observed.env'
+        image_tool('mcopy','-o','-i',state_image,'::/quirkbench/next.env',str(env))
+        values=dict(line.split('=',1) for line in image_tool('grub-editenv',str(env),'list').splitlines() if '=' in line)
+        return not values.get('next_entry') and not values.get('candidate_id')
+    def hash_partition(part):
+        state=hashlib.sha256()
+        with trial.open('rb') as handle:
+            handle.seek(part['start']*512)
+            remaining=(part['end']-part['start']+1)*512
+            while remaining:
+                raw=handle.read(min(4*1024**2,remaining))
+                if not raw:raise QemuError('truncated trial image')
+                state.update(raw);remaining-=len(raw)
+        return state.hexdigest()
+    fixed_before=[hash_partition(p) for p in manifest['partitions'][:2]]
+    results=[]
+    previous_vars_hash=None
+    previous_values=None
+    trials=[('settle','recovery',None),('recovery','recovery',None),('candidate','candidate',manifest['candidate_id']),('after-candidate','recovery',None),('missing-candidate','recovery','0'*64),('after-missing','recovery',None),('load-failure','recovery',manifest['load_failure_candidate_id']),('after-load-failure','recovery',None),('panic-candidate','candidate',manifest['panic_candidate_id']),('after-panic','recovery',None)]
+    for name,mode,candidate in trials:
+        event('qemu-'+name,'Booting '+mode+'; waiting for verified target serial marker and poweroff.')
+        if candidate:arm(candidate)
+        serial=work/(name+'.serial.log')
+        command=(
+            'qemu-system-x86_64','-machine','q35,accel=tcg','-cpu','max','-m',str(inputs.memory_mib),'-smp','2',
+            '-nodefaults','-display','none','-monitor','none','-serial','stdio',
+            '-drive',f'if=pflash,format=raw,unit=0,readonly=on,file={inputs.ovmf_code}',
+            '-drive',f'if=pflash,format=raw,unit=1,file={variables}',
+            '-device','qemu-xhci,id=xhci','-drive',f'if=none,id=usb,file={trial},format=raw',
+            '-device','usb-storage,drive=usb,bus=xhci.0,bootindex=1',
+            '-drive',f'if=none,id=sentinel,file={sentinel},format=raw',
+            '-device','nvme,drive=sentinel,serial=QUIRKBENCH_SENTINEL','-no-reboot')
+        shutil.copyfile(variables,work/(name+'.vars.before.fd'))
+        before=sha256_file(variables)
+        before_values=firmware_variables(work/(name+'.vars.before.fd'),work/(name+'.vars.before.json'))
+        if previous_vars_hash is not None and (before != previous_vars_hash or before_values != previous_values):
+            raise QemuError('firmware store changed between boot trials')
+        try:
+            def checkpoint(activity):
+                atomic_write(work/'progress.json',canonical({'completed':len(results),'total':len(trials),'trials':results,
+                    'active_trial':{'name':name,'expected_mode':mode,'serial':serial.name,**activity}}))
+            proc=monitored_process(command,serial,timeout_s=inputs.timeout_seconds,
+                                   event=lambda message:event('qemu-'+name,message),checkpoint=checkpoint)
+        except subprocess.TimeoutExpired as exc:raise QemuError(f'{name} boot timed out; inspect {serial}') from exc
+        log=serial.read_text(errors='replace') if serial.exists() else ''
+        shutil.copyfile(variables,work/(name+'.vars.after.fd'))
+        after=sha256_file(variables)
+        terminal_marker = 'Kernel panic - not syncing: sysrq triggered crash' if name == 'panic-candidate' else 'QUIRKBENCH_RECOVERY_SMOKE_READY'
+        if proc.returncode or (name != 'panic-candidate' and f'QUIRKBENCH_BOOT mode={mode}' not in log) or terminal_marker not in log:
+            raise QemuError(f'{name} boot did not qualify (exit {proc.returncode}); inspect {serial}; QEMU: {proc.stderr[-1000:]}')
+        if mode == 'candidate' and name != 'panic-candidate' and 'revision='+manifest['candidate_revision'] not in log:
+            raise QemuError('candidate did not report authorized OSTree revision')
+        if mode == 'candidate' and name != 'panic-candidate':
+            expected_smoke = (f"QUIRKBENCH_CANDIDATE_SMOKE_READY kernel_release={manifest['candidate_kernel_release']} "
+                              f"modules=present userspace=fixture-ready health_sha256={manifest['candidate_health_sha256']}")
+            if expected_smoke not in log:
+                raise QemuError('candidate kernel/modules/userspace smoke measurement differs from deployment')
+        if name == 'load-failure' and 'QUIRKBENCH_GRUB candidate-load-failed' not in log:
+            raise QemuError('load-failure trial did not exercise explicit GRUB recovery fallback')
+        if name == 'panic-candidate':
+            verify_panic_proof(log,manifest)
+        if candidate and not state_consumed():raise QemuError('candidate one-shot state persisted after boot')
+        if sha256_file(sentinel)!=sentinel_digest:raise QemuError('internal NVMe sentinel changed')
+        if sha256_file(inputs.ovmf_vars_template)!=template_digest or sha256_file(inputs.ovmf_code)!=code_digest:raise QemuError('firmware input file changed')
+        after_values=firmware_variables(work/(name+'.vars.after.fd'),work/(name+'.vars.after.json'))
+        maintenance=[] if name=='settle' else compare_firmware_variables(before_values,after_values)
+        previous_vars_hash,previous_values=after,after_values
+        if [hash_partition(p) for p in manifest['partitions'][:2]]!=fixed_before:raise QemuError('fixed recovery/ESP partition changed')
+        results.append({'name':name,'expected_mode':mode,'serial':serial.name,'serial_sha256':sha256_file(serial),'vars_before':before,'vars_after':after,'firmware_maintenance':maintenance,'settings_preserved':None if name=='settle' else True,'sentinel_sha256':sentinel_digest,'state_consumed':state_consumed(),'exit_code':proc.returncode,'userspace_markers_observed':{marker:marker in log for marker in ('QUIRKBENCH_BOOT','QUIRKBENCH_CANDIDATE_SMOKE_READY','QUIRKBENCH_PANIC_REQUESTED')} if name=='panic-candidate' else None})
+        atomic_write(work/'progress.json',canonical({'completed':len(results),'total':len(trials),'trials':results,'active_trial':None}))
+    report={'schema_version':1,'qualification':'qemu-uefi-boot-cycle','image_sha256':manifest['image_sha256'],'firmware_code_sha256':code_digest,'firmware_template_sha256':template_digest,'fixed_partitions_sha256':fixed_before,'trials':results,'limitations':['VM fixture only; physical firmware, USB and crash recovery remain unqualified.', 'Panic trial covers late-boot panic/reset/fallback; early-boot failures, hard hangs and crash capture remain unqualified.', 'A panic can drop queued userspace markers; panic proof uses kernel-emitted release, exact authorized fault command line and actual panic. The normal candidate trial separately verifies userspace and modules.']}
+    atomic_write(work/'qualification.json',canonical(report))
+    event('qemu-complete','All ten boot trials and preservation checks passed.')
+    return work/'qualification.json'

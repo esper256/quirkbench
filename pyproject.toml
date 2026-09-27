@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-test = ["pytest>=8,<10"]
+test = ["pytest>=8,<10", "cryptography>=43", "jsonschema>=4"]
 
 [project.scripts]
 quirkbench = "quirkbench.cli:main"
