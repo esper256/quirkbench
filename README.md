@@ -6,6 +6,10 @@ Quirkbench implements a durable controller/target lab with a human monitor, auth
 
 ## Run the software acceptance gate
 
+Routine development uses focused tests; expensive builds and boot qualification
+are final major-version release gates with explicit opt-in. See the
+[testing and agent quota policy](docs/testing-policy.md) and [agent instructions](AGENTS.md).
+
 Python 3.11+ is required. The core controller and simulated loop use the standard library. OSTree composition, deployment and backup also require system OSTree tools; strict signature verification requires Python GI (`python3-gobject-base`). Install test/build dependencies into a project environment, not system Python:
 
 ```sh

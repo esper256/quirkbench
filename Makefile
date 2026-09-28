@@ -1,11 +1,21 @@
 export PYTHONPATH := $(CURDIR)/src
 
 PYTHON ?= .venv/bin/python
+TESTS ?= tests
+
+# Expensive real-system fixtures are explicit final major-version release gates.
+# Fail during parsing, before aggregate prerequisites can launch (even with -j).
+RELEASE_TARGETS := acceptance-m2 acceptance-v1-image acceptance-qemu acceptance-standard-image acceptance-ostree-repository acceptance-ostree-signatures acceptance-ostree-deployment acceptance-ostree-controller-backup
+ifneq ($(filter $(RELEASE_TARGETS),$(MAKECMDGOALS)),)
+ifneq ($(RELEASE_QUALIFICATION),1)
+$(error Release-only qualification: requires an explicitly requested final major-version release and RELEASE_QUALIFICATION=1; see docs/testing-policy.md)
+endif
+endif
 
 .PHONY: test acceptance-m1 demo monitor acceptance-qemu acceptance-hardware acceptance-patch acceptance-m2 acceptance-ostree-repository acceptance-ostree-signatures acceptance-ostree-deployment acceptance-ostree-controller-backup
 
 test:
-	$(PYTHON) -m pytest
+	$(PYTHON) -m pytest $(TESTS)
 
 # Real UEFI boot cycle: recovery, candidate, missing/load failure and panic fallback.
 acceptance-qemu:

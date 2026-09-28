@@ -1,5 +1,12 @@
 # Qualification fixtures
 
+**Scheduling policy:** these expensive real-system fixtures run only for an
+explicitly requested final major-version release, never automatically after an
+edit or milestone task. Make targets require `RELEASE_QUALIFICATION=1` alongside
+the inputs below. Direct script invocations follow the same policy. Routine work
+uses focused software tests; see [testing and agent quota](../docs/testing-policy.md).
+Do not keep an agent waiting on long runs unless their results block development.
+
 Templates intentionally fail acceptance. Copy one outside this directory, fill observations from an actual run, and reference evidence files relative to the report with `{"path":"relative/file", "sha256":"64 lowercase hex"}`. The verifier checks report completeness and referenced bytes; it cannot authenticate an operator's observations or establish causality from a manifest alone. Higher-reasoning/human review still assesses evidence and limitations.
 
 Hardware endurance requires more than 30 real hours, the listed injected events, evaluated recovery capabilities, resource-use and safety evidence, and no silently unresolved attempts. Patch bundles require separately matched baseline/patched/revert/regression observations, source/build identities, actual patch files and exposure counts. Keep an unreproduced issue inconclusive instead of manufacturing a passing report.

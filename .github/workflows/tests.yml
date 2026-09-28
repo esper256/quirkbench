@@ -5,6 +5,8 @@ on:
   pull_request:
 
 jobs:
+  # Software only. Real composition/image/VM/endurance gates are release-only;
+  # never add them to push/PR CI (see docs/testing-policy.md).
   unit:
     runs-on: ubuntu-latest
     strategy:

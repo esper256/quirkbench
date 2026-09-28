@@ -1,5 +1,11 @@
 # Implementation milestones and bounded briefs
 
+**Test scheduling:** the acceptance sections describe release evidence, not a
+requirement to run expensive gates for every task or milestone. Follow the
+[testing policy](testing-policy.md): focused software checks during development;
+real builds, VM and endurance qualification only for an explicitly requested final
+major-version release. Avoid agent waiting unless results block continued work.
+
 These milestone numbers follow the approved project plan. M1 is achieved. The revised M2 was achieved for OSTree layout revision 1; [fresh six-partition qualification](v1-qualification.md) now records the replacement image checks and remaining physical gates. Some later-milestone adapters exist as scaffolding; passing their unit tests does not complete their hardware or build gates. Each implementation task receives this brief, its listed contracts, and its acceptance tests, rather than the entire planning conversation.
 
 ## Milestone 1 — architecture, contracts, and executable specification
