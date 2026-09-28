@@ -27,7 +27,7 @@ You need:
 | --- | --- |
 | Controller | An x86-64 Linux computer with internet access, Python 3.11+, rootless Podman and Distrobox. Setup checks these and gives installation instructions for anything missing. |
 | Build storage | Start with about 200 GiB available for source, builds and evidence, with additional room for retained results and backups. Setup checks capacity and keeps a free-space reserve. |
-| Target | An x86-64 UEFI computer that can boot USB storage, with Secure Boot disabled. Peripheral support is checked after boot. |
+| Target | An x86-64 UEFI computer that can boot USB storage, with Secure Boot disabled. Peripheral support is checked after boot; experimental boots require a usable firmware system UUID and the release’s storage protection profile. |
 | External drive | A USB SSD is preferable to a small thumb drive. 256 GB is a useful starting size; targets with substantial RAM or large logs may need more. **Flashing erases the selected external drive.** |
 | Network | Both computers on the same trusted local network. Ethernet is simplest; Wi-Fi setup is available. Guest networks that isolate devices will not work. |
 | Coding agent | For managed investigations, a supported coding-agent command and its account or credentials. Alternatively, use your own interactive agent with shell access to the controller. Agent usage may incur charges. |
@@ -100,8 +100,10 @@ if necessary. Quirkbench never changes those settings. For repeated experiments,
 the USB drive must remain the selected boot device across restarts; a one-time boot
 menu choice is not sufficient on every computer.
 
-Recovery opens a local setup screen. First boot expands the external drive's data
-partitions and shows progress. Later boots reuse that layout. No desktop installation
+Recovery opens a local setup screen. Before changing partitions, it shows the external
+drive identity, available capacity and proposed allocation, with advanced sizing options.
+Confirm the layout to expand the data partitions with visible progress. Interrupted
+setup resumes the recorded plan; later boots reuse that layout. No desktop installation
 or internal-disk selection is part of this process.
 
 If the image cannot support the target's boot or storage-protection requirements,
@@ -136,8 +138,11 @@ quirkbench targets
 ```
 
 The target should appear as **Recovery ready**. On subsequent boots it reconnects
-using the saved configuration. A changed controller address can be entered through
-the recovery setup screen without reflashing.
+using the saved configuration. This means connected in recovery, not yet qualified for
+every experiment. If the controller address changes, rerun its connection setup and
+use recovery’s endpoint-change screen; the wizard checks certificates and connectivity
+before saving the change. A new trust identity requires fingerprint confirmation. No
+reflash is needed. A stable DHCP reservation avoids most address changes.
 
 Moving the drive to another computer requires explicit setup for that target.
 Quirkbench will not resume the previous computer's experiment. Previous evidence
@@ -178,6 +183,10 @@ target. A useful description is concrete:
 > A USB mouse still works. I can reproduce it by closing and reopening the lid,
 > but not on every attempt. I can help check whether the pointer moves.
 
+Suspend experiments require an eligible bounded recipe and attended checks of the
+selected sleep mode and recovery limitations. Recovery itself does not automatically
+suspend; unsupported sleep modes remain blocked.
+
 You can also provide a prepared description:
 
 ```sh
@@ -185,8 +194,9 @@ quirkbench session start --device target-01 --problem ./problem.md
 ```
 
 Review the scope, source versions, agent settings and usage budget before starting.
-Quirkbench prepares a compatible baseline and a dedicated source workspace. You can
-select an existing source tree or supported version in advanced setup. Missing
+Quirkbench selects a supported baseline for the detected hardware and prepares a
+dedicated source workspace. Advanced setup accepts supported versions or source trees
+with an approved build recipe; it cannot build arbitrary distributions automatically. Missing
 hardware/profile support is a visible blocker, not something the agent can bypass.
 
 **The first session includes an attended baseline check:** build, boot, observation,
@@ -334,7 +344,9 @@ outstanding work and requires this explicit resume. An uncertain attempt needs
 review before another is authorized.
 
 To disconnect the external drive, pause first and wait for the target to show
-**Recovery ready**, then choose **Shut down** on the target. If the controller is
+**Safe to shut down**, then choose **Shut down** on the target and wait for poweroff.
+This check includes stopped workers, reconciled execution and evidence saved locally;
+**Recovery ready** alone is not permission to unplug a mounted drive. If the controller is
 unavailable, recovery retains unacknowledged evidence on the drive for the next
 connection. Keep that drive intact; do not reflash it to fix a connection problem.
 
@@ -384,9 +396,11 @@ An export is for sharing; it is not a complete resumable backup. Use:
 quirkbench backup --output /path/to/backup-directory
 ```
 
-Backup includes the controller database, retained source/evidence and referenced
-OSTree content. The command explains how to back up private controller credentials
-separately. Restore into a new state directory with `quirkbench restore`; restored
+Backup first checkpoints source edits or identifies any workspace that could not be
+captured. It includes the controller database, retained source/evidence and referenced
+OSTree content, with a completeness report. Pending target-only evidence and unknown
+offline target state are called out; the archive cannot include data not yet uploaded.
+The command explains how to back up private controller credentials separately. Restore into a new state directory with `quirkbench restore`; restored
 sessions stay paused until credentials and target state are reconciled.
 
 ## If something gets in the way

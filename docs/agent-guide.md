@@ -39,7 +39,7 @@ do not resume it or change its authorization yourself.
 ## Retrieve enough evidence to make a decision
 
 ```sh
-quirkbench experiment show ATTEMPT_ID --json
+quirkbench attempt show ATTEMPT_ID --json
 quirkbench evidence read EVIDENCE_DIGEST --offset 0 --length 16384
 ```
 
@@ -98,16 +98,25 @@ freezes source and builds after your invocation exits. Do not also call submissi
 commands or start another session runner. Read-only queries are allowed. You may
 return a human-input request or a reasoned conclusion instead of another experiment.
 
-**External mode:** once source edits are quiescent, write the proposal and submit it:
+**External mode:** select a pinned source revision in the approved dedicated worktree.
+For dirty or approved untracked edits, stop writing and request an explicit capture:
+
+```sh
+quirkbench session capture-source SESSION_ID --request-id CAPTURE_REQUEST_ID
+```
+
+Yield while capture runs. Use its completed immutable reference in your proposal;
+do not resume editing during capture. Quirkbench does not automatically commit into
+your repository. Write the proposal and submit it:
 
 ```sh
 quirkbench session propose SESSION_ID --file proposal.json --request-id REQUEST_ID
 ```
 
 Keep the request ID for retries of the same submission. Changed inputs require a new
-ID. The command snapshots approved source edits before acknowledging acceptance;
-do not continue writing those files while it captures them. It records the decision
-and returns durable operation/experiment identities. Accepted means queued, not passed.
+ID. Submission records the decision and returns a durable operation ID promptly.
+Background validation binds the pinned revision or completed capture to immutable
+build inputs. Accepted means queued, not frozen, executed or passed.
 External agents must not invoke managed adapters for the same session.
 
 In both modes, Quirkbench freezes the actual build input, validates protection and
@@ -120,8 +129,8 @@ actions; it is not a sandbox against malicious controller-side agent software.
 
 Builds and experiments are durable operations, not synchronous agent tasks. In
 managed mode, return the proposal and exit; the controller invokes the next decision
-when actionable results are available, without waiting for an entire repetition batch
-when intermediate evidence warrants review. It must not invoke a model for every
+at declared batch boundaries or deterministic early-stop conditions between attempts,
+and on actionable failures or human replies. It must not invoke a model for every
 heartbeat or log chunk. Dispatch remains fenced until the current attempt is reconciled.
 
 In external mode, inspect status once if necessary:
@@ -152,3 +161,9 @@ A supported conclusion identifies the patch, matched baseline/patched/revert evi
 regressions, exposure counts and limitations. Otherwise produce a useful inconclusive
 report describing what was tried and the next missing observation. Do not publish a
 patch or install it into the production OS unless separately authorized by the user.
+
+Human observations use `session observations SESSION_ID --json` and
+`session respond SESSION_ID --request REQUEST_ID --file response.json --request-id ID`.
+Use the returned response schema and exact request/attempt/step identity. Missing or
+late physical observations are not a passing test. Never manufacture an observation
+or extend a physical experiment deadline while waiting for a person.

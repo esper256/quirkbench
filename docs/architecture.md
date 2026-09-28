@@ -108,3 +108,14 @@ Unit and integration tests exercise record rejection, durable state transitions,
 ## Physical execution and reset
 
 A durable `BOOT_PENDING` handoff precedes one-shot arming. Candidate adoption verifies exact revision and attempt identity; recovery return is acknowledged separately from result completion. Streaming recipes seal/upload evidence during execution; bounded final uploads return through recovery even on network failure. Recovery alone prepares/arms deployments. Systemd watchdog activation requires a matching qualification profile or an explicit attended qualification run. Kernel and settings changes invalidate coverage. See [debug image](debug-image.md) and [watchdog qualification](watchdog-qualification.md).
+
+## Product orchestration boundary
+
+The [product interface contract](product-interface.md) specifies planned services and
+UX over these existing primitives. Controller systemd user services own rootless
+workers; sessions reference campaigns. Deliver external-agent proposals first, then a
+managed decision queue over the same source-capture and dispatch API. Proposal receipt
+is distinct from immutable-source readiness. Recipe extensions and human observations
+are versioned records, not arbitrary target commands. Recovery remains suspend-disabled;
+only eligible candidate recipes may exercise reviewed sleep modes. Backup completeness
+also reports uncaptured workspaces, private identity and target-only evidence.

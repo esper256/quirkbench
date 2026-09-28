@@ -5,14 +5,22 @@ and [bounded handoff tasks](implementation-handoff.md) for implementation. Plann
 interfaces below are not claims that setup or session orchestration already exists.
 Use [controller, target and builder](terminology.md) consistently.
 
+## Delivery contract
+
+The [product interface contract](product-interface.md) binds the preview manual to
+implementation: release packaging, stable controller services, public CLI, baseline
+catalog, source handoff, human observations and honest readiness/backup status.
+Deliver the external-agent workflow first; managed operation remains the finished
+product default over the same API. These are planned features, not completed gates.
+
 ## Product flow
 
 1. Build or obtain a generic recovery `.img` for a supported platform, verify its
    checksum and flash it with a standard writer such as Etcher. No installed-OS
    collector, target credentials or controller address is required to build it.
 2. Boot that external drive on the target using owner-controlled boot selection.
-   Recovery verifies protection and commissions only the positively identified
-   external storage. Secure Boot must already be disabled; no firmware changes.
+   Recovery verifies protection, shows capacity and geometry choices, then journals
+   the confirmed plan and commissions only the positively identified external storage. Secure Boot must already be disabled; no firmware changes.
 3. A local recovery setup screen offers Ethernet or Wi-Fi configuration, controller
    address/port and pairing. NetworkManager owns networking; use its existing TUI
    rather than implementing wireless configuration. Only controller reachability
@@ -22,11 +30,12 @@ Use [controller, target and builder](terminology.md) consistently.
    device-scoped credentials, network settings and a target binding in private
    control storage on the evidence partition. Pairing does not start a campaign.
 5. Recovery sends a bounded hardware inventory. The controller selects a reviewed
-   protection/hardware profile and builds the first exact signed OSTree baseline.
+   protection/hardware profile and a supported versioned baseline catalog entry.
    Missing support blocks the affected capability with an actionable explanation.
-6. Run an attended baseline round trip: preparation, one-shot candidate boot,
-   observation, durable upload and recovery return. Then start an investigation
-   through the local CLI, with a problem statement and configured coding agent.
+6. Start a session with a problem statement and managed or external agent driver.
+   Its initial operation builds the exact signed baseline and runs an attended round
+   trip: preparation, one-shot candidate boot, observation, durable upload and recovery
+   return. A successful lab check does not establish reproduction of the reported issue.
 7. Later attempts transfer OSTree objects. Every attempt returns through fixed
    recovery; successful candidates cannot chain updates or promote themselves.
 
@@ -94,7 +103,8 @@ CPUID/model name and portable machine-id cannot identify a target. Initial autom
 boot binding uses a valid SMBIOS system UUID, checked before GRUB candidate selection
 and again before supervisor authentication/watchdog activation. It is an accidental
 mismatch detector, not attestation: absent/default/known-duplicate values require
-explicit attended handling, and spoofing is outside this software protection model.
+an explicit blocked candidate state. Attendance alone cannot replace the early gate;
+any alternative needs separate review. Spoofing is outside this software protection model.
 Do not silently fall back to a weaker identity or use a fingerprint as a secret.
 See C4 for enrollment, retargeting, trust and early-boot details.
 
@@ -104,8 +114,14 @@ Keep one authoritative SQLite database, content-addressed immutable artifacts an
 retained OSTree object closures. Add managed background operations for image build,
 composition and agent decisions; CLI mutations return durable IDs promptly. Worker
 ownership, request idempotency, checkpointing and restart fences are specified in
-C2/C3. State lives outside disposable containers. Rootless Fedora builds never
+C2/C3. Controller systemd user services own the coordinator and rootless workers;
+setup records logout/lingering behavior. State and credentials live outside disposable
+containers at stable configured paths independent of the invoking working directory. Rootless Fedora builds never
 install experimental packages/modules on the controller OS.
+
+Deliver setup/installation and supported baseline selection without requiring a
+source checkout or manually assembled build manifests. Distinguish recovery boot,
+enrollment, experiment eligibility and unattended qualification.
 
 Use shell commands with versioned JSON and typed application services. No MCP or
 remote administration server is required in v1. A deterministic session runner
@@ -116,10 +132,17 @@ Unknown usage, expired authentication, exhausted storage and persistent failures
 pause durably rather than retrying indefinitely. Session duration is unrestricted;
 operator budgets and experiment deadlines control resource use.
 
+Proposal acceptance returns a durable operation ID before background preparation.
+Managed agents exit before capture; external agents hand off pinned revisions or
+completed explicit dirty-source captures. No build reads a changing worktree.
+
 Pause prevents new scheduling immediately, finishes the active bounded unit and
 returns an active target attempt through recovery. Resume reconciles outstanding
 work. Controller restart always requires explicit resume. Neither an agent's
 proposal, a completed upload nor a matching target fingerprint authorizes execution.
+Report draining workers, recovery arrival, pending evidence and safe shutdown separately.
+Backups report consistent-cut source coverage, target-only evidence and separate private
+credential requirements; a controller archive alone cannot claim full session recovery.
 
 ## Recovery and observability
 
@@ -142,18 +165,23 @@ Offline recovery waits without reboot loops. Monitoring requires no AI invocatio
 
 | Brief | Deliverable | Gate |
 | --- | --- | --- |
-| P1 | Shared bounded inventory and deterministic candidate profiles | Multi-platform fixtures, privacy/limits, unsupported/protection conflicts |
-| P2 | Local JSON API and durable background operations | Request replay, restart fencing, pause, managed worker survival |
+| P0 | Frozen product CLI, source handoff and observation/recipe contracts | Schema/help fixtures, additive compatibility, authority review |
+| P1 | Shared bounded inventory and deterministic supported baseline catalog | Multi-platform fixtures, privacy/limits, unsupported/protection conflicts |
+| P2 | Stable setup/service topology, release installation, JSON API and durable operations | Request replay, restart fencing, pause, managed worker survival |
 | P3 | Generic recovery compatibility, local setup, network persistence, secure pairing and target binding | Unconfigured boot, interrupted enrollment, moved media, wrong trust, private-state isolation |
 | P4 | Attended recovery-to-baseline commissioning workflow | Actual runtime assembly with fake privileged adapters, then operator-run device round trip |
 | P5 | Qualified watchdog and scoped candidate activation authorization | Exact identity/grant/revocation tests, then physical reset coverage |
-| P6 | Durable investigation/session runner and a concrete coding-agent adapter | Source snapshots, proposal/outbox replay, usage, auth failures, pause/resume |
+| P6 | Complete external investigation, then managed decision scheduling and one concrete adapter | Source snapshots, proposal/outbox replay, usage, auth failures, pause/resume |
 | P7 | Bounded diagnostic recipes and patch exports | Explicit stimuli, baseline/patched/revert identities, regression evidence and uncertainty |
 | P8 | Final major-version release qualification | Stable release bytes, infrastructure preservation, fault coverage and declared endurance objective |
 
-P1/P2 can proceed independently. P3's generic recovery and early binding are required
-before advertising portable setup; enrollment depends on P2's durable services.
-P4 uses P1–P3; P5 and P6 follow with separate authority review. Higher-reasoning review
+Implementation order is P0 contracts; P1 supported baselines and P2 installation/
+persistent services; P3/P4 portable setup and attended baseline; P6 external journey;
+then P6 managed scheduling over that proven workflow. Foundational P7 recipe/observation
+records are needed by P4/P6; broader diagnostics follow. P5 qualification is required
+before unattended operation, not before the attended external journey. P3 includes
+pre-commission capacity choices and endpoint migration. P8 packaging acceptance is
+prepared in P2; expensive final release qualification remains last. Higher-reasoning review
 is required for storage protection, enrollment/boot binding, worker fencing and
 watchdog policy. Bounded implementations use focused tests and the handoff briefs.
 

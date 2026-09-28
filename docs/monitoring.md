@@ -48,3 +48,12 @@ enrollment, inventory upload and baseline waiting. Distinguish operator input fr
 a timed network operation. Never display passwords, enrollment codes or private keys
 in diagnostic logs. A changed/ambiguous target binding visibly requires setup while
 retaining prior evidence. The existing runtime waits safely; the guided UI is planned.
+
+## Planned product status semantics
+
+The [product interface contract](product-interface.md#readiness-and-safe-shutdown)
+separates enrollment, experiment eligibility and unattended qualification. Pause
+shows scheduling stopped, draining workers, recovery arrival and pending evidence
+individually. Safe shutdown is a separate derived condition, not a synonym for
+Paused or Recovery ready. Human-input UI uses durable request/response IDs and
+deadlines; late responses cannot satisfy a newer attempt or extend its deadline.

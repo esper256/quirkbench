@@ -178,7 +178,9 @@ The synthesis stages are:
    provenance to the existing `quirkbench image` adapter. It uses sgdisk, filesystem
    tools and grub-mkimage for the compact GPT image, fixed recovery and SMBIOS-bound
    one-shot loader. The established commissioning code creates the final six roles
-   on first boot; no KIWI/installer resize service is introduced.
+   on first boot after the local capacity screen confirms and journals geometry. This
+   screen runs from RAM before evidence storage or enrollment exists; retries preserve
+   the same plan and existing filesystems. No KIWI/installer resize service is introduced.
 7. **Publish.** Verify complete staged output and provenance, synchronize, then publish
    `.img` (optionally `.img.xz`), checksum and release manifest. Sign distribution
    metadata with a release key kept on the controller. Factory media has no controller

@@ -37,3 +37,11 @@ are independently observed. Missing hardware is an unmet gate, never a passing s
 Every task includes human visibility: phase, contact/heartbeat, measurable advance,
 waiting reason, deadline and real counters. Long work may be healthy; heartbeats do
 not prove progress, and progress does not authorize a lease or another attempt.
+
+The product delivery gate also includes the [C8 interface contract](product-interface.md):
+installable releases without a checkout, persistent controller services, supported
+baseline selection and the public session facade. Complete an external-agent session
+before adding managed scheduling. Foundational recipe/human-observation records come
+before that journey; broad diagnostics and unattended qualification follow. Readiness,
+safe shutdown and backup completeness must report distinct facts, not a single green
+status. See the handoff for packet dependencies; no milestone is advanced by this plan.

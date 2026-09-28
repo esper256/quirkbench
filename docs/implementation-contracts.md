@@ -170,7 +170,8 @@ An operation deadline/failure never releases a physical attempt fence or invents
 its terminal result. Use the existing uncertain-attempt/recovery reconciliation
 rules for a target that may still be executing, and retain late evidence.
 
-The managed rootless container service manager owns workers, not the initiating
+The controller user service manager (systemd user services) owns the coordinator
+and rootless container workers, not the initiating
 CLI, terminal, agent turn or a bare `Popen` child. Controller setup must verify
 that management facility before accepting background work. Report whether logout,
 sleep and reboot stop it; never promise power-loss continuity or silently change
@@ -201,6 +202,16 @@ never silently follow mutable network refs. Escaping symlinks, special files,
 credential directories and uncontrolled generated files are excluded or rejected.
 Record incomplete snapshots as incomplete, not usable build inputs.
 
+Proposal acceptance returns a durable operation ID promptly; it does not assert
+that source capture or validation has completed. A proposal is not a finalized
+Experiment. Managed invocations must exit before source capture. External proposals
+select a pinned revision in a dedicated private worktree, or an already completed
+source-capture operation. Capturing approved dirty/untracked edits requires an
+explicit exclusive-writer handoff; it is a separate durable operation. Do not
+automatically commit into the user repository or snapshot a changing tree. Reject
+mutation during capture, preserve the edits, and do not build partial input.
+The controller binds the resulting immutable source identities to execution records.
+
 The agent must exit/quiesce before a final source snapshot. Checkpoint at every
 decision boundary and preserve interrupted edits on timeout/restart before another
 agent touches the worktree. Periodic snapshots cannot claim a consistent tree while
@@ -210,7 +221,8 @@ source/config/toolchain/recipe identities; timestamps and branch names are not k
 
 `AgentProposal` fields: version, decision ID, campaign ID, input-context digest,
 action (`experiment`, `needs_human`, `conclude`), hypothesis/summary, rejected
-approaches, source snapshot references, optional typed experiment proposal and
+approaches, approved workspace/base-revision references and change intent, optional
+typed experiment proposal and
 usage observation. The experiment proposal selects an approved build recipe ID,
 installed target recipe ID, bounded parameters/repetitions/deadline and baseline
 reference. It cannot contain shell commands, arbitrary artifact URLs, private paths,
@@ -314,7 +326,8 @@ may retain separate secondary observations; do not add fields to TargetBinding v
 UUID is an accidental mismatch guard, not a secret
 or attestation. CPUID/model name, network MAC and portable machine-id are not valid
 substitutes. All-zero/all-ones, missing or controller-known duplicate identities block
-automatic candidate boot. Expose ambiguity and require a reviewed attended path;
+candidate boot. Expose ambiguity; attendance alone does not replace identity. An
+alternative gate requires a separately reviewed design, not a v1 fallback;
 never silently bypass the early gate or guess the closest enrolled target.
 
 The bootloader checks identity BEFORE loading an experiment kernel. Initial GRUB
@@ -458,3 +471,13 @@ Final release evidence still requires the applicable real build/VM/physical and
 endurance gates. These fixture tests do not establish hardware support. During
 development run only the owning focused suites; do not run expensive acceptance
 because a brief mentions its eventual physical outcome.
+
+## C8 — Product workflow and delivery (P0–P8)
+
+The [product interface contract](product-interface.md) is normative for the planned
+release, service topology, CLI/session facade, supported baseline catalog, decision
+scheduling, recipe extensions, human observations, readiness, endpoint migration,
+capacity selection and backup completeness. It extends C0–C7 without replacing the
+frozen Experiment/Result envelopes or existing database authority. Implement its
+records through additive migrations and versioned schemas. Preview commands are
+acceptance targets, not evidence that an implementation exists.

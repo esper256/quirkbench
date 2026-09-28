@@ -164,3 +164,13 @@ already imported rpm-ostree package cache can satisfy `--download-only-rpms`
 without retaining RPM files. This deliberately trades download speed for a
 complete replay snapshot. The downloaded RPMs are archived in retained CAS
 evidence before the cache becomes disposable.
+
+## Planned product service integration
+
+The current assemble environment is a builder prototype, not the persistent controller
+service. Its temporary home and `init=false` do not establish logout/reboot continuity.
+The [product contract](../docs/product-interface.md#persistent-services-and-state)
+requires controller systemd user services to own rootless workers, with stable private
+credential/configuration homes and durable workspaces outside disposable containers.
+The user installer/setup packet supplies that integration; never put agent credentials
+in the prototype temporary build home or imply this file alone provides the service.

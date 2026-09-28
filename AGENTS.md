@@ -54,3 +54,10 @@ or schema is not existing passing implementation evidence.
 
 These rules change test scheduling, not acceptance standards. Never hide a failing
 gate with a skip or mark an unrun qualification complete.
+
+The [product interface contract](docs/product-interface.md) is normative C8. Implement
+the complete external-agent journey before managed scheduling; managed remains the
+finished UX default. Controller user services own rootless workers. Do not infer
+source capture, safe shutdown, unattended eligibility or backup completeness from a
+single accepted/paused/ready state. P0 fixtures and foundational recipe/observation
+records precede the full journey; see packet dependencies rather than numeric order.

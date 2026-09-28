@@ -49,6 +49,12 @@ filesystem stops for human investigation; it never blindly reformats. The requir
 evidence allocation includes the configured log budget, twice detected RAM and
 20% capacity headroom. Defaults target a 250/256 GB or larger external SSD.
 
+Before any partition mutation, a local RAM-backed screen shows positively identified
+media, RAM/capacity requirements and proposed sizing. Confirmed geometry is durably
+journaled on boot state before expansion; credentials and evidence storage are not
+prerequisites. A retry uses the same plan. Moving media to a higher-RAM target rechecks
+capacity eligibility and never triggers automatic repartitioning. See the
+[product contract](product-interface.md#endpoint-changes-and-media-capacity).
 Sizing is chosen at commissioning; later layout changes require rebuilding media.
 Version 1 prototype images require rebuilding, not in-place conversion. Historical
 controller data and qualification files remain readable and are not removed.
