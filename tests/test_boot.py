@@ -6,14 +6,14 @@ import pytest
 from quirkbench.boot import (BootConfig,BootError,install_runtime,install_candidate_runtime,
     parse_cmdline,prepare_recovery,read_boot_entry,render_candidate,arm_once,reboot_candidate)
 from quirkbench.deployment import PreparedDeployment
-UUIDS=tuple(str(n)*8+'-'+str(n)*4+'-'+str(n)*4+'-'+str(n)*4+'-'+str(n)*12 for n in range(1,5))
+UUIDS=tuple(str(n)*8+'-'+str(n)*4+'-'+str(n)*4+'-'+str(n)*4+'-'+str(n)*12 for n in range(1,7))
 CONFIG=BootConfig('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',*UUIDS)
 LOG='[0.000] Secure boot disabled\n'
 
 def cmdline(mode='recovery'):
     root=UUIDS[3 if mode=='candidate' else 1]
     access='rw rootflags=nosuid,nodev' if mode=='candidate' else 'ro'
-    value=f'root=PARTUUID={root} {access} quirkbench.esp=PARTUUID={UUIDS[0]} quirkbench.state=PARTUUID={UUIDS[2]} quirkbench.data=PARTUUID={UUIDS[3]} quirkbench.mode={mode}'
+    value=f'root=PARTUUID={root} {access} quirkbench.esp=PARTUUID={UUIDS[0]} quirkbench.state=PARTUUID={UUIDS[2]} quirkbench.data=PARTUUID={UUIDS[3]} quirkbench.library=PARTUUID={UUIDS[4]} quirkbench.evidence=PARTUUID={UUIDS[5]} quirkbench.mode={mode}'
     if mode=='candidate':value+=' quirkbench.candidate='+'a'*64+' quirkbench.revision='+'b'*64+' ostree=/ostree/boot.0/attempt/'+'c'*64+'/0'
     return value
 
@@ -76,12 +76,14 @@ def test_arm_and_reboot_require_verified_mounts_and_matching_attempt(tmp_path):
     assert calls==[]
 
 def test_recovery_mounts_executable_sysroot_and_restricted_evidence(tmp_path):
-    devices=[SimpleNamespace(path=tmp_path/str(i)) for i in range(4)]
+    devices=[SimpleNamespace(path=tmp_path/str(i),filesystem="ext4") for i in range(6)]
     calls=[]
     result=prepare_recovery(CONFIG,cmdline=cmdline(),kernel_log=LOG,mountinfo='',state_mount=tmp_path/'state',data_mount=tmp_path/'data',runner=lambda argv:calls.append(argv) or '',identity_verifier=lambda *a,**k:SimpleNamespace(partitions=devices))
     assert result['quirkbench.mode']=='recovery'
     assert any('rw,nosuid,nodev' in call for call in calls)
-    assert any('remount,bind,rw,nosuid,nodev,noexec' in call for call in calls)
+    assert any('rw,nosuid,nodev,noexec' in call for call in calls)
+    assert any(str(tmp_path/'5') in call and str(tmp_path/'data/evidence') in call for call in calls)
+    assert any('ro,noload,nosuid,nodev' in call for call in calls)
 
 def test_secureboot_unknown_blocks_before_mutation(tmp_path):
     with pytest.raises(BootError,match='Secure Boot'):
@@ -156,3 +158,54 @@ def test_fragment_authorizes_boot_only_after_both_loaders_succeed(tmp_path,kerne
     result=subprocess.run(['bash','-c',prefix+fragment+'printf "LOADED=%s\\n" "$quirkbench_candidate_loaded"'],check=True,text=True,capture_output=True)
     assert result.stdout.splitlines()[-1]=='LOADED='+loaded
     assert ('INITRD_CALLED' in result.stdout)==initrd_called
+
+@pytest.mark.parametrize('failure',['unrecognized_filesystem','mount_failure','full_filesystem'])
+def test_recovery_upload_storage_survives_unavailable_experiments_and_library(tmp_path,failure):
+    import subprocess
+    devices=[SimpleNamespace(path=tmp_path/str(i),filesystem='ext4') for i in range(6)]
+    calls=[]
+    if failure=='unrecognized_filesystem':
+        devices[3].filesystem='';devices[4].filesystem=''
+    def run(argv):
+        calls.append(argv)
+        if failure!='unrecognized_filesystem' and argv[-2] in (str(devices[3].path),str(devices[4].path)):
+            if failure=='full_filesystem':raise OSError('no space left')
+            raise subprocess.CalledProcessError(32,argv)
+        return ''
+    result=prepare_recovery(CONFIG,cmdline=cmdline(),kernel_log=LOG,mountinfo='',
+        state_mount=tmp_path/'state',data_mount=tmp_path/'data',runner=run,
+        identity_verifier=lambda *a,**k:SimpleNamespace(partitions=devices))
+    assert 'quirkbench.experiments_unavailable' in result
+    assert 'quirkbench.library_unavailable' in result
+    mounts=[call for call in calls if call[0]=='mount']
+    assert mounts[1][-2:]==[str(devices[5].path),str(tmp_path/'data/evidence')]
+
+
+def test_runtime_enables_wired_network_and_gates_supervisor_on_verified_boot(tmp_path):
+    root=tmp_path/'root';(root/'etc').mkdir(parents=True)
+    (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1')
+    install_runtime(root,CONFIG)
+    units=root/'etc/systemd/system'
+    assert (units/'multi-user.target.wants/systemd-networkd.service').is_symlink()
+    assert 'DHCP=yes' in (root/'etc/systemd/network/20-quirkbench-wired.network').read_text()
+    assert 'Requires=quirkbench-recovery.service' in (units/'quirkbench-supervisor.service.d/boot.conf').read_text()
+    assert (root/'usr/lib/quirkbench/quirkbench/transport.py').exists()
+
+
+def test_mount_destination_symlink_refused_before_external_command(tmp_path):
+    from quirkbench.boot import _mount_one
+    destination=tmp_path/'evidence';destination.symlink_to(tmp_path/'other')
+    with pytest.raises(BootError,match='without symlinks'):
+        _mount_one(tmp_path/'device',destination,'ext4','rw,nosuid,nodev,noexec',
+            runner=lambda _:pytest.fail('must not mount through symlink'),mountinfo='')
+
+
+def test_panic_identity_survives_kernel_console_command_line_truncation(tmp_path):
+    from quirkbench.qemu import verify_panic_proof
+    p=prepared(tmp_path)
+    fragment=render_candidate(p,tmp_path,CONFIG,smoke=True).replace(' quirkbench.smoke=1 ',' quirkbench.smoke=1 quirkbench.fault=panic ')
+    command=next(line for line in fragment.splitlines() if line.startswith('if linux ')).split(' ',3)[3].removesuffix('; then')
+    # Actual GRUB BOOT_IMAGE paths include long OSTree stateroot/boot checksums.
+    printed=('BOOT_IMAGE='+'x'*280+' '+command)[:1024]
+    log='Linux version 6.12-test (builder)\nKernel command line: '+printed+'\nKernel panic - not syncing: sysrq triggered crash\n'
+    verify_panic_proof(log,{'candidate_id':p.deployment_id,'candidate_revision':p.revision,'candidate_kernel_release':'6.12-test'})

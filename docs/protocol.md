@@ -55,8 +55,28 @@ before any claim.
 
 The v1 experiment envelope remains unchanged. Its `deployment` artifact role names an immutable versioned deployment manifest containing backend, exact revision, configured repository identifier, protection profile and provenance. The configured OSTree backend retrieves signed content from authenticated HTTPS; target bearer credentials and trust configuration are separate from agent credentials. The ordinary artifact endpoint carries the small manifest, not an ISO or an ad hoc kernel bundle.
 
-Unsupported deployment backends and legacy kernel-only execution requests fail explicitly before a recipe starts. Candidate execution requires qualified reboot/reconciliation integration; successful manifest validation does not itself authorize a boot. Repository commits reachable from experiments and retained checkpoints are part of backup and retention obligations.
+Unsupported deployment backends and legacy kernel-only execution requests fail explicitly before a recipe starts. Candidate execution requires the configured physical adapters and exact controller handoff; successful manifest validation does not itself authorize a boot. Repository commits reachable from experiments and retained checkpoints are part of backup and retention obligations.
 
 The read-only OSTree publication service is separate from `/v1` administration and evidence transport. It exposes `/<repository-alias>/<OSTree-path>` through mutual TLS: every client certificate must chain to the configured client CA, and clients verify the server CA. GET and HEAD support streamed objects and single byte ranges; directory listing, symlink traversal, private files and HTTP writes are rejected. Commit-signature verification remains required in addition to TLS. Keep signing keys outside published repositories. Repository download permission does not authorize experiment execution.
 
 A controller accepts a new deployment only with its explicit `provenance.build_evidence` closure: `{"schema_version":1,"artifacts":{"role":"sha256"}}`. Required roles are build provenance, `vmlinux`, `system_map`, `kernel_source`, `userspace_source`, `config`, and `modules` (the provenance role is named `build_provenance`). All referenced blobs must already be durable in the controller store, and source/symbol identities must match the recorded build. This is submission validation rather than a change to the v1 experiment envelope. Read-only historical records remain available.
+
+## Physical handoff and live evidence extension
+
+Additive v1 routes preserve existing experiment/result envelopes:
+
+| Route | Purpose |
+| --- | --- |
+| `POST /v1/handoff` | Commit exact revision and boot origin before arming |
+| `POST /v1/candidate-started` | Adopt the authorized candidate's new boot identity |
+| `POST /v1/recovery-returned` | Record recovery separately from result completion |
+| `POST /v1/maintenance` | Read the operator-created library maintenance fence |
+| `GET /v1/artifacts/HASH` with `Range` | Resume large immutable library content with final client hash verification |
+
+A handoff has its own BOOT_PENDING state and bounded authorization. Repeated
+acknowledgements converge; stale boots cannot authorize execution. Live sealed
+chunks use the existing upload/evidence routes. Candidate finish has bounded
+network work and requests recovery; pending data remains available across boots.
+Library selections use the ordinary `library` artifact role and exact pack IDs;
+backup retention follows their complete content closure. Maintenance is started
+and finished through local controller administration, never by a candidate recipe.

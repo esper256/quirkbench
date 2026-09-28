@@ -1,4 +1,4 @@
-"""Local administration; no endpoint or command writes a physical USB device."""
+"""Controller administration and positively verified external-USB target services."""
 from __future__ import annotations
 import argparse
 from dataclasses import asdict
@@ -39,6 +39,8 @@ def parser():
     qualify = commands.add_parser('qualify-image',help='run ten real UEFI recovery, candidate, load-failure, panic and fallback trials'); qualify.add_argument('image',type=Path); qualify.add_argument('--manifest',type=Path,required=True); qualify.add_argument('--ovmf-code',type=Path,required=True); qualify.add_argument('--ovmf-vars',type=Path,required=True); qualify.add_argument('--work',type=Path,required=True); qualify.add_argument('--timeout',type=int,default=180)
     compose = commands.add_parser('compose',help='compose and sign a complete experimental Fedora OSTree revision'); compose.add_argument('manifest',type=Path); compose.add_argument('--workspace',type=Path,required=True); compose.add_argument('--publish-repo',type=Path,required=True); compose.add_argument('--campaign')
     repo = commands.add_parser('serve-repository',help='serve read-only OSTree content with mutual TLS'); repo.add_argument('--host',default='127.0.0.1'); repo.add_argument('--port',type=int,default=8444); repo.add_argument('--allow-lan',action='store_true'); repo.add_argument('--cert',required=True); repo.add_argument('--key',required=True); repo.add_argument('--client-ca',required=True)
+    maintenance = commands.add_parser('library-maintenance', help='fence scheduling for explicit recovery library maintenance'); maintenance.add_argument('action', choices=['begin','finish']); maintenance.add_argument('device_id'); maintenance.add_argument('--selection')
+    commands.add_parser('target-service', help='run the verified USB target supervisor; never run on the controller')
     commands.add_parser('doctor', help='report optional build and VM prerequisites')
     return result
 
@@ -115,7 +117,7 @@ def main(argv=None):
             from .image import ImageInputs, create_image
             raw=json.loads(args.manifest.read_bytes())
             if not isinstance(raw,dict) or set(raw)-set(ImageInputs.__dataclass_fields__):raise ValueError('invalid image input fields')
-            fields={key:Path(value) if key not in ('size_mib','root_mib','smoke') and value is not None else value for key,value in raw.items()}
+            fields={key:Path(value) if key not in ('size_mib','root_mib','smoke','experiment_mib','library_mib','log_budget_mib') and value is not None else value for key,value in raw.items()}
             answer={'manifest':str(create_image(ImageInputs(**fields)))}
         elif args.command == 'qualify-image':
             from .qemu import QemuInputs, qualify_boot_cycle
@@ -125,6 +127,9 @@ def main(argv=None):
             import shutil
             names = ('podman','distrobox','qemu-system-x86_64','qemu-img','virt-fw-vars','grub2-mkimage','dracut','openssl','ostree','rpm-ostree','rpmbuild','createrepo_c')
             answer = {'executables': {name: shutil.which(name) for name in names}, 'physical_hardware_qualified': False}
+        elif args.command == 'target-service':
+            from .runtime import main as target_main
+            return target_main([])
         elif args.command == 'target':
             from .target import TargetAgent
             from .transport import HTTPSDeviceClient, TransportError
@@ -151,7 +156,9 @@ def main(argv=None):
             answer = {'restored': str(restored.root), 'scheduling': 'paused'}
         else:
             controller = Controller(args.state, **controller_options)
-            if args.command == 'register':
+            if args.command == 'library-maintenance':
+                answer = controller.library_maintenance(args.device_id, args.selection, finish=args.action == 'finish')
+            elif args.command == 'register':
                 answer = controller.register(CapabilityReport.from_dict(json.loads(args.report.read_bytes())))
             elif args.command == 'campaign':
                 if args.action == 'create':

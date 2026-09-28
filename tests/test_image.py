@@ -54,11 +54,11 @@ def test_grub_defaults_to_recovery_and_checks_one_shot_clear():
     assert 'quirkbench.mode=recovery' in fallback and '\n    boot\n' in fallback
 
 
-def test_four_partitions_keep_state_separate_from_fixed_recovery():
+def test_factory_four_partitions_reserve_space_for_commissioning():
     from quirkbench.image import partition_layout
     parts=partition_layout(4096,1024)
     assert [p['number'] for p in parts]==[1,2,3,4]
-    assert [p['label'] for p in parts]==['QUIRKBENCH-ESP','QUIRKBENCH-RECOVERY','QUIRKBENCH-STATE','QUIRKBENCH-DATA']
+    assert [p['label'] for p in parts]==['QUIRKBENCH-ESP','QUIRKBENCH-RECOVERY','QUIRKBENCH-STATE','QUIRKBENCH-EXPERIMENTS']
     assert all(a['end']<b['start'] for a,b in zip(parts,parts[1:]))
     assert parts[2]['end']-parts[2]['start']+1==32*1024*1024//512
 
@@ -175,3 +175,30 @@ def test_interrupted_publication_rejects_changed_runtime_builder(tmp_path,monkey
         module.create_image(inputs)
     assert not Path(str(inputs.output)+'.json').exists()
     assert inputs.output.read_bytes()==b'completed image awaiting manifest'
+
+
+def test_source_change_during_image_staging_refuses_all_publication(tmp_path,monkeypatch):
+    import shutil
+    import quirkbench.image as module
+    inputs=_inputs(tmp_path)
+    changed=[False]
+    def changing_copy(source,destination):
+        shutil.copytree(source,destination)
+        changed[0]=True
+    def fake_command(*argv,**kwargs):
+        if argv[0]=='grub-mkimage':
+            Path(argv[argv.index('--output')+1]).write_bytes(b'fixture loader')
+        return ''
+    monkeypatch.setattr(module,'_verify_provenance',lambda *a:None)
+    monkeypatch.setattr(module,'_tool',lambda name:name)
+    monkeypatch.setattr(module,'_run',fake_command)
+    monkeypatch.setattr(module,'_copy_tree',changing_copy)
+    monkeypatch.setattr(module,'_copy_slice',lambda *a:None)
+    monkeypatch.setattr(module,'sha256_file',lambda _: 'c'*64)
+    monkeypatch.setattr(module,'_input_identity',lambda _: 'd'*64)
+    monkeypatch.setattr(module,'_builder_identity',lambda:('b' if changed[0] else 'a')*64)
+    monkeypatch.setattr(module.shutil,'disk_usage',lambda _:shutil._ntuple_diskusage(100*1024**3,0,100*1024**3))
+    with pytest.raises(ImageError,match='changed during assembly'):module.create_image(inputs)
+    assert not inputs.output.exists()
+    assert not Path(str(inputs.output)+'.json').exists()
+    assert not Path(str(inputs.output)+'.pending.json').exists()

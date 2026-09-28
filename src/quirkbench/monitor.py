@@ -26,8 +26,18 @@ def render(status):
     age = target['contact_age_s']
     contact = 'NO CONTACT RECORDED' if age is None else 'CONTACT LATE' if age > 60 else 'recent contact'
     lines.append(f"Target {status['device']} ({target['mode']}, boot {target['boot_id']}): {contact}; last contact {duration(age)} ago")
+    inventory = target.get('inventory', {})
+    if inventory.get('boot_stage'):
+        lines.append('Last reported boot stage: ' + inventory['boot_stage'])
+    watchdog = inventory.get('watchdog')
+    if watchdog:
+        armed = {True: 'armed', False: 'inactive', None: 'unknown'}.get(watchdog.get('armed'), 'unknown')
+        timeout = watchdog.get('actual_timeout_s')
+        lines.append(f"Watchdog: {watchdog.get('identity') or 'unidentified'}; {armed}; observed timeout {str(timeout)+'s' if timeout is not None else 'unknown'}; coverage starts {watchdog.get('earliest_covered_stage', 'unqualified')} (last target report)")
+    for name, values in inventory.get('partition_capacity', {}).items():
+        lines.append(f"Storage {name}: {values['available_bytes']/1024**3:.1f} GiB available / {values['total_bytes']/1024**3:.1f} GiB (last target report)")
     for attempt in status['attempts']:
-        if attempt['state'] in ('CLAIMED','RUNNING','UNCERTAIN'):
+        if attempt['state'] in ('CLAIMED','RUNNING','BOOT_PENDING','UNCERTAIN'):
             lease = attempt['lease_until']-progress['sampled_at']
             lines.append(f"Attempt {attempt['id']}: {attempt['state']}; lease {'expired' if lease <= 0 else 'expires in '+duration(lease)}")
             if attempt['state']=='UNCERTAIN':

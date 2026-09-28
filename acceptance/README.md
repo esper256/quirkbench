@@ -27,3 +27,36 @@ Current transition review and outstanding qualification are recorded in [the OST
 A complete published result can also be qualified through `acceptance/qualify-ostree-controller-backup.py --controller EXISTING_STATE --repository PUBLISHED_REPO --manifest DEPLOYMENT_JSON --work NEW_DIRECTORY`. This exercises the real controller backup and restore APIs, retaining matching build evidence and independent OSTree objects. It checks source-backup immutability and exclusion of synthetic private files, partial uploads and unreferenced artifacts. It reports campaign pause as unexercised when the source has no campaigns; empty tables are not evidence of pause behavior.
 
 `acceptance/qualify-ostree-incremental.py --prior-work PRIOR_DEPLOYMENT_FIXTURE --work NEW_DIRECTORY --manifest NEW_DEPLOYMENT_JSON --repository PUBLISHED_REPO --public-key SIGNING_PUBLIC_KEY` checks a signed changed-object update on a preserved copy of the prior regular-file fixture. It reuses the exact loopback URL and trust files, measures added objects and preparation time, and verifies fresh attempt state, idempotency and preservation of the earlier attempt. The original full transfer/fault report remains part of the evidence.
+
+## Layout revision 2 and execution/reset integration
+
+`make acceptance-v1-image IMAGE=... OVMF_CODE=... OVMF_VARS=... WORK_DIR=...`
+runs software tests and the fresh six-partition QEMU image gate. The fixture grows
+only its copied sparse image, observes first-boot commissioning, verifies all six
+GPT identities, observes distinct experiment/evidence/library mounts, and preserves
+fixed recovery/ESP and library bytes across the subsequent ten boot trials. It
+never enlarges or writes the source image or a physical block device. Fixture
+partition capacities may be smaller than the production defaults and are recorded.
+
+`make acceptance-standard-image IMAGE=... OVMF_CODE=... OVMF_VARS=... WORK_DIR=...`
+boots an unprovisioned, non-smoke factory image, commissions its production layout,
+and observes the actual supervisor waiting for more than its 30-second service
+watchdog interval. It verifies a single boot, repeated visible provisioning waits,
+mount identities, fixed recovery and internal sentinel preservation. It then stops
+the disposable VM through QMP; this fixture does not claim a graceful guest
+shutdown, controller communication or physical watchdog coverage. The ten-trial
+gate separately compares settled persistent firmware settings.
+
+`tests/test_physical_handoff.py` runs the same handoff/streamed-evidence lifecycle
+through local and real HTTPS clients, injecting the boot boundary. It covers lost
+acknowledgements, old generations, wrong revisions, controller restart, interrupted
+arming, bounded offline finish and pause fences. These tests do not claim to reboot
+real hardware. Library maintenance tests exercise resumable ranged content above
+256 MiB, immutable publication and retained backup closure.
+
+Watchdog runtime tests use temporary sysfs/configuration fixtures and systemd
+notification sockets. They never arm the host watchdog. Real hardware qualification
+must follow [the explicit watchdog matrix](../docs/watchdog-qualification.md):
+activation, boot handoff, runtime reset, shutdown and suspend are separate outcomes.
+Do not substitute a successful late panic reboot or software heartbeat for those
+observations. Missing hardware remains an unmet gate, not a skipped passing test.

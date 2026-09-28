@@ -39,7 +39,7 @@ dnf -y --installroot="$output" --use-host-config --releasever="$release" \
   --setopt=install_weak_deps=False --setopt=tsflags=nodocs install \
   fedora-release systemd systemd-udev systemd-networkd bash coreutils util-linux \
   e2fsprogs dracut ostree python3 python3-gobject-base iproute ethtool pciutils usbutils procps-ng \
-  gdisk grub2-tools-minimal cloud-utils-growpart
+  gdisk parted grub2-tools-minimal cloud-utils-growpart
 mkdir -p "$output/etc"
 test -e "$output/sbin/init"
 printf 'quirkbench-fedora-target-v1\n' > "$output/etc/.quirkbench-rootfs.pending"

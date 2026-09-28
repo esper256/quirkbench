@@ -1,5 +1,7 @@
 # Focused OSTree qualification observations
 
+> Historical qualification: this report records layout revision 1. The six-partition revision and live/reset runtime require their own qualification; see [current image contract](debug-image.md).
+
 M1 remains achieved. **The revised M2 is achieved** under the approved minimal-Fedora OSTree architecture (2026-09-27). The [architecture revision review](m2-ostree-review.md) is the primary transition review. This supplement records the completed build/deployment/VM gate and its limits; it does not constitute physical commissioning. The [machine-readable evidence index](../.quirkbench/ostree/m2-qualification.json) contains report hashes and exact identities.
 
 ## Architecture and persistence

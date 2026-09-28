@@ -244,7 +244,8 @@ def test_two_supervisors_do_not_duplicate_execution(tmp_path):
         thread.start()
     for thread in threads:
         thread.join(timeout=5)
-    assert sorted(outcomes) == ["completed", "idle"]
+    assert sorted(outcomes) == ["busy", "completed"]
+    assert agents[0].step() == "idle"
     assert marker.read_text() == "1\n"
 
 
@@ -291,3 +292,26 @@ def test_deployment_cannot_fall_through_to_an_ordinary_recipe(tmp_path):
     assert not (tmp_path / 'executed').exists()
     assert client.results[0].outcome == Outcome.NEEDS_HUMAN
     assert 'deployment was booted' in client.results[0].limitations[0]
+
+
+@pytest.mark.parametrize('mode', ['recovery', 'experiment'])
+def test_maintenance_lock_wait_is_nonblocking_and_keeps_supervisor_alive(tmp_path, mode):
+    import fcntl
+    from quirkbench.watchdog import SupervisorMonitor
+    client = FakeClient()
+    client.claims.append(claim())
+    now = [0.0]
+    notifications = []
+    monitor = SupervisorMonitor(clock=lambda: now[0], notify=notifications.append)
+    agent = TargetAgent(client, tmp_path, CapabilityReport('target-1', 'boot-1', [], mode=mode), supervisor=monitor)
+    initial = agent.journal_path.read_bytes()
+    with agent.lock_path.open('a+b') as maintenance:
+        fcntl.flock(maintenance, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # Simulated healthy maintenance is longer than the service watchdog.
+        for tick in range(0, 181, 5):
+            now[0] = tick
+            assert agent.step() == 'busy'
+            assert monitor.snapshot()['phase'] == 'target-lock-wait'
+        assert agent.journal_path.read_bytes() == initial
+    assert len(client.claims) == 1 and not client.results
+    assert len(notifications) >= 37

@@ -240,6 +240,10 @@ def run_qemu(inputs: QemuInputs) -> QemuResult:
     vars_guest_before = sha256_file(vars_copy)
     subprocess.run(("qemu-img", "create", "-f", "qcow2", "-F", "raw",
                     "-b", str(inputs.image), str(overlay)), check=True)
+    import json
+    manifest_path = Path(str(inputs.image) + ".json")
+    capacity = commissioning_fixture_size(json.loads(manifest_path.read_bytes()), inputs.memory_mib) if manifest_path.exists() else 100 * 1024**3
+    subprocess.run(("qemu-img", "resize", str(overlay), str(capacity)), check=True, timeout=30)
     command = qemu_command(inputs, vars_copy=vars_copy, sentinel=sentinel,
                            usb_overlay=overlay, serial_log=serial)
     timed_out = False
@@ -274,6 +278,78 @@ def verify_panic_proof(log: str, manifest: dict) -> None:
         raise QemuError('panic trial lacks actual kernel panic and exact authorized fault command line')
 
 
+def commissioning_fixture_size(manifest: dict, memory_mib: int) -> int:
+    """Size a sparse USB copy for actual first-boot partition commissioning."""
+    import math
+    if manifest.get("layout_version") != 2 or manifest.get("schema_version") != 2:
+        raise QemuError("six-role boot acceptance requires a rebuilt layout v2 image")
+    settings = manifest.get("commissioning", {})
+    if settings.get("schema_version") != 2:
+        raise QemuError("image lacks versioned commissioning capacities")
+    capacities = [settings.get(k) for k in ("experiment_mib", "library_mib", "log_budget_mib")]
+    if any(type(v) is not int or v < 1 for v in capacities):
+        raise QemuError("invalid commissioning capacity")
+    experiment, library, logs = capacities
+    # Cover advertised guest RAM (which exceeds Linux MemTotal) plus GPT and
+    # alignment slack. This sparse capacity is not an actual host reservation.
+    evidence = math.ceil((logs + 2 * memory_mib) / .8)
+    required_mib = math.ceil(manifest["partitions"][3]["start"] / 2048) + experiment + library + evidence + 16
+    return max(100 * 1024, required_mib, math.ceil(manifest["size_bytes"] / 1024**2)) * 1024**2
+
+
+def commissioned_partition_report(image: Path, manifest: dict, *, runner=None) -> list[dict]:
+    """Read GPT from a regular fixture; require exact commissioned role geometry."""
+    from .commission import _parse_print, _parse_info
+    if image.is_symlink() or not image.is_file():
+        raise QemuError("commissioned image must be a regular fixture")
+    runner = runner or (lambda argv: subprocess.run(argv, check=True, capture_output=True, text=True, timeout=30).stdout)
+    guid, last, sectors, entries, rows = _parse_print(runner(("sgdisk", "--print", str(image))))
+    if len(rows) != 6 or guid != manifest["identity"]["disk_guid"] or sectors * 512 != image.stat().st_size:
+        raise QemuError("first boot did not commission the expected six-partition disk")
+    if last != sectors-entries-2:
+        raise QemuError("commissioning did not relocate backup GPT")
+    settings = manifest["commissioning"]
+    uuids = settings["partition_uuids"]
+    first5 = manifest["partitions"][3]["start"] + settings["experiment_mib"] * 2048
+    first6 = first5 + settings["library_mib"] * 2048
+    expected = [(p["start"], p["end"]) for p in manifest["partitions"][:3]] + [
+        (manifest["partitions"][3]["start"], first5-1), (first5, first6-1),
+        (first6, ((last+1)//2048)*2048-1)]
+    result = []
+    for n, role in enumerate(("esp", "recovery", "state", "experiments", "library", "evidence"), 1):
+        uuid, start, end, code = _parse_info(runner(("sgdisk", f"--info={n}", str(image))))
+        if uuid != uuids[n-1] or rows[n] != expected[n-1] or (start, end) != expected[n-1] or code != {1:"EF00",3:"0700"}.get(n,"8300"):
+            raise QemuError(f"commissioned {role} identity or geometry differs")
+        result.append({"number": n, "role": role, "partuuid": uuid, "start": start, "end": end})
+    return result
+
+
+def verify_mount_proof(log: str, expected_mode: str) -> dict:
+    """Require observed mount isolation rather than relying on image metadata."""
+    import json
+    lines = [line.split("QUIRKBENCH_MOUNTS ", 1)[1] for line in log.splitlines() if "QUIRKBENCH_MOUNTS " in line]
+    if len(lines) != 1:
+        raise QemuError("boot omitted an unambiguous measured mount report")
+    try:
+        report = json.loads(lines[0]); mounts = report["mounts"]
+        if report["mode"] != expected_mode or set(mounts) != {"experiments", "library", "evidence"}:
+            raise ValueError()
+        devices = set()
+        for role, mount in mounts.items():
+            required = {"ro", "nosuid", "nodev"} if role == "library" else {"rw", "nosuid", "nodev"}
+            if role == "evidence": required.add("noexec")
+            point = "/sysroot" if role == "experiments" and expected_mode == "candidate" else "/var/lib/quirkbench/" + role
+            if (mount["root"] != "/" or mount["mountpoint"] != point or mount["filesystem"] != "ext4"
+                    or not required <= set(mount["options"]) or mount["device"] in devices):
+                raise ValueError()
+            if role != "evidence" and "noexec" in mount["options"]:
+                raise ValueError()
+            devices.add(mount["device"])
+    except (ValueError, KeyError, TypeError) as exc:
+        raise QemuError("observed experiment/library/evidence mount isolation failed") from exc
+    return report
+
+
 def qualify_boot_cycle(inputs: QemuInputs, manifest_path: Path, *, event=None) -> Path:
     """Real recovery/candidate/fallback trials on one disposable raw USB copy.
 
@@ -294,12 +370,16 @@ def qualify_boot_cycle(inputs: QemuInputs, manifest_path: Path, *, event=None) -
     if not manifest.get('smoke'):raise QemuError('boot qualification requires QEMU smoke image')
     if manifest.get('deployment_backend') != 'ostree' or not manifest.get('candidate_id') or not manifest.get('candidate_revision') or not manifest.get('candidate_kernel_release') or not manifest.get('candidate_health_sha256') or not manifest.get('panic_candidate_id') or not manifest.get('load_failure_candidate_id'):
         raise QemuError('boot qualification requires a prepared OSTree candidate')
-    for tool in ('qemu-system-x86_64','mcopy','cp','virt-fw-vars'):
+    for tool in ('qemu-system-x86_64','mcopy','cp','virt-fw-vars','sgdisk'):
         if shutil.which(tool) is None:raise QemuError('missing qualification tool: '+tool)
     work=inputs.work_dir
     if any(work.iterdir()):raise QemuError('qualification work directory must be empty')
     trial=work/'usb-trial.img';variables=work/'OVMF_VARS.fd';sentinel=work/'internal-sentinel.img'
     subprocess.run(['cp','--reflink=auto','--sparse=always',str(inputs.image),str(trial)],check=True)
+    fixture_bytes=commissioning_fixture_size(manifest,inputs.memory_mib)
+    with trial.open('r+b') as stream:
+        stream.truncate(fixture_bytes);stream.flush();os.fsync(stream.fileno())
+    event('qemu-commission',f'Sparse USB fixture capacity {fixture_bytes} bytes; first boot must commission six roles.')
     shutil.copyfile(inputs.ovmf_vars_template,variables);_make_sentinel(sentinel)
     sentinel_digest=sha256_file(sentinel)
     template_digest=sha256_file(inputs.ovmf_vars_template)
@@ -331,6 +411,8 @@ def qualify_boot_cycle(inputs: QemuInputs, manifest_path: Path, *, event=None) -
     results=[]
     previous_vars_hash=None
     previous_values=None
+    commissioned_parts=None
+    library_digest=None
     trials=[('settle','recovery',None),('recovery','recovery',None),('candidate','candidate',manifest['candidate_id']),('after-candidate','recovery',None),('missing-candidate','recovery','0'*64),('after-missing','recovery',None),('load-failure','recovery',manifest['load_failure_candidate_id']),('after-load-failure','recovery',None),('panic-candidate','candidate',manifest['panic_candidate_id']),('after-panic','recovery',None)]
     for name,mode,candidate in trials:
         event('qemu-'+name,'Booting '+mode+'; waiting for verified target serial marker and poweroff.')
@@ -363,6 +445,13 @@ def qualify_boot_cycle(inputs: QemuInputs, manifest_path: Path, *, event=None) -
         terminal_marker = 'Kernel panic - not syncing: sysrq triggered crash' if name == 'panic-candidate' else 'QUIRKBENCH_RECOVERY_SMOKE_READY'
         if proc.returncode or (name != 'panic-candidate' and f'QUIRKBENCH_BOOT mode={mode}' not in log) or terminal_marker not in log:
             raise QemuError(f'{name} boot did not qualify (exit {proc.returncode}); inspect {serial}; QEMU: {proc.stderr[-1000:]}')
+        mounts = None if name == 'panic-candidate' else verify_mount_proof(log,mode)
+        observed_parts = commissioned_partition_report(trial,manifest)
+        if commissioned_parts is None:
+            commissioned_parts=observed_parts
+            library_digest=hash_partition(commissioned_parts[4])
+        elif observed_parts != commissioned_parts or hash_partition(commissioned_parts[4]) != library_digest:
+            raise QemuError('commissioned geometry or read-only library changed')
         if mode == 'candidate' and name != 'panic-candidate' and 'revision='+manifest['candidate_revision'] not in log:
             raise QemuError('candidate did not report authorized OSTree revision')
         if mode == 'candidate' and name != 'panic-candidate':
@@ -381,9 +470,9 @@ def qualify_boot_cycle(inputs: QemuInputs, manifest_path: Path, *, event=None) -
         maintenance=[] if name=='settle' else compare_firmware_variables(before_values,after_values)
         previous_vars_hash,previous_values=after,after_values
         if [hash_partition(p) for p in manifest['partitions'][:2]]!=fixed_before:raise QemuError('fixed recovery/ESP partition changed')
-        results.append({'name':name,'expected_mode':mode,'serial':serial.name,'serial_sha256':sha256_file(serial),'vars_before':before,'vars_after':after,'firmware_maintenance':maintenance,'settings_preserved':None if name=='settle' else True,'sentinel_sha256':sentinel_digest,'state_consumed':state_consumed(),'exit_code':proc.returncode,'userspace_markers_observed':{marker:marker in log for marker in ('QUIRKBENCH_BOOT','QUIRKBENCH_CANDIDATE_SMOKE_READY','QUIRKBENCH_PANIC_REQUESTED')} if name=='panic-candidate' else None})
+        results.append({'name':name,'mount_proof':mounts,'library_sha256':library_digest,'expected_mode':mode,'serial':serial.name,'serial_sha256':sha256_file(serial),'vars_before':before,'vars_after':after,'firmware_maintenance':maintenance,'settings_preserved':None if name=='settle' else True,'sentinel_sha256':sentinel_digest,'state_consumed':state_consumed(),'exit_code':proc.returncode,'userspace_markers_observed':{marker:marker in log for marker in ('QUIRKBENCH_BOOT','QUIRKBENCH_CANDIDATE_SMOKE_READY','QUIRKBENCH_PANIC_REQUESTED')} if name=='panic-candidate' else None})
         atomic_write(work/'progress.json',canonical({'completed':len(results),'total':len(trials),'trials':results,'active_trial':None}))
-    report={'schema_version':1,'qualification':'qemu-uefi-boot-cycle','image_sha256':manifest['image_sha256'],'firmware_code_sha256':code_digest,'firmware_template_sha256':template_digest,'fixed_partitions_sha256':fixed_before,'trials':results,'limitations':['VM fixture only; physical firmware, USB and crash recovery remain unqualified.', 'Panic trial covers late-boot panic/reset/fallback; early-boot failures, hard hangs and crash capture remain unqualified.', 'A panic can drop queued userspace markers; panic proof uses kernel-emitted release, exact authorized fault command line and actual panic. The normal candidate trial separately verifies userspace and modules.']}
+    report={'schema_version':2,'layout_version':2,'qualification':'qemu-uefi-boot-cycle','fixture_size_bytes':fixture_bytes,'commissioned_partitions':commissioned_parts,'library_sha256':library_digest,'image_sha256':manifest['image_sha256'],'firmware_code_sha256':code_digest,'firmware_template_sha256':template_digest,'fixed_partitions_sha256':fixed_before,'trials':results,'limitations':['VM fixture only; physical firmware, USB and crash recovery remain unqualified.', 'Panic trial covers late-boot panic/reset/fallback; early-boot failures, hard hangs and crash capture remain unqualified.', 'A panic can drop queued userspace markers; panic proof uses kernel-emitted release, exact authorized fault command line and actual panic. The normal candidate trial separately verifies userspace and modules.']}
     atomic_write(work/'qualification.json',canonical(report))
     event('qemu-complete','All ten boot trials and preservation checks passed.')
     return work/'qualification.json'

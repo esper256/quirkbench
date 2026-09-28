@@ -1,12 +1,7 @@
-"""Read-only boot identity checks and an explicitly armed p4 growth plan.
-
-This module never formats a partition. Importing or planning does not run a
-mutating command. Callers must supply a persisted commissioned identity from
-the image manifest; observing a new disk is not permission to commission it.
-"""
+"""Fail-closed external USB identity and journaled six-partition commissioning."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import argparse
 import gzip
 import json
@@ -15,6 +10,9 @@ import os
 from pathlib import Path
 import re
 import stat
+import math
+import tempfile
+import fcntl
 import subprocess
 from typing import Callable
 
@@ -36,14 +34,14 @@ def _guid(value: str) -> str:
 @dataclass(frozen=True)
 class BootIdentity:
     disk_guid: str
-    partition_uuids: tuple[str, str, str, str]
+    partition_uuids: tuple[str, ...]
 
     def __post_init__(self):
         object.__setattr__(self, "disk_guid", _guid(self.disk_guid))
-        if len(self.partition_uuids) != 4:
-            raise CommissionError("exactly four partition UUIDs are required")
+        if len(self.partition_uuids) != 6:
+            raise CommissionError("exactly six partition UUIDs are required")
         uuids = tuple(_guid(value) for value in self.partition_uuids)
-        if len(set(uuids)) != 4:
+        if len(set(uuids)) != 6:
             raise CommissionError("partition UUIDs must be distinct")
         object.__setattr__(self, "partition_uuids", uuids)
 
@@ -52,9 +50,14 @@ class BootIdentity:
 class CommissionIdentity(BootIdentity):
     partition_starts: tuple[int, int, int, int]
     fixed_ends: tuple[int, int, int]
+    experiment_mib: int = 32768
+    library_mib: int = 32768
+    log_budget_mib: int = 4096
 
     def __post_init__(self):
         super().__post_init__()
+        if any(type(v) is not int or v < 1 for v in (self.experiment_mib, self.library_mib, self.log_budget_mib)):
+            raise CommissionError("commissioning capacities must be positive integer MiB")
         if len(self.partition_starts) != 4 or len(self.fixed_ends) != 3:
             raise CommissionError("expected four starts and three fixed ends")
         object.__setattr__(self, "partition_starts", tuple(self.partition_starts))
@@ -98,7 +101,7 @@ class DiskLayout:
     path: Path
     guid: str
     last_usable: int
-    partitions: tuple[Partition, Partition, Partition, Partition]
+    partitions: tuple[Partition, ...]
     major_minor: tuple[int, int]
     logical_sector_size: int
     disk_sectors: int
@@ -111,15 +114,17 @@ class CommissionPlan:
     identity: CommissionIdentity
     layout: DiskLayout
     commands: tuple[tuple[str, ...], ...]
-
-    @property
-    def needs_partition_growth(self) -> bool:
-        return bool(self.commands and self.commands[0][0] == "growpart")
+    geometry: tuple[tuple[int, int], ...]
+    target_ram_mib: int
 
 
 def _run(argv: tuple[str, ...]) -> str:
-    completed = subprocess.run(argv, check=True, capture_output=True, text=True)
-    return completed.stdout
+    if argv[0] == "blkid":
+        return subprocess.run(argv, check=True, capture_output=True, text=True, timeout=30).stdout
+    from .ostree import CommandRunner
+    def progress(phase, message):
+        print(json.dumps({"phase": "commission-" + Path(argv[0]).name, "status": "running", "activity": message, "deadline_seconds": 180}), flush=True)
+    return CommandRunner(progress, lambda: None, timeout_s=180)(list(argv))
 
 
 def _block_rdev(path: Path) -> tuple[int, int]:
@@ -200,6 +205,8 @@ def _read_cmdline(paths: ProbePaths, expected: BootIdentity, *, mode: str = "rec
         "quirkbench.esp": expected.partition_uuids[0],
         "quirkbench.state": expected.partition_uuids[2],
         "quirkbench.data": expected.partition_uuids[3],
+        "quirkbench.library": expected.partition_uuids[4],
+        "quirkbench.evidence": expected.partition_uuids[5],
     }
     for key, uuid in expected_args.items():
         found = [word.split("=", 1)[1] for word in words if word.startswith(key + "=")]
@@ -258,9 +265,7 @@ def _read_mounts(paths: ProbePaths, root_dev: tuple[int, int], state_dev: tuple[
             if not allow_data_mounted or filesystem != "ext4":
                 raise CommissionError("data partition is mounted outside its restricted path")
             required = {"rw", "nosuid", "nodev"}
-            if point == "/var/lib/quirkbench/evidence":
-                required.add("noexec")
-            elif point != "/var/lib/quirkbench" or "noexec" in options:
+            if point != "/var/lib/quirkbench/experiments" or "noexec" in options:
                 raise CommissionError("data partition is mounted outside its restricted path")
             if not required <= options:
                 raise CommissionError("data partition is mounted outside its restricted path")
@@ -269,7 +274,7 @@ def _read_mounts(paths: ProbePaths, root_dev: tuple[int, int], state_dev: tuple[
         stateroot = deployment.rsplit("/deploy/", 1)[0]
         expected_roots = {"/": deployment, "/sysroot": "/", "/usr": deployment + "/usr",
                           "/etc": deployment + "/etc", "/var": stateroot + "/var",
-                          "/boot": "/boot", "/var/lib/quirkbench/evidence": "/quirkbench/evidence"}
+                          "/boot": "/boot"}
         seen = set()
         for point, filesystem, options, mount_root in data_mounts:
             if point in seen or point not in expected_roots or filesystem != "ext4" or mount_root != expected_roots[point]:
@@ -305,8 +310,8 @@ def _parse_print(output: str) -> tuple[str, int, int, int, dict[int, tuple[int, 
             if number in rows:
                 raise CommissionError("duplicate partition in sgdisk print")
             rows[number] = (start, end)
-    if set(rows) != {1, 2, 3, 4}:
-        raise CommissionError("expected exactly four GPT partitions")
+    if set(rows) not in ({1, 2, 3, 4}, {1, 2, 3, 4, 5}, {1, 2, 3, 4, 5, 6}):
+        raise CommissionError("unexpected GPT partition set")
     return _guid(guid.group(1)), int(usable.group(1)), disk_sectors, entry_sectors, rows
 
 
@@ -351,8 +356,13 @@ def verify_boot_identity(
     block_rdev: Callable[[Path], tuple[int, int]] = _block_rdev,
     allow_data_mounted: bool = False,
     mode: str = "recovery",
+    allow_factory: bool = False,
+    allow_unformatted: bool = False,
+    allow_library_maintenance: bool = False,
 ) -> DiskLayout:
     """Read-only, fail-closed identity check usable by the boot supervisor."""
+    if allow_library_maintenance and mode != "recovery":
+        raise CommissionError("library maintenance writes require recovery mode")
     if mode not in {"recovery", "candidate"}:
         raise CommissionError("invalid boot mode")
     disk = _boot_disk_from_root(expected, paths) if disk is None else Path(disk)
@@ -366,10 +376,12 @@ def verify_boot_identity(
     guid, last_usable, disk_sectors, entry_sectors, rows = _parse_print(runner(("sgdisk", "--print", str(disk))))
     if guid != expected.disk_guid:
         raise CommissionError("disk GUID differs from commissioned identity")
-    expected_filesystems = ("vfat", "ext4", "vfat", "ext4")
-    expected_codes = ("EF00", "8300", "0700", "8300")
+    if len(rows) != 6 and not allow_factory:
+        raise CommissionError("USB layout is not commissioned")
+    expected_filesystems = ("vfat", "ext4", "vfat", "ext4", "ext4", "ext4")
+    expected_codes = ("EF00", "8300", "0700", "8300", "8300", "8300")
     partitions = []
-    for number in range(1, 5):
+    for number in range(1, len(rows) + 1):
         part_name = _partition_name(disk.name, number)
         part_path = paths.dev_directory / part_name
         sys_link = paths.sys_class_block / part_name
@@ -391,14 +403,39 @@ def verify_boot_identity(
             raise CommissionError(f"partition {number} has invalid geometry")
         if _integer_file(sys_part / "start", minimum=34) != start or _integer_file(sys_part / "size", minimum=1) != end - start + 1:
             raise CommissionError(f"partition {number} kernel geometry differs from GPT")
-        filesystem = runner(("blkid", "-p", "-s", "TYPE", "-o", "value", str(part_path))).strip()
-        if filesystem != expected_filesystems[number - 1]:
+        try:
+            filesystem = runner(("blkid", "-p", "-s", "TYPE", "-o", "value", str(part_path))).strip()
+        except subprocess.CalledProcessError as exc:
+            if exc.returncode != 2 or not ((allow_unformatted and number >= 5) or (mode == "recovery" and number in (4, 5))):
+                raise
+            filesystem = ""
+        if filesystem != expected_filesystems[number - 1] and not ((mode == "recovery" and number in (4, 5)) or (not filesystem and allow_unformatted and number >= 5)):
             raise CommissionError(f"partition {number} filesystem is not {expected_filesystems[number - 1]}")
+        if number >= 5 and filesystem == "ext4":
+            actual_uuid = runner(("blkid", "-p", "-s", "UUID", "-o", "value", str(part_path))).strip()
+            if actual_uuid.lower() != expected.partition_uuids[number-1]:
+                if number == 5 and mode == "recovery":
+                    filesystem = "unavailable"
+                else:
+                    raise CommissionError("existing filesystem UUID differs from planned creation identity")
         partitions.append(Partition(number, part_path, uuid, start, end, type_code, filesystem, part_dev))
     for before, after in zip(partitions, partitions[1:]):
         if before.end >= after.start:
             raise CommissionError("partitions overlap or are out of order")
     _read_mounts(paths, partitions[1].major_minor, partitions[2].major_minor, partitions[3].major_minor, allow_data_mounted=allow_data_mounted, mode=mode)
+    # The library/evidence partitions may never alias candidate mutable state.
+    for partition in partitions[4:]:
+        for line in paths.proc_mountinfo.read_text().splitlines():
+            fields = line.split()
+            if fields[2] != f"{partition.major_minor[0]}:{partition.major_minor[1]}":
+                continue
+            role = "library" if partition.number == 5 else "evidence"
+            required = ({"nosuid", "nodev"} if allow_library_maintenance else {"ro", "nosuid", "nodev"}) if role == "library" else {"rw", "nosuid", "nodev", "noexec"}
+            if role == "library" and not ({"ro", "rw"} & set(fields[5].split(","))):
+                raise CommissionError("library mount lacks explicit access mode")
+            if (fields[3] != "/" or fields[4] != "/var/lib/quirkbench/" + role
+                    or not required <= set(fields[5].split(",")) or not allow_data_mounted):
+                raise CommissionError(f"{role} partition is mounted outside its restricted path")
     sector_size = _integer_file(resolved / "queue" / "logical_block_size", minimum=512)
     if sector_size not in (512, 4096):
         raise CommissionError("unsupported logical sector size")
@@ -411,71 +448,153 @@ def verify_boot_identity(
     return DiskLayout(disk, guid, last_usable, tuple(partitions), disk_dev, sector_size, disk_sectors, entry_sectors, last_usable < expected_last_usable)
 
 
-def plan_commission(
-    disk: Path,
-    expected: CommissionIdentity,
-    *,
-    paths: ProbePaths = ProbePaths(),
-    runner: Callable[[tuple[str, ...]], str] = _run,
-    block_rdev: Callable[[Path], tuple[int, int]] = _block_rdev,
-) -> CommissionPlan:
-    """Return an inert plan; never resize or format anything."""
-    layout = verify_boot_identity(expected, disk=disk, paths=paths, runner=runner, block_rdev=block_rdev)
-    for index, part in enumerate(layout.partitions):
-        if part.start != expected.partition_starts[index]:
-            raise CommissionError(f"partition {part.number} start differs from commissioned image")
-        if index < 3 and part.end != expected.fixed_ends[index]:
-            raise CommissionError(f"fixed partition {part.number} changed")
-    if layout.partitions[3].end > layout.last_usable:
-        raise CommissionError("data partition extends beyond usable disk")
+def _target_ram_mib() -> int:
+    match = re.search(r"^MemTotal:\s+(\d+) kB$", Path("/proc/meminfo").read_text(), re.M)
+    if match is None:
+        raise CommissionError("target RAM inventory unavailable")
+    return math.ceil(int(match.group(1)) / 1024)
+
+
+def plan_commission(disk: Path, expected: CommissionIdentity, *, paths: ProbePaths = ProbePaths(),
+                    runner=_run, block_rdev=_block_rdev, target_ram_mib: int | None = None) -> CommissionPlan:
+    """Plan a fixed final geometry without mutating any storage."""
+    layout = verify_boot_identity(expected, disk=disk, paths=paths, runner=runner,
+                                  block_rdev=block_rdev, allow_factory=True, allow_unformatted=True)
+    if layout.partitions[3].filesystem != "ext4" or any(p.filesystem not in ("", "ext4") for p in layout.partitions[4:]):
+        raise CommissionError("commissioning requires original experiment filesystem and no foreign library/evidence signatures")
+    if layout.logical_sector_size != 512:
+        raise CommissionError("factory image requires a 512-byte logical sector device")
+    for index, part in enumerate(layout.partitions[:4]):
+        if part.start != expected.partition_starts[index] or (index < 3 and part.end != expected.fixed_ends[index]):
+            raise CommissionError("fixed image geometry changed")
+    ram = _target_ram_mib() if target_ram_mib is None else target_ram_mib
+    if type(ram) is not int or ram < 1:
+        raise CommissionError("positive target RAM MiB required")
+    start4 = expected.partition_starts[3]
+    start5 = start4 + expected.experiment_mib * 2048
+    start6 = start5 + expected.library_mib * 2048
+    last = ((layout.disk_sectors - layout.entry_sectors - 1) // 2048) * 2048 - 1
+    evidence_mib = (last + 1 - start6) // 2048
+    minimum = math.ceil((expected.log_budget_mib + 2 * ram) / 0.8)
+    if evidence_mib < minimum:
+        raise CommissionError(f"insufficient evidence capacity: {evidence_mib} MiB available, {minimum} MiB required; use larger USB storage")
+    geometry = tuple((p.start, p.end) for p in layout.partitions[:3]) + ((start4, start5-1), (start5, start6-1), (start6, last))
+    if layout.partitions[3].end > geometry[3][1]:
+        raise CommissionError("factory experiment filesystem cannot be shrunk")
+    for part in layout.partitions[4:]:
+        if (part.start, part.end) != geometry[part.number-1]:
+            raise CommissionError("existing partition differs from planned geometry")
     commands = []
     if layout.backup_needs_relocation:
-        commands.append(("sgdisk", "-e", str(layout.path)))
-    sectors_per_mib = 1048576 // layout.logical_sector_size
-    data_start = layout.partitions[3].start
-    usable_for_growth = layout.disk_sectors - layout.entry_sectors - 2
-    aligned_end = data_start + ((usable_for_growth + 1 - data_start) // sectors_per_mib) * sectors_per_mib - 1
-    if layout.partitions[3].end < aligned_end:
-        commands.append(("growpart", "--fudge", "0", str(layout.path), "4"))
-    # Always safe to retry after growpart succeeded but resize2fs did not.
+        commands.append(("sgdisk", "-e", str(disk)))
+    if layout.partitions[3].end != geometry[3][1]:
+        commands.append(("sgdisk", "--delete=4", f"--new=4:{start4}:{start5-1}", "--typecode=4:8300", "--change-name=4:QUIRKBENCH-EXPERIMENTS", f"--partition-guid=4:{expected.partition_uuids[3]}", str(disk)))
+    for n, role in ((5, "LIBRARY"), (6, "EVIDENCE")):
+        if len(layout.partitions) < n:
+            a, b = geometry[n-1]
+            commands.append(("sgdisk", f"--new={n}:{a}:{b}", f"--typecode={n}:8300", f"--change-name={n}:QUIRKBENCH-{role}", f"--partition-guid={n}:{expected.partition_uuids[n-1]}", str(disk)))
     commands.append(("resize2fs", str(layout.partitions[3].path)))
-    return CommissionPlan(expected, layout, tuple(commands))
+    return CommissionPlan(expected, layout, tuple(commands), geometry, ram)
 
 
-def execute_commission(
-    plan: CommissionPlan,
-    *,
-    commissioned_identity: CommissionIdentity,
-    allow_write: bool = False,
-    paths: ProbePaths = ProbePaths(),
-    runner: Callable[[tuple[str, ...]], str] = _run,
-    block_rdev: Callable[[Path], tuple[int, int]] = _block_rdev,
-) -> DiskLayout:
-    """Grow only p4 after explicit arming and revalidation at each boundary."""
+def _write_journal(path: Path, record: dict) -> None:
+    """Publish and sync intent before any corresponding device mutation."""
+    if path.is_symlink() or path.parent.is_symlink():
+        raise CommissionError("commission journal cannot be a symlink")
+    fd, temporary = tempfile.mkstemp(prefix=".commission-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump(record, stream, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def execute_commission(plan: CommissionPlan, *, commissioned_identity: CommissionIdentity,
+                       allow_write=False, paths: ProbePaths = ProbePaths(), runner=_run,
+                       block_rdev=_block_rdev, journal: Path = Path("/boot/quirkbench-state/quirkbench/commission.json")) -> DiskLayout:
+    """Complete the recorded geometry; never reformat an observed filesystem.
+
+    An interrupted mkfs with no recognizable ext4 is explicitly uncertain and
+    needs human intervention. Missing completion acknowledgement is never
+    permission to issue mkfs a second time.
+    """
     if not allow_write or commissioned_identity != plan.identity:
         raise CommissionError("execution requires explicit matching commissioned identity and allow_write=True")
-    current = plan_commission(plan.layout.path, commissioned_identity, paths=paths, runner=runner, block_rdev=block_rdev)
-    if current.layout.partitions[3].end < plan.layout.partitions[3].end:
-        raise CommissionError("data partition shrank since planning")
-    if current.layout.backup_needs_relocation:
-        runner(("sgdisk", "-e", str(current.layout.path)))
-        relocated = plan_commission(plan.layout.path, commissioned_identity, paths=paths, runner=runner, block_rdev=block_rdev)
-        if relocated.layout.backup_needs_relocation or relocated.layout.partitions != current.layout.partitions:
-            raise CommissionError("GPT relocation changed partitions or did not complete")
-        current = relocated
-    if current.needs_partition_growth:
-        runner(("growpart", "--fudge", "0", str(current.layout.path), "4"))
-        grown = plan_commission(plan.layout.path, commissioned_identity, paths=paths, runner=runner, block_rdev=block_rdev)
-        if grown.layout.partitions[:3] != current.layout.partitions[:3] or grown.layout.partitions[3].end <= current.layout.partitions[3].end:
-            raise CommissionError("partition growth changed fixed layout or did not advance")
-        current = grown
-    # Re-probe immediately before touching ext4; no mkfs command exists here.
-    current = plan_commission(plan.layout.path, commissioned_identity, paths=paths, runner=runner, block_rdev=block_rdev)
-    runner(("resize2fs", str(current.layout.partitions[3].path)))
-    final = plan_commission(plan.layout.path, commissioned_identity, paths=paths, runner=runner, block_rdev=block_rdev)
-    if final.layout.partitions[:3] != current.layout.partitions[:3] or final.layout.partitions[3] != current.layout.partitions[3]:
-        raise CommissionError("layout changed during filesystem resize")
-    return final.layout
+    if not journal.parent.is_dir() or journal.is_symlink():
+        raise CommissionError("verified boot-state journal directory required")
+    # Production journal storage must itself have passed the identity/mount check.
+    if paths == ProbePaths():
+        mount = [x.split() for x in paths.proc_mountinfo.read_text().splitlines() if len(x.split()) > 5 and x.split()[4] == "/boot/quirkbench-state"]
+        state = plan.layout.partitions[2]
+        if len(mount) != 1 or mount[0][2] != f"{state.major_minor[0]}:{state.major_minor[1]}" or journal != Path("/boot/quirkbench-state/quirkbench/commission.json"):
+            raise CommissionError("journal must reside on verified boot-state partition")
+    with (journal.parent / "commission.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise CommissionError("commissioning already active") from exc
+        base = json.loads(json.dumps({"schema_version": 2, "identity": asdict(plan.identity), "geometry": plan.geometry, "target_ram_mib": plan.target_ram_mib}))
+        if journal.exists():
+            record = json.loads(journal.read_text())
+            if any(record.get(k) != v for k, v in base.items()):
+                raise CommissionError("commissioning journal disagrees with requested geometry; retain original settings")
+        else:
+            if len(plan.layout.partitions) != 4:
+                raise CommissionError("existing final partitions without journal require human reconciliation")
+            record = {**base, "format_intents": [], "complete": False}
+            _write_journal(journal, record)
+        def probe():
+            return plan_commission(plan.layout.path, commissioned_identity, paths=paths, runner=runner,
+                                   block_rdev=block_rdev, target_ram_mib=plan.target_ram_mib)
+        for command in plan.commands:
+            current = probe()
+            if command[0] == "sgdisk" and command not in current.commands:
+                continue
+            print(json.dumps({"phase": "commission", "status": "running", "operation": command[0:2]}), flush=True)
+            runner(command)
+            fd = os.open(command[-1], os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            if command[0] == "sgdisk":
+                runner(("partprobe", str(plan.layout.path)))
+                runner(("udevadm", "settle", "--timeout=30"))
+            probe()
+        for n, label in ((5, "QBLIBRARY"), (6, "QBEVIDENCE")):
+            current = probe()
+            part = current.layout.partitions[n-1]
+            if part.filesystem:
+                if part.filesystem != "ext4":
+                    raise CommissionError("unexpected existing filesystem; refusing format")
+                continue
+            if n in record["format_intents"]:
+                raise CommissionError(f"partition {n} format outcome uncertain; human intervention required, refusing reformat")
+            record["format_intents"].append(n)
+            _write_journal(journal, record)
+            probe()
+            runner(("mkfs.ext4", "-q", "-L", label, "-U", commissioned_identity.partition_uuids[n-1], str(part.path)))
+            # mkfs returns only after initialization; sync buffers before acknowledgement.
+            fd = os.open(part.path, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            if probe().layout.partitions[n-1].filesystem != "ext4":
+                raise CommissionError("new filesystem verification failed")
+        final = probe().layout
+        record["complete"] = True
+        _write_journal(journal, record)
+        return final
 
 
 def _load_commission_identity(path: Path) -> CommissionIdentity:
@@ -485,12 +604,12 @@ def _load_commission_identity(path: Path) -> CommissionIdentity:
     if not stat.S_ISREG(details.st_mode) or details.st_mode & 0o022:
         raise CommissionError("identity file must be regular and not group/world writable")
     document = json.loads(path.read_text())
-    required = {"schema_version", "disk_guid", "partition_uuids", "partition_starts", "fixed_ends"}
-    if not isinstance(document, dict) or set(document) != required or type(document["schema_version"]) is not int or document["schema_version"] != 1:
+    required = {"schema_version", "disk_guid", "partition_uuids", "partition_starts", "fixed_ends", "experiment_mib", "library_mib", "log_budget_mib"}
+    if not isinstance(document, dict) or set(document) != required or type(document["schema_version"]) is not int or document["schema_version"] != 2:
         raise CommissionError("invalid commissioned identity document")
     return CommissionIdentity(
         document["disk_guid"], document["partition_uuids"],
-        document["partition_starts"], document["fixed_ends"],
+        document["partition_starts"], document["fixed_ends"], document["experiment_mib"], document["library_mib"], document["log_budget_mib"],
     )
 
 
@@ -501,13 +620,13 @@ def main(
     runner: Callable[[tuple[str, ...]], str] = _run,
     block_rdev: Callable[[Path], tuple[int, int]] = _block_rdev,
 ) -> int:
-    parser = argparse.ArgumentParser(description="Verify external boot identity and plan p4-only data growth")
+    parser = argparse.ArgumentParser(description="Verify external boot identity and plan six-partition commissioning")
     parser.add_argument("--identity", type=Path, default=Path("/etc/quirkbench/commission.json"))
-    parser.add_argument("--apply", action="store_true", help="explicitly execute the verified p4 growth plan")
+    parser.add_argument("--apply", action="store_true", help="execute the verified and journaled external-device commissioning plan")
     args = parser.parse_args(argv)
     try:
         identity = _load_commission_identity(args.identity)
-        boot = verify_boot_identity(identity, paths=paths, runner=runner, block_rdev=block_rdev)
+        boot = verify_boot_identity(identity, paths=paths, runner=runner, block_rdev=block_rdev, allow_factory=True, allow_unformatted=True)
         plan = plan_commission(boot.path, identity, paths=paths, runner=runner, block_rdev=block_rdev)
         if args.apply:
             final = execute_commission(plan, commissioned_identity=identity, allow_write=True, paths=paths, runner=runner, block_rdev=block_rdev)
@@ -516,7 +635,8 @@ def main(
             final = plan.layout
             status = "dry-run"
         print(json.dumps({
-            "schema_version": 1,
+            "schema_version": 2,
+            "layout_version": 2,
             "status": status,
             "disk": str(final.path),
             "disk_guid": final.guid,

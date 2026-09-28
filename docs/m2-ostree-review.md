@@ -1,5 +1,7 @@
 # OSTree architecture revision review
 
+> Historical qualification: this report records layout revision 1. The six-partition revision and live/reset runtime require their own qualification; see [current image contract](debug-image.md).
+
 This review replaces the prototype deployment assumptions recorded in the historical M1 review. M1 remains achieved. The revised M2 gate is achieved: real composition, deployment and all ten VM boot trials passed on 2026-09-27. Physical Acer qualification belongs to M4.
 
 ## Reviewed boundaries

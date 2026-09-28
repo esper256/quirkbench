@@ -30,7 +30,7 @@ from .contracts import canonical
 ROLES = {"kernel", "config", "initramfs", "modules", "userspace", "build_provenance"}
 PACKAGES = ["fedora-release", "systemd", "systemd-udev", "systemd-networkd", "bash",
             "coreutils", "util-linux", "rpm", "nss-altfiles", "ostree", "dracut", "python3", "python3-gobject-base", "kmod", "iproute",
-            "e2fsprogs", "gdisk", "grub2-tools-minimal", "ca-certificates"]
+            "e2fsprogs", "gdisk", "parted", "grub2-tools-minimal", "ca-certificates"]
 UNSAFE_UNITS = ["fwupd.service", "fwupd-refresh.service", "fwupd-refresh.timer", "udisks2.service",
                 "systemd-pstore.service", "systemd-hibernate.service", "systemd-suspend.service",
                 "systemd-hybrid-sleep.service", "systemd-suspend-then-hibernate.service",
@@ -129,8 +129,9 @@ class ComposeInputs:
             "composer_sha256": sha256_file(Path(__file__)), "protection_profile": self.protection_profile,
             "replacement_rpm_sha256": sorted(self.replacement_rpms.values()),
             "build_evidence_sha256": self.evidence_sha256,
+            "runtime_assets_sha256": {p.name: sha256_file(p) for p in sorted((Path(__file__).parents[2]/"target-assets").iterdir()) if p.is_file()},
             "candidate_runtime_sha256": {name: sha256_file(Path(__file__).parent / name)
-                for name in ("boot.py", "commission.py", "build.py", "__init__.py")}})).hexdigest()
+                for name in sorted(path.name for path in Path(__file__).parent.glob("*.py"))}})).hexdigest()
 
 
 def builder_base_digest() -> str:

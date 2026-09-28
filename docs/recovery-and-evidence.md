@@ -32,8 +32,8 @@ The candidate should establish diagnostic channels and load a separately qualifi
 fixed crash-capture kernel as early as feasible. Loading from an initramfs shortens
 but does not eliminate the unprotected early-boot interval. Progress milestones
 must distinguish kernel startup, initramfs, writable USB evidence, network,
-crash-capture readiness and experiment readiness. A normal test ends with a full
-reboot to recovery. A panic may first enter the capture kernel, save its dump to
+crash-capture readiness and experiment readiness. The experiment uploads sealed chunks while it runs and sends its terminal result promptly. Final uploads are bounded; a normal test ends with a full
+reboot to recovery, where missing acknowledgements and pending chunks are retried. A panic may first enter the capture kernel, save its dump to
 the identified USB data partition or controller, and then perform a full reboot.
 The capture kernel is not the recovery boot and does not run the experiment.
 
@@ -65,7 +65,7 @@ automatic recovery and a useful trace from every arbitrarily early hard hang.
 
 ## Current implementation versus planned capability
 
-The revised M2 OSTree build and VM qualification is achieved; [recorded results](ostree-review.md) include explicit initramfs-load failure and kernel panic/reset/recovery. Earlier custom-bundle work produced kernel, initramfs and image artifacts; those historical results do not qualify the replacement OSTree deployment. No such build or VM result constitutes Acer crash-recovery acceptance.
+The historical revised M2 OSTree build and VM qualification was achieved for layout revision 1; [recorded results](ostree-review.md) include explicit initramfs-load failure and kernel panic/reset/recovery. Earlier custom-bundle work produced kernel, initramfs and image artifacts; those historical results do not qualify the replacement OSTree deployment. No such build or VM result constitutes Acer crash-recovery acceptance.
 
 The current kernel protection policy explicitly disables KEXEC and KEXEC_FILE,
 so **kdump is not implemented or available in the current image**. Enabling it
@@ -98,3 +98,7 @@ Traditional OSTree repository transport is the v1 choice; bootc and the full Sil
 - [Linux kdump: prerequisites, reserved memory, loading and capture](https://docs.kernel.org/admin-guide/kdump/kdump.html)
 - [Linux netconsole: transport and driver constraints](https://docs.kernel.org/networking/netconsole.html)
 - [Linux ramoops: reserved RAM and persistence requirements](https://docs.kernel.org/admin-guide/ramoops.html)
+
+## Current implementation
+
+[Layout revision 2](debug-image.md) separates experiments, evidence and the optional library into distinct filesystems. The target runtime connects exact-revision handoff, streaming evidence, bounded final upload and recovery acknowledgement. Systemd watchdog activation uses versioned qualification profiles and observed hardware state; see [watchdog qualification](watchdog-qualification.md). No physical watchdog recovery is inferred from software tests or the prior QEMU image.

@@ -22,4 +22,18 @@ An independent monitor cannot prove that a disconnected machine is alive. Its pu
 
 OSTree composition, publication, object transfer and deployment preparation use these same progress semantics. Show measured transferred bytes/objects where the tool exposes them, then deployment preparation and boot handoff as separate bounded phases. A reporting subprocess with no measured advance must not conceal a stuck composition or deploy. Last known commit and attempt identity accompany boot-stage reports; no synthetic percentage or network timeout implies successful boot or a kernel crash.
 
-Current OSTree subprocess monitoring reports bounded phases and output-byte activity, not measured network bytes or a percentage of the OS download. A quiet long-running command can therefore show suspected stall even if it is still working; qualify or add tool-specific counters before claiming precise transfer progress. Composition emits periodic activity and retains logs. The durable physical handoff and boot-stage monitor integration remain M3 work.
+Current OSTree subprocess monitoring reports bounded phases and output-byte activity, not measured network bytes or a percentage of the OS download. A quiet long-running command can therefore show suspected stall even if it is still working; qualify or add tool-specific counters before claiming precise transfer progress. Composition emits periodic activity and retains logs. Durable physical handoff and boot-stage reporting are implemented; their physical behavior still requires the hardware gate.
+
+## Physical execution and reset observations
+
+The controller monitor includes BOOT_PENDING while waiting for the exact next boot,
+and keeps result completion separate from recovery arrival. Target inventory shows
+last-observed watchdog identity, armed state, actual timeout, qualified boot stage
+and each partition's capacity. These are labeled as last target reports, not live
+hardware counters. Unknown timeout/countdown values remain unknown.
+
+The systemd-supervised target loop emits service liveness independently of useful
+progress. Live recipe chunks and uploads have measured counts; long library
+verification emits hashed-byte progress. A heartbeat cannot extend a phase deadline.
+Recovery waits visibly for provisioning/network, while authentication, protocol,
+storage and identity errors stop with a preserved human-intervention reason.

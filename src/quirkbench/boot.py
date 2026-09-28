@@ -60,15 +60,17 @@ class RecoveryConfig:
     root_partuuid: str
     state_partuuid: str
     data_partuuid: str
-    schema_version: int = 1
+    library_partuuid: str
+    evidence_partuuid: str
+    schema_version: int = 2
 
     def __post_init__(self) -> None:
-        if type(self.schema_version) is not int or self.schema_version != 1:
+        if type(self.schema_version) is not int or self.schema_version != 2:
             raise BootError("unsupported boot config version")
-        values = [self.esp_partuuid, self.root_partuuid, self.state_partuuid, self.data_partuuid]
+        values = [self.esp_partuuid, self.root_partuuid, self.state_partuuid, self.data_partuuid, self.library_partuuid, self.evidence_partuuid]
         for value in [self.disk_guid, *values]:
             _guid(value)
-        if len({value.lower() for value in values}) != 4:
+        if len({value.lower() for value in values}) != 6:
             raise BootError("partition GUIDs must be distinct")
 
     @classmethod
@@ -88,7 +90,7 @@ BootConfig = RecoveryConfig
 def parse_cmdline(text: str, config: RecoveryConfig) -> dict[str, str]:
     values = {}
     tracked = {"root", "quirkbench.esp", "quirkbench.state", "quirkbench.data",
-               "quirkbench.mode", "quirkbench.candidate", "quirkbench.revision", "quirkbench.smoke", "quirkbench.fault", "ostree"}
+               "quirkbench.library", "quirkbench.evidence", "quirkbench.mode", "quirkbench.candidate", "quirkbench.revision", "quirkbench.smoke", "quirkbench.fault", "ostree"}
     for token in text.split():
         key, sep, value = token.partition("=")
         if key in tracked:
@@ -100,7 +102,8 @@ def parse_cmdline(text: str, config: RecoveryConfig) -> dict[str, str]:
         raise BootError("invalid boot mode")
     expected = {"root": config.data_partuuid if mode == "candidate" else config.root_partuuid,
                 "quirkbench.esp": config.esp_partuuid, "quirkbench.state": config.state_partuuid,
-                "quirkbench.data": config.data_partuuid}
+                "quirkbench.data": config.data_partuuid,
+                "quirkbench.library": config.library_partuuid, "quirkbench.evidence": config.evidence_partuuid}
     for key, identity in expected.items():
         if values.get(key, "").lower() != "partuuid=" + identity.lower():
             raise BootError("booted partition identity differs from image")
@@ -184,13 +187,18 @@ def read_boot_entry(prepared, data_mount: Path) -> dict:
 
 def render_candidate(prepared, data_mount: Path, config: RecoveryConfig, *, smoke=False) -> str:
     entry = read_boot_entry(prepared, data_mount)
-    args = (f"root=PARTUUID={config.data_partuuid} rw rootflags=nosuid,nodev console=tty0 console=ttyS0,115200 panic=10 oops=panic "
+    # Kernel console printk may truncate the long command line. Keep the
+    # authorized experiment/fault identity before storage and OSTree paths so
+    # early panic evidence still identifies the exact experiment.
+    authorization = (f"quirkbench.mode=candidate quirkbench.candidate={prepared.deployment_id} "
+                     f"quirkbench.revision={prepared.revision} ")
+    if smoke:
+        authorization += "quirkbench.smoke=1 "
+    args = authorization + (f"root=PARTUUID={config.data_partuuid} rw rootflags=nosuid,nodev console=tty0 console=ttyS0,115200 panic=10 oops=panic "
             f"noresume rd.auto=0 rd.luks=0 rd.lvm=0 rd.md=0 rd.dm=0 "
             f"quirkbench.esp=PARTUUID={config.esp_partuuid} quirkbench.state=PARTUUID={config.state_partuuid} "
-            f"quirkbench.data=PARTUUID={config.data_partuuid} quirkbench.mode=candidate "
-            f"quirkbench.candidate={prepared.deployment_id} quirkbench.revision={prepared.revision} ostree={entry['ostree']}")
-    if smoke:
-        args += " quirkbench.smoke=1"
+            f"quirkbench.data=PARTUUID={config.data_partuuid} quirkbench.library=PARTUUID={config.library_partuuid} quirkbench.evidence=PARTUUID={config.evidence_partuuid} "
+            f"ostree={entry['ostree']}")
     return (f"set quirkbench_candidate_loaded=\n"
             f"if linux $data/boot{entry['linux']} {args}; then\n"
             f"  if initrd $data/boot{entry['initrd']}; then\n"
@@ -228,7 +236,7 @@ def require_secure_boot_disabled(kernel_log: str) -> None:
 
 
 def _run(argv: list[str]) -> str:
-    process = subprocess.run(argv, text=True, capture_output=True, check=True)
+    process = subprocess.run(argv, text=True, capture_output=True, check=True, timeout=60)
     return process.stdout
 
 
@@ -247,6 +255,8 @@ def _mount_source(mountinfo: str, mountpoint: str) -> tuple[str, set[str]] | Non
 
 def _mount_one(device: Path, mountpoint: Path, filesystem: str, options: str,
                *, runner: Callable[[list[str]], str], mountinfo: str) -> None:
+    if not mountpoint.is_absolute() or mountpoint.resolve() != mountpoint:
+        raise BootError("mountpoint must be a direct allowlisted path without symlinks")
     old = _mount_source(mountinfo, str(mountpoint))
     if old is not None:
         if Path(old[0]).resolve() != device.resolve():
@@ -266,38 +276,40 @@ def prepare_recovery(config: RecoveryConfig, *, cmdline: str, kernel_log: str,
 
     args = parse_cmdline(cmdline, config)
     require_secure_boot_disabled(kernel_log)
-    expected = BootIdentity(config.disk_guid, (config.esp_partuuid, config.root_partuuid, config.state_partuuid, config.data_partuuid))
+    expected = BootIdentity(config.disk_guid, (config.esp_partuuid, config.root_partuuid, config.state_partuuid, config.data_partuuid, config.library_partuuid, config.evidence_partuuid))
     mode = args["quirkbench.mode"]
     if mode == "candidate":
         state_mount = Path("/run/quirkbench-state")
     layout = (identity_verifier or verify_boot_identity)(expected, allow_data_mounted=True, mode=mode)
     _mount_one(layout.partitions[2].path, state_mount, "vfat", "rw,nosuid,nodev,noexec,umask=0077",
                runner=runner, mountinfo=mountinfo)
-    if mode == "recovery":
-        _mount_one(layout.partitions[3].path, data_mount, "ext4", "rw,nosuid,nodev",
-                   runner=runner, mountinfo=mountinfo)
-        backing = data_mount / "quirkbench/evidence"
-        destination = data_mount / "evidence"
-    else:
-        data_mount = Path("/sysroot")
-        backing = data_mount / "quirkbench/evidence"
-        destination = Path("/var/lib/quirkbench/evidence")
+    evidence_mount = data_mount / "evidence"
+    library_mount = data_mount / "library"
+    # Evidence must remain available even if experiments or library cannot mount.
+    _mount_one(layout.partitions[5].path, evidence_mount, "ext4", "rw,nosuid,nodev,noexec",
+               runner=runner, mountinfo=mountinfo)
+    if mode == "candidate":
         roots = [line.split() for line in mountinfo.splitlines() if len(line.split()) > 5 and line.split()[4] == "/"]
         if len(roots) != 1 or not re.fullmatch(r"/ostree/deploy/[A-Za-z0-9_-]+/deploy/" + args["quirkbench.revision"] + r"\.[0-9]+", roots[0][3]):
             raise BootError("running OSTree revision differs from authorized revision")
-        env = state_mount / "quirkbench/next.env"
-        value = _read_env(env, runner)
+        value = _read_env(state_mount / "quirkbench/next.env", runner)
         if value.get("next_entry") or value.get("candidate_id"):
             raise BootError("candidate one-shot state was not consumed before boot")
-    if backing.parent.is_symlink() or backing.parent.resolve() != data_mount.resolve() / "quirkbench":
-        raise BootError("evidence backing path escapes sysroot")
-    for directory in (backing, destination):
-        if directory.is_symlink():
-            raise BootError("evidence path cannot be a symlink")
-        directory.mkdir(parents=True, exist_ok=True)
-    if _mount_source(mountinfo, str(destination)) is None:
-        runner(["mount", "--bind", str(backing), str(destination)])
-        runner(["mount", "-o", "remount,bind,rw,nosuid,nodev,noexec", str(destination)])
+    else:
+        try:
+            if layout.partitions[3].filesystem != "ext4":
+                raise OSError("experiment filesystem unavailable")
+            _mount_one(layout.partitions[3].path, data_mount / "experiments", "ext4", "rw,nosuid,nodev",
+                       runner=runner, mountinfo=mountinfo)
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            args["quirkbench.experiments_unavailable"] = str(exc)
+    try:
+        if layout.partitions[4].filesystem != "ext4":
+            raise OSError("library filesystem unavailable")
+        _mount_one(layout.partitions[4].path, library_mount, "ext4", "ro,noload,nosuid,nodev",
+                   runner=runner, mountinfo=mountinfo)
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        args["quirkbench.library_unavailable"] = str(exc)
     return args
 
 
@@ -309,13 +321,13 @@ def _verify_stage_identity(config: RecoveryConfig, *, data_mount: Path, state_mo
                            identity_verifier=None, mountinfo: str | None = None) -> None:
     from .commission import BootIdentity, verify_boot_identity
 
-    if identity_verifier is None and (data_mount != Path("/var/lib/quirkbench")
+    if identity_verifier is None and (data_mount != Path("/var/lib/quirkbench/experiments")
                                       or state_mount != Path("/boot/quirkbench-state")):
         raise BootError("candidate paths must be the fixed recovery mounts")
     if data_mount.is_symlink() or state_mount.is_symlink():
         raise BootError("candidate mountpoint cannot be a symlink")
     expected = BootIdentity(config.disk_guid, (config.esp_partuuid, config.root_partuuid,
-                                               config.state_partuuid, config.data_partuuid))
+                                               config.state_partuuid, config.data_partuuid, config.library_partuuid, config.evidence_partuuid))
     layout = (identity_verifier or verify_boot_identity)(expected, allow_data_mounted=True)
     inventory = Path("/proc/self/mountinfo").read_text() if mountinfo is None else mountinfo
     for mountpoint, partition in ((state_mount, layout.partitions[2]),
@@ -400,6 +412,49 @@ def trigger_candidate_panic(boot: dict, vendor: str, *, trigger: Path = Path("/p
     raise BootError("panic injection unexpectedly returned")
 
 
+def commission_boot(config: RecoveryConfig, *, identity_path: Path = Path("/etc/quirkbench/commission.json")) -> None:
+    """Run first-boot commissioning only from fixed recovery on its verified USB."""
+    from .commission import (_load_commission_identity, verify_boot_identity,
+                             plan_commission, execute_commission)
+    identity = _load_commission_identity(identity_path)
+    expected = (config.esp_partuuid, config.root_partuuid, config.state_partuuid,
+                config.data_partuuid, config.library_partuuid, config.evidence_partuuid)
+    if identity.disk_guid != config.disk_guid or identity.partition_uuids != expected:
+        raise BootError("commissioning identity differs from fixed boot configuration")
+    layout = verify_boot_identity(identity, allow_factory=True, allow_unformatted=True)
+    mountinfo = Path("/proc/self/mountinfo").read_text()
+    _mount_one(layout.partitions[2].path, Path("/boot/quirkbench-state"), "vfat",
+               "rw,nosuid,nodev,noexec,umask=0077", runner=_run, mountinfo=mountinfo)
+    journal = Path("/boot/quirkbench-state/quirkbench/commission.json")
+    previous = json.loads(journal.read_text()) if journal.exists() else None
+    if previous and previous.get("complete"):
+        from dataclasses import asdict
+        if (previous.get("identity") != json.loads(json.dumps(asdict(identity)))
+                or previous.get("geometry") != [[p.start, p.end] for p in layout.partitions]):
+            raise BootError("completed commissioning geometry or identity changed")
+        return
+    plan = plan_commission(layout.path, identity, target_ram_mib=previous.get("target_ram_mib") if previous else None)
+    execute_commission(plan, commissioned_identity=identity, allow_write=True)
+
+
+def mount_proof(mode: str, mountinfo: str) -> dict:
+    """Record observed distinct filesystem mounts for image acceptance."""
+    points = {"experiments": "/sysroot" if mode == "candidate" else "/var/lib/quirkbench/experiments",
+              "library": "/var/lib/quirkbench/library", "evidence": "/var/lib/quirkbench/evidence"}
+    report = {"mode": mode, "mounts": {}}
+    for role, point in points.items():
+        matches = [line.split() for line in mountinfo.splitlines() if len(line.split()) > 6 and line.split()[4] == point]
+        if not matches:
+            report["mounts"][role] = None
+            continue
+        if len(matches) != 1:
+            raise BootError("ambiguous role mount")
+        fields = matches[0]
+        report["mounts"][role] = {"device": fields[2], "root": fields[3], "mountpoint": fields[4],
+                                   "options": fields[5].split(","), "filesystem": fields[fields.index("-")+1]}
+    return report
+
+
 def service_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Quirkbench recovery boot verifier")
     parser.add_argument("--config", type=Path, default=Path("/etc/quirkbench/boot.json"))
@@ -407,10 +462,15 @@ def service_main(argv: list[str] | None = None) -> int:
     cmdline = Path("/proc/cmdline").read_text()
     config_path = Path("/sysroot/quirkbench/identity.json") if "quirkbench.mode=candidate" in cmdline.split() else args.config
     config = RecoveryConfig.load(config_path)
+    if "quirkbench.mode=recovery" in cmdline.split():
+        commission_boot(config)
     log = _run(["dmesg", "--kernel"])
     mountinfo = Path("/proc/self/mountinfo").read_text()
     boot = prepare_recovery(config, cmdline=cmdline, kernel_log=log, mountinfo=mountinfo)
     mode = boot["quirkbench.mode"]
+    status = Path("/run/quirkbench-boot.json")
+    status.write_bytes(_canonical({"config": config.to_dict(), "boot": boot}))
+    print("QUIRKBENCH_MOUNTS " + json.dumps(mount_proof(mode, Path("/proc/self/mountinfo").read_text()), sort_keys=True), flush=True)
     print(f"QUIRKBENCH_BOOT mode={mode} disk={config.disk_guid} revision={boot.get('quirkbench.revision', 'recovery')}", flush=True)
     if boot.get("quirkbench.smoke") == "1":
         vendor = Path("/sys/class/dmi/id/sys_vendor").read_text().strip()
@@ -451,14 +511,17 @@ def install_runtime(rootfs: Path, config: RecoveryConfig | dict | None = None, a
     assets = Path(assets_dir) if assets_dir is not None else Path(__file__).resolve().parents[2] / "target-assets"
     if not assets.is_dir():
         raise BootError("target runtime assets missing")
+    network = rootfs / "etc/systemd/network"
+    network.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(assets / "20-quirkbench-wired.network", network / "20-quirkbench-wired.network")
     fstab = rootfs / "etc/fstab"
     if fstab.exists() and any(line.strip() and not line.lstrip().startswith("#") for line in fstab.read_text().splitlines()):
         raise BootError("target fstab may not contain automatic mounts")
     package = rootfs / "usr/lib/quirkbench/quirkbench"
     package.mkdir(parents=True, exist_ok=True)
     source = Path(__file__).resolve().parent
-    for name in ("__init__.py", "boot.py", "commission.py", "build.py"):
-        src = source / name
+    for src in source.glob("*.py"):
+        name = src.name
         if not src.is_file():
             raise BootError("runtime Python module missing: " + name)
         shutil.copyfile(src, package / name)
@@ -478,6 +541,20 @@ def install_runtime(rootfs: Path, config: RecoveryConfig | dict | None = None, a
         if link.exists() or link.is_symlink():
             link.unlink()
         link.symlink_to("../" + unit)
+    for name in ("quirkbench-supervisor.service", "quirkbench-supervisor-failure.service"):
+        shutil.copyfile(assets / name, units / name)
+    supervisor_link = units / "multi-user.target.wants/quirkbench-supervisor.service"
+    if supervisor_link.exists() or supervisor_link.is_symlink():
+        supervisor_link.unlink()
+    supervisor_link.symlink_to("../quirkbench-supervisor.service")
+    supervisor_dropin = units / "quirkbench-supervisor.service.d"
+    supervisor_dropin.mkdir(exist_ok=True)
+    prerequisite = "quirkbench-candidate.service" if candidate else "quirkbench-recovery.service"
+    (supervisor_dropin / "boot.conf").write_text(f"[Unit]\nRequires={prerequisite}\nAfter={prerequisite}\n")
+    network_link = units / "multi-user.target.wants/systemd-networkd.service"
+    if network_link.exists() or network_link.is_symlink():
+        network_link.unlink()
+    network_link.symlink_to("/usr/lib/systemd/system/systemd-networkd.service")
     for name in ("fwupd.service", "udisks2.service", "systemd-pstore.service",
                  "systemd-hibernate.service", "systemd-suspend.service",
                  "systemd-hybrid-sleep.service", "systemd-suspend-then-hibernate.service",

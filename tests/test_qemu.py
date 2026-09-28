@@ -61,8 +61,10 @@ def test_qemu_detects_internal_sentinel_write(tmp_path: Path) -> None:
     inputs = _inputs(tmp_path)
 
     def fake_run(argv, **kwargs):
-        if argv[0] == "qemu-img":
+        if argv[:2] == ("qemu-img", "create"):
             Path(argv[-1]).write_bytes(b"overlay")
+        elif argv[:2] == ("qemu-img", "resize"):
+            pass
         else:
             sentinel = inputs.work_dir / "internal-sentinel.img"
             with sentinel.open("r+b") as handle:
@@ -144,3 +146,60 @@ def test_panic_proof_requires_kernel_evidence_not_queued_journal_marker():
                     log.replace('Linux version 6.12-test','Linux version 6.12-other')):
         with pytest.raises(QemuError,match='actual kernel panic'):
             verify_panic_proof(changed,manifest)
+
+
+def manifest_v2():
+    from quirkbench.image import partition_layout
+    from test_commission import UUIDS, GUID
+    parts=partition_layout(4096,2048)
+    return {'schema_version':2,'layout_version':2,'size_bytes':4096*1024**2,'partitions':parts,
+        'identity':{'disk_guid':GUID},'commissioning':{'schema_version':2,'partition_uuids':UUIDS,
+        'experiment_mib':32768,'library_mib':32768,'log_budget_mib':4096}}
+
+
+def test_sparse_commissioning_fixture_covers_sizing_policy_and_rejects_old_layout():
+    from quirkbench.qemu import commissioning_fixture_size
+    manifest=manifest_v2()
+    assert commissioning_fixture_size(manifest,2048)==100*1024**3
+    manifest['commissioning']['library_mib']=100*1024
+    assert commissioning_fixture_size(manifest,16384)>150*1024**3
+    manifest['layout_version']=1
+    with pytest.raises(QemuError,match='rebuilt'):commissioning_fixture_size(manifest,2048)
+
+
+def test_gpt_acceptance_checks_actual_six_role_geometry(tmp_path):
+    from quirkbench.qemu import commissioned_partition_report, commissioning_fixture_size
+    from test_commission import UUIDS, GUID
+    manifest=manifest_v2();image=tmp_path/'fixture.img'
+    with image.open('wb') as stream:stream.truncate(commissioning_fixture_size(manifest,2048))
+    sectors=image.stat().st_size//512;last=sectors-34
+    start4=manifest['partitions'][3]['start'];start5=start4+32768*2048;start6=start5+32768*2048
+    geometry=[(p['start'],p['end']) for p in manifest['partitions'][:3]]+[(start4,start5-1),(start5,start6-1),(start6,((last+1)//2048)*2048-1)]
+    def run(argv):
+        if argv[1]=='--print':
+            rows='\n'.join(f'{i} {a} {b} 1MiB 8300 role' for i,(a,b) in enumerate(geometry,1))
+            return f'Disk {image}: {sectors} sectors, 512 bytes each\nDisk identifier (GUID): {GUID}\nMain partition table begins at sector 2 and ends at sector 33\nFirst usable sector is 34, last usable sector is {last}\n{rows}'
+        n=int(argv[1].split('=')[1]);a,b=geometry[n-1]
+        return f'Partition GUID code: '+{1:'EF00',3:'0700'}.get(n,'8300')+f'\nPartition unique GUID: {UUIDS[n-1]}\nFirst sector: {a}\nLast sector: {b}\n'
+    report=commissioned_partition_report(image,manifest,runner=run)
+    assert [p['role'] for p in report]==['esp','recovery','state','experiments','library','evidence']
+    geometry[4]=(geometry[4][0]+1,geometry[4][1])
+    with pytest.raises(QemuError,match='library'):commissioned_partition_report(image,manifest,runner=run)
+
+
+@pytest.mark.parametrize('mode',['recovery','candidate'])
+def test_mount_proof_requires_separate_measured_filesystems(mode):
+    import json
+    from copy import deepcopy
+    from quirkbench.boot import mount_proof
+    from quirkbench.qemu import verify_mount_proof
+    point='/sysroot' if mode=='candidate' else '/var/lib/quirkbench/experiments'
+    inventory=f'1 0 8:4 / {point} rw,nosuid,nodev - ext4 /dev/sda4 rw\n2 0 8:5 / /var/lib/quirkbench/library ro,nosuid,nodev - ext4 /dev/sda5 ro\n3 0 8:6 / /var/lib/quirkbench/evidence rw,nosuid,nodev,noexec - ext4 /dev/sda6 rw\n'
+    record=mount_proof(mode,inventory)
+    log=lambda value:'[0] QUIRKBENCH_MOUNTS '+json.dumps(value)
+    assert verify_mount_proof(log(record),mode)==record
+    for role,field,value in [('evidence','device','8:4'),('library','options',['rw','nosuid','nodev']),('evidence','root','/quirkbench/evidence')]:
+        bad=deepcopy(record);bad['mounts'][role][field]=value
+        with pytest.raises(QemuError,match='isolation'):verify_mount_proof(log(bad),mode)
+    bad=deepcopy(record);bad['mounts']['library']=None
+    with pytest.raises(QemuError,match='isolation'):verify_mount_proof(log(bad),mode)

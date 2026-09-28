@@ -138,3 +138,19 @@ def test_old_boot_cannot_invalidate_new_generation(lab):
     c.register(CapabilityReport('target','boot-two',[],mode='simulation'))
     with pytest.raises(Conflict): c.register(CapabilityReport('target','boot',[],mode='simulation'))
     assert c.status('campaign')['target']['boot_id']=='boot-two'
+
+
+def test_monitor_reports_watchdog_unknown_without_fabricating_countdown(tmp_path):
+    from quirkbench.controller import Controller
+    from quirkbench.contracts import CapabilityReport
+    from quirkbench.monitor import render
+    c = Controller(tmp_path, reserve_bytes=0)
+    c.register(CapabilityReport('acer', 'boot', [], inventory={
+        'boot_stage': 'supervisor-ready',
+        'watchdog': {'identity': None, 'armed': None, 'actual_timeout_s': None, 'earliest_covered_stage': 'unqualified'},
+        'partition_capacity': {'evidence': {'available_bytes': 4*1024**3, 'total_bytes': 10*1024**3}}}))
+    c.create_campaign('lab', 'acer')
+    text = render(c.monitor('lab'))
+    assert 'observed timeout unknown' in text
+    assert 'unqualified (last target report)' in text
+    assert 'Storage evidence: 4.0 GiB' in text

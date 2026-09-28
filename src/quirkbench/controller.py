@@ -11,7 +11,7 @@ import shutil
 import sqlite3
 import time
 import uuid
-from .contracts import CapabilityReport, Checkpoint, Conflict, ContractError, Experiment, Progress, Result, canonical, digest, identifier
+from .contracts import sha256, CapabilityReport, Checkpoint, Conflict, ContractError, Experiment, Progress, Result, canonical, digest, identifier
 from .store import ArtifactStore, StoragePressure, atomic_write, sync_directory
 
 MIGRATIONS = ["""
@@ -39,6 +39,13 @@ ALTER TABLE attempts ADD COLUMN last_heartbeat REAL;
 ALTER TABLE attempts ADD COLUMN finished REAL;
 """, """
 CREATE TABLE deployment_refs(owner TEXT NOT NULL, manifest_digest TEXT NOT NULL, repository TEXT NOT NULL, revision TEXT NOT NULL, PRIMARY KEY(owner,manifest_digest), FOREIGN KEY(owner,manifest_digest) REFERENCES refs(owner,digest));
+""", """
+ALTER TABLE attempts ADD COLUMN handoff_revision TEXT;
+ALTER TABLE attempts ADD COLUMN handoff_origin TEXT;
+ALTER TABLE attempts ADD COLUMN recovery_boot TEXT;
+ALTER TABLE attempts ADD COLUMN recovery_returned REAL;
+""", """
+CREATE TABLE maintenance(device TEXT PRIMARY KEY REFERENCES devices(id), request TEXT NOT NULL, selection TEXT NOT NULL);
 """]
 
 def uid():
@@ -97,7 +104,7 @@ class Controller:
         return row
 
     def _uncertain(self, db, clause, params, reason):
-        rows = db.execute('SELECT a.id,j.campaign FROM attempts a JOIN jobs j ON j.id=a.job WHERE a.state IN (\'CLAIMED\',\'RUNNING\') AND ' + clause, params).fetchall()
+        rows = db.execute('SELECT a.id,j.campaign FROM attempts a JOIN jobs j ON j.id=a.job WHERE a.state IN (\'CLAIMED\',\'RUNNING\',\'BOOT_PENDING\') AND ' + clause, params).fetchall()
         for row in rows:
             db.execute('UPDATE attempts SET state=\'UNCERTAIN\' WHERE id=?', (row['id'],))
             db.execute('UPDATE campaigns SET state=\'PAUSED\',reason=? WHERE id=?', (reason, row['campaign']))
@@ -119,11 +126,13 @@ class Controller:
         with self.transaction() as db:
             prior = db.execute('SELECT * FROM devices WHERE id=?', (report.device_id,)).fetchone()
             generation = prior['generation'] if prior else 1
+            if prior and prior['boot'] == report.boot_id and json.loads(prior['report'])['mode'] != report.mode:
+                raise Conflict('boot mode cannot change without a new boot identity')
             if prior and prior['boot'] != report.boot_id:
                 if db.execute('SELECT 1 FROM boot_history WHERE device=? AND boot=?', (report.device_id, report.boot_id)).fetchone():
                     raise Conflict('previous boot cannot re-register over a newer generation')
                 generation += 1
-                self._uncertain(db, 'a.device=?', (report.device_id,), 'target boot changed; execution uncertain')
+                self._uncertain(db, "a.device=? AND (a.state!='BOOT_PENDING' OR ?!='experiment')", (report.device_id, report.mode), 'target boot changed; execution uncertain')
             db.execute('INSERT INTO devices(id,boot,generation,report,last_contact) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET boot=excluded.boot,generation=excluded.generation,report=excluded.report,last_contact=excluded.last_contact', (report.device_id, report.boot_id, generation, canonical(asdict(report)).decode(), self.clock()))
             db.execute('INSERT OR IGNORE INTO boot_history VALUES(?,?)', (report.device_id, report.boot_id))
             return {'device_id': report.device_id, 'generation': generation}
@@ -145,6 +154,7 @@ class Controller:
         spec = canonical(experiment.to_dict()).decode()
         for value in experiment.artifacts.values():
             self.store.verify(value)
+        library_values = self._library_closure(experiment.artifacts.values())
         deployment = self._deployment_manifest(experiment.artifacts["deployment"]) if "deployment" in experiment.artifacts else None
         build_evidence = self._deployment_evidence(deployment) if deployment is not None else None
         with self.transaction() as db:
@@ -153,7 +163,7 @@ class Controller:
             if previous and previous['spec'] != spec:
                 raise Conflict('experiment ID already has a different immutable specification')
             db.execute('INSERT OR IGNORE INTO experiments VALUES(?,?)', (experiment.experiment_id, spec))
-            for value in experiment.artifacts.values():
+            for value in set(experiment.artifacts.values()) | library_values:
                 db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)', ('experiment:' + experiment.experiment_id, value))
             if deployment is not None:
                 self._retain_deployment(db, "experiment:" + experiment.experiment_id, experiment.artifacts["deployment"], deployment, build_evidence)
@@ -161,7 +171,7 @@ class Controller:
                 db.execute("INSERT OR IGNORE INTO jobs(campaign,experiment,repetition,state) VALUES(?,?,?,'QUEUED')", (campaign_id, experiment.experiment_id, repetition))
 
     def _pause(self, db, campaign_id, reason):
-        active = db.execute("SELECT 1 FROM attempts a JOIN jobs j ON a.job=j.id WHERE j.campaign=? AND a.state IN ('CLAIMED','RUNNING')", (campaign_id,)).fetchone()
+        active = db.execute("SELECT 1 FROM attempts a JOIN jobs j ON a.job=j.id WHERE j.campaign=? AND a.state IN ('CLAIMED','RUNNING','BOOT_PENDING')", (campaign_id,)).fetchone()
         db.execute('UPDATE campaigns SET state=?,reason=? WHERE id=?', ('PAUSE_REQUESTED' if active else 'PAUSED', reason, campaign_id))
 
     def pause(self, campaign_id, reason='user requested pause'):
@@ -176,13 +186,47 @@ class Controller:
         with self.transaction() as db:
             campaign = self._campaign(db, campaign_id)
             device = db.execute('SELECT * FROM devices WHERE id=?', (campaign['device'],)).fetchone()
+            if db.execute('SELECT 1 FROM maintenance WHERE device=?', (campaign['device'],)).fetchone():
+                raise Conflict('target library maintenance must finish before resume')
             report = json.loads(device['report'])
             if report['mode'] not in ('recovery', 'simulation'):
                 raise Conflict('target must report recovery before resume')
-            if db.execute("SELECT 1 FROM attempts WHERE device=? AND state IN ('CLAIMED','RUNNING','UNCERTAIN')", (campaign['device'],)).fetchone():
+            if db.execute("SELECT 1 FROM attempts WHERE device=? AND (state IN ('CLAIMED','RUNNING','BOOT_PENDING','UNCERTAIN') OR (handoff_revision IS NOT NULL AND recovery_returned IS NULL))", (campaign['device'],)).fetchone():
                 raise Conflict('outstanding attempt requires reconciliation')
             db.execute("UPDATE campaigns SET state='RUNNING',reason=NULL,session_started=?,session_tokens=0 WHERE id=?", (self.clock(), campaign_id))
         return self.status(campaign_id)
+
+    def library_maintenance(self, device_id, selection=None, *, finish=False):
+        """Local operator API: holds a durable scheduling fence until released."""
+        from .library import library_artifacts
+        identifier(device_id)
+        closure = library_artifacts(self.store, selection) if selection is not None else set()
+        with self.transaction() as db:
+            row = db.execute('SELECT * FROM devices WHERE id=?', (device_id,)).fetchone()
+            if row is None or json.loads(row['report'])['mode'] != 'recovery':
+                raise Conflict('library maintenance requires recovery')
+            if db.execute("SELECT 1 FROM campaigns WHERE device=? AND state!='PAUSED'", (device_id,)).fetchone():
+                raise Conflict('pause all device campaigns before library maintenance')
+            if db.execute("SELECT 1 FROM attempts WHERE device=? AND (state IN ('CLAIMED','RUNNING','BOOT_PENDING','UNCERTAIN') OR (handoff_revision IS NOT NULL AND recovery_returned IS NULL))", (device_id,)).fetchone():
+                raise Conflict('reconcile outstanding attempt before maintenance')
+            current = db.execute('SELECT * FROM maintenance WHERE device=?', (device_id,)).fetchone()
+            if finish:
+                db.execute('DELETE FROM maintenance WHERE device=?', (device_id,))
+                return {'device_id': device_id, 'maintenance': False}
+            if selection is None:
+                raise ContractError('library selection required')
+            if current and current['selection'] != selection:
+                raise Conflict('finish existing library maintenance first')
+            request = current['request'] if current else uid()
+            db.execute('INSERT OR IGNORE INTO maintenance VALUES(?,?,?)', (device_id, request, selection))
+            for value in closure:
+                db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)', ('library:' + device_id + ':' + request, value))
+            return {'device_id': device_id, 'request_id': request, 'selection': selection}
+
+    def maintenance_status(self, device_id):
+        with self.transaction() as db:
+            row = db.execute('SELECT * FROM maintenance WHERE device=?', (identifier(device_id),)).fetchone()
+            return dict(row) if row else None
 
     def configure_budget(self, campaign_id, seconds=28800, tokens=1000000):
         from .contracts import positive
@@ -217,7 +261,7 @@ class Controller:
             old = db.execute('SELECT attempt FROM claims WHERE device=? AND boot=? AND request=?', (device_id, boot_id, request_id)).fetchone()
             if old:
                 return self._claim_reply(db, self._attempt(db, old['attempt'])) if old['attempt'] else None
-            if db.execute("SELECT 1 FROM attempts WHERE device=? AND state IN ('CLAIMED','RUNNING','UNCERTAIN')", (device_id,)).fetchone():
+            if db.execute("SELECT 1 FROM attempts WHERE device=? AND (state IN ('CLAIMED','RUNNING','BOOT_PENDING','UNCERTAIN') OR (handoff_revision IS NOT NULL AND recovery_returned IS NULL))", (device_id,)).fetchone():
                 return None
             report = json.loads(device['report'])
             if report['mode'] not in ('recovery', 'simulation'):
@@ -228,7 +272,7 @@ class Controller:
             if job:
                 spec = json.loads(job['spec'])
                 attempt_id = uid()
-                deadline = self.clock() + spec['timeout_s'] + 120
+                deadline = self.clock() + spec['timeout_s'] + (1800 if 'deployment' in spec['artifacts'] else 120)
                 db.execute("INSERT INTO attempts(id,job,device,boot,generation,token,lease_until,deadline,state,result,resolution,created) VALUES(?,?,?,?,?,?,?,?,'CLAIMED',NULL,NULL,?)", (attempt_id, job['id'], device_id, boot_id, device['generation'], secrets.token_urlsafe(32), min(self.clock() + 60, deadline), deadline, self.clock()))
                 db.execute("UPDATE jobs SET state='ACTIVE' WHERE id=?", (job['id'],))
             db.execute('INSERT INTO claims VALUES(?,?,?,?)', (device_id, boot_id, request_id, attempt_id))
@@ -248,6 +292,68 @@ class Controller:
             db.execute("UPDATE attempts SET state='RUNNING',started=COALESCE(started,?),last_heartbeat=? WHERE id=?", (self.clock(), self.clock(), attempt_id))
             return {'attempt_id': attempt_id, 'state': 'RUNNING'}
 
+    def handoff(self, attempt_id, token, boot_id, revision):
+        """Durably authorize one exact candidate before USB one-shot arming."""
+        sha256(revision)
+        self._expire()
+        with self.transaction() as db:
+            row = self._attempt(db, attempt_id, token)
+            if row['handoff_revision']:
+                device = db.execute('SELECT * FROM devices WHERE id=?', (row['device'],)).fetchone()
+                if (row['handoff_revision'] != revision or row['handoff_origin'] != boot_id or row['state'] != 'BOOT_PENDING'
+                    or device['boot'] != boot_id or device['generation'] != row['generation']
+                    or row['lease_until'] <= self.clock()):
+                    raise Conflict('handoff already consumed or differs')
+                return {'attempt_id': attempt_id, 'state': 'BOOT_PENDING', 'revision': revision}
+            self._live(db, attempt_id, token, boot_id)
+            device = db.execute('SELECT report FROM devices WHERE id=?', (row['device'],)).fetchone()
+            if json.loads(device['report'])['mode'] != 'recovery':
+                raise Conflict('only recovery may prepare a handoff')
+            spec = json.loads(db.execute('SELECT e.spec FROM jobs j JOIN experiments e ON e.id=j.experiment WHERE j.id=?', (row['job'],)).fetchone()[0])
+            manifest = self._deployment_manifest(spec['artifacts'].get('deployment'))
+            if manifest.revision != revision:
+                raise Conflict('revision differs from authorized experiment')
+            db.execute("UPDATE attempts SET state='BOOT_PENDING',handoff_revision=?,handoff_origin=?,lease_until=? WHERE id=?", (revision, boot_id, min(self.clock()+300, row['deadline']), attempt_id))
+            return {'attempt_id': attempt_id, 'state': 'BOOT_PENDING', 'revision': revision}
+
+    def candidate_started(self, attempt_id, token, boot_id, revision):
+        """Adopt the expected new boot exactly once; expired intent never executes."""
+        sha256(revision)
+        with self.transaction() as db:
+            row = self._attempt(db, attempt_id, token)
+            device = db.execute('SELECT * FROM devices WHERE id=?', (row['device'],)).fetchone()
+            if row['state'] == 'RUNNING' and row['boot'] == boot_id and row['handoff_revision'] == revision:
+                self._live(db, attempt_id, token, boot_id)
+                return {'attempt_id': attempt_id, 'state': 'RUNNING'}
+            if (row['state'] != 'BOOT_PENDING' or row['handoff_revision'] != revision
+                or row['handoff_origin'] == boot_id or device['boot'] != boot_id
+                or device['generation'] != row['generation'] + 1
+                or json.loads(device['report'])['mode'] != 'experiment'
+                or row['lease_until'] <= self.clock()):
+                raise Conflict('unexpected candidate boot or expired handoff')
+            spec = json.loads(db.execute('SELECT e.spec FROM jobs j JOIN experiments e ON e.id=j.experiment WHERE j.id=?', (row['job'],)).fetchone()[0])
+            deadline = self.clock() + spec['timeout_s'] + 120
+            db.execute("UPDATE attempts SET state='RUNNING',boot=?,generation=?,started=?,last_heartbeat=?,deadline=?,lease_until=? WHERE id=?", (boot_id, device['generation'], self.clock(), self.clock(), deadline, min(self.clock()+60, deadline), attempt_id))
+            return {'attempt_id': attempt_id, 'state': 'RUNNING'}
+
+    def recovery_returned(self, attempt_id, token, boot_id):
+        with self.transaction() as db:
+            row = self._attempt(db, attempt_id, token)
+            device = db.execute('SELECT * FROM devices WHERE id=?', (row['device'],)).fetchone()
+            spec = json.loads(db.execute('SELECT e.spec FROM jobs j JOIN experiments e ON e.id=j.experiment WHERE j.id=?', (row['job'],)).fetchone()[0])
+            if (device['boot'] != boot_id or json.loads(device['report'])['mode'] != 'recovery'
+                or 'deployment' not in spec['artifacts']):
+                raise Conflict('verified subsequent recovery boot required')
+            if row['recovery_returned'] is not None:
+                return {'attempt_id': attempt_id, 'recovery_returned': True}
+            if boot_id == (row['handoff_origin'] or row['boot']):
+                if (not row['handoff_revision'] or row['state'] not in ('BOOT_PENDING', 'UNCERTAIN')
+                    or device['generation'] != row['generation']):
+                    raise Conflict('same-boot recovery requires an interrupted handoff')
+                self._uncertain(db, 'a.id=?', (attempt_id,), 'handoff interrupted; USB selection disarmed')
+            db.execute('UPDATE attempts SET recovery_boot=COALESCE(recovery_boot,?),recovery_returned=COALESCE(recovery_returned,?) WHERE id=?', (boot_id,self.clock(),attempt_id))
+            return {'attempt_id': attempt_id, 'recovery_returned': True}
+
     def heartbeat(self, attempt_id, token, boot_id):
         self._expire()
         with self.transaction() as db:
@@ -263,8 +369,10 @@ class Controller:
 
     def artifact_allowed(self, device_id, value):
         with self.transaction() as db:
-            rows = db.execute('SELECT e.spec FROM jobs j JOIN campaigns c ON j.campaign=c.id JOIN experiments e ON j.experiment=e.id WHERE c.device=?', (identifier(device_id),)).fetchall()
-            return any(value in json.loads(row['spec'])['artifacts'].values() for row in rows)
+            maintenance = db.execute('SELECT request FROM maintenance WHERE device=?', (identifier(device_id),)).fetchone()
+            if maintenance and db.execute('SELECT 1 FROM refs WHERE owner=? AND digest=?', ('library:' + device_id + ':' + maintenance['request'], sha256(value))).fetchone():
+                return True
+            return db.execute("SELECT 1 FROM refs r JOIN jobs j ON r.owner='experiment:'||j.experiment JOIN campaigns c ON j.campaign=c.id WHERE c.device=? AND r.digest=? LIMIT 1", (identifier(device_id), sha256(value))).fetchone() is not None
 
     def upload(self, attempt_id, token, boot_id, upload_id, offset, data, expected_digest, total_size):
         with self.transaction() as db:
@@ -324,8 +432,8 @@ class Controller:
             device = db.execute('SELECT * FROM devices WHERE id=?', (identifier(device_id),)).fetchone()
             if device is None or device['boot'] != boot_id:
                 raise Conflict('register current boot before reconciliation')
-            rows = db.execute("SELECT id,state,boot,generation,result,resolution FROM attempts WHERE device=? ORDER BY rowid", (device_id,)).fetchall()
-            return {'device_id': device_id, 'generation': device['generation'], 'attempts': [dict(row) for row in rows], 'may_claim': not any(row['state'] in ('RUNNING','CLAIMED','UNCERTAIN') for row in rows)}
+            rows = db.execute("SELECT id,state,boot,generation,result,resolution,handoff_revision,recovery_returned FROM attempts WHERE device=? ORDER BY rowid", (device_id,)).fetchall()
+            return {'device_id': device_id, 'generation': device['generation'], 'attempts': [dict(row) for row in rows], 'may_claim': not any(row['state'] in ('RUNNING','CLAIMED','BOOT_PENDING','UNCERTAIN') or (row['handoff_revision'] and row['recovery_returned'] is None) for row in rows)}
 
     def resolve(self, attempt_id, disposition, note):
         if disposition not in ('retry', 'abandon') or not isinstance(note, str) or not note.strip():
@@ -343,9 +451,9 @@ class Controller:
         with self.transaction() as db:
             campaign = dict(self._campaign(db, campaign_id))
             campaign['jobs'] = [dict(row) for row in db.execute('SELECT id,experiment,repetition,state FROM jobs WHERE campaign=? ORDER BY id', (campaign_id,))]
-            campaign['attempts'] = [dict(row) for row in db.execute('SELECT a.id,a.state,a.result,a.resolution,a.lease_until,a.deadline,a.created,a.started,a.last_heartbeat,a.finished FROM attempts a JOIN jobs j ON j.id=a.job WHERE j.campaign=? ORDER BY a.rowid', (campaign_id,))]
+            campaign['attempts'] = [dict(row) for row in db.execute('SELECT a.id,a.state,a.result,a.resolution,a.lease_until,a.deadline,a.created,a.started,a.last_heartbeat,a.finished,a.handoff_revision,a.recovery_boot,a.recovery_returned FROM attempts a JOIN jobs j ON j.id=a.job WHERE j.campaign=? ORDER BY a.rowid', (campaign_id,))]
             device = db.execute('SELECT boot,generation,last_contact,report FROM devices WHERE id=?', (campaign['device'],)).fetchone()
-            campaign['target'] = {'boot_id': device['boot'], 'generation': device['generation'], 'last_contact': device['last_contact'], 'contact_age_s': max(0, self.clock()-device['last_contact']) if device['last_contact'] is not None else None, 'mode': json.loads(device['report'])['mode']}
+            campaign['target'] = {'boot_id': device['boot'], 'generation': device['generation'], 'last_contact': device['last_contact'], 'contact_age_s': max(0, self.clock()-device['last_contact']) if device['last_contact'] is not None else None, 'mode': json.loads(device['report'])['mode'], 'inventory': json.loads(device['report']).get('inventory', {})}
             campaign['total_tokens'] = db.execute('SELECT COALESCE(SUM(tokens),0) FROM usage WHERE campaign=?', (campaign_id,)).fetchone()[0]
             return campaign
 
@@ -435,7 +543,22 @@ class Controller:
         with self._connect() as db:
             return self._deployment_rows(db)
 
+    def _library_closure(self, values):
+        from .library import library_artifacts
+        closure = set()
+        for value in values:
+            if self.store.path(value).stat().st_size > 8 * 1024**2:
+                continue
+            try:
+                document = json.loads(self.store.get(value))
+            except (ValueError, UnicodeDecodeError):
+                continue
+            if isinstance(document, dict) and set(document) == {'schema_version', 'packs'}:
+                closure.update(library_artifacts(self.store, value))
+        return closure
+
     def checkpoint(self, checkpoint: Checkpoint):
+        library_values = self._library_closure(checkpoint.artifacts)
         deployments = {}
         for value in checkpoint.artifacts:
             self.store.verify(value)
@@ -455,7 +578,7 @@ class Controller:
         with self.transaction() as db:
             self._campaign(db, checkpoint.campaign_id)
             db.execute('INSERT OR IGNORE INTO checkpoints VALUES(?,?,?)', (checkpoint_id, checkpoint.campaign_id, document.decode()))
-            for value in checkpoint.artifacts:
+            for value in set(checkpoint.artifacts) | library_values:
                 db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)', (owner, value))
                 if value in deployments:
                     manifest, evidence = deployments[value]
@@ -497,6 +620,8 @@ class Controller:
                 deployments = self._deployment_rows(target)
             finally:
                 source.close(); target.close()
+            if not self._library_closure(values) <= set(values):
+                raise ContractError('backup is missing retained library content')
             for row in deployments:
                 closure = self._deployment_evidence(self._deployment_manifest(row['manifest_digest']))
                 if not set(closure.values()) <= set(values):
@@ -569,6 +694,8 @@ class Controller:
         temporary = destination.with_name(destination.name + '.pending-' + uid())
         shutil.copytree(backup, temporary)
         controller = cls(temporary, **kwargs)
+        if not controller._library_closure(references) <= references:
+            raise ContractError('restore is missing retained library content')
         for row in deployments:
             closure = controller._deployment_evidence(controller._deployment_manifest(row['manifest_digest']))
             if not set(closure.values()) <= references:
@@ -634,6 +761,7 @@ class Controller:
         with self.transaction() as db:
             rows = db.execute('SELECT * FROM activities WHERE campaign=? ORDER BY started,id', (campaign_id,)).fetchall()
         activities = []
+        terminal_attempts = {a['id'] for a in status['attempts'] if a['state'] in ('COMPLETE', 'RESOLVED')}
         for row in rows:
             report = json.loads(row['document'])
             elapsed = max(0, (row['updated'] if report['state'] in ('COMPLETE','FAILED') else now)-row['started'])
@@ -647,6 +775,8 @@ class Controller:
                     health = 'REPORTING_LATE'
                 elif health == 'ACTIVE' and idle > report['stall_after_s']:
                     health = 'SUSPECTED_STALL'
+            if row['attempt'] in terminal_attempts and health not in ('COMPLETE', 'FAILED'):
+                health = 'ENDED'
             activities.append({**report, 'health': health, 'elapsed_s': elapsed, 'last_report_age_s': age, 'last_advance_age_s': idle, 'deadline_in_s': report['timeout_s']-elapsed, 'attempt_id': row['attempt']})
         for attempt in status['attempts']:
             start = attempt['started'] if attempt['started'] is not None else attempt['created']
@@ -654,11 +784,13 @@ class Controller:
             contact = attempt['last_heartbeat'] if attempt['last_heartbeat'] is not None else start
             terminal = attempt['state'] in ('COMPLETE','RESOLVED')
             end = attempt['finished'] if terminal and attempt['finished'] is not None else now
-            state = 'COMPLETE' if terminal else 'WAITING' if attempt['state']=='CLAIMED' else 'ACTIVE'
+            state = 'COMPLETE' if terminal else 'WAITING' if attempt['state'] in ('CLAIMED','BOOT_PENDING') else 'ACTIVE'
             health = 'UNCERTAIN' if attempt['state']=='UNCERTAIN' else 'OVERDUE' if not terminal and now >= attempt['deadline'] else 'REPORTING_LATE' if not terminal and now-contact>30 else state
             message = 'Awaiting target start acknowledgement.' if attempt['state']=='CLAIMED' else 'Recipe supervisor is reporting; intermediate recipe progress is not measured.'
             if terminal:
                 message = 'Attempt completed or explicitly resolved; consult its evidence and outcome.'
+            elif attempt['state']=='BOOT_PENDING':
+                message = 'One-shot boot authorized; waiting for candidate boot identity or recovery reconciliation.'
             elif attempt['state']=='UNCERTAIN':
                 message = 'Execution uncertain; reconcile before scheduling any repetition.'
             activities.append({'activity_id': 'attempt-'+attempt['id'], 'attempt_id': attempt['id'], 'campaign_id': campaign_id, 'phase': 'recipe', 'state': state, 'health': health, 'message': message, 'completed': None, 'total': None, 'unit': 'steps', 'elapsed_s': max(0,end-start), 'last_report_age_s': max(0,now-contact), 'last_advance_age_s': max(0,end-start), 'deadline_in_s': attempt['deadline']-now})

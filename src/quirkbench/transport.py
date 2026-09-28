@@ -147,10 +147,13 @@ def make_server(
                 elif path == "/v1/claim":
                     _body(data, {"boot_id", "request_id"})
                     answer = controller.claim(device_id, identifier(data["boot_id"]), identifier(data["request_id"]))
+                elif path == "/v1/maintenance":
+                    _body(data, set())
+                    answer = controller.maintenance_status(device_id)
                 elif path == "/v1/reconcile":
                     _body(data, {"boot_id"})
                     answer = controller.reconcile(device_id, identifier(data["boot_id"]))
-                elif path in {"/v1/start", "/v1/heartbeat", "/v1/evidence", "/v1/complete", "/v1/upload", "/v1/progress"}:
+                elif path in {"/v1/start", "/v1/heartbeat", "/v1/evidence", "/v1/complete", "/v1/upload", "/v1/progress", "/v1/handoff", "/v1/candidate-started", "/v1/recovery-returned"}:
                     answer = self._attempt_action(path, device_id, data)
                 else:
                     self._send(404, {"error": "unknown route"})
@@ -172,7 +175,10 @@ def make_server(
                 self._send(status, {"error": name})
 
         def _attempt_action(self, path: str, device_id: str, data: dict) -> dict:
-            if path == "/v1/progress":
+            if path in {"/v1/handoff", "/v1/candidate-started"}:
+                _body(data, {"attempt_id", "token", "boot_id", "revision"})
+                attempt_id = identifier(data["attempt_id"])
+            elif path == "/v1/progress":
                 _body(data, {"attempt_id", "token", "report"})
                 attempt_id = identifier(data["attempt_id"])
             elif path == "/v1/complete":
@@ -195,6 +201,11 @@ def make_server(
                 raise ContractError("token must be a string")
             if path == "/v1/progress":
                 return controller.progress(Progress.from_dict(data["report"]), attempt_id, token)
+            if path in {"/v1/handoff", "/v1/candidate-started"}:
+                method = controller.handoff if path == "/v1/handoff" else controller.candidate_started
+                return method(attempt_id, token, identifier(data["boot_id"]), sha256(data["revision"]))
+            if path == "/v1/recovery-returned":
+                return controller.recovery_returned(attempt_id, token, identifier(data["boot_id"]))
             if path == "/v1/start":
                 return controller.start(attempt_id, token, identifier(data["boot_id"]))
             if path == "/v1/heartbeat":
@@ -223,18 +234,47 @@ def make_server(
                 digest = sha256(parsed.path.rsplit("/", 1)[-1])
                 if not controller.artifact_allowed(device_id, digest):
                     raise PermissionError("artifact is not assigned to device")
-                if hasattr(controller.store, "verify") and controller.store.verify(digest) > 256 * 1024 * 1024:
-                    raise OverflowError("artifact too large for transport")
-                raw = controller.store.get(digest)
-                if len(raw) > 256 * 1024 * 1024:
-                    raise OverflowError("artifact too large for transport")
-                self.close_connection = True
-                self.send_response(200)
-                self.send_header("Content-Type", "application/octet-stream")
-                self.send_header("Content-Length", str(len(raw)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self.wfile.write(raw)
+                import io, os, re
+                if hasattr(controller.store, "path"):
+                    path = controller.store.path(digest)
+                    if path.is_symlink() or not path.is_file():
+                        raise ContractError("artifact unavailable")
+                    source = path.open("rb")
+                    size = os.fstat(source.fileno()).st_size
+                else:
+                    raw = controller.store.get(digest)
+                    source, size = io.BytesIO(raw), len(raw)
+                with source:
+                    start, end, status = 0, size - 1, 200
+                    requested = self.headers.get("Range")
+                    if requested:
+                        match = re.fullmatch(r"bytes=([0-9]+)-([0-9]*)", requested)
+                        if not match:
+                            raise ContractError("unsupported artifact byte range")
+                        start = int(match[1])
+                        end = min(size - 1, int(match[2]) if match[2] else size - 1)
+                        if start >= size or end < start:
+                            self._send(416, {"error": "range outside artifact"})
+                            return
+                        status = 206
+                    self.close_connection = True
+                    self.send_response(status)
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.send_header("Content-Length", str(max(0, end - start + 1)))
+                    self.send_header("Accept-Ranges", "bytes")
+                    self.send_header("ETag", '"' + digest + '"')
+                    if status == 206:
+                        self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    source.seek(start)
+                    remaining = end - start + 1
+                    while remaining > 0:
+                        block = source.read(min(256 * 1024, remaining))
+                        if not block:
+                            raise OSError("artifact truncated")
+                        self.wfile.write(block)
+                        remaining -= len(block)
             except PermissionError:
                 self._send(403, {"error": "forbidden"})
             except OverflowError:
@@ -296,6 +336,15 @@ class HTTPSDeviceClient:
     def start(self, attempt_id: str, token: str, boot_id: str):
         return self._request("/v1/start", {"attempt_id": attempt_id, "token": token, "boot_id": boot_id})
 
+    def handoff(self, attempt_id, token, boot_id, revision):
+        return self._request("/v1/handoff", {"attempt_id": attempt_id, "token": token, "boot_id": boot_id, "revision": revision})
+
+    def candidate_started(self, attempt_id, token, boot_id, revision):
+        return self._request("/v1/candidate-started", {"attempt_id": attempt_id, "token": token, "boot_id": boot_id, "revision": revision})
+
+    def recovery_returned(self, attempt_id, token, boot_id):
+        return self._request("/v1/recovery-returned", {"attempt_id": attempt_id, "token": token, "boot_id": boot_id})
+
     def heartbeat(self, attempt_id: str, token: str, boot_id: str):
         return self._request("/v1/heartbeat", {"attempt_id": attempt_id, "token": token, "boot_id": boot_id})
 
@@ -333,6 +382,74 @@ class HTTPSDeviceClient:
             raise TransportError("artifact digest mismatch")
         return raw
 
+    def maintenance_status(self):
+        return self._request("/v1/maintenance", {})
+
+    def download_artifact(self, value, size, destination, *, progress=None, reserve_bytes=1024**3, timeout_s=1800):
+        """Resume immutable content into a cache file with bounded memory/time.
+
+        Server publication already verifies hashes; the receiver verifies the
+        full hash before making the destination visible. Partial bytes survive.
+        """
+        from pathlib import Path
+        import fcntl, hashlib, os, shutil, time
+        from .store import sync_directory, StoragePressure
+        sha256(value)
+        if type(size) is not int or size < 0 or timeout_s <= 0:
+            raise ValueError("invalid download bounds")
+        destination = Path(destination)
+        if not destination.is_absolute() or destination.resolve() != destination:
+            raise ValueError("download requires an explicit cache path")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        partial = destination.with_name(destination.name + ".part")
+        lock = destination.with_name(destination.name + ".lock")
+        if partial.is_symlink() or lock.is_symlink():
+            raise ValueError("download cache cannot contain symlinks")
+        def verify(path):
+            with path.open("rb") as stream:
+                return path.stat().st_size == size and hashlib.file_digest(stream, "sha256").hexdigest() == value
+        progress = progress or (lambda **record: None)
+        deadline = time.monotonic() + timeout_s
+        with lock.open("a+b") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if destination.exists():
+                if not verify(destination):
+                    raise TransportError("cached artifact failed verification")
+                return destination
+            offset = partial.stat().st_size if partial.exists() else 0
+            if offset > size:
+                raise TransportError("partial artifact exceeds declared size")
+            with partial.open("ab") as output:
+                while offset < size:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("artifact download deadline exceeded")
+                    count = min(1024**2, size - offset)
+                    if shutil.disk_usage(destination.parent).free - count < reserve_bytes:
+                        raise StoragePressure("artifact cache reserve reached")
+                    request = Request(self.base_url + "/v1/artifacts/" + value,
+                        headers={"X-Device-ID": self.device_id, "Authorization": "Bearer " + self.token,
+                                 "Range": f"bytes={offset}-{offset+count-1}"})
+                    try:
+                        with urlopen(request, context=self.context, timeout=min(self.timeout, max(.1, deadline-time.monotonic()))) as response:
+                            if (response.status != 206 or response.headers.get("Content-Range") != f"bytes {offset}-{offset+count-1}/{size}"
+                                    or response.headers.get("ETag") != '"'+value+'"'):
+                                raise TransportError("artifact range response mismatch")
+                            block = response.read(count + 1)
+                    except (HTTPError, URLError, OSError) as exc:
+                        raise TransportError("artifact range fetch failed") from exc
+                    if len(block) != count:
+                        raise TransportError("artifact range length mismatch")
+                    output.write(block); output.flush(); os.fsync(output.fileno())
+                    offset += count
+                    progress(completed=offset, total=size, unit="bytes")
+            sync_directory(partial.parent)
+            if not verify(partial):
+                raise TransportError("downloaded artifact failed verification; retain partial for inspection")
+            os.link(partial, destination)
+            sync_directory(destination.parent)
+            partial.unlink(); sync_directory(partial.parent)
+            return destination
+
 
 class LocalDeviceClient:
     """Same target-facing methods without network, useful for a local demo."""
@@ -359,6 +476,18 @@ class LocalDeviceClient:
     def start(self, attempt_id, token, boot_id):
         self._check(attempt_id)
         return self.controller.start(attempt_id, token, boot_id)
+
+    def handoff(self, attempt_id, token, boot_id, revision):
+        self._check(attempt_id)
+        return self.controller.handoff(attempt_id, token, boot_id, revision)
+
+    def candidate_started(self, attempt_id, token, boot_id, revision):
+        self._check(attempt_id)
+        return self.controller.candidate_started(attempt_id, token, boot_id, revision)
+
+    def recovery_returned(self, attempt_id, token, boot_id):
+        self._check(attempt_id)
+        return self.controller.recovery_returned(attempt_id, token, boot_id)
 
     def heartbeat(self, attempt_id, token, boot_id):
         self._check(attempt_id)

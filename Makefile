@@ -51,3 +51,13 @@ acceptance-hardware:
 acceptance-patch:
 	@test -n "$(REPORT)" || { echo "REPORT must name a completed evidence-backed patch report" >&2; exit 2; }
 	$(PYTHON) acceptance/check_report.py patch-bundle "$(REPORT)"
+
+# Fresh layout-v2 gate; never reuse historical layout-v1 boot evidence.
+.PHONY: acceptance-v1-image
+acceptance-v1-image: test acceptance-qemu
+
+# Non-smoke image: real commissioning and healthy unprovisioned supervisor wait.
+.PHONY: acceptance-standard-image
+acceptance-standard-image:
+	@test -n "$(IMAGE)" -a -n "$(OVMF_CODE)" -a -n "$(OVMF_VARS)" -a -n "$(WORK_DIR)" || { echo "IMAGE, OVMF_CODE, OVMF_VARS and empty WORK_DIR are required" >&2; exit 2; }
+	$(PYTHON) acceptance/qualify-standard-image.py --image "$(IMAGE)" --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)" --work "$(WORK_DIR)"

@@ -2,7 +2,7 @@
 
 The production deployment backend is minimal Fedora composed with rpm-ostree and published through a traditional signed OSTree repository. The old four-file kernel/initramfs bundle is retired. Historical artifacts remain available, but old images require rebuilding; there is no in-place image conversion.
 
-The revised M2 build and VM gate is achieved. See [qualification observations](ostree-review.md) for exact identities, reports and physical integration limits.
+The earlier M2 build and VM gate qualified layout revision 1. Layout revision 2 and its execution/reset integration require fresh acceptance. See [qualification observations](ostree-review.md) for exact identities, reports and physical integration limits.
 
 ## Build and compose on the controller
 
@@ -14,9 +14,9 @@ Default to one build at a time, no more than half host CPUs and RAM, and a 20 Gi
 
 ### Capacity planning
 
-Use an existing suitable external USB SSD where possible. Budget approximately 32 GiB for recovery, active deployments and logs, plus twice the target's RAM for pending crash dumps, then leave at least 20% of the device free. A 250/256 GB SSD is a comfortable starting point; 500 GB adds headroom for retained evidence. This is capacity planning, not a claim that crash capture is already qualified. Unacknowledged evidence must never be deleted to free space for another experiment.
+Use an existing suitable external USB SSD where possible. Default allocations are 2 GiB recovery, 32 GiB experiments and 32 GiB library, plus EFI/state. Evidence receives the remaining capacity and must fit the configured log budget plus twice target RAM, with at least 20% capacity headroom. A 250/256 GB SSD is a comfortable starting point; 500 GB adds headroom for retained evidence. This is capacity planning, not a claim that crash capture is already qualified. Unacknowledged evidence must never be deleted to free space for another experiment.
 
-Controller storage is separate: initially budget roughly 200 GiB for sources, builds, symbols, retained RPMs and evidence, in addition to the enforced 20 GiB free-space reserve. Keep enough extra capacity for independent backups; their OSTree objects do not share hardlinks with the source repository. A compact initial image can expand its existing data partition during commissioning to use the external device's available capacity.
+Controller storage is separate: initially budget roughly 200 GiB for sources, builds, symbols, retained RPMs and evidence, in addition to the enforced 20 GiB free-space reserve. Keep enough extra capacity for independent backups; their OSTree objects do not share hardlinks with the source repository. The compact initial image commissions the six-role layout on first recovery boot; see [the image contract](debug-image.md).
 
 ### CLI entry points
 
@@ -46,7 +46,7 @@ Each physical attempt gets a fresh deployment group and mutable state. Repeating
 
 Image assembly writes regular files only; it does not write physical drives, change host firmware, install host kernels or invoke host package installation. Output a partitioned `.img` or `.img.xz` plus checksum for a normal writer such as Etcher.
 
-The image retains four partitions: fixed removable EFI bootloader/recovery files, read-only recovery root, a small GRUB one-shot state filesystem, and journaled ext4 data. Data holds the candidate OSTree sysroot and separately retained evidence. Only that existing data partition may expand, after strict positive identification of the external boot device and restartable geometry checks.
+The final image has fixed EFI/recovery, one-shot state, experiments, library and evidence partitions. Its compact factory form contains the first four GPT entries with all six identities reserved. First-boot commissioning records geometry, grows experiments and creates the preidentified library/evidence filesystems. It never reformats an ambiguous existing filesystem. See [layout revision 2](debug-image.md).
 
 Recovery remains independent of candidate deployments. OSTree generates candidate boot entries without regenerating the system bootloader; Quirkbench validates and translates the entry into the fixed USB boot control. GRUB clears, saves and verifies one-shot state before candidate handoff. If that fails it selects recovery. Candidate content never replaces fixed recovery or the bootloader. Do not invoke `grub-reboot` against the host installation or use `efibootmgr`.
 
@@ -61,13 +61,16 @@ The `image` command accepts a separate JSON input. For a VM qualification image,
   "recovery_provenance": "/workspace/recovery/provenance.json",
   "rootfs_dir": "/workspace/recovery/rootfs",
   "prepared_data_tree": "/workspace/deployment-fixture/data",
-  "size_mib": 4096,
-  "root_mib": 1024,
+  "size_mib": 6144,
+  "root_mib": 2048,
+  "experiment_mib": 32768,
+  "library_mib": 32768,
+  "log_budget_mib": 4096,
   "smoke": true
 }
 ```
 
-All paths are placeholders. The output's parent must exist and the output must be new. Build the Fedora recovery root with `target-assets/build-rootfs.sh FEDORA_RELEASE ABSOLUTE_OUTPUT_DIRECTORY` as UID 0 inside the rootless builder; use its corresponding recorded kernel/initramfs build provenance. Set partition sizes to fit the actual recovery and deployment contents. The small initial image is distinct from the full external-device capacity budget; commissioning expands its data partition before real campaigns. Save the JSON as `/workspace/inputs/image.json`, then run:
+All paths are placeholders. The output's parent must exist and the output must be new. Build the Fedora recovery root with `target-assets/build-rootfs.sh FEDORA_RELEASE ABSOLUTE_OUTPUT_DIRECTORY` as UID 0 inside the rootless builder; use its corresponding recorded kernel/initramfs build provenance. Set partition sizes to fit the actual recovery and deployment contents. The small initial image is distinct from the full external-device capacity budget; commissioning creates the complete layout before real campaigns. Recovery must include `parted` (`partprobe`), `gdisk`, `e2fsprogs` and `util-linux`. Save the JSON as `/workspace/inputs/image.json`, then run:
 
 ```sh
 PYTHONPATH=src python3 -m quirkbench image /workspace/inputs/image.json

@@ -1,4 +1,4 @@
-"""Assemble a four-partition UEFI USB image using regular files only."""
+"""Assemble a compact factory image for the six-role UEFI USB layout using regular files only."""
 from __future__ import annotations
 from dataclasses import dataclass
 from contextlib import contextmanager
@@ -37,12 +37,19 @@ class ImageInputs:
     size_mib: int=4096
     prepared_data_tree: Path | None=None
     recovery_provenance: Path | None=None
-    root_mib: int=1024
+    root_mib: int=2048
+    experiment_mib: int=32768
+    library_mib: int=32768
+    log_budget_mib: int=4096
     smoke: bool=False
 
     def validate(self):
         if type(self.size_mib) is not int or self.size_mib < MIN_IMAGE_MIB or self.root_mib < 256:
             raise ImageError('image/root partition too small')
+        if any(type(value) is not int or value < 1 for value in (self.experiment_mib,self.library_mib,self.log_budget_mib)):
+            raise ImageError('commissioning capacities must be positive integer MiB')
+        if self.size_mib-self.root_mib-ESP_MIB-STATE_MIB-1 > self.experiment_mib:
+            raise ImageError('factory experiment partition exceeds commissioned size')
         if self.size_mib < self.root_mib+ESP_MIB+STATE_MIB+512+2:
             raise ImageError('image needs at least 512 MiB of data space')
         if not self.output.is_absolute() or not self.output.parent.is_dir() or self.output.is_symlink():
@@ -143,19 +150,20 @@ def partition_layout(size_mib,root_mib):
         end=start+size*MIB//SECTOR-1
         answer.append({'number':number,'label':'QUIRKBENCH-'+label,'start':start,'end':end})
         start=end+1
-    answer.append({'number':4,'label':'QUIRKBENCH-DATA','start':start,'end':size_mib*MIB//SECTOR-34})
+    answer.append({'number':4,'label':'QUIRKBENCH-EXPERIMENTS','start':start,'end':size_mib*MIB//SECTOR-34})
     return answer
 
 
-def grub_config(partuuid: str, *, esp_uuid=None,root_uuid=None,state_uuid=None,data_uuid=None,smoke=False):
+def grub_config(partuuid: str, *, esp_uuid=None,root_uuid=None,state_uuid=None,data_uuid=None,library_uuid=None,evidence_uuid=None,smoke=False):
     """Bind all access to the firmware-loaded ESP's disk, never global search."""
-    for value in (partuuid,esp_uuid,root_uuid,state_uuid,data_uuid):
+    for value in (partuuid,esp_uuid,root_uuid,state_uuid,data_uuid,library_uuid,evidence_uuid):
         if value is not None:
             try:uuid.UUID(value)
             except (ValueError,AttributeError) as exc:raise ImageError('invalid partition GUID') from exc
     # IDs may be omitted only by callers inspecting a sample configuration.
     esp_uuid=esp_uuid or partuuid;state_uuid=state_uuid or partuuid;data_uuid=data_uuid or partuuid
-    args=f'root=PARTUUID={partuuid} ro rootflags=noload fsck.mode=skip rd.skipfsck console=tty0 console=ttyS0,115200 panic=10 oops=panic noresume rd.auto=0 rd.luks=0 rd.lvm=0 rd.md=0 rd.dm=0 quirkbench.esp=PARTUUID={esp_uuid} quirkbench.state=PARTUUID={state_uuid} quirkbench.data=PARTUUID={data_uuid}'
+    library_uuid=library_uuid or partuuid;evidence_uuid=evidence_uuid or partuuid
+    args=f'root=PARTUUID={partuuid} ro rootflags=noload fsck.mode=skip rd.skipfsck console=tty0 console=ttyS0,115200 panic=10 oops=panic noresume rd.auto=0 rd.luks=0 rd.lvm=0 rd.md=0 rd.dm=0 quirkbench.esp=PARTUUID={esp_uuid} quirkbench.state=PARTUUID={state_uuid} quirkbench.data=PARTUUID={data_uuid} quirkbench.library=PARTUUID={library_uuid} quirkbench.evidence=PARTUUID={evidence_uuid}'
     if smoke:args+=' quirkbench.smoke=1'
     return f'''serial --unit=0 --speed=115200
 terminal_input console serial
@@ -261,7 +269,7 @@ def _verify_provenance(path,kernel,initramfs,config):
 def _prepare_data(inputs, directory, config):
     from .boot import RecoveryConfig, write_candidate_entry
     from .deployment import PreparedDeployment, DeploymentManifest
-    (directory/'quirkbench/evidence').mkdir(parents=True, exist_ok=True)
+    (directory/'quirkbench').mkdir(parents=True, exist_ok=True)
     (directory/'quirkbench/identity.json').write_bytes(canonical(config))
     record = directory/'quirkbench/prepared.json'
     if not record.exists():
@@ -298,7 +306,7 @@ def _prepare_data(inputs, directory, config):
         from .boot import render_candidate
         panic_candidate_id = hashlib.sha256(canonical({'deployment': prepared.deployment_id, 'fixture': 'qemu-panic-v1'})).hexdigest()
         fragment = render_candidate(prepared, directory, RecoveryConfig(**config), smoke=True)
-        panic_fragment = fragment.replace(' quirkbench.smoke=1; then', ' quirkbench.smoke=1 quirkbench.fault=panic; then')
+        panic_fragment = fragment.replace(' quirkbench.smoke=1 ', ' quirkbench.smoke=1 quirkbench.fault=panic ')
         if panic_fragment == fragment:
             raise ImageError('candidate fragment lacks guarded smoke kernel command')
         (directory/'quirkbench/boot'/(panic_candidate_id+'.cfg')).write_text(panic_fragment)
@@ -322,13 +330,18 @@ def _create_image(inputs: ImageInputs) -> Path:
     inputs.validate()
     for name in ('sgdisk','mformat','mmd','mcopy','mkfs.ext4','grub-mkimage','grub-editenv','cp'):_tool(name)
     _verify_provenance(inputs.recovery_provenance,inputs.recovery_kernel,inputs.recovery_initramfs,inputs.recovery_config)
+    # Snapshot before copying runtime or rootfs; never attribute a mixed image
+    # to sources that changed while assembly was running.
+    initial_builder_identity = _builder_identity()
+    initial_input_identity = _input_identity(inputs)
     if shutil.disk_usage(inputs.output.parent).free < inputs.size_mib*MIB*2+20*1024**3:
         raise ImageError('image build would breach 20 GiB free-space reserve')
     parts=partition_layout(inputs.size_mib,inputs.root_mib)
     disk_guid=str(uuid.uuid4())
     for part in parts:part['partuuid']=str(uuid.uuid4())
     p1,p2,p3,p4=parts
-    config={'schema_version':1,'disk_guid':disk_guid,'esp_partuuid':p1['partuuid'],'root_partuuid':p2['partuuid'],'state_partuuid':p3['partuuid'],'data_partuuid':p4['partuuid']}
+    extra_uuids=[str(uuid.uuid4()),str(uuid.uuid4())]
+    config={'schema_version':2,'disk_guid':disk_guid,'esp_partuuid':p1['partuuid'],'root_partuuid':p2['partuuid'],'state_partuuid':p3['partuuid'],'data_partuuid':p4['partuuid'],'library_partuuid':extra_uuids[0],'evidence_partuuid':extra_uuids[1]}
     from .boot import install_runtime
     with tempfile.TemporaryDirectory(prefix='.quirkbench-image-',dir=inputs.output.parent) as name:
         work=Path(name);image=work/'image.img'
@@ -340,7 +353,7 @@ def _create_image(inputs: ImageInputs) -> Path:
         _run(*commands,str(image))
         root=work/'rootfs';_copy_tree(inputs.rootfs_dir,root)
         install_runtime(root,config)
-        commissioned={'schema_version':1,'disk_guid':disk_guid,'partition_uuids':[p['partuuid'] for p in parts],'partition_starts':[p['start'] for p in parts],'fixed_ends':[p['end'] for p in parts[:3]]}
+        commissioned={'schema_version':2,'disk_guid':disk_guid,'partition_uuids':[p['partuuid'] for p in parts]+extra_uuids,'partition_starts':[p['start'] for p in parts],'fixed_ends':[p['end'] for p in parts[:3]],'experiment_mib':inputs.experiment_mib,'library_mib':inputs.library_mib,'log_budget_mib':inputs.log_budget_mib}
         (root/'etc/quirkbench/commission.json').write_bytes(canonical(commissioned))
         (root/'etc/quirkbench/commission.json').chmod(0o600)
         payload=work/'data'
@@ -358,7 +371,7 @@ def _create_image(inputs: ImageInputs) -> Path:
                 _run('mcopy','-i',str(fs),str(marker),'::/quirkbench-'+part['partuuid'])
                 if part['number']==1:
                     _run('mmd','-i',str(fs),'::/EFI','::/EFI/BOOT')
-                    cfg=work/'grub.cfg';cfg.write_text(grub_config(p2['partuuid'],esp_uuid=p1['partuuid'],state_uuid=p3['partuuid'],data_uuid=p4['partuuid'],smoke=inputs.smoke))
+                    cfg=work/'grub.cfg';cfg.write_text(grub_config(p2['partuuid'],esp_uuid=p1['partuuid'],state_uuid=p3['partuuid'],data_uuid=p4['partuuid'],library_uuid=extra_uuids[0],evidence_uuid=extra_uuids[1],smoke=inputs.smoke))
                     efi=work/'BOOTX64.EFI'
                     early=work/'early.cfg'
                     early.write_text('normal\n')
@@ -372,15 +385,17 @@ def _create_image(inputs: ImageInputs) -> Path:
                     _run('mcopy','-i',str(fs),str(env),'::/quirkbench/next.env')
             else:
                 source=root if part['number']==2 else payload
-                _run('mkfs.ext4','-q','-F','-L','QBRECOVERY' if part['number']==2 else 'QBDATA','-U',str(uuid.uuid4()),'-O','^metadata_csum_seed','-d',str(source),str(fs))
+                _run('mkfs.ext4','-q','-F','-L','QBRECOVERY' if part['number']==2 else 'QBEXPERIMENTS','-U',str(uuid.uuid4()),'-O','^metadata_csum_seed','-d',str(source),str(fs))
             _copy_slice(fs,image,part['start']*SECTOR)
         _emit('image-hash',status='running',total_bytes=image.stat().st_size)
         checksum=sha256_file(image)
         _emit('image-hash',status='complete',total_bytes=image.stat().st_size)
-        record={'schema_version':1,'image_sha256':checksum,'size_bytes':image.stat().st_size,'partitions':parts,'identity':config,'candidate_id':candidate_id,'smoke':inputs.smoke,'boot_policy':'fixed recovery; same-disk consumed one-shot; no EFI writes','recovery_kernel_sha256':sha256_file(inputs.recovery_kernel),'recovery_initramfs_sha256':sha256_file(inputs.recovery_initramfs),'candidate_revision':candidate_revision,'candidate_kernel_release':candidate_kernel_release,'candidate_health_sha256':candidate_health_sha256,'panic_candidate_id':panic_candidate_id,'load_failure_candidate_id':load_failure_candidate_id,'deployment_backend':'ostree'}
+        record={'schema_version':2,'layout_version':2,'commissioned':False,'commissioning':commissioned,'image_sha256':checksum,'size_bytes':image.stat().st_size,'partitions':parts,'identity':config,'candidate_id':candidate_id,'smoke':inputs.smoke,'boot_policy':'fixed recovery; same-disk consumed one-shot; no EFI writes','recovery_kernel_sha256':sha256_file(inputs.recovery_kernel),'recovery_initramfs_sha256':sha256_file(inputs.recovery_initramfs),'candidate_revision':candidate_revision,'candidate_kernel_release':candidate_kernel_release,'candidate_health_sha256':candidate_health_sha256,'panic_candidate_id':panic_candidate_id,'load_failure_candidate_id':load_failure_candidate_id,'deployment_backend':'ostree'}
         _emit('image-input-fingerprint',status='running')
         record['builder_identity']=_builder_identity()
         record['input_identity']=_input_identity(inputs)
+        if (record['builder_identity'] != initial_builder_identity or record['input_identity'] != initial_input_identity):
+            raise ImageError('image inputs or runtime changed during assembly; refusing publication')
         _emit('image-input-fingerprint',status='complete')
         atomic_write(Path(str(inputs.output)+'.pending.json'),canonical(record))
         # Hard-link publication refuses a concurrently created output.
@@ -394,10 +409,9 @@ def _create_image(inputs: ImageInputs) -> Path:
 def _builder_identity():
     package=Path(__file__).resolve().parent
     assets=package.parents[1]/'target-assets'
-    sources={f'python/{name}':package/name for name in
-             ('__init__.py','image.py','boot.py','commission.py','build.py')}
+    sources={f'python/{path.name}':path for path in package.glob('*.py')}
     sources.update({f'assets/{name}':assets/name for name in
-                    ('quirkbench-recovery.service','quirkbench-candidate.service','var.mount','tmp.mount')})
+                    ('quirkbench-recovery.service','quirkbench-candidate.service','quirkbench-supervisor.service','quirkbench-supervisor-failure.service','20-quirkbench-wired.network','var.mount','tmp.mount')})
     return hashlib.sha256(canonical({name:sha256_file(path) for name,path in sorted(sources.items())})).hexdigest()
 
 
@@ -408,7 +422,7 @@ def _input_identity(inputs):
         file=getattr(inputs,name)
         values[name]=sha256_file(file) if file is not None else None
     values['prepared_data_tree']=_tree_hash(inputs.prepared_data_tree) if inputs.prepared_data_tree is not None else None
-    values.update(rootfs=_tree_hash(inputs.rootfs_dir),size_mib=inputs.size_mib,root_mib=inputs.root_mib,smoke=inputs.smoke)
+    values.update(rootfs=_tree_hash(inputs.rootfs_dir),size_mib=inputs.size_mib,root_mib=inputs.root_mib,experiment_mib=inputs.experiment_mib,library_mib=inputs.library_mib,log_budget_mib=inputs.log_budget_mib,smoke=inputs.smoke)
     return hashlib.sha256(canonical(values)).hexdigest()
 
 
