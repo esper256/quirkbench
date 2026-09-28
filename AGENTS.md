@@ -3,12 +3,20 @@
 Preserve agent quota. Read [the testing policy](docs/testing-policy.md) before
 choosing validation. This policy applies to delegated work as well.
 
+Follow [the authoritative forward plan](docs/product-roadmap.md), briefs P1–P8.
+Inventory/provisioning/session commands in that plan are proposed, not implemented.
+Use a bounded brief and focused tests; request higher-reasoning review for storage,
+watchdog authorization or durable execution boundary changes. No MCP service in v1.
+
 - For ordinary edits, run the smallest relevant software tests. Documentation-only
   changes need link/consistency checks, not pytest or an image rebuild.
-- Real composition, image builds, QEMU boot cycles, full OSTree transfer/backup
-  qualification and hardware endurance are **final major-version release gates**.
+- Real composition/image/transfer/backup qualification, QEMU boot cycles and
+  hardware endurance are **final major-version release gates**.
   Do not run them after routine edits, at every milestone, or merely because a
   related source file changed. A development task is not release authorization.
+  User-requested image production or scientific kernel experiments are product
+  operations, not automatic infrastructure tests; do not attach the release suite
+  to them. Attended device commissioning validates that specific delivered device.
 - The release Make targets require `RELEASE_QUALIFICATION=1`. Set it only for an
   explicitly requested final major-version qualification. Do not bypass this
   policy by invoking the underlying Python scripts or CLI directly.

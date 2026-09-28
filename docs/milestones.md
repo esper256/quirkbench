@@ -3,8 +3,30 @@
 **Test scheduling:** the acceptance sections describe release evidence, not a
 requirement to run expensive gates for every task or milestone. Follow the
 [testing policy](testing-policy.md): focused software checks during development;
-real builds, VM and endurance qualification only for an explicitly requested final
+real build, VM and endurance qualification only for an explicitly requested final
 major-version release. Avoid agent waiting unless results block continued work.
+
+## Current execution plan
+
+The [product roadmap](product-roadmap.md) is authoritative for remaining work and
+settles discovery, provisioning, watchdog authorization and CLI/agent boundaries.
+The original M1–M5 numbering below is retained for continuity, not a fresh sequence
+of infrastructure rewrites. New work uses bounded briefs P1–P8:
+
+| Existing milestone | Current status | Remaining briefs |
+| --- | --- | --- |
+| M1 | Achieved | Preserve contracts and review additive extensions |
+| M2 | Build/image infrastructure implemented and VM-qualified | P1 hardware discovery/profiles; P3 tailored, provisioned images |
+| M3 | Durable handoff/live evidence implemented and software-tested | P2 durable background operations; P3 provisioning; P4 actual attended Acer cycle |
+| M4 | Watchdog and agent primitives exist; no physical qualification or complete session runner | P5 actual reset policy/qualification; P6 sessions; P8 endurance |
+| M5 | Initial investigations not started | P7 recipes, causal investigations and patch evidence |
+
+Deliver inventory → prepare → flash first (P1–P3), then an attended physical cycle
+(P4), then one attended issue session (P6 plus a P7 recipe). P5 and the physical
+release gates add unattended capability. Cheaper models implement each brief;
+higher-reasoning review is concentrated on protection, persistence, reset policy
+and experimental conclusions. The roadmap lists proposed test suites and explicit
+exclusions so implementation can proceed without repeatedly redesigning the system.
 
 These milestone numbers follow the approved project plan. M1 is achieved. The revised M2 was achieved for OSTree layout revision 1; [fresh six-partition qualification](v1-qualification.md) now records the replacement image checks and remaining physical gates. Some later-milestone adapters exist as scaffolding; passing their unit tests does not complete their hardware or build gates. Each implementation task receives this brief, its listed contracts, and its acceptance tests, rather than the entire planning conversation.
 
@@ -48,9 +70,9 @@ Human visibility is a required contract: phase, state, last report/contact, last
 
 **Owner:** cheaper models for scoped integration; higher-reasoning review of recovery and agent decisions.
 
-**Brief 4A: qualification (required before any unattended hardware campaign).** Use `acceptance/hardware-endurance.template.json`. Commission the Acer, wired adapter, boot identity, watchdogs, panic reboot, fixed kdump, netconsole and suspend/resume. Identify supported versus unsupported recovery; stop cleanly for human reset when necessary. Neither network silence nor a watchdog timeout proves a kernel crash. Separately qualify boot selection, automatic reset and surviving diagnostic evidence at multiple boot stages, including failures before crash capture is armed. Follow `docs/recovery-and-evidence.md`; VM acceptance does not satisfy this physical gate. Review the current kexec prohibition before implementing kdump. Record unsupported early-boot failures explicitly and require human intervention where necessary.
+**Brief 4A: qualification (required before unattended hardware campaigns).** Follow roadmap P5/P8 and use `acceptance/hardware-endurance.template.json`. Commission the Acer, wired adapter, boot identity, hardware watchdog, panic reboot and diagnostic channels. Qualify suspend only when enabling its recipes. Distinguish exact-build qualification from explicit authorization to try experimental kernels; never inherit a passing claim across build IDs. Identify unsupported recovery and stop for human intervention. Neither network silence nor a watchdog timeout proves a kernel crash. Kdump is deferred and marked unavailable under the current no-kexec policy; it is not a prerequisite for the first attended session. Follow `docs/recovery-and-evidence.md`; VM acceptance does not satisfy the physical gate.
 
-**Brief 4B: agent campaigns.** Own `agent.py`, campaign orchestration and adapter tests. The provider-neutral JSON command adapter, source checkpoints, compact context, hypothesis ledger, cumulative accounting and budgets already have a scaffold. Finish automated decision/build/experiment scheduling, continuous snapshots of scoped unfinished edits, provider session replacement, bounded failure backoff, and audit export. Credentials remain local to Distrobox. A monitoring human must see provider wait versus compiler activity versus target silence, without inspecting agent chat history.
+**Brief 4B: agent campaigns.** Follow roadmap P2/P6. Keep a CLI-first local API and a deterministic, durable session runner; MCP is deferred. Existing provider-neutral JSON invocation, source checkpoints, compact context, ledger and budgets are primitives. Finish scoped source editing, exact-input build/compose dispatch, proposal validation, agent replacement and pause/restart recovery. Invoke the agent only when a decision is needed, never to wait for a build or test. Credentials remain local to Distrobox. Human progress reporting remains independent of agent inference.
 
 **Acceptance:** `pytest tests/test_agent.py tests/test_monitor.py`, then fill and verify the hardware fixture using `make acceptance-hardware REPORT=/absolute/report.json`. Require an actual campaign longer than 30 hours, controller restart, network loss, agent replacement, repeated pause/resume, retained outcomes/checkpoints and resource-use evidence. Accelerated-clock unit tests cannot satisfy endurance. This gate is explicitly unqualified in M1.
 

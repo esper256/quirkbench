@@ -28,14 +28,17 @@ Arming the candidate is one-shot: GRUB consumes and verifies the cleared state
 before handing over to the candidate kernel. Recovery remains the default even
 if the candidate never reaches userspace. Candidates never replace recovery.
 
-The candidate should establish diagnostic channels and load a separately qualified,
-fixed crash-capture kernel as early as feasible. Loading from an initramfs shortens
-but does not eliminate the unprotected early-boot interval. Progress milestones
-must distinguish kernel startup, initramfs, writable USB evidence, network,
-crash-capture readiness and experiment readiness. The experiment uploads sealed chunks while it runs and sends its terminal result promptly. Final uploads are bounded; a normal test ends with a full
-reboot to recovery, where missing acknowledgements and pending chunks are retried. A panic may first enter the capture kernel, save its dump to
-the identified USB data partition or controller, and then perform a full reboot.
-The capture kernel is not the recovery boot and does not run the experiment.
+The candidate establishes available diagnostic channels as early as practical.
+Progress distinguishes kernel startup, initramfs, writable USB evidence, network
+and experiment readiness. It uploads sealed chunks while running and sends its
+terminal result promptly. Final uploads are bounded; normal completion returns
+through recovery, where missing acknowledgements and pending chunks are retried.
+
+**Deferred capture extension:** after a separate no-kexec policy revision, a fixed,
+qualified capture kernel could collect a vmcore and reboot. That kernel would be
+separate from recovery and from the experiment. Current images do not load it;
+crash-capture readiness must remain unavailable. The first attended session needs
+honest log/reset coverage, not a claim that all early-boot failures yield dumps.
 
 Recovery reconciles the prior attempt and uploads retained evidence before any
 new experiment. The target retains evidence until durable controller
@@ -44,6 +47,10 @@ proof of a kernel crash. A silent or ambiguous execution remains uncertain and
 requires reconciliation; it is not automatically repeated.
 
 ## Failure coverage to qualify on the Acer
+
+Capture-kernel rows below describe deferred capability, not current image behavior.
+The [forward plan](product-roadmap.md) prioritizes actual watchdog driver support,
+an attended baseline round trip and diagnostic logs before that extension.
 
 | Failure | Route back to recovery | Evidence and remaining limit |
 | --- | --- | --- |

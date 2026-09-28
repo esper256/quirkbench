@@ -2,11 +2,17 @@
 
 # Quirkbench
 
+The [forward product plan](docs/product-roadmap.md) defines the remaining work:
+read-only target inventory → tailored provisioned image → attended Acer cycle →
+CLI-driven problem-solving sessions → qualified unattended operation. Its new
+commands are planned interfaces, not features already available. MCP is deferred;
+the local CLI and durable operations will be the agent API.
+
 Quirkbench implements a durable controller/target lab with a human monitor, authenticated HTTPS, strict contracts and fault tests. The current six-partition image includes a physical handoff supervisor, live evidence and watchdog integration, and has passed fresh VM boot qualification. **It is not yet commissioned for unattended Acer operation.** Its hardware, reset and extended-campaign acceptance gates remain separate from software and VM results.
 
 ## Run the software acceptance gate
 
-Routine development uses focused tests; expensive builds and boot qualification
+Routine development uses focused tests; expensive infrastructure qualification
 are final major-version release gates with explicit opt-in. See the
 [testing and agent quota policy](docs/testing-policy.md) and [agent instructions](AGENTS.md).
 

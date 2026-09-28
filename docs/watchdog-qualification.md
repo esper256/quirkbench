@@ -5,6 +5,43 @@ supervisor sends `sd_notify` service heartbeats; it never opens `/dev/watchdog`.
 An active device and a successful notification test do not qualify recovery from
 a kernel hang. Current Acer hardware coverage remains **untested**.
 
+## What is already set up
+
+The service units, activation code and profile checks exist. The current built
+kernel lacks a usable hardware-watchdog driver, and no physical reset has been
+demonstrated. The service watchdog checks the supervisor's notifications; the
+hardware watchdog resets a machine that stops servicing its timer. Systemd's
+[service setting](https://github.com/systemd/systemd/blob/main/man/systemd.service.xml)
+and [hardware settings](https://github.com/systemd/systemd/blob/main/man/systemd-system.conf.xml)
+are distinct. Hardware settings have no effect without a supported device.
+
+The primary purpose is resetting the **experimental OS** into fixed recovery.
+Recovery may service that same hardware timer, particularly across handoff. It is
+not a second watchdog or an independent reset device. No controller/network outage
+should turn healthy recovery into a reboot loop. Discovery on the installed OS
+must never open `/dev/watchdog*`: opening can activate a timer, as described by the
+[kernel watchdog API](https://docs.kernel.org/watchdog/watchdog-api.html).
+
+## Planned experimental-kernel authorization
+
+The [forward plan](product-roadmap.md) retains exact-build qualification as the
+default and adds a separate `WatchdogAuthorization` under brief P5. An operator
+may explicitly permit a campaign to activate the watchdog on experimental kernels
+after commissioning its platform/baseline. Authorization binds each exact revision
+and build ID; it does not copy a baseline's passing qualification to a new kernel.
+Report baseline coverage, current activation and candidate uncertainty separately.
+Relevant hardware/firmware/reset/power changes require attended review; screening
+cannot prove all kernel changes harmless. Unattended experimental use requires the
+explicit risk scope, and unsupported cases remain human-intervention conditions.
+
+This extension is not implemented. The current rules below still apply. It needs
+versioned capability negotiation, stale/revoked authorization tests and
+higher-reasoning review before activation; older targets must fail explicitly.
+There is no requirement to repeat an entire destructive qualification campaign on
+every build or every recovery boot.
+
+## Current profile contract
+
 `RecoveryProfile` records hardware and kernel identities, requested timeout,
 watchdog identity, lockup settings, separate coverage results, and an immutable
 qualification evidence artifact. Start with 120 seconds. Observe the actual

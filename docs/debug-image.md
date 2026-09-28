@@ -5,6 +5,11 @@ always the default boot. Each physical attempt gets an isolated OSTree deploymen
 with fresh `/etc` and `/var`. A successful experiment uploads its results and
 returns through recovery; it cannot prepare or authorize the next experiment.
 
+The [forward product plan](product-roadmap.md) adds hardware-tailored builds and
+automatic first-boot provisioning. The six-partition layout remains unchanged.
+The existing image is an infrastructure artifact; its kernel still needs the
+actual Acer/network/watchdog hardware profile before claiming device readiness.
+
 ## Layout revision 2
 
 The standard image writer receives a compact GPT `.img` plus checksum. The factory
@@ -95,7 +100,19 @@ and 0600 for credentials. `runtime.json` contains:
 }
 ```
 
-For initial provisioning, first boot completes partition commissioning. Shut down and attach the USB to the controller, then copy only device configuration/trust files into the positively identified evidence partition using normal Linux filesystem tools. Subsequent boots reuse that configuration. No automatic internal-disk mount or custom USB writer is involved.
+**Current manual path:** first boot completes partition commissioning. Shut down
+and attach the USB to the controller, then copy device configuration/trust files
+into the positively identified evidence partition using normal Linux filesystem
+tools. Subsequent boots reuse that configuration.
+
+**Planned normal path (P3):** image preparation embeds a private device-only bootstrap
+bundle in a reserved experiments directory. Verified first-boot recovery installs
+it atomically into evidence/control before registration. The controller retains
+the matching device registration and public build provenance. The image contains
+device secrets and is private; it must not enter public artifact/evidence exports.
+AI credentials and signing/CA private keys are never included. See the roadmap for
+retry/conflict semantics. This removes the second physical transfer; it adds no
+USB writer and no internal-disk mount.
 
 Wired interfaces use DHCP; the controller can have a static IP. Provisioning is an
 explicit commissioning step, never an AI credential transfer. Only the spool is
@@ -126,6 +143,12 @@ state, never an assumed countdown. A hardware reset returns to recovery because
 the one-shot candidate selection was already consumed. Early boot, runtime,
 shutdown and suspend need independent qualification. No usable watchdog or a
 missing observation is reported honestly; software heartbeat is not hardware proof.
+
+This hardware reset primarily protects the experimental OS. Recovery services the
+same watchdog if configured/armed; there is no second hardware-watchdog subsystem.
+The current built kernels lack a usable driver, so integration code is not yet
+Acer reset coverage. The roadmap distinguishes exact-kernel qualification from a
+future explicit campaign authorization to activate it on experimental kernels.
 
 The supervisor has systemd service supervision, caller-driven heartbeat and bounded
 phase/recipe deadlines. It reports actual progress separately from responsiveness.

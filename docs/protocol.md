@@ -1,5 +1,11 @@
 # Device protocol (version 1)
 
+This is the existing target-facing protocol. The planned [local agent/operation
+API](product-roadmap.md) uses the CLI and typed application services, not a new MCP
+server or remote administrative route. Its operation IDs, JSON envelopes and
+watchdog authorization records require explicit versioned implementation; examples
+in the roadmap do not extend this protocol implicitly.
+
 The controller listens on HTTPS only. `make_server` binds to `127.0.0.1` by
 default; a LAN address requires `allow_lan=True`, a configured certificate and
 private key, and one random token of at least 32 characters per device. Device
@@ -32,9 +38,10 @@ attempt token further scopes writes. Controller administration, campaign
 creation, scheduling, and status have no HTTP route. The target accepts only
 recipes installed in its local Python registry. The built-in `smoke` recipe is
 available in simulation mode and returns `INCONCLUSIVE` with an explicit demo
-observation; it does not claim to test a kernel. Kernel candidate boot requires
-a commissioned `BootControl` implementation. The default target has none,
-reports no boot capability, and never reboots or runs host stress commands.
+observation; it does not claim to test a kernel. The generic target CLI has no
+physical boot adapter and cannot reboot the host. The verified USB runtime
+assembles the OSTree/BootControl adapters and the physical `system-observation`
+recipe; it still needs actual hardware commissioning.
 
 The target writes each journal transition and evidence blob with a temporary
 file, `fsync`, and atomic rename. It records execution intent before calling

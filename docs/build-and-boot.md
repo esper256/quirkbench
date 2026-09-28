@@ -2,11 +2,11 @@
 
 The production deployment backend is minimal Fedora composed with rpm-ostree and published through a traditional signed OSTree repository. The old four-file kernel/initramfs bundle is retired. Historical artifacts remain available, but old images require rebuilding; there is no in-place image conversion.
 
-The earlier M2 build and VM gate qualified layout revision 1. Layout revision 2 and its execution/reset integration require fresh acceptance. See [qualification observations](ostree-review.md) for exact identities, reports and physical integration limits.
+The earlier M2 gate qualified layout revision 1; [fresh layout-2 results](v1-qualification.md) now record the replacement image checks. Neither result qualifies the Acer. The [forward product plan](product-roadmap.md) adds a read-only target inventory, reviewed HardwarePlan and background `device prepare` workflow; those commands are planned. The lower-level build/compose/image commands below already exist.
 
 ## Build and compose on the controller
 
-Use the versioned Fedora container environment, immutable base-image identity and recorded build/package/toolchain inputs. Podman and Distrobox are host prerequisites; all build packages and experimental installations stay inside the container. Persistent project state lives outside its disposable filesystem. Credentials, repository signing private keys and agent authentication must never enter a target filesystem, RPM payload, build log or exported source snapshot.
+Use the versioned Fedora container environment, immutable base-image identity and recorded build/package/toolchain inputs. Podman and Distrobox are host prerequisites; all build packages and experimental installations stay inside the container. Persistent project state lives outside its disposable filesystem. Agent authentication and repository/CA signing private keys never enter target filesystems or build outputs. Device-scoped credentials belong only in private provisioning and evidence/control, never in RPMs, OSTree commits, build logs, source snapshots or exported debugging evidence.
 
 Build kernels and modules in dedicated output trees. Stage userspace using `DESTDIR` and modules using `INSTALL_MOD_PATH`, preserve matching debug symbols and source archives in the controller artifact store, and package the experimental components as RPMs for composition. The composer produces one revision containing matching kernel, modules, initramfs, userspace and default configuration. Do not apply package overrides on the target. Capture exact source, configuration, package and toolchain identities in the deployment provenance.
 

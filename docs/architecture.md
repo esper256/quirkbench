@@ -1,6 +1,22 @@
 # Quirkbench: architecture and v1 contracts
 
-This repository is a local, evidence-first laboratory for Linux experiments. The controller owns scheduling and durable state. A booted target reports its capabilities, claims one bounded attempt, performs the privileged recipe locally, and uploads observations. The included `smoke` recipe runs only in simulation mode and demonstrates the protocol without making a kernel claim. The HTTPS transport and image/QEMU build helpers are software components; actual target boot control needs a commissioned implementation and separate qualification.
+This repository is a local, evidence-first laboratory for Linux experiments. The controller owns scheduling and durable state. A booted target reports capabilities, claims one bounded attempt, runs a locally installed recipe and uploads observations. The physical runtime and OSTree boot control are implemented; actual Acer commissioning remains outstanding. Simulation `smoke` and physical `system-observation` recipes do not claim to reproduce an issue. The [forward product plan](product-roadmap.md) specifies the remaining discovery, provisioning and session work; planned extensions below are not current runtime guarantees.
+
+## Forward product boundary
+
+The installed target OS runs only a read-only inventory collector. A versioned,
+reviewed HardwarePlan maps observations to protected recovery/baseline builds.
+The controller prepares a private image with device-only provisioning; first boot
+installs it durably into evidence/control. Internal storage remains excluded and
+all physical writes require positive USB identity. Candidate OSTree updates cannot
+change fixed recovery, private provisioning or the bootloader.
+
+Agents use a local CLI with typed application services, JSON and idempotent
+operation IDs. A persistent worker performs long work without a waiting agent;
+session orchestration reuses campaign state in the existing SQLite database.
+There is no v1 MCP server or remote administrative API. The proposed experimental
+watchdog authorization is separate from exact-build qualification and must be
+implemented/reviewed before use. See the roadmap for contracts and bounded briefs.
 
 ## Trust and execution boundaries
 

@@ -7,6 +7,12 @@ the inputs below. Direct script invocations follow the same policy. Routine work
 uses focused software tests; see [testing and agent quota](../docs/testing-policy.md).
 Do not keep an agent waiting on long runs unless their results block development.
 
+The [remaining implementation briefs](../docs/product-roadmap.md) use focused
+software fixtures for discovery, bootstrap, background operations and sessions.
+Their proposed suites are not current passing evidence. Target hardware inventory
+and first device commissioning do not replace physical watchdog/endurance gates,
+nor do they automatically trigger the full release suite.
+
 Templates intentionally fail acceptance. Copy one outside this directory, fill observations from an actual run, and reference evidence files relative to the report with `{"path":"relative/file", "sha256":"64 lowercase hex"}`. The verifier checks report completeness and referenced bytes; it cannot authenticate an operator's observations or establish causality from a manifest alone. Higher-reasoning/human review still assesses evidence and limitations.
 
 Hardware endurance requires more than 30 real hours, the listed injected events, evaluated recovery capabilities, resource-use and safety evidence, and no silently unresolved attempts. Patch bundles require separately matched baseline/patched/revert/regression observations, source/build identities, actual patch files and exposure counts. Keep an unreproduced issue inconclusive instead of manufacturing a passing report.
