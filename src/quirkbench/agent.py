@@ -21,7 +21,7 @@ class ScriptedAgent:
 class CommandAgent:
     """Local trusted adapter command, JSON stdin/stdout, never a shell string.
 
-    Provider authentication is inherited from the host environment. Raw output
+    Provider authentication is inherited from the controller environment. Raw output
     is private temporary data and is never automatically added to evidence.
     """
     def __init__(self, argv, timeout_s=600):

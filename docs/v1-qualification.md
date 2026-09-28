@@ -1,7 +1,7 @@
 # Layout revision 2 qualification — 2026-09-28
 
 The six-partition image and software integration passed the checks below. This
-qualifies build and VM infrastructure, not unattended Acer operation. The
+qualifies build and VM infrastructure, not unattended target operation. The
 [review](v1-layout-review.md) records the revised boundaries and issues found.
 
 The local [qualification index](../.quirkbench/v1-layout/qualification.json)
@@ -17,7 +17,7 @@ Git; historical layout-1 evidence remains unchanged in its original directories.
 | Preservation | Fixed recovery/EFI, library and internal sentinel preserved; effective firmware settings satisfy the reviewed MTC-only exception |
 | Standard image supervisor | Production partition defaults commissioned; ten visible provisioning waits spanning more than 45 seconds, without service failure or reboot loop |
 | Backup and restore | 36 retained artifacts and 10,410 OSTree objects; independent restored content and unchanged source backup |
-| Host inventory | All 2,786 recorded packages, boot configuration and running kernel unchanged |
+| Controller inventory | All 2,786 recorded packages, boot configuration and running kernel unchanged |
 
 The standard [4 GiB factory image](../.quirkbench/v1-layout/quirkbench-v1.img)
 has a [checksum file](../.quirkbench/v1-layout/quirkbench-v1.img.sha256) and
@@ -35,7 +35,7 @@ its firmware initialization is distinct from the settled ten-trial comparison.
 
 Remaining gates are explicit:
 
-- Qualify actual Acer USB boot, internal-storage protection, watchdog activation,
+- Qualify actual target USB boot, internal-storage protection, watchdog activation,
   earliest covered boot stage, handoff, runtime/shutdown reset and suspend.
   Current image kernels lack a usable hardware-watchdog driver; build and qualify
   the observed hardware's driver before claiming automatic hang recovery.
@@ -45,7 +45,7 @@ Remaining gates are explicit:
 - Review the no-kexec policy before implementing kdump. Panic reset proves neither
   crash-dump availability nor recovery from all hangs.
 - Complete the campaign exceeding 30 hours and the three issue investigations.
-  No Acer fix or unattended readiness is claimed.
+  No target fix or unattended readiness is claimed.
 
 Existing protected kernel builds, container recreation and initial full-transfer
 fault qualification are retained historical inputs. The new reports do not claim

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "kind": "hardware-endurance",
   "status": "unqualified",
-  "device": "Acer SF14-61T; fill serial/hardware identifiers locally",
+  "device": "Target computer; fill model and hardware identifiers locally",
   "duration_seconds": 0,
   "required_events": ["controller_restart", "network_interruption", "agent_session_replacement", "pause_resume_1", "pause_resume_2", "storage_pressure", "human_recovery_classification"],
   "observed_events": [],

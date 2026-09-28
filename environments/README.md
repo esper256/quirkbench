@@ -3,7 +3,7 @@
 The Containerfile takes a verified immutable `registry.fedoraproject.org/fedora@sha256:...`
 base reference. `assemble.ini` creates a rootless Distrobox with a private home
 and 4 CPU / 4 GiB cgroup caps. The pipeline checks that those caps are no more
-than half the host resources and refuses to build if the cgroup limits are
+than half the controller resources and refuses to build if the cgroup limits are
 missing. Adjust the caps downward on smaller hosts. Its controller-wide file
 lock permits one build at a time.
 
@@ -15,7 +15,7 @@ run `replay_rpms.py LOCK LOCK_SHA256 BASE_DIGEST` as UID 0 **inside** the rootle
 container, using an RPM repository snapshot that retains every full NEVRA.
 The script verifies the entire installed RPM set after replay; it fails if a
 locked version is unavailable or any extra/different package remains. It does
-not install packages on the host. The pipeline independently rechecks both
+not install packages on the controller OS. The pipeline independently rechecks both
 RPM locks and toolchain versions before every cache miss.
 
 `userspace-fixture.tar.xz` contains a tiny C `make all` / `make install`
@@ -90,7 +90,7 @@ and [treefile reference](https://coreos.github.io/rpm-ostree/treefile/).
 
 Use a dedicated **rootless Podman** container for rpm-ostree composition, alongside
 normal non-root Distrobox controller/kernel builds. Run its process as container
-UID 0 with the default rootless UID mapping: UID 0 maps to the unprivileged host
+UID 0 with the default rootless UID mapping: UID 0 maps to the unprivileged controller
 user, and subordinate UIDs remain mapped. Do not use keep-id for this composition
 profile: rpm-ostree finalization preserves root-owned metadata and fails as UID
 1000; a single-UID nested namespace also fails on unmapped ownership.

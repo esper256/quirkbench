@@ -2,15 +2,15 @@
 
 The production deployment backend is minimal Fedora composed with rpm-ostree and published through a traditional signed OSTree repository. The old four-file kernel/initramfs bundle is retired. Historical artifacts remain available, but old images require rebuilding; there is no in-place image conversion.
 
-The earlier M2 gate qualified layout revision 1; [fresh layout-2 results](v1-qualification.md) now record the replacement image checks. Neither result qualifies the Acer. The [forward product plan](product-roadmap.md) adds a read-only target inventory, reviewed HardwarePlan and background `device prepare` workflow; those commands are planned. The lower-level build/compose/image commands below already exist.
+The earlier M2 gate qualified layout revision 1; [fresh layout-2 results](v1-qualification.md) now record the replacement image checks. Neither result qualifies the target. The [forward product plan](product-roadmap.md) adds a read-only target inventory, reviewed HardwarePlan and background `target prepare` workflow; those commands are planned. The lower-level build/compose/image commands below already exist.
 
 ## Build and compose on the controller
 
-Use the versioned Fedora container environment, immutable base-image identity and recorded build/package/toolchain inputs. Podman and Distrobox are host prerequisites; all build packages and experimental installations stay inside the container. Persistent project state lives outside its disposable filesystem. Agent authentication and repository/CA signing private keys never enter target filesystems or build outputs. Device-scoped credentials belong only in private provisioning and evidence/control, never in RPMs, OSTree commits, build logs, source snapshots or exported debugging evidence.
+Use the versioned Fedora container environment, immutable base-image identity and recorded build/package/toolchain inputs. Podman and Distrobox are controller prerequisites; all build packages and experimental installations stay inside the container. Persistent project state lives outside its disposable filesystem. Agent authentication and repository/CA signing private keys never enter target filesystems or build outputs. Device-scoped credentials belong only in private provisioning and evidence/control, never in RPMs, OSTree commits, build logs, source snapshots or exported debugging evidence.
 
 Build kernels and modules in dedicated output trees. Stage userspace using `DESTDIR` and modules using `INSTALL_MOD_PATH`, preserve matching debug symbols and source archives in the controller artifact store, and package the experimental components as RPMs for composition. The composer produces one revision containing matching kernel, modules, initramfs, userspace and default configuration. Do not apply package overrides on the target. Capture exact source, configuration, package and toolchain identities in the deployment provenance.
 
-Default to one build at a time, no more than half host CPUs and RAM, and a 20 GiB free-space reserve. Report compiler output activity, measured object/byte counters where available and bounded phase deadlines. Cache reuse is an optimization; checkpoints and source identities remain recoverable without caches.
+Default to one build at a time, no more than half the controller CPUs and RAM, and a 20 GiB free-space reserve. Report compiler output activity, measured object/byte counters where available and bounded phase deadlines. Cache reuse is an optimization; checkpoints and source identities remain recoverable without caches.
 
 ### Capacity planning
 
@@ -44,11 +44,11 @@ Each physical attempt gets a fresh deployment group and mutable state. Repeating
 
 ## Build the external image
 
-Image assembly writes regular files only; it does not write physical drives, change host firmware, install host kernels or invoke host package installation. Output a partitioned `.img` or `.img.xz` plus checksum for a normal writer such as Etcher.
+Image assembly writes regular files only; it does not write physical drives, change controller firmware, install controller kernels or invoke controller OS package installation. Output a partitioned `.img` or `.img.xz` plus checksum for a normal writer such as Etcher.
 
 The final image has fixed EFI/recovery, one-shot state, experiments, library and evidence partitions. Its compact factory form contains the first four GPT entries with all six identities reserved. First-boot commissioning records geometry, grows experiments and creates the preidentified library/evidence filesystems. It never reformats an ambiguous existing filesystem. See [layout revision 2](debug-image.md).
 
-Recovery remains independent of candidate deployments. OSTree generates candidate boot entries without regenerating the system bootloader; Quirkbench validates and translates the entry into the fixed USB boot control. GRUB clears, saves and verifies one-shot state before candidate handoff. If that fails it selects recovery. Candidate content never replaces fixed recovery or the bootloader. Do not invoke `grub-reboot` against the host installation or use `efibootmgr`.
+Recovery remains independent of candidate deployments. OSTree generates candidate boot entries without regenerating the system bootloader; Quirkbench validates and translates the entry into the fixed USB boot control. GRUB clears, saves and verifies one-shot state before candidate handoff. If that fails it selects recovery. Candidate content never replaces fixed recovery or the bootloader. Do not invoke `grub-reboot` against the controller installation or use `efibootmgr`.
 
 The `image` command accepts a separate JSON input. For a VM qualification image, use actual recovery outputs and the prepared data tree returned by [the deployment fixture](../acceptance/README.md):
 
@@ -84,7 +84,7 @@ The initial supported profile keeps internal-controller support excluded from re
 
 The current no-kexec policy does not support kdump. Review that policy and independently qualify the fixed capture kernel before enabling crash capture. Secure Boot is assumed disabled and must be verified. Owner-controlled USB boot selection and manual recovery of unsupported complete hangs remain explicit boundaries.
 
-QEMU proves infrastructure behavior, not Acer fixes. The revised M2 gate requires a clean-container compose, preserved state after container recreation, one revision changing kernel and userspace with matching modules, interrupted update fault cases, recovery/candidate/subsequent-recovery/failed-candidate boots, and unchanged sentinel disks, fixed recovery and settled persistent firmware settings. Record host package and boot configuration inventories before and after. A process exit, timeout or immutable OVMF template hash alone is not successful boot qualification.
+QEMU proves infrastructure behavior, not target fixes. The revised M2 gate requires a clean-container compose, preserved state after container recreation, one revision changing kernel and userspace with matching modules, interrupted update fault cases, recovery/candidate/subsequent-recovery/failed-candidate boots, and unchanged sentinel disks, fixed recovery and settled persistent firmware settings. Record controller package and boot configuration inventories before and after. A process exit, timeout or immutable OVMF template hash alone is not successful boot qualification.
 
 The hardware gate separately verifies actual storage protection, reset, diagnostic capture and evidence upload before unattended campaigns. See [recovery coverage](recovery-and-evidence.md). Unit tests and old bundle-based VM results must not be represented as completion of the OSTree M2 gate.
 

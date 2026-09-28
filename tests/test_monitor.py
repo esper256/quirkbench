@@ -145,11 +145,11 @@ def test_monitor_reports_watchdog_unknown_without_fabricating_countdown(tmp_path
     from quirkbench.contracts import CapabilityReport
     from quirkbench.monitor import render
     c = Controller(tmp_path, reserve_bytes=0)
-    c.register(CapabilityReport('acer', 'boot', [], inventory={
+    c.register(CapabilityReport('target-01', 'boot', [], inventory={
         'boot_stage': 'supervisor-ready',
         'watchdog': {'identity': None, 'armed': None, 'actual_timeout_s': None, 'earliest_covered_stage': 'unqualified'},
         'partition_capacity': {'evidence': {'available_bytes': 4*1024**3, 'total_bytes': 10*1024**3}}}))
-    c.create_campaign('lab', 'acer')
+    c.create_campaign('lab', 'target-01')
     text = render(c.monitor('lab'))
     assert 'observed timeout unknown' in text
     assert 'unqualified (last target report)' in text

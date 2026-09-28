@@ -39,7 +39,7 @@ creation, scheduling, and status have no HTTP route. The target accepts only
 recipes installed in its local Python registry. The built-in `smoke` recipe is
 available in simulation mode and returns `INCONCLUSIVE` with an explicit demo
 observation; it does not claim to test a kernel. The generic target CLI has no
-physical boot adapter and cannot reboot the host. The verified USB runtime
+physical boot adapter and cannot reboot the computer running that command. The verified USB runtime
 assembles the OSTree/BootControl adapters and the physical `system-observation`
 recipe; it still needs actual hardware commissioning.
 

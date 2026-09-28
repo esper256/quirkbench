@@ -37,7 +37,7 @@ Reviewed persistence and boot boundaries:
 
 Software regression scenarios exercise these observable boundaries with local and
 HTTPS transports. Real image boot results and their exact artifact identities are
-recorded separately; neither test class establishes Acer recovery or a >30-hour
+recorded separately; neither test class establishes target recovery or a >30-hour
 campaign. Source changes during composition must reject publication; an interrupted
 revision-2 compose demonstrated that check while preserving its draft output.
 

@@ -1,19 +1,26 @@
-> Current image contract: [six-partition v1 layout, live evidence and qualified reset](docs/debug-image.md). [Fresh layout-2 qualification](docs/v1-qualification.md) passed 405 software tests and ten real UEFI boot trials; physical Acer qualification remains outstanding.
+> Current image contract: [six-partition v1 layout, live evidence and qualified reset](docs/debug-image.md). [Fresh layout-2 qualification](docs/v1-qualification.md) passed 405 software tests and ten real UEFI boot trials; physical target qualification remains outstanding.
 
 # Quirkbench
 
+Quirkbench investigates Linux hardware issues across computer models and form
+factors. The **controller** runs the agent, builds images and stores evidence;
+the **target** boots experiments and returns observations. The **builder** is the
+controller's isolated build component. See [terminology and supported-platform
+scope](docs/terminology.md): the current backend is x86-64/UEFI with USB boot;
+additional platforms need explicit support, not model-specific changes to the core.
+
 The [forward product plan](docs/product-roadmap.md) defines the remaining work:
-read-only target inventory → tailored provisioned image → attended Acer cycle →
+read-only target inventory → tailored provisioned image → attended target cycle →
 CLI-driven problem-solving sessions → qualified unattended operation. Its new
 commands are planned interfaces, not features already available. MCP is deferred;
 the local CLI and durable operations will be the agent API.
 
-Quirkbench implements a durable controller/target lab with a human monitor, authenticated HTTPS, strict contracts and fault tests. The current six-partition image includes a physical handoff supervisor, live evidence and watchdog integration, and has passed fresh VM boot qualification. **It is not yet commissioned for unattended Acer operation.** Its hardware, reset and extended-campaign acceptance gates remain separate from software and VM results.
+Quirkbench implements a durable controller/target lab with a human monitor, authenticated HTTPS, strict contracts and fault tests. The current six-partition image includes a physical handoff supervisor, live evidence and watchdog integration, and has passed fresh VM boot qualification. **It is not yet commissioned for unattended target operation.** Its hardware, reset and extended-campaign acceptance gates remain separate from software and VM results.
 
 ## Run the software acceptance gate
 
 Routine development uses focused tests; expensive infrastructure qualification
-are final major-version release gates with explicit opt-in. See the
+is a final major-version release gate with explicit opt-in. See the
 [testing and agent quota policy](docs/testing-policy.md) and [agent instructions](AGENTS.md).
 
 Python 3.11+ is required. The core controller and simulated loop use the standard library. OSTree composition, deployment and backup also require system OSTree tools; strict signature verification requires Python GI (`python3-gobject-base`). Install test/build dependencies into a project environment, not system Python:
@@ -64,6 +71,6 @@ The approved OS deployment backend is **OSTree/rpm-ostree**, using a traditional
 
 The external image uses six partitions: fixed EFI/recovery, narrowly writable GRUB state, experiments, a read-only library and independent evidence storage. A compact factory image commissions the remaining capacity on first boot, preserving interrupted work. Use a normal writer such as Etcher; Quirkbench does not provide a USB writer. Existing prototype images need rebuilding, not in-place conversion. Existing campaign records, source checkpoints and evidence remain readable.
 
-M1 is achieved. **Historical M2 layout revision 1** passed 286 software tests and ten real UEFI VM boot trials, plus composition, incremental deployment, container recreation and complete backup/restore checks. [Qualification observations](docs/ostree-review.md) link the evidence. Passing unit tests alone does not qualify an image. QEMU tests boot infrastructure and disk/firmware sentinels, not Acer behavior. Hardware recovery, watchdogs, netconsole, kdump, Acer diagnostics, the campaign exceeding 30 hours and evidence-backed fixes have separate acceptance gates. See [qualification fixtures](acceptance/README.md).
+M1 is achieved. **Historical M2 layout revision 1** passed 286 software tests and ten real UEFI VM boot trials, plus composition, incremental deployment, container recreation and complete backup/restore checks. [Qualification observations](docs/ostree-review.md) link the evidence. Passing unit tests alone does not qualify an image. QEMU tests boot infrastructure and disk/firmware sentinels, not target behavior. Hardware recovery, watchdogs, netconsole, kdump, target diagnostics, the campaign exceeding 30 hours and evidence-backed fixes have separate acceptance gates. See [qualification fixtures](acceptance/README.md).
 
 The [OSTree architecture revision review](docs/m2-ostree-review.md) records implemented boundaries, observed qualification and remaining integration gates. New deployment submissions retain an explicit build-evidence closure containing matching symbols, configuration, modules and source archives; an OS revision alone is not a complete debugging checkpoint.

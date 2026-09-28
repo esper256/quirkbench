@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "experiment_id": "acer-inventory-001",
+  "experiment_id": "target-inventory-001",
   "hypothesis": "The selected protected deployment boots and can return real kernel inventory and logs.",
   "recipe": "system-observation",
   "artifacts": {"deployment": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},

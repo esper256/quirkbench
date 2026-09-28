@@ -5,35 +5,44 @@ M1/M2 infrastructure and [recorded qualification](v1-qualification.md). The work
 below is **planned, not implemented**, unless explicitly identified as existing.
 CLI examples describe the intended interface, not commands available today.
 
+Planned target-management subcommands extend the existing `target` namespace;
+retain compatibility with its current transport-runner flags. Existing `--device`
+options and `device_id` fields continue to mean target ID.
+
+Follow [the terminology and scope contract](terminology.md). This roadmap applies
+to arbitrary target computer models and form factors. No brief may bake a vendor
+or model into controller logic. Current x86-64/UEFI/USB backend limits remain
+explicit; new platform support belongs behind build/boot adapters and profiles.
+
 ## Decisions
 
 | Question | Decision |
 | --- | --- |
-| Target discovery | A standalone, read-only Python collector runs on the Acer's installed Linux and produces a bounded, versioned inventory. |
+| Target discovery | A standalone, read-only Python collector runs on the target's installed Linux and produces a bounded, versioned inventory. |
 | Image preparation | The controller resolves that inventory against reviewed hardware profiles, then generates a provisioned `.img` and checksum. Etcher writes it. |
 | Deployment | Keep fixed recovery and the six-partition layout; candidate updates remain exact signed OSTree revisions. |
 | Watchdog | Hardware reset primarily protects the experimental boot. Keep one systemd owner; recovery handles that same device safely, not a second watchdog architecture. |
 | Agent interface | Local CLI with versioned JSON, operation IDs and durable background work. No MCP server in v1. |
 | Agent lifecycle | A deterministic controller runner invokes the agent at decision points; no agent remains alive merely to watch a build or experiment. |
-| First usable delivery | An attended, provisioned Acer inventory cycle, followed by one issue-specific session. Overnight operation has additional gates. |
+| First usable delivery | An attended, provisioned target inventory cycle, followed by one issue-specific session. Overnight operation has additional gates. |
 | Crash capture | Logs and qualified reset first. Kdump stays deferred behind an explicit no-kexec policy revision; unavailable dumps are reported honestly. |
 
 ## Intended human workflow
 
-Here **target** means the Acer being investigated; **controller/build host** means
+Here **target** means the computer being investigated; **controller** means
 the separate Linux computer running Quirkbench and the coding agent.
 
 1. On the target's installed Linux, clone a known Quirkbench revision, attach the
    wired adapter/dock intended for debugging, and run the standalone collector:
-   `python3 tools/collect-target.py --output acer-inventory.json`.
+   `python3 tools/collect-target.py --output target-01-inventory.json`.
    No package installation, privileged setup or service is required. Copy that
    file to the controller by any normal means; it contains no enrollment secret.
-2. On the controller, run `quirkbench host init` once to configure persistent
+2. On the controller, run `quirkbench controller init` once to configure persistent
    state, the rootless Fedora build environment, LAN endpoints and device trust.
-   Then run `quirkbench device import acer-inventory.json --name acer` and inspect
-   `quirkbench device plan acer`. Missing required observations block preparation
+   Then run `quirkbench target import target-01-inventory.json --name target-01` and inspect
+   `quirkbench target plan target-01`. Missing required observations block preparation
    with specific collection instructions; optional unknowns remain visible.
-3. Run `quirkbench device prepare acer --output acer-debug.img`. This returns an
+3. Run `quirkbench target prepare target-01 --output target-01-debug.img`. This returns an
    operation ID promptly. `quirkbench operation status ID --json` and the human
    monitor show progress without agent inference. The worker builds/reuses the
    protected recovery and a matching baseline deployment, publishes the baseline,
@@ -43,9 +52,9 @@ the separate Linux computer running Quirkbench and the coding agent.
    device configuration and registers in recovery. It does not start experiments
    without an explicit campaign. Secure Boot must already be disabled; Quirkbench
    never changes firmware to make this true.
-5. `quirkbench device commission acer --attended` runs bounded inventory and one
+5. `quirkbench target commission target-01 --attended` runs bounded inventory and one
    baseline round trip, recording identity, evidence acknowledgement and recovery
-   arrival separately. Then use `quirkbench session start --device acer
+   arrival separately. Then use `quirkbench session start --device target-01
    --problem problem.md --agent AGENT --attended`, followed by existing monitoring,
    pause and resume concepts. A session is the user-facing workflow for a campaign,
    not a second authoritative copy of campaign state.
@@ -98,7 +107,20 @@ userspace packages, capacity estimates and unresolved requirements. Import is
 strictly validated and bounded; strings cannot become shell commands, arbitrary
 paths, package names or download URLs. Known IDs/modaliases resolve through the
 selected kernel's metadata and a reviewed mapping. Unknown required hardware
-needs a bounded profile task; never guess support from the laptop model name.
+needs a bounded profile task; never guess support from the target computer model name.
+
+HardwarePlan must include target architecture and boot backend separately from
+the controller architecture. Dispatch only to an implemented compatible backend;
+an unsupported combination returns a precise planning error. Do not pass inventory
+strings directly as compiler architecture flags. The existing hardcoded x86-64
+build/RPM/GRUB assumptions must be encapsulated as the initial platform adapter
+before claiming multi-architecture preparation. Cross-building is an explicit
+backend capability, not assumed because both machines run Linux.
+
+P1 fixtures must cover multiple vendors/form factors, different wired adapters,
+missing watchdogs, varied storage topology and unsupported architecture/firmware.
+P3 must prove profile selection does not reuse another target's credentials,
+protection plan or reset evidence. Machine identities are not profile identities.
 
 Build separate recovery and baseline configurations. Recovery needs boot, USB,
 wired network, evidence and deployment tools; the baseline additionally needs the
@@ -238,7 +260,7 @@ The existing SQLite database remains authoritative. Add persistent operation row
 for preparation, build, compose and agent decisions; do not introduce another task
 database. Workers run in the managed rootless container under its service manager,
 with state/logs outside the container. CLI exit or an agent turn ending cannot kill
-the work. Host restart interrupts work, persists/reconciles its last known stage,
+the work. Controller restart interrupts work, persists/reconciles its last known stage,
 and requires explicit resume. No autonomous scheduling after controller restart.
 
 Use one campaign coordinator and the existing global build resource limits.
@@ -283,8 +305,8 @@ Proposed test filenames below are deliverables, not existing passing suites.
 | --- | --- | --- | --- |
 | P1 — discovery and profiles | `tools/collect-target.py`, inventory/profile schemas, import/plan CLI, fixture data | `tests/test_inventory.py`, `tests/test_hardware_plan.py`: missing tools, unknown IDs, USB adapters, privacy, bounded output, no device writes or watchdog opens, malicious reports, protection conflicts | Cheaper implementation; higher review of profile/protection decisions. No build, active probing or qualification claim. |
 | P2 — durable local operations | Operation journal/migration, CLI JSON, managed worker, scoped source snapshots, events | `tests/test_operations.py`: exit/restart, duplicate requests, stale workers, paused scheduling, crash during publication, source changes, compact outputs | Higher review of restart/ownership semantics; cheaper implementation. No MCP or replacement database. |
-| P3 — tailored provisioned images | HardwarePlan to existing builder/composer/image adapters, host setup, private bootstrap and first-boot import | `tests/test_provisioning.py` plus focused build/image/commission tests: every interrupted import, identity mismatch, no secret export, exact inputs, expired trust and offline recovery | Higher review of privileged writes/credential boundary. Cheaper packaging. No USB writer, firmware changes or in-place old-image conversion. |
-| P4 — attended device commissioning | Guided physical inventory and one baseline cycle; actual profile changes if needed | Extend runtime/physical-handoff tests; produce a capability report template with each unobserved item explicit | Human Acer run at delivery; distinguish software acceptance from physical evidence. No claim to fix a device issue. |
+| P3 — tailored provisioned images | HardwarePlan to existing builder/composer/image adapters, controller setup, private bootstrap and first-boot import | `tests/test_provisioning.py` plus focused build/image/commission tests: every interrupted import, identity mismatch, no secret export, exact inputs, expired trust and offline recovery | Higher review of privileged writes/credential boundary. Cheaper packaging. No USB writer, firmware changes or in-place old-image conversion. |
+| P4 — attended device commissioning | Guided physical inventory and one baseline cycle; actual profile changes if needed | Extend runtime/physical-handoff tests; produce a capability report template with each unobserved item explicit | Human-supervised target run at delivery; distinguish software acceptance from physical evidence. No claim to fix a device issue. |
 | P5 — reset policy | Driver/profile requirements, explicit WatchdogAuthorization, coverage display, attended qualification workflow | Watchdog/runtime/controller fixtures: build mismatch, authorization revocation/replay, old-client rejection, healthy waits, deadlines, suspend fences, no-controller recovery | Higher review mandatory; cheap bounded integration. Physical reset trials before unattended use. No kdump or early-boot guarantee. |
 | P6 — usable problem-solving sessions | First concrete agent adapter, session CLI, deterministic decision/build/experiment loop, budgets/checkpoints | `tests/test_sessions.py` and agent tests: session replacement, partial edits, auth loss, duplicate decisions, unknown usage, pause/restart, no waiting-agent calls | Higher review of ownership, scoped edit and replay boundaries; cheaper CLI/adapter work. External CLI-driven attended use may precede the autonomous runner. |
 | P7 — diagnostics and patch bundles | Input/audio/microphone tools and recipes, physical observation records, baseline/patched/revert comparisons | `tests/test_diagnostic_recipes.py` and patch-report checks: time/exposure accounting, missing observations, negative/revert controls, inconclusive results | Higher experimental design/causal analysis; cheaper recipe implementation. No installed-Bazzite mutation or automatic patch publication. |
@@ -293,11 +315,12 @@ Proposed test filenames below are deliverables, not existing passing suites.
 P1/P2/P3 enable inventory → prepare → flash. P4 enables a first supervised physical
 cycle. P6 plus one P7 recipe enables a usable attended problem-solving session.
 P5 and physical/endurance evidence are additionally required for unattended use.
-P5 implementation and P6 software work need not wait for access to the Acer, but
-their hardware claims must wait. Start P7 with missing key-release observations
-unless actual baseline evidence favors another issue; it has a small observable
-input path, not a guaranteed easy fix. Then add microphone routing and audio-loop
-stress with real acoustic observations and exposure counts.
+P5 implementation and P6 software work need not wait for access to the target, but
+their hardware claims must wait. Select the first P7 recipe from the investigation
+goal and observed target capabilities. Input key-release, microphone routing and
+audio-loop stress are initial recipe examples, not a required issue sequence for
+every target. Record physical observations and exposure counts appropriate to the
+actual failure; headless or non-audio targets need different recipes.
 
 ## Validation and non-goals
 

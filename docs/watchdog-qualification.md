@@ -3,7 +3,7 @@
 Quirkbench uses systemd as the only userspace hardware watchdog owner. The
 supervisor sends `sd_notify` service heartbeats; it never opens `/dev/watchdog`.
 An active device and a successful notification test do not qualify recovery from
-a kernel hang. Current Acer hardware coverage remains **untested**.
+a kernel hang. Current target hardware coverage remains **untested**.
 
 ## What is already set up
 
@@ -77,7 +77,7 @@ Malformed profiles still fail validation rather than silently changing policy.
 The existing minimal qualification kernel has no functional watchdog driver or
 lockup detectors. Do not infer watchdog coverage from those earlier VM results.
 Choose the driver after observing the target hardware; no driver is assumed to
-match the Acer merely because of its model name. Keep the normal storage and
+match the target merely because of its model name. Keep the normal storage and
 firmware protection policy. For the reviewed initial driver families,
 `validate_watchdog_kernel(config, driver=...)` requires built-in watchdog core,
 sysfs, the chosen driver, and both lockup detectors, **as well as** the existing
@@ -88,7 +88,7 @@ gate. This does not change the kexec prohibition or enable kdump.
 ## Required physical trials
 
 Run controlled failures only on the externally booted lab target with a person
-able to reset it. Retain target/host timestamps, serial or network diagnostics,
+able to reset it. Retain target/controller timestamps, serial or network diagnostics,
 observed configuration, reset latency, recovery arrival and evidence hashes for
 each trial. Keep raw evidence separate from the final coverage report.
 
@@ -124,7 +124,7 @@ Runtime activation writes only a target `/run/systemd/system.conf.d` drop-in and
 explicitly selected `/proc/sys/kernel` settings after positive boot verification,
 then uses bounded `systemctl daemon-reexec`. Failure may leave the watchdog armed;
 the runtime must report the observation and prevent new scheduling. Configuration
-generation and unit tests never activate the host watchdog.
+generation and unit tests never activate the controller watchdog.
 
 References: [Linux watchdog sysfs ABI](https://github.com/torvalds/linux/blob/master/Documentation/ABI/testing/sysfs-class-watchdog),
 [systemd manager watchdog settings](https://github.com/systemd/systemd/blob/main/man/systemd-system.conf.xml).

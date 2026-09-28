@@ -1,8 +1,14 @@
 # Quirkbench: architecture and v1 contracts
 
-This repository is a local, evidence-first laboratory for Linux experiments. The controller owns scheduling and durable state. A booted target reports capabilities, claims one bounded attempt, runs a locally installed recipe and uploads observations. The physical runtime and OSTree boot control are implemented; actual Acer commissioning remains outstanding. Simulation `smoke` and physical `system-observation` recipes do not claim to reproduce an issue. The [forward product plan](product-roadmap.md) specifies the remaining discovery, provisioning and session work; planned extensions below are not current runtime guarantees.
+This repository is a local, evidence-first laboratory for Linux experiments. The controller owns scheduling and durable state. A booted target reports capabilities, claims one bounded attempt, runs a locally installed recipe and uploads observations. The physical runtime and OSTree boot control are implemented; actual target commissioning remains outstanding. Simulation `smoke` and physical `system-observation` recipes do not claim to reproduce an issue. The [forward product plan](product-roadmap.md) specifies the remaining discovery, provisioning and session work; planned extensions below are not current runtime guarantees.
 
 ## Forward product boundary
+
+Use [controller, target and builder](terminology.md) as distinct roles. The core
+state machine and protocol are independent of target vendor/model/form factor.
+Hardware discovery selects versioned platform profiles and adapters, including
+explicit architecture/boot constraints. Unsupported profiles remain unsupported;
+generic architecture does not imply unqualified universal hardware support.
 
 The installed target OS runs only a read-only inventory collector. A versioned,
 reviewed HardwarePlan maps observations to protected recovery/baseline builds.
@@ -22,7 +28,7 @@ implemented/reviewed before use. See the roadmap for contracts and bounded brief
 
 The controller is authoritative for campaign, job, attempt, lease, and evidence metadata in SQLite. Content-addressed blobs live in an immutable store keyed by SHA-256; their hashes are checked when read and transferred. State changes that authorize work or acknowledge evidence must commit durably before the controller responds. File publication uses a temporary file, flush/fsync, atomic rename, and directory fsync. A backup must capture a consistent database, all referenced blobs, and the complete OSTree content reachable from retained deployment revisions. Restoring verifies both artifact hashes and repository content. A database plus ordinary artifacts alone is not a complete backup when deployment references exist. Retained checkpoints protect deployment manifests and their referenced commits from cleanup.
 
-The target alone runs privileged recipes. The controller can offer artifacts and instructions through the target-facing protocol but cannot run those tasks on its own host. HTTPS uses a server certificate, a device bearer token, bounded request bodies, and a device-scoped artifact endpoint. Administrative operations remain local to the controller. A target journals an outbound operation before sending it; it removes that outbox item only after the server has durably committed and acknowledged it. Retries carry stable identities so a duplicate message is either an idempotent replay or a conflict, never a second execution.
+The target alone runs privileged recipes. The controller can offer artifacts and instructions through the target-facing protocol but cannot run those tasks on the controller. HTTPS uses a server certificate, a device bearer token, bounded request bodies, and a device-scoped artifact endpoint. Administrative operations remain local to the controller. A target journals an outbound operation before sending it; it removes that outbox item only after the server has durably committed and acknowledged it. Retries carry stable identities so a duplicate message is either an idempotent replay or a conflict, never a second execution.
 
 The target's boot mode is an independent fact from experiment outcome. `recovery`, `experiment`, and `simulation` are capability report modes; they are not `PASS` or `FAIL`. A reboot changes the boot identity. Registration of a new boot makes unfinished attempts from an old boot uncertain, while retaining their evidence. An operator must resolve an uncertain attempt explicitly before any new attempt of that work is issued. A lease expiry stops authorization for new execution; it does not erase prior observations or prove that an already-running task stopped.
 
@@ -58,7 +64,7 @@ The original v1 envelope field sets and outcome vocabulary remain frozen. `Exper
 
 ## Composition and deployment boundary
 
-The production backend is minimal Fedora composed with rpm-ostree. The controller builds experimental RPMs inside a resource-bounded rootless Fedora container, then composes a complete filesystem revision. Kernels, modules, initramfs, userspace and default configuration travel together. Matching symbols and source/toolchain identities remain retained build evidence. No experimental package is installed on the controller host or assembled on the target.
+The production backend is minimal Fedora composed with rpm-ostree. The controller builds experimental RPMs inside a resource-bounded rootless Fedora container, then composes a complete filesystem revision. Kernels, modules, initramfs, userspace and default configuration travel together. Matching symbols and source/toolchain identities remain retained build evidence. No experimental package is installed on the controller or assembled on the target.
 
 A signed OSTree repository is served through authenticated HTTPS. Device credentials and repository trust configuration are distinct from agent credentials and signing private keys, which remain on the controller. An experiment authorizes an exact commit, never a moving branch. OSTree supplies object verification, incremental fetching and synchronized deployment transactions; optional static deltas are deferred until measurements justify them.
 
@@ -83,7 +89,7 @@ The protection requirement is that internal disks cannot be accidentally selecte
 
 M1 is achieved. The earlier revised M2 OSTree build/VM qualification was achieved for layout revision 1; [fresh layout revision 2 qualification](v1-qualification.md) records the replacement image results and their limits. Old prototype image results do not qualify the replacement backend. See [recovery and evidence](recovery-and-evidence.md) for the separate selection, reset and diagnostic requirements. Current no-kexec policy means kdump is unavailable until reviewed and implemented.
 
-QEMU tests image assembly, deployment and fallback using disposable internal-disk sentinels and settled OVMF variable snapshots. The [reviewed firmware gate](m2-ostree-review.md) compares effective settings, permits only the exact firmware-owned MTC counter step, and retains raw snapshots. It does not establish Acer hardware behavior or physical recovery. Actual experiments boot directly on the laptop; complete hangs may require human reset.
+QEMU tests image assembly, deployment and fallback using disposable internal-disk sentinels and settled OVMF variable snapshots. The [reviewed firmware gate](m2-ostree-review.md) compares effective settings, permits only the exact firmware-owned MTC counter step, and retains raw snapshots. It does not establish target hardware behavior or physical recovery. Actual experiments boot directly on the target computer; complete hangs may require human reset.
 
 ## Human visibility
 

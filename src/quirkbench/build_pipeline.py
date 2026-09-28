@@ -219,7 +219,7 @@ class ResourceLimits:
 
     @classmethod
     def from_cgroup(cls, root: Path = Path("/sys/fs/cgroup")) -> "ResourceLimits":
-        """Require kernel-enforced CPU and memory cgroup limits at half host.
+        """Require kernel-enforced CPU and memory cgroup limits at half the controller resources.
 
         The Distrobox must be launched with Podman --cpus and --memory. A soft
         estimate or a per-process RLIMIT alone does not cap all compiler jobs.
@@ -232,9 +232,9 @@ class ResourceLimits:
             cpu_quota, cpu_period = int(quota), int(period)
         except (OSError, ValueError, StopIteration) as exc:
             raise BuildError("enforced cgroup CPU and memory limits required") from exc
-        host_cpus = os.cpu_count() or 0
-        if host_cpus < 1 or memory > mem_total // 2 or cpu_quota > max(1, host_cpus // 2) * cpu_period:
-            raise BuildError("container cgroup exceeds half of host CPU or RAM")
+        controller_cpus = os.cpu_count() or 0
+        if controller_cpus < 1 or memory > mem_total // 2 or cpu_quota > max(1, controller_cpus // 2) * cpu_period:
+            raise BuildError("container cgroup exceeds half of controller CPU or RAM")
         if memory < 4 * GIB:
             raise BuildError("container memory limit below 4 GiB; defer build")
         cpus = max(1, cpu_quota // cpu_period)

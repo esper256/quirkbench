@@ -1,10 +1,10 @@
 # Bare-metal experiments, recovery, and diagnostic coverage
 
 Quirkbench experiments boot the candidate Linux kernel directly on the physical
-laptop through its firmware and USB GRUB. QEMU tests Quirkbench's infrastructure:
+target computer through its firmware and USB GRUB. QEMU tests Quirkbench's infrastructure:
 image assembly, kernel/initramfs smoke boot, one-shot consumption, recovery
 selection, and storage/firmware protection under controlled fixtures. It cannot
-establish that an Acer audio, input, power-management, or microphone issue is
+establish that an target audio, input, power-management, or microphone issue is
 reproduced or fixed. A hardware-specific candidate need not support virtual
 hardware; any VM smoke requirement must declare the applicable hardware profile.
 
@@ -46,7 +46,7 @@ acknowledgement. Returning to recovery without a dump is an observation, not
 proof of a kernel crash. A silent or ambiguous execution remains uncertain and
 requires reconciliation; it is not automatically repeated.
 
-## Failure coverage to qualify on the Acer
+## Failure coverage to qualify on the target
 
 Capture-kernel rows below describe deferred capability, not current image behavior.
 The [forward plan](product-roadmap.md) prioritizes actual watchdog driver support,
@@ -72,7 +72,7 @@ automatic recovery and a useful trace from every arbitrarily early hard hang.
 
 ## Current implementation versus planned capability
 
-The historical revised M2 OSTree build and VM qualification was achieved for layout revision 1; [recorded results](ostree-review.md) include explicit initramfs-load failure and kernel panic/reset/recovery. Earlier custom-bundle work produced kernel, initramfs and image artifacts; those historical results do not qualify the replacement OSTree deployment. No such build or VM result constitutes Acer crash-recovery acceptance.
+The historical revised M2 OSTree build and VM qualification was achieved for layout revision 1; [recorded results](ostree-review.md) include explicit initramfs-load failure and kernel panic/reset/recovery. Earlier custom-bundle work produced kernel, initramfs and image artifacts; those historical results do not qualify the replacement OSTree deployment. No such build or VM result constitutes target crash-recovery acceptance.
 
 The current kernel protection policy explicitly disables KEXEC and KEXEC_FILE,
 so **kdump is not implemented or available in the current image**. Enabling it

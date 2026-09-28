@@ -1,5 +1,12 @@
 # Quirkbench agent instructions
 
+Use [the terminology and scope rules](docs/terminology.md): **controller** builds
+and runs investigations; **target** boots experiments and produces evidence.
+Quirkbench is hardware-generic, not tied to one laptop/vendor. Keep platform quirks
+in reviewed profiles/adapters. Preserve public wire names such as `device_id` and
+technical names such as the network `--host` option; do not break compatibility
+for vocabulary changes. Never equate generic design with universal tested support.
+
 Preserve agent quota. Read [the testing policy](docs/testing-policy.md) before
 choosing validation. This policy applies to delegated work as well.
 

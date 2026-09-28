@@ -103,7 +103,7 @@ class RecoveryProfile:
 def systemd_watchdog_configuration(profile: RecoveryProfile, *, kernel_release: str,
                                    hardware_id: str, kernel_build_id: str | None = None,
                                    qualification_run: bool = False) -> str:
-    """Generate staged configuration, never change the running host manager.
+    """Generate staged configuration, never change the running controller manager.
 
 The explicit qualification mode is for a human-observed fault trial; it does
 not mark the profile qualified. A changed kernel/hardware invalidates coverage.
@@ -238,7 +238,7 @@ armed watchdog; the caller must stop scheduling and report the observed state.
     if any(not path.is_file() for path in paths):
         raise ValueError("qualified lockup setting unavailable in this kernel")
     # _persist writes canonical JSON, so configuration text uses its own atomic
-    # fsync+replace path. No shell or host system package manager is involved.
+    # fsync+replace path. No shell or controller OS package manager is involved.
     directory = Path(config_dir)
     directory.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".quirkbench-watchdog-", dir=directory)

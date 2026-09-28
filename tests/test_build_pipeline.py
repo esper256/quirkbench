@@ -304,7 +304,7 @@ def test_failed_stage_keeps_log_but_excludes_target_rootfs(tmp_path: Path, monke
     assert not (pending[0] / "sysroot").exists()
 
 
-def test_resource_limits_require_enforced_half_host_cgroup(tmp_path: Path, monkeypatch) -> None:
+def test_resource_limits_require_enforced_half_controller_cgroup(tmp_path: Path, monkeypatch) -> None:
     (tmp_path / "memory.max").write_text(str(4 * 1024**3))
     (tmp_path / "cpu.max").write_text("400000 100000\n")
     original_read_text = Path.read_text

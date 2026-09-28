@@ -61,7 +61,7 @@ class ImageInputs:
         protected=('/dev','/proc','/sys','/run','/boot','/etc','/usr','/media','/mnt')
         parent=self.output.parent.resolve()
         if any(parent==Path(p) or Path(p) in parent.parents for p in protected):
-            raise ImageError('output cannot be a host system/device path')
+            raise ImageError('output cannot be a controller system/device path')
         for source in (self.recovery_kernel,self.recovery_initramfs,self.recovery_config):
             if source is None or not source.is_absolute() or source.is_symlink() or not source.is_file():
                 raise ImageError(f'missing absolute regular input: {source}')

@@ -132,7 +132,7 @@ def test_panic_injection_is_explicit_and_qemu_only(tmp_path,capsys):
     trigger=tmp_path/'sysrq-trigger'
     args={'quirkbench.mode':'candidate','quirkbench.smoke':'1','quirkbench.fault':'panic'}
     with pytest.raises(BootError,match='requires'):
-        trigger_candidate_panic(args,'Acer',trigger=trigger)
+        trigger_candidate_panic(args,'PhysicalTarget',trigger=trigger)
     assert not trigger.exists()
     with pytest.raises(BootError,match='requires'):
         trigger_candidate_panic({**args,'quirkbench.smoke':'0'},'QEMU',trigger=trigger)

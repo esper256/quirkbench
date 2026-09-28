@@ -8,7 +8,7 @@ returns through recovery; it cannot prepare or authorize the next experiment.
 The [forward product plan](product-roadmap.md) adds hardware-tailored builds and
 automatic first-boot provisioning. The six-partition layout remains unchanged.
 The existing image is an infrastructure artifact; its kernel still needs the
-actual Acer/network/watchdog hardware profile before claiming device readiness.
+actual target hardware profile, including network and watchdog support before claiming device readiness.
 
 ## Layout revision 2
 
@@ -84,7 +84,7 @@ and 0600 for credentials. `runtime.json` contains:
 ```json
 {
   "schema_version": 1,
-  "device_id": "acer",
+  "device_id": "target-01",
   "controller_url": "https://192.168.1.10:8443",
   "ca": "controller-ca.pem",
   "token_file": "device-token",
@@ -129,8 +129,8 @@ Privileged cleanup stays in recovery; a library script receives no arbitrary dis
 wipe authority. Kernel-coupled tools belong in the experimental deployment.
 
 Begin maintenance with the controller CLI after pausing all campaigns on the device:
-`quirkbench library-maintenance begin acer --selection HASH`. The durable fence
-prevents resume until `quirkbench library-maintenance finish acer`. The target
+`quirkbench library-maintenance begin target-01 --selection HASH`. The durable fence
+prevents resume until `quirkbench library-maintenance finish target-01`. The target
 `python3 -m quirkbench.library_maintenance` command verifies the fence, downloads through authenticated resumable
 artifact transport, publishes verified packs atomically, then restores read-only
 access. Backup/checkpoint retention includes selections, manifests and file content.
@@ -147,7 +147,7 @@ missing observation is reported honestly; software heartbeat is not hardware pro
 This hardware reset primarily protects the experimental OS. Recovery services the
 same watchdog if configured/armed; there is no second hardware-watchdog subsystem.
 The current built kernels lack a usable driver, so integration code is not yet
-Acer reset coverage. The roadmap distinguishes exact-kernel qualification from a
+target reset coverage. The roadmap distinguishes exact-kernel qualification from a
 future explicit campaign authorization to activate it on experimental kernels.
 
 The supervisor has systemd service supervision, caller-driven heartbeat and bounded
@@ -173,7 +173,7 @@ live uploads, stale leases, uncertain arming, controller restart, pause, bounded
 finish, service deadlines and missing watchdog observations. Real QEMU acceptance
 must commission this layout, boot recovery/candidate/fallback and preserve fixed
 recovery, library, internal sentinels and effective firmware settings. Old M2 VM
-results qualify only the old image. Acer USB/reset/suspend/crash-capture coverage
+results qualify only the old image. target USB/reset/suspend/crash-capture coverage
 and the campaign exceeding 30 hours remain explicit hardware gates.
 
 [Recorded layout-2 qualification](v1-qualification.md) includes the fresh ten-boot
@@ -184,5 +184,5 @@ For the first attended protocol trial, adapt
 the placeholder deployment hash with the artifact ID printed by `compose`. Register
 the provisioned target, create a paused campaign, submit the experiment, and resume
 explicitly. `system-observation` deliberately returns `INCONCLUSIVE`: its logs prove
-protocol/boot observations, not a fix for any Acer issue. Require independently
+protocol/boot observations, not a fix for any target issue. Require independently
 qualified reset coverage before using this mechanism unattended.
