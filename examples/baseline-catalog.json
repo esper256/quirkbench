@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "catalog_revision": "example-only-v1",
+  "entries": [
+    {
+      "schema_version": 1,
+      "baseline_id": "example-fedora44-x86_64-v1",
+      "profile_id": "generic-x86_64-uefi-usb-v1",
+      "profile_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "platform_adapter_id": "x86_64-uefi-usb-v1",
+      "protection_policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "architecture": "x86_64",
+      "boot_method": "uefi",
+      "fedora_release": "44",
+      "kernel_source_nevra": "kernel-0:6.15.1-1.fc44.src",
+      "kernel_srpm_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "kernel_config_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "userspace_source_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "rpm_snapshot_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "build_rpm_lock_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "target_rpm_lock_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "toolchain_lock_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "repo_config_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "dracut_config_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+      "builder_image_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+      "packages": [
+        {"name": "NetworkManager", "nevra": "NetworkManager-1:1.50.0-1.fc44.x86_64"},
+        {"name": "fedora-release", "nevra": "fedora-release-0:44-1.noarch"}
+      ],
+      "build_recipe": {"recipe_id": "fedora-kernel-rpm-v1", "digest": "7777777777777777777777777777777777777777777777777777777777777777"},
+      "target_recipes": [{"recipe_id": "system-observation", "digest": "8888888888888888888888888888888888888888888888888888888888888888"}],
+      "replacement_slots": {
+        "kernel": {"package": "kernel-quirkbench", "relative_path": "rpms/kernel-quirkbench.rpm"},
+        "userspace": {"package": "quirkbench-experiment-userspace", "relative_path": "rpms/quirkbench-experiment-userspace.rpm"}
+      }
+    }
+  ]
+}

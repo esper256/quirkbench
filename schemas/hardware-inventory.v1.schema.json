@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quirkbench:schema:hardware-inventory:v1",
+  "title": "HardwareInventory v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "collector_revision", "collected_at", "platform", "observations", "summary"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "collector_revision": {"const": "passive-sysfs-v1"},
+    "collected_at": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"},
+    "platform": {
+      "type": "object", "additionalProperties": false,
+      "required": ["architecture", "boot_method", "collection_environment"],
+      "properties": {
+        "architecture": {"type": "string", "minLength": 1, "maxLength": 64},
+        "boot_method": {"enum": ["uefi", "unknown"]},
+        "collection_environment": {"enum": ["recovery", "installed_os"]}
+      }
+    },
+    "observations": {"type": "array", "maxItems": 8192, "items": {"$ref": "#/$defs/observation"}},
+    "summary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state", "limits_version", "observation_count", "partial_reasons"],
+      "properties": {
+        "state": {"enum": ["complete", "partial"]},
+        "limits_version": {"type": "integer", "const": 1},
+        "observation_count": {"type": "integer", "minimum": 0, "maximum": 8192},
+        "partial_reasons": {"type": "array", "uniqueItems": true, "items": {"enum": ["collection_deadline", "item_limit", "probe_limit", "probe_failure", "report_limit"]}}
+      }
+    }
+  },
+  "$defs": {
+    "observation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["key", "source_kind", "status", "value"],
+      "properties": {
+        "key": {"type": "string", "maxLength": 384},
+        "source_kind": {"enum": ["sysfs", "procfs"]},
+        "status": {"enum": ["observed", "absent", "permission_denied", "tool_missing", "timed_out", "truncated"]},
+        "value": {"type": ["string", "integer", "null"]}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "key": {"pattern": "^pci\\.[A-Za-z0-9][A-Za-z0-9:._-]{0,127}\\.(vendor|device|class|subsystem_vendor|subsystem_device)$"},
+            "source_kind": {"const": "sysfs"},
+            "value": {"oneOf": [{"type": "string", "pattern": "^(0x)?[0-9A-Fa-f]{1,8}$"}, {"type": "null"}]}
+          }
+        },
+        {
+          "properties": {
+            "key": {"pattern": "^usb\\.[A-Za-z0-9][A-Za-z0-9:._-]{0,127}\\.(idVendor|idProduct|bDeviceClass|bDeviceSubClass|bDeviceProtocol)$"},
+            "source_kind": {"const": "sysfs"},
+            "value": {"oneOf": [{"type": "string", "pattern": "^(0x)?[0-9A-Fa-f]{1,8}$"}, {"type": "null"}]}
+          }
+        },
+        {
+          "properties": {
+            "key": {"pattern": "^net\\.[A-Za-z0-9][A-Za-z0-9:._-]{0,127}\\.type$"},
+            "source_kind": {"const": "sysfs"},
+            "value": {"oneOf": [{"type": "string", "pattern": "^[0-9]{1,6}$"}, {"type": "null"}]}
+          }
+        },
+        {
+          "properties": {
+            "key": {"pattern": "^net\\.[A-Za-z0-9][A-Za-z0-9:._-]{0,127}\\.operstate$"},
+            "source_kind": {"const": "sysfs"},
+            "value": {"enum": ["unknown", "notpresent", "down", "lowerlayerdown", "testing", "dormant", "up", null]}
+          }
+        },
+        {
+          "properties": {
+            "key": {"pattern": "^(pci|usb|net)\\.([A-Za-z0-9][A-Za-z0-9:._-]{0,127}\\.)?enumeration$"},
+            "source_kind": {"const": "sysfs"}, "status": {"const": "permission_denied"}, "value": {"type": "null"}
+          }
+        },
+        {
+          "properties": {"key": {"const": "dmi.chassis_type"}, "source_kind": {"const": "sysfs"},
+                         "value": {"oneOf": [{"type": "string", "pattern": "^(?:[1-9]|[12][0-9]|3[0-6])$"}, {"type": "null"}]}}
+        },
+        {
+          "properties": {"key": {"const": "memory.total_kib"}, "source_kind": {"const": "procfs"},
+                         "value": {"oneOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]}}
+        }
+      ],
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "observed"}}}, "then": {"properties": {"value": {"not": {"type": "null"}}}}},
+        {"if": {"properties": {"status": {"enum": ["absent", "permission_denied", "tool_missing", "timed_out", "truncated"]}}}, "then": {"properties": {"value": {"type": "null"}}}}
+      ]
+    }
+  }
+}

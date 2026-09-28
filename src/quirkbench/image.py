@@ -432,6 +432,7 @@ def _builder_identity():
     package=Path(__file__).resolve().parent
     assets=package.parents[1]/'target-assets'
     sources={f'python/{path.name}':path for path in package.glob('*.py')}
+    sources.update({f'python/recipes/{path.name}':path for path in (package/'recipes').glob('*.json')})
     sources.update({f'assets/{name}':assets/name for name in
                     ('quirkbench-recovery.service','quirkbench-candidate.service','quirkbench-supervisor.service','quirkbench-supervisor-failure.service','var.mount','tmp.mount')})
     return hashlib.sha256(canonical({name:sha256_file(path) for name,path in sorted(sources.items())})).hexdigest()

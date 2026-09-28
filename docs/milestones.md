@@ -2,7 +2,9 @@
 
 The [product roadmap](product-roadmap.md) is the forward plan; the
 [handoff packets](implementation-handoff.md) define implementation-sized tasks and
-[contracts](implementation-contracts.md) define their boundaries.
+[contracts](implementation-contracts.md) define their boundaries. The
+[implementation progress log](implementation-progress.md) records completed
+software packets without treating them as image or hardware qualification.
 
 | Milestone | Current scope and remaining gate |
 | --- | --- |

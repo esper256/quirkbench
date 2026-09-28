@@ -26,6 +26,20 @@ def parser():
     submit = actions.add_parser('submit'); submit.add_argument('id'); submit.add_argument('experiment', type=Path)
     budget = actions.add_parser('budget'); budget.add_argument('id'); budget.add_argument('--seconds', type=float, default=28800); budget.add_argument('--tokens', type=int, default=1000000)
     artifact = commands.add_parser('artifact'); artifact.add_argument('action', choices=['put']); artifact.add_argument('file', type=Path)
+    operation = commands.add_parser('operation', help='read durable operation records')
+    operation_actions = operation.add_subparsers(dest='action', required=True)
+    operation_status = operation_actions.add_parser('status', help='read one operation without invoking recovery or scheduling')
+    operation_status.add_argument('operation_id'); operation_status.add_argument('--json', action='store_true')
+    session = commands.add_parser('session', help='durable investigation observation records')
+    session_actions = session.add_subparsers(dest='action', required=True)
+    observations = session_actions.add_parser('observations', help='list typed human requests and answers')
+    observations.add_argument('session_id'); observations.add_argument('--json', action='store_true')
+    observations.add_argument('--after', type=int, default=0); observations.add_argument('--limit', type=int, default=20)
+    observation = session_actions.add_parser('observation', help='read one complete human request and answer')
+    observation.add_argument('session_id'); observation.add_argument('--request', required=True); observation.add_argument('--json', action='store_true')
+    respond = session_actions.add_parser('respond', help='durably answer a human request')
+    respond.add_argument('session_id'); respond.add_argument('--request', required=True)
+    respond.add_argument('--file', type=Path, required=True); respond.add_argument('--request-id', required=True)
     backup = commands.add_parser('backup'); backup.add_argument('destination', type=Path)
     restore = commands.add_parser('restore'); restore.add_argument('backup', type=Path)
     resolve = commands.add_parser('resolve'); resolve.add_argument('attempt_id'); resolve.add_argument('disposition', choices=['retry','abandon']); resolve.add_argument('--note', required=True)
@@ -33,7 +47,7 @@ def parser():
     agent = commands.add_parser('agent-step'); agent.add_argument('campaign_id'); agent.add_argument('argv', nargs=argparse.REMAINDER)
     serve = commands.add_parser('serve'); serve.add_argument('--host', default='127.0.0.1', help='controller service bind address'); serve.add_argument('--port', type=int, default=8443); serve.add_argument('--allow-lan', action='store_true'); serve.add_argument('--cert', required=True); serve.add_argument('--key', required=True); serve.add_argument('--tokens-file', type=Path, required=True)
     target = commands.add_parser('target'); target.add_argument('--url', required=True); target.add_argument('--ca', required=True); target.add_argument('--token-file', type=Path, required=True); target.add_argument('--report', type=Path, required=True); target.add_argument('--once', action='store_true'); target.add_argument('--interval', type=float, default=5)
-    watch = commands.add_parser('watch'); watch.add_argument('campaign_id'); watch.add_argument('--interval', type=float, default=2); watch.add_argument('--once', action='store_true'); watch.add_argument('--json', action='store_true')
+    watch = commands.add_parser('watch'); watch.add_argument('campaign_id'); watch.add_argument('--interval', type=float, default=2); watch.add_argument('--once', action='store_true'); watch.add_argument('--json', action='store_true'); watch.add_argument('--session', help='include human requests for this session')
     build = commands.add_parser('build',help='build pinned source manifests inside the dedicated Fedora container'); build.add_argument('manifest',type=Path); build.add_argument('--workspace',type=Path,required=True); build.add_argument('--campaign')
     image = commands.add_parser('image',help='assemble a new regular-file USB image'); image.add_argument('manifest',type=Path)
     qualify = commands.add_parser('qualify-image',help='run ten real UEFI recovery, candidate, load-failure, panic and fallback trials'); qualify.add_argument('image',type=Path); qualify.add_argument('--manifest',type=Path,required=True); qualify.add_argument('--ovmf-code',type=Path,required=True); qualify.add_argument('--ovmf-vars',type=Path,required=True); qualify.add_argument('--work',type=Path,required=True); qualify.add_argument('--timeout',type=int,default=180)
@@ -47,6 +61,70 @@ def parser():
 
 def main(argv=None):
     args = parser().parse_args(argv)
+    if args.command == 'session':
+        from .contracts import Conflict, ContractError
+        from .operations import operation_response
+        from .product_contracts import MAX_DOCUMENT_BYTES
+        try:
+            if args.reserve_gib < 0:
+                raise ContractError('reserve must be nonnegative')
+            raw = None
+            if args.action == 'respond':
+                with args.file.open('rb') as stream:
+                    raw = stream.read(MAX_DOCUMENT_BYTES + 1)
+            controller = Controller(args.state.resolve(), reserve_bytes=int(args.reserve_gib*1024**3))
+            if args.action == 'observations':
+                data = controller.list_observations(args.session_id, after=args.after, limit=args.limit)
+            elif args.action == 'observation':
+                data = controller.observation_detail(args.session_id, args.request)
+            else:
+                data = controller.respond_observation(args.session_id, args.request, args.request_id, raw)
+            if args.action == 'respond' or args.json:
+                print(json.dumps(operation_response(data=data), sort_keys=True))
+            elif args.action == 'observations':
+                for item in data['items']:
+                    request = item['request']
+                    print(f"{request['request_id']} {request['kind']} {item['state']}: {request['prompt']}")
+                    if item.get('truncated'):
+                        print(f"  Full record: quirkbench session observation {args.session_id} --request {request['request_id']}")
+                if data['next_cursor'] is not None:
+                    print(f"More observations: --after {data['next_cursor']}")
+            else:
+                print(json.dumps(data, indent=2, sort_keys=True))
+            return 0
+        except Exception as exc:
+            code = 'CONFLICT' if isinstance(exc, Conflict) else 'INVALID_INPUT' if isinstance(exc, (ContractError, FileNotFoundError, IsADirectoryError)) else 'INFRASTRUCTURE'
+            status = 3 if code == 'CONFLICT' else 2 if code == 'INVALID_INPUT' else 5
+            message = str(exc)[:512] if code != 'INFRASTRUCTURE' else 'observation service unavailable'
+            if args.action == 'respond' or args.json:
+                print(json.dumps(operation_response(error={'code': code, 'message': message,
+                                                           'retryable': code == 'INFRASTRUCTURE'}), sort_keys=True))
+            else:
+                print(f'{code}: {message}', file=sys.stderr)
+            return status
+    if args.command == 'operation':
+        from .contracts import Conflict, ContractError
+        from .operations import operation_response
+        try:
+            if args.reserve_gib < 0:
+                raise ContractError('reserve must be nonnegative')
+            answer = Controller(args.state.resolve(), reserve_bytes=int(args.reserve_gib*1024**3)).operation_status(args.operation_id)
+            if args.json:
+                print(json.dumps(answer, sort_keys=True))
+            else:
+                data = answer['data']
+                print(f"{data['id']} {data['kind']} {data['state']}")
+            return 0
+        except Exception as exc:
+            code = 'CONFLICT' if isinstance(exc, Conflict) else 'INVALID_INPUT' if isinstance(exc, ContractError) else 'INFRASTRUCTURE'
+            status = 3 if code == 'CONFLICT' else 2 if code == 'INVALID_INPUT' else 5
+            message = str(exc)[:512] if code != 'INFRASTRUCTURE' else 'operation status unavailable'
+            if args.json:
+                print(json.dumps(operation_response(error={'code': code, 'message': message,
+                                                           'retryable': code == 'INFRASTRUCTURE'}), sort_keys=True))
+            else:
+                print(f'{code}: {message}', file=sys.stderr)
+            return status
     try:
         if args.reserve_gib < 0:
             raise ValueError('reserve must be nonnegative')
@@ -176,6 +254,12 @@ def main(argv=None):
                     raise ValueError('watch interval must be positive')
                 while True:
                     snapshot = controller.monitor(args.campaign_id)
+                    if args.session:
+                        snapshot['observations'] = controller.list_observations(args.session)
+                        with controller.transaction() as db:
+                            row = db.execute('SELECT campaign FROM observation_requests WHERE session=? LIMIT 1', (args.session,)).fetchone()
+                        if row is not None and row['campaign'] != args.campaign_id:
+                            raise ValueError('observation session belongs to another campaign')
                     if args.json:
                         print(json.dumps(snapshot, sort_keys=True), flush=True)
                     else:
@@ -200,12 +284,12 @@ def main(argv=None):
             elif args.command == 'serve':
                 from .transport import make_server
                 tokens = json.loads(args.tokens_file.read_bytes())
-                server = make_server(controller, host=args.host, port=args.port, certfile=args.cert, keyfile=args.key, device_tokens=tokens, allow_lan=args.allow_lan)
-                controller.startup()
-                try:
-                    server.serve_forever()
-                finally:
-                    server.server_close()
+                with controller.lifecycle():
+                    server = make_server(controller, host=args.host, port=args.port, certfile=args.cert, keyfile=args.key, device_tokens=tokens, allow_lan=args.allow_lan)
+                    try:
+                        server.serve_forever()
+                    finally:
+                        server.server_close()
                 answer = {'stopped': True}
             else:
                 raise ValueError('unknown command')

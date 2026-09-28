@@ -2,6 +2,7 @@
 from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import asdict
+import fcntl
 import hmac
 import json
 import os
@@ -13,6 +14,7 @@ import time
 import uuid
 from .contracts import sha256, CapabilityReport, Checkpoint, Conflict, ContractError, Experiment, Progress, Result, canonical, digest, identifier
 from .store import ArtifactStore, StoragePressure, atomic_write, sync_directory
+from .operations import operation_intent, operation_response
 
 MIGRATIONS = ["""
 CREATE TABLE devices(id TEXT PRIMARY KEY, boot TEXT NOT NULL, generation INTEGER NOT NULL, report TEXT NOT NULL);
@@ -46,25 +48,213 @@ ALTER TABLE attempts ADD COLUMN recovery_boot TEXT;
 ALTER TABLE attempts ADD COLUMN recovery_returned REAL;
 """, """
 CREATE TABLE maintenance(device TEXT PRIMARY KEY REFERENCES devices(id), request TEXT NOT NULL, selection TEXT NOT NULL);
+""", """
+CREATE TABLE operations(id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, request_digest TEXT NOT NULL, input_digest TEXT NOT NULL, kind TEXT NOT NULL, campaign TEXT REFERENCES campaigns(id), device TEXT REFERENCES devices(id), state TEXT NOT NULL CHECK(state IN ('QUEUED','RUNNING','WAITING','SUCCEEDED','FAILED','INTERRUPTED')), stage TEXT, worker_epoch INTEGER, worker_generation INTEGER NOT NULL DEFAULT 0, worker_unit TEXT, started REAL, deadline REAL, heartbeat REAL, progress TEXT, result_digest TEXT, error_digest TEXT, wait_event TEXT, created REAL NOT NULL, updated REAL NOT NULL);
+CREATE TABLE operation_refs(operation TEXT NOT NULL REFERENCES operations(id), role TEXT NOT NULL CHECK(role IN ('input','source','output')), digest TEXT NOT NULL, PRIMARY KEY(operation,role,digest), FOREIGN KEY(operation,digest) REFERENCES refs(owner,digest));
+CREATE TABLE operation_events(id INTEGER PRIMARY KEY, operation TEXT NOT NULL REFERENCES operations(id), created REAL NOT NULL, kind TEXT NOT NULL, document TEXT NOT NULL);
+CREATE INDEX operation_events_scope ON operation_events(operation,id);
+""", """
+CREATE TABLE controller_lifecycle(id INTEGER PRIMARY KEY CHECK(id=1), epoch INTEGER NOT NULL CHECK(epoch>=0));
+INSERT INTO controller_lifecycle(id,epoch) VALUES(1,0);
+ALTER TABLE operations ADD COLUMN queued_epoch INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE operations ADD COLUMN stage_dir TEXT;
+""", """
+ALTER TABLE operations ADD COLUMN worker_boot_id TEXT;
+""", """
+CREATE TABLE observation_requests(seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, session TEXT NOT NULL, campaign TEXT NOT NULL REFERENCES campaigns(id), attempt TEXT REFERENCES attempts(id), document TEXT NOT NULL, issued_at TEXT NOT NULL, deadline_at TEXT NOT NULL);
+CREATE INDEX observation_requests_session ON observation_requests(session,seq);
+CREATE TABLE observation_responses(request TEXT PRIMARY KEY REFERENCES observation_requests(id), document TEXT NOT NULL, received_at REAL NOT NULL, late INTEGER NOT NULL CHECK(late IN (0,1)));
+CREATE TABLE observation_response_commands(id TEXT PRIMARY KEY, request TEXT NOT NULL REFERENCES observation_requests(id), document TEXT NOT NULL);
 """]
 
 def uid():
     return uuid.uuid4().hex
 
+
+def validate_boot_id(value):
+    if not isinstance(value, str):
+        raise ContractError('invalid controller boot identity')
+    try:
+        parsed = str(uuid.UUID(value))
+    except (ValueError, AttributeError) as exc:
+        raise ContractError('invalid controller boot identity') from exc
+    if parsed != value:
+        raise ContractError('invalid controller boot identity')
+    return parsed
+
+
+def controller_boot_id():
+    """Identify the current kernel boot, not a target boot or machine identity."""
+    raw = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    return validate_boot_id(raw)
+
+
+class _LifecycleOwner:
+    """A held coordinator lock and its durable epoch; no worker launcher yet."""
+
+    def __init__(self, controller, epoch):
+        self.controller = controller
+        self.epoch = epoch
+        self.closed = False
+
+    def claim(self, operation_id, *, stage, deadline):
+        """Reserve one pure image-preparation stage for a future service worker."""
+        if self.closed or self.controller._lifecycle_owner is not self:
+            raise Conflict('controller lifecycle ownership ended')
+        identifier(stage)
+        if not isinstance(deadline, (int, float)) or isinstance(deadline, bool) or not self.controller.clock() < deadline < float('inf'):
+            raise ContractError('worker deadline must be finite and in the future')
+        controller = self.controller
+        with controller.transaction() as db:
+            current = db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
+            if current != self.epoch:
+                raise Conflict('controller lifecycle epoch changed')
+            if db.execute('SELECT 1 FROM operations WHERE worker_unit IS NOT NULL LIMIT 1').fetchone():
+                raise Conflict('previous worker units require termination reconciliation')
+            row = db.execute('SELECT * FROM operations WHERE id=?', (identifier(operation_id),)).fetchone()
+            if row is None:
+                raise ContractError('unknown operation')
+            if row['state'] != 'QUEUED' or row['queued_epoch'] != self.epoch:
+                raise Conflict('operation is not queued in the current lifecycle')
+            if row['kind'] != 'image_prepare':
+                raise Conflict('worker dispatch for this operation kind is not implemented')
+            if row['campaign'] is not None:
+                campaign = controller._campaign(db, row['campaign'])
+                if campaign['state'] != 'RUNNING':
+                    raise Conflict('campaign pause blocks the next operation stage')
+            generation = row['worker_generation'] + 1
+            unit = f'quirkbench-worker-{operation_id}-{generation}.service'
+            boot_id = validate_boot_id(controller.boot_id_reader())
+            workers = controller.root / 'workers'
+            workers.mkdir(mode=0o700, exist_ok=True)
+            if workers.is_symlink():
+                raise Conflict('worker staging root cannot be a symlink')
+            operation_stage = workers / operation_id
+            operation_stage.mkdir(mode=0o700, exist_ok=True)
+            if operation_stage.is_symlink():
+                raise Conflict('operation staging root cannot be a symlink')
+            # A transaction rollback leaves its directory unreferenced. A fresh
+            # claim gets a new path and never reuses possibly changed bytes.
+            private_stage = operation_stage / f'{generation}-{uid()}'
+            private_stage.mkdir(mode=0o700)
+            now = controller.clock()
+            db.execute("UPDATE operations SET state='RUNNING',stage=?,stage_dir=?,worker_epoch=?,worker_generation=?,worker_unit=?,worker_boot_id=?,started=?,deadline=?,heartbeat=?,updated=? WHERE id=?",
+                       (stage, str(private_stage), self.epoch, generation, unit, boot_id, now, deadline, now, now, operation_id))
+            db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
+                       (operation_id, now, 'claimed', canonical({'stage': stage, 'worker_epoch': self.epoch,
+                                                                  'worker_generation': generation, 'worker_unit': unit}).decode()))
+            return controller._operation_status(db, operation_id)
+
+    def dispatch(self, operation_id, *, stage, deadline, services):
+        """Claim before requesting a service; ambiguous launch retains its unit."""
+        from .worker_service import WorkerServiceError
+        services.preflight(self.controller.root, deadline)
+        claimed = self.claim(operation_id, stage=stage, deadline=deadline)
+        try:
+            services.launch(claimed, self.controller.root)
+        except BaseException as exc:
+            definitely_unlaunched = isinstance(exc, WorkerServiceError) and not exc.possibly_started
+            terminal = (self.controller.store.put(canonical({
+                'schema_version': 1, 'code': 'WORKER_LAUNCH_REJECTED',
+                'message': 'worker setup changed before launch', 'retryable': True}))
+                        if definitely_unlaunched else None)
+            with self.controller.transaction() as db:
+                row = db.execute('SELECT * FROM operations WHERE id=?', (operation_id,)).fetchone()
+                current = db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
+                if (row is not None and current == self.epoch and row['state'] == 'RUNNING'
+                        and row['worker_epoch'] == self.epoch
+                        and row['worker_generation'] == claimed['worker_generation']
+                        and row['worker_unit'] == claimed['worker_unit']):
+                    now = self.controller.clock()
+                    if definitely_unlaunched:
+                        db.execute('INSERT OR IGNORE INTO refs(owner,digest) VALUES(?,?)',
+                                   (operation_id, terminal.sha256))
+                        db.execute("UPDATE operations SET state='FAILED',worker_epoch=NULL,worker_unit=NULL,worker_boot_id=NULL,stage_dir=NULL,error_digest=?,updated=? WHERE id=?",
+                                   (terminal.sha256, now, operation_id))
+                    else:
+                        db.execute("UPDATE operations SET state='INTERRUPTED',worker_epoch=NULL,updated=? WHERE id=?",
+                                   (now, operation_id))
+                    db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
+                               (operation_id, now, 'launch_rejected' if definitely_unlaunched else 'launch_uncertain',
+                                canonical({'worker_unit': claimed['worker_unit']}).decode()))
+            raise
+        return claimed
+
+    def reconcile_units(self, services):
+        """Clear ownership only after a full service/cgroup stop is established."""
+        if self.closed or self.controller._lifecycle_owner is not self:
+            raise Conflict('controller lifecycle ownership ended')
+        with self.controller.transaction() as db:
+            current = db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
+            if current != self.epoch:
+                raise Conflict('controller lifecycle epoch changed')
+            rows = [dict(row) for row in db.execute(
+                "SELECT id,state,worker_unit,worker_boot_id,worker_generation FROM operations WHERE worker_unit IS NOT NULL ORDER BY id")]
+        cleared = []
+        for saved in rows:
+            if saved['state'] not in ('INTERRUPTED', 'SUCCEEDED', 'FAILED'):
+                raise Conflict('active worker must finish or be interrupted before reconciliation')
+            # Never hold SQLite open while a manager stop or cgroup check waits.
+            proof = services.stop_and_verify(saved['worker_unit'], saved['worker_boot_id'])
+            if proof not in ('stopped', 'previous_boot'):
+                raise Conflict('worker stop proof is unavailable')
+            with self.controller.transaction() as db:
+                current = db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
+                row = db.execute('SELECT * FROM operations WHERE id=?', (saved['id'],)).fetchone()
+                if (current != self.epoch or row is None
+                        or row['worker_unit'] != saved['worker_unit']
+                        or row['worker_boot_id'] != saved['worker_boot_id']
+                        or row['worker_generation'] != saved['worker_generation']
+                        or row['state'] not in ('INTERRUPTED', 'SUCCEEDED', 'FAILED')):
+                    raise Conflict('worker identity changed during reconciliation')
+                now = self.controller.clock()
+                db.execute('UPDATE operations SET worker_unit=NULL,worker_boot_id=NULL,updated=? WHERE id=?',
+                           (now, saved['id']))
+                db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
+                           (saved['id'], now, 'worker_stopped', canonical({'proof': proof}).decode()))
+                cleared.append(saved['id'])
+        return cleared
+
 class Controller:
-    def __init__(self, root, clock=time.time, reserve_bytes=20 * 1024**3, deployment_repository=None):
+    def __init__(self, root, clock=time.time, reserve_bytes=20 * 1024**3, deployment_repository=None,
+                 boot_id_reader=controller_boot_id):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.clock = clock
+        self.boot_id_reader = boot_id_reader
         self.deployment_repository = deployment_repository
+        self._lifecycle_owner = None
         self.store = ArtifactStore(self.root / 'artifacts', reserve_bytes=reserve_bytes)
         self.db_path = self.root / 'controller.sqlite'
-        with self._connect() as db:
-            version = db.execute('PRAGMA user_version').fetchone()[0]
-            if version > len(MIGRATIONS):
-                raise ContractError('database created by newer software')
-            for number in range(version, len(MIGRATIONS)):
-                db.executescript('BEGIN IMMEDIATE;\n' + MIGRATIONS[number] + f'\nPRAGMA user_version={number + 1};\nCOMMIT;')
+        with (self.root / 'migration.lock').open('a+b') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            with self._connect() as db:
+                version = db.execute('PRAGMA user_version').fetchone()[0]
+                if version > len(MIGRATIONS):
+                    raise ContractError('database created by newer software')
+                upgrade_fd = None
+                if version < len(MIGRATIONS):
+                    upgrade_fd = os.open(self.root / 'coordinator.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+                    try:
+                        fcntl.flock(upgrade_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError as exc:
+                        os.close(upgrade_fd)
+                        raise Conflict('stop the active controller before schema upgrade') from exc
+                try:
+                    if 0 < version < len(MIGRATIONS):
+                        active_attempt = db.execute("SELECT 1 FROM attempts WHERE state IN ('CLAIMED','RUNNING','BOOT_PENDING','UNCERTAIN') LIMIT 1").fetchone()
+                        if active_attempt:
+                            raise Conflict('reconcile active or uncertain target attempts before schema upgrade')
+                    if version >= 7 and version < len(MIGRATIONS):
+                        active = db.execute("SELECT 1 FROM operations WHERE state IN ('RUNNING','WAITING') OR worker_unit IS NOT NULL LIMIT 1").fetchone()
+                        if active:
+                            raise Conflict('stop and reconcile active workers before schema upgrade')
+                    for number in range(version, len(MIGRATIONS)):
+                        db.executescript('BEGIN IMMEDIATE;\n' + MIGRATIONS[number] + f'\nPRAGMA user_version={number + 1};\nCOMMIT;')
+                finally:
+                    if upgrade_fd is not None:
+                        fcntl.flock(upgrade_fd, fcntl.LOCK_UN)
+                        os.close(upgrade_fd)
         os.chmod(self.db_path, 0o600)
         sync_directory(self.root)
 
@@ -117,10 +307,188 @@ class Controller:
                 if row['session_started'] is not None and self.clock() >= row['session_started'] + row['session_seconds']:
                     self._pause(db, row['id'], 'session time budget reached')
 
+    def _startup_db(self, db, *, restored=False):
+        self._uncertain(db, '1=1', (), 'controller restarted; reconcile before resume')
+        db.execute("UPDATE campaigns SET state='PAUSED',reason='controller restarted; explicit resume required'")
+        # A live owner's unit names are evidence needed to stop complete cgroups.
+        # Copied unit names in a restored backup refer to another controller.
+        if restored:
+            db.execute("UPDATE operations SET state='INTERRUPTED',worker_epoch=NULL,worker_unit=NULL,worker_boot_id=NULL,stage_dir=NULL,updated=? WHERE state IN ('RUNNING','WAITING')", (self.clock(),))
+            db.execute("UPDATE operations SET worker_epoch=NULL,worker_unit=NULL,worker_boot_id=NULL,stage_dir=NULL,updated=? WHERE state='INTERRUPTED'", (self.clock(),))
+            db.execute("UPDATE operations SET worker_unit=NULL,worker_boot_id=NULL,stage_dir=NULL WHERE state IN ('SUCCEEDED','FAILED')")
+        else:
+            db.execute("UPDATE operations SET state='INTERRUPTED',worker_epoch=NULL,updated=? WHERE state IN ('RUNNING','WAITING')", (self.clock(),))
+
     def startup(self):
+        """One-shot legacy reconciliation still fences a concurrent owner."""
+        with self.lifecycle():
+            pass
+
+    def _restore_startup(self):
+        """Reconcile only a freshly copied backup before it is made visible."""
         with self.transaction() as db:
-            self._uncertain(db, '1=1', (), 'controller restarted; reconcile before resume')
-            db.execute("UPDATE campaigns SET state='PAUSED',reason='controller restarted; explicit resume required'")
+            db.execute('UPDATE controller_lifecycle SET epoch=epoch+1 WHERE id=1')
+            self._startup_db(db, restored=True)
+
+    @contextmanager
+    def lifecycle(self):
+        """Hold the controller owner lock and fence old publications for its lifetime.
+
+        This is only the ownership boundary. P2b service dispatch and cgroup
+        termination must be added before claims can run product operations.
+        """
+        if self._lifecycle_owner is not None:
+            raise Conflict('controller lifecycle already owned by this process')
+        lock_path = self.root / 'coordinator.lock'
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        try:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise Conflict('another controller lifecycle owns this state') from exc
+            with self.transaction() as db:
+                old = db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
+                if old >= 2**63 - 2:
+                    raise Conflict('controller lifecycle epoch exhausted')
+                epoch = old + 1
+                db.execute('UPDATE controller_lifecycle SET epoch=? WHERE id=1', (epoch,))
+                self._startup_db(db)
+            owner = _LifecycleOwner(self, epoch)
+            self._lifecycle_owner = owner
+            try:
+                yield owner
+            finally:
+                # Closing the owner fences a worker even before a successor starts.
+                try:
+                    with self.transaction() as db:
+                        db.execute('UPDATE controller_lifecycle SET epoch=epoch+1 WHERE id=1 AND epoch=?', (epoch,))
+                        self._startup_db(db)
+                finally:
+                    owner.closed = True
+                    self._lifecycle_owner = None
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+    def admit_operation(self, request_id, kind, arguments, *, campaign_id=None, device_id=None,
+                        input_refs=(), source_refs=(), local_paths=None):
+        """Durably record immutable work. P2b owns any subsequent execution claim."""
+        identifier(request_id)
+        intent, raw, request_digest = operation_intent(
+            kind, arguments, campaign_id=campaign_id, device_id=device_id,
+            input_refs=input_refs, source_refs=source_refs, local_paths=local_paths)
+        for value in intent['input_refs'] + intent['source_refs']:
+            self.store.verify(value)
+        stored = self.store.put(raw)
+        with self.transaction() as db:
+            if db.execute('SELECT 1 FROM observation_response_commands WHERE id=?', (request_id,)).fetchone():
+                raise Conflict('request ID already belongs to an observation response')
+            previous = db.execute('SELECT id,request_digest FROM operations WHERE request_id=?', (request_id,)).fetchone()
+            if previous:
+                if previous['request_digest'] != request_digest:
+                    raise Conflict('request ID already has different immutable operation intent')
+                return self._operation_status(db, previous['id'])
+            if campaign_id is not None:
+                campaign = self._campaign(db, campaign_id)
+                if device_id is not None and device_id != campaign['device']:
+                    raise Conflict('operation target differs from campaign target')
+            if device_id is not None and not db.execute('SELECT 1 FROM devices WHERE id=?', (device_id,)).fetchone():
+                raise ContractError('unknown target')
+            operation_id = uid()
+            now = self.clock()
+            queued_epoch = db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
+            db.execute('INSERT INTO operations(id,request_id,request_digest,input_digest,kind,campaign,device,state,created,updated,queued_epoch) VALUES(?,?,?,?,?,?,?,\'QUEUED\',?,?,?)',
+                       (operation_id, request_id, request_digest, stored.sha256, kind, campaign_id, device_id, now, now, queued_epoch))
+            for role, values in (('input', [stored.sha256] + intent['input_refs']), ('source', intent['source_refs'])):
+                for value in set(values):
+                    db.execute('INSERT OR IGNORE INTO refs(owner,digest) VALUES(?,?)', (operation_id, value))
+                    db.execute('INSERT INTO operation_refs(operation,role,digest) VALUES(?,?,?)', (operation_id, role, value))
+            db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
+                       (operation_id, now, 'accepted', canonical({'state': 'QUEUED'}).decode()))
+            return self._operation_status(db, operation_id)
+
+    def _operation_status(self, db, operation_id):
+        row = db.execute('SELECT * FROM operations WHERE id=?', (identifier(operation_id),)).fetchone()
+        if row is None:
+            raise ContractError('unknown operation')
+        data = dict(row)
+        data['references'] = {role: [item['digest'] for item in db.execute(
+            'SELECT digest FROM operation_refs WHERE operation=? AND role=? ORDER BY digest',
+            (operation_id, role))] for role in ('input', 'source', 'output')}
+        return data
+
+    def operation_status(self, operation_id):
+        """Read-only status never performs startup reconciliation or dispatch."""
+        db = self._connect()
+        try:
+            return operation_response(operation_id=operation_id,
+                                      data=self._operation_status(db, operation_id))
+        finally:
+            db.close()
+
+    def _publish_operation(self, operation_id, worker_epoch, worker_generation, *,
+                           output_refs=(), state=None, result=None, error=None):
+        """P2b worker hook: fence and reference publication share one transaction."""
+        if state not in (None, 'SUCCEEDED', 'FAILED'):
+            raise ContractError('invalid publication state')
+        if (state == 'SUCCEEDED' and error is not None) or (state == 'FAILED' and result is not None):
+            raise ContractError('operation result and terminal state disagree')
+        if state is None and (result is not None or error is not None):
+            raise ContractError('terminal document requires terminal state')
+        if type(worker_epoch) is not int or type(worker_generation) is not int:
+            raise ContractError('worker fence must contain integer epoch and generation')
+        if not isinstance(output_refs, (tuple, list, set)) or len(output_refs) > 256:
+            raise ContractError('invalid operation outputs')
+        outputs = sorted({sha256(value) for value in output_refs})
+        for value in outputs:
+            self.store.verify(value)
+        document = result if state == 'SUCCEEDED' else error
+        if state is not None:
+            if (not isinstance(document, dict) or 'schema_version' in document
+                    or len(canonical(document)) > 1 << 20):
+                raise ContractError('terminal document must be a bounded object')
+            if state == 'SUCCEEDED':
+                if (set(document) != {'public_artifacts', 'private_deliverable'}
+                        or document['private_deliverable'] is not None
+                        or not isinstance(document['public_artifacts'], list)
+                        or len(document['public_artifacts']) > 256
+                        or any(sha256(value) != value for value in document['public_artifacts'])
+                        or len(set(document['public_artifacts'])) != len(document['public_artifacts'])):
+                    raise ContractError('result requires public CAS references; private deliverables are not enabled')
+            elif (set(document) != {'code', 'message', 'retryable'}
+                  or not isinstance(document['code'], str) or not isinstance(document['message'], str)
+                  or len(document['code']) > 64 or len(document['message']) > 512
+                  or type(document['retryable']) is not bool):
+                raise ContractError('invalid operation failure record')
+            terminal = self.store.put(canonical({'schema_version': 1, **document}))
+        else:
+            terminal = None
+        with self.transaction() as db:
+            row = db.execute('SELECT * FROM operations WHERE id=?', (identifier(operation_id),)).fetchone()
+            if row is None:
+                raise ContractError('unknown operation')
+            current_epoch = db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
+            if (row['state'] != 'RUNNING' or row['worker_epoch'] != worker_epoch
+                    or row['worker_generation'] != worker_generation or current_epoch != worker_epoch):
+                raise Conflict('stale or inactive operation worker')
+            if state == 'SUCCEEDED':
+                retained = {item[0] for item in db.execute(
+                    "SELECT digest FROM operation_refs WHERE operation=? AND role='output'", (operation_id,))}
+                if not set(document['public_artifacts']) <= retained | set(outputs):
+                    raise ContractError('operation result names an unpublished output')
+            now = self.clock()
+            for value in outputs + ([terminal.sha256] if terminal else []):
+                db.execute('INSERT OR IGNORE INTO refs(owner,digest) VALUES(?,?)', (operation_id, value))
+            for value in outputs:
+                db.execute("INSERT OR IGNORE INTO operation_refs(operation,role,digest) VALUES(?,'output',?)", (operation_id, value))
+            if state is not None:
+                column = 'result_digest' if state == 'SUCCEEDED' else 'error_digest'
+                db.execute(f'UPDATE operations SET state=?,{column}=?,updated=? WHERE id=?',
+                           (state, terminal.sha256, now, operation_id))
+            db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
+                       (operation_id, now, 'finished' if state else 'output',
+                        canonical({'state': state or 'RUNNING', 'outputs': outputs}).decode()))
+            return self._operation_status(db, operation_id)
 
     def register(self, report: CapabilityReport):
         with self.transaction() as db:
@@ -700,7 +1068,7 @@ class Controller:
             closure = controller._deployment_evidence(controller._deployment_manifest(row['manifest_digest']))
             if not set(closure.values()) <= references:
                 raise ContractError('restore is missing retained build-evidence references')
-        controller.startup()
+        controller._restore_startup()
         for path in temporary.rglob('*'):
             if path.is_file():
                 with path.open('rb') as handle:
@@ -804,3 +1172,139 @@ class Controller:
         with self.transaction() as db:
             self._campaign(db, campaign_id)
             return [dict(row) for row in db.execute('SELECT * FROM events WHERE campaign=? AND id>? ORDER BY id LIMIT ?', (campaign_id, after, limit))]
+
+    def issue_observation(self, campaign_id, request):
+        """Persist a typed human question; this never changes attempt authority."""
+        from datetime import datetime, timezone
+        from .product_contracts import validate_document
+        request = validate_document('observation-request', request)
+        raw = canonical(request).decode()
+        campaign_id = identifier(campaign_id)
+        with self.transaction() as db:
+            self._campaign(db, campaign_id)
+            old = db.execute('SELECT campaign,document FROM observation_requests WHERE id=?',
+                             (request['request_id'],)).fetchone()
+            if old:
+                if old['campaign'] != campaign_id or old['document'] != raw:
+                    raise Conflict('observation request is immutable')
+                return request['request_id']
+            binding = db.execute('SELECT campaign FROM observation_requests WHERE session=? LIMIT 1',
+                                 (request['session_id'],)).fetchone()
+            if binding and binding['campaign'] != campaign_id:
+                raise Conflict('observation session belongs to another campaign')
+            attempt_id = request['attempt_id']
+            if attempt_id is not None:
+                attempt = db.execute('SELECT a.deadline,j.campaign FROM attempts a JOIN jobs j ON j.id=a.job WHERE a.id=?',
+                                     (attempt_id,)).fetchone()
+                if attempt is None or attempt['campaign'] != campaign_id:
+                    raise ContractError('observation attempt does not belong to campaign')
+                deadline = datetime.strptime(request['deadline_at'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).timestamp()
+                if request['kind'] != 'post_test_interpretation' and deadline > attempt['deadline']:
+                    raise ContractError('observation deadline exceeds physical attempt deadline')
+            db.execute('INSERT INTO observation_requests(id,session,campaign,attempt,document,issued_at,deadline_at) VALUES(?,?,?,?,?,?,?)',
+                       (request['request_id'], request['session_id'], campaign_id, attempt_id, raw,
+                        request['issued_at'], request['deadline_at']))
+        return request['request_id']
+
+    def respond_observation(self, session_id, request_id, command_request_id, raw):
+        """Join by exact question ID and keep a late answer on that question."""
+        from datetime import datetime, timezone
+        from .product_contracts import load_document
+        session_id = identifier(session_id)
+        request_id = identifier(request_id)
+        command_request_id = identifier(command_request_id)
+        response = load_document(raw, 'observation-response')
+        if response['session_id'] != session_id or response['request_id'] != request_id:
+            raise ContractError('observation response must match session and request')
+        document = canonical(response).decode()
+        with self.transaction() as db:
+            if db.execute('SELECT 1 FROM operations WHERE request_id=?', (command_request_id,)).fetchone():
+                raise Conflict('request ID already belongs to an operation')
+            replay = db.execute('SELECT request,document FROM observation_response_commands WHERE id=?',
+                                (command_request_id,)).fetchone()
+            if replay and (replay['request'] != request_id or replay['document'] != document):
+                raise Conflict('response command request ID was reused with different content')
+            question = db.execute('SELECT session,issued_at,deadline_at FROM observation_requests WHERE id=?',
+                                  (request_id,)).fetchone()
+            if question is None or question['session'] != session_id:
+                raise ContractError('unknown observation request for session')
+            old = db.execute('SELECT document,received_at,late FROM observation_responses WHERE request=?',
+                             (request_id,)).fetchone()
+            if old:
+                if old['document'] != document:
+                    raise Conflict('observation response is immutable')
+                if replay is None:
+                    db.execute('INSERT INTO observation_response_commands VALUES(?,?,?)',
+                               (command_request_id, request_id, document))
+                return {'request_id': request_id, 'response': response,
+                        'received_at': old['received_at'], 'late': bool(old['late'])}
+            now = self.clock()
+            deadline = datetime.strptime(question['deadline_at'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).timestamp()
+            issued = datetime.strptime(question['issued_at'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).timestamp()
+            answered = datetime.strptime(response['answered_at'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).timestamp()
+            if answered < issued:
+                raise ContractError('observation answer predates its request')
+            late = now > deadline or answered > deadline
+            db.execute('INSERT INTO observation_responses VALUES(?,?,?,?)',
+                       (request_id, document, now, int(late)))
+            db.execute('INSERT INTO observation_response_commands VALUES(?,?,?)',
+                       (command_request_id, request_id, document))
+            return {'request_id': request_id, 'response': response,
+                    'received_at': now, 'late': late}
+
+    def list_observations(self, session_id, *, after=0, limit=20):
+        """Return bounded durable question/answer records for CLI and monitors."""
+        from datetime import datetime, timezone
+        session_id = identifier(session_id)
+        if type(after) is not int or after < 0 or type(limit) is not int or not 1 <= limit <= 100:
+            raise ContractError('invalid observation cursor or limit')
+        db = self._connect()
+        try:
+            rows = db.execute('SELECT q.seq,q.document AS question,r.document AS response,r.received_at,r.late '
+                              'FROM observation_requests q LEFT JOIN observation_responses r ON r.request=q.id '
+                              'WHERE q.session=? AND q.seq>? ORDER BY q.seq LIMIT ?',
+                              (session_id, after, limit + 1)).fetchall()
+        finally:
+            db.close()
+        now = self.clock()
+        items = []
+        for row in rows[:limit]:
+            request = json.loads(row['question'])
+            response = json.loads(row['response']) if row['response'] is not None else None
+            deadline = datetime.strptime(request['deadline_at'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).timestamp()
+            state = ('answered_late' if row['late'] else 'answered') if response else ('overdue' if now > deadline else 'pending')
+            item = {'cursor': row['seq'], 'request': request, 'response': response,
+                    'received_at': row['received_at'], 'state': state}
+            if len(canonical(item)) > 50_000:
+                # The list is a bounded monitor summary; exact documents remain
+                # available through observation_detail.
+                item['request'] = {**request, 'prompt': request['prompt'][:512]}
+                if response is not None and response['note'] is not None:
+                    item['response'] = {**response, 'note': response['note'][:512]}
+                item['truncated'] = True
+            if items and len(canonical(items)) + len(canonical(item)) > 60_000:
+                break
+            items.append(item)
+        return {'session_id': session_id, 'items': items,
+                'next_cursor': items[-1]['cursor'] if len(rows) > len(items) else None}
+
+    def observation_detail(self, session_id, request_id):
+        """Read the exact persisted documents for a single human request."""
+        from datetime import datetime, timezone
+        session_id = identifier(session_id)
+        request_id = identifier(request_id)
+        db = self._connect()
+        try:
+            row = db.execute('SELECT q.document AS question,r.document AS response,r.received_at,r.late '
+                             'FROM observation_requests q LEFT JOIN observation_responses r ON r.request=q.id '
+                             'WHERE q.session=? AND q.id=?', (session_id, request_id)).fetchone()
+        finally:
+            db.close()
+        if row is None:
+            raise ContractError('unknown observation request for session')
+        request = json.loads(row['question'])
+        response = json.loads(row['response']) if row['response'] is not None else None
+        deadline = datetime.strptime(request['deadline_at'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).timestamp()
+        state = ('answered_late' if row['late'] else 'answered') if response else ('overdue' if self.clock() > deadline else 'pending')
+        return {'request': request, 'response': response,
+                'received_at': row['received_at'], 'state': state}

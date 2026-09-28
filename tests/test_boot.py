@@ -94,8 +94,14 @@ def test_runtime_keeps_candidate_var_separate(tmp_path):
     install_runtime(recovery,CONFIG)
     assert json.loads((recovery/'etc/quirkbench/boot.json').read_text())==asdict(CONFIG)
     assert (recovery/'etc/systemd/system/var.mount').is_file()
+    recipe = recovery/'usr/lib/quirkbench/quirkbench/recipes/system-observation.v1.json'
+    assert recipe.is_file()
+    from quirkbench.build import sha256_file
+    assert json.loads(recipe.read_text())['code_sha256'] == sha256_file(
+        recovery/'usr/lib/quirkbench/quirkbench/runtime.py')
     candidate=tmp_path/'candidate';candidate.mkdir();install_candidate_runtime(candidate)
     assert (candidate/'usr/etc/systemd/system/quirkbench-candidate.service').is_file()
+    assert (candidate/'usr/lib/quirkbench/quirkbench/recipes/system-observation.v1.json').read_bytes() == recipe.read_bytes()
     assert not (candidate/'usr/etc/systemd/system/var.mount').exists()
     assert not (candidate/'usr/etc/quirkbench/boot.json').exists()
 

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Quirkbench recovery rootfs lock v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "baseline_id", "baseline_digest", "protection_policy_digest", "rpm_snapshot_sha256", "target_rpm_lock_sha256", "recovery_fragment_sha256"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "baseline_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "baseline_digest": {"$ref": "#/$defs/sha256"},
+    "protection_policy_digest": {"$ref": "#/$defs/sha256"},
+    "rpm_snapshot_sha256": {"$ref": "#/$defs/sha256"},
+    "target_rpm_lock_sha256": {"$ref": "#/$defs/sha256"},
+    "recovery_fragment_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

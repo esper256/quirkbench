@@ -533,6 +533,19 @@ def install_runtime(rootfs: Path, config: RecoveryConfig | dict | None = None, a
         if not src.is_file():
             raise BootError("runtime Python module missing: " + name)
         shutil.copyfile(src, package / name)
+    from .contracts import ContractError
+    from .recipe_registry import RecipeRegistry
+    from .runtime import system_observation
+    try:
+        recipe_registry = RecipeRegistry(source / 'recipes',
+                                         {'system-observation': system_observation},
+                                         granted_privileges={'read_kernel_log'})
+    except ContractError as exc:
+        raise BootError('installed recipe metadata and code differ') from exc
+    recipe_destination = package / 'recipes'
+    recipe_destination.mkdir(exist_ok=True)
+    for _, _, path in recipe_registry.records.values():
+        shutil.copyfile(path, recipe_destination / path.name)
     settings = rootfs / "etc/quirkbench"
     settings.mkdir(parents=True, exist_ok=True)
     if config is not None:

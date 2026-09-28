@@ -21,6 +21,7 @@ from .commission import BootIdentity, verify_boot_identity
 from .contracts import CapabilityReport, ContractError, Outcome, canonical, identifier
 from .library import LibraryStore
 from .ostree import OstreeBackend, Remote
+from .recipe_registry import RecipeRegistry, UnavailableRegistry
 from .store import atomic_write
 from .target import TargetAgent, RecipeOutput, EvidenceChunk
 from .transport import HTTPSDeviceClient, TransportError
@@ -214,7 +215,15 @@ def create_agent(config, boot, verify, provision, supervisor):
                  'boot_stage': 'supervisor-ready'}
     if mode == 'experiment':
         inventory.update(deployment_id=boot['quirkbench.candidate'], revision=boot['quirkbench.revision'])
-    capabilities = ['recipe.system-observation']
+    try:
+        registry = RecipeRegistry(Path(__file__).with_name('recipes'),
+                                  {'system-observation': system_observation},
+                                  granted_privileges={'read_kernel_log'})
+        capabilities = ['recipe.system-observation'] if 'system-observation' in registry.records else []
+    except (ContractError, OSError):
+        # Broken installed metadata must not prevent recovery evidence upload.
+        registry = UnavailableRegistry()
+        capabilities = []
     backend = None
     can_prepare = mode == 'recovery' and not boot.get('quirkbench.experiments_unavailable')
     if mode == 'experiment' or can_prepare:
@@ -231,7 +240,7 @@ def create_agent(config, boot, verify, provision, supervisor):
                               capabilities, mode, inventory)
     client = HTTPSDeviceClient(provision['controller_url'], report.device_id,
                                provision['token_file'].read_text().strip(), str(provision['ca']), timeout=5)
-    target = TargetAgent(client, CONTROL/'agent', report, recipes={'system-observation': system_observation},
+    target = TargetAgent(client, CONTROL/'agent', report, recipe_registry=registry,
                         boot_control=UsbBootControl(config, mode), deployment_backend=backend,
                         supervisor=supervisor, library_store=library)
     if library is not None:

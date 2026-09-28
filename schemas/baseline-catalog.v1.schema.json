@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quirkbench:schema:baseline-catalog:v1",
+  "title": "Reviewed baseline catalog v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "catalog_revision", "entries"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "catalog_revision": {"$ref": "#/$defs/id"},
+    "entries": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/entry"}}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
+    "rpm-name": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9+_.-]{0,127}$"},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "oci-digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "nevra": {"type": "string", "pattern": "^[A-Za-z0-9+_.-]+-[0-9]+:[A-Za-z0-9+_.~^-]+\\.(?:[A-Za-z0-9_]+|\\(none\\))$", "maxLength": 256},
+    "package": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "nevra"],
+      "properties": {"name": {"$ref": "#/$defs/rpm-name"}, "nevra": {"$ref": "#/$defs/nevra"}}
+    },
+    "recipe": {
+      "type": "object", "additionalProperties": false,
+      "required": ["recipe_id", "digest"],
+      "properties": {"recipe_id": {"$ref": "#/$defs/id"}, "digest": {"$ref": "#/$defs/digest"}}
+    },
+    "slot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["package", "relative_path"],
+      "properties": {
+        "package": {"$ref": "#/$defs/id"},
+        "relative_path": {"type": "string", "pattern": "^rpms/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\\.rpm$"}
+      }
+    },
+    "entry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "baseline_id", "profile_id", "profile_digest", "platform_adapter_id", "protection_policy_digest", "architecture", "boot_method", "fedora_release", "kernel_source_nevra", "kernel_srpm_sha256", "kernel_config_sha256", "userspace_source_sha256", "rpm_snapshot_sha256", "build_rpm_lock_sha256", "target_rpm_lock_sha256", "toolchain_lock_sha256", "repo_config_sha256", "dracut_config_sha256", "builder_image_digest", "packages", "build_recipe", "target_recipes", "replacement_slots"],
+      "properties": {
+        "schema_version": {"type": "integer", "const": 1},
+        "baseline_id": {"$ref": "#/$defs/id"},
+        "profile_id": {"$ref": "#/$defs/id"},
+        "profile_digest": {"$ref": "#/$defs/digest"},
+        "platform_adapter_id": {"const": "x86_64-uefi-usb-v1"},
+        "protection_policy_digest": {"$ref": "#/$defs/digest"},
+        "architecture": {"const": "x86_64"},
+        "boot_method": {"const": "uefi"},
+        "fedora_release": {"type": "string", "pattern": "^[0-9]{2}$"},
+        "kernel_source_nevra": {"$ref": "#/$defs/nevra"},
+        "kernel_srpm_sha256": {"$ref": "#/$defs/digest"},
+        "kernel_config_sha256": {"$ref": "#/$defs/digest"},
+        "userspace_source_sha256": {"$ref": "#/$defs/digest"},
+        "rpm_snapshot_sha256": {"$ref": "#/$defs/digest"},
+        "build_rpm_lock_sha256": {"$ref": "#/$defs/digest"},
+        "target_rpm_lock_sha256": {"$ref": "#/$defs/digest"},
+        "toolchain_lock_sha256": {"$ref": "#/$defs/digest"},
+        "repo_config_sha256": {"$ref": "#/$defs/digest"},
+        "dracut_config_sha256": {"$ref": "#/$defs/digest"},
+        "builder_image_digest": {"$ref": "#/$defs/oci-digest"},
+        "packages": {"type": "array", "minItems": 1, "maxItems": 8192, "items": {"$ref": "#/$defs/package"}},
+        "build_recipe": {"$ref": "#/$defs/recipe"},
+        "target_recipes": {"type": "array", "minItems": 1, "maxItems": 128, "items": {"$ref": "#/$defs/recipe"}},
+        "replacement_slots": {
+          "type": "object", "additionalProperties": false,
+          "required": ["kernel", "userspace"],
+          "properties": {"kernel": {"$ref": "#/$defs/slot"}, "userspace": {"$ref": "#/$defs/slot"}}
+        }
+      }
+    }
+  }
+}

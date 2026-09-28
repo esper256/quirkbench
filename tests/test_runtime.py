@@ -226,6 +226,25 @@ def test_agent_can_report_missing_hardware_identity_without_false_coverage(tmp_p
     assert report.inventory['watchdog']['earliest_covered_stage'] == 'unqualified'
 
 
+def test_invalid_installed_recipe_registry_preserves_recovery_control(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime, 'hardware_identity', lambda: None)
+    monkeypatch.setattr(runtime.os.path, 'ismount', lambda path: False)
+    monkeypatch.setattr(runtime, 'HTTPSDeviceClient', lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(runtime, 'RecipeRegistry', lambda *a, **k: (_ for _ in ()).throw(ContractError('bad metadata')))
+    captured = {}
+    def agent(client, path, report, **kwargs):
+        captured.update(report=report, registry=kwargs['recipe_registry'])
+        return SimpleNamespace(step=lambda: 'idle')
+    monkeypatch.setattr(runtime, 'TargetAgent', agent)
+    provision_data = runtime.load_provisioning(provision(tmp_path))
+    result = runtime.create_agent(CONFIG, {'quirkbench.mode': 'recovery', 'quirkbench.experiments_unavailable': '1'},
+                                  lambda: True, provision_data, SupervisorMonitor(notify=lambda *a: None))
+    assert result.step() == 'idle'
+    assert 'recipe.system-observation' not in captured['report'].capabilities
+    with pytest.raises(ContractError, match='unavailable'):
+        captured['registry'].resolve(None, captured['report'])
+
+
 def qualified_profile(release, build_id):
     from dataclasses import replace
     from quirkbench.watchdog import COVERAGE

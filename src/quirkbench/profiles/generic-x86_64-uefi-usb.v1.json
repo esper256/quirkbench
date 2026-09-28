@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "profile_id": "generic-x86_64-uefi-usb-v1",
+  "platform_adapter_id": "x86_64-uefi-usb-v1",
+  "architectures": ["x86_64"],
+  "boot_methods": ["uefi"],
+  "boot_transport": "usb",
+  "required_boot_drivers": ["xhci_hcd", "usb_storage", "sd_mod", "ext4", "vfat"],
+  "compatibility_network_drivers": ["e1000e", "igc", "r8169", "atlantic", "iwlwifi", "ath9k", "mt7921e"],
+  "optional_peripherals": ["audio", "bluetooth", "camera", "touchscreen", "hardware_watchdog"],
+  "protection": {
+    "policy_id": "internal-controller-exclusion-v1",
+    "excluded_internal_controller_drivers": ["ahci", "nvme", "vmd", "megaraid_sas", "mpt3sas"],
+    "allowed_write_bus": "usb",
+    "automount": false,
+    "firmware_writes": false
+  },
+  "minimum_ram_kib": 1048576
+}

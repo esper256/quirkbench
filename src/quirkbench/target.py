@@ -113,6 +113,7 @@ class TargetAgent:
         report: CapabilityReport,
         *,
         recipes: dict[str, Callable[[Experiment], RecipeOutput]] | None = None,
+        recipe_registry=None,
         boot_control: BootControl | None = None,
         deployment_backend: DeploymentBackend | None = None,
         supervisor=None,
@@ -142,6 +143,7 @@ class TargetAgent:
         os.chmod(self.blob_dir, 0o700)
         self.boot_control = boot_control
         self.recipes = dict(recipes or {})
+        self.recipe_registry = recipe_registry
         if report.mode == "simulation":
             self.recipes.setdefault("smoke", smoke)
         self._journal = self._load()
@@ -161,6 +163,16 @@ class TargetAgent:
 
     def _save(self) -> None:
         _atomic(self.journal_path, canonical(self._journal))
+
+    def _resolve_recipe(self, experiment):
+        if self.recipe_registry is None:
+            recipe = self.recipes.get(experiment.recipe)
+            return recipe, None if recipe else 'Requested recipe is not installed.'
+        from .contracts import ContractError
+        try:
+            return self.recipe_registry.resolve(experiment, self.report), None
+        except ContractError as exc:
+            return None, str(exc)
 
     def _set_pending(self, pending: dict | None) -> None:
         self._journal["pending"] = pending
@@ -450,8 +462,8 @@ class TargetAgent:
                     raise ValueError("required immutable library verifier is unavailable")
                 selection = LibrarySelection.from_dict(json.loads(self.client.artifact(experiment.artifacts["library"])))
                 self.library_store.require(selection, self.report.inventory.get("architecture"), self.report.capabilities)
-            recipe = self.recipes.get(experiment.recipe)
-            output = self._run_recipe(recipe, experiment, pending) if recipe else RecipeOutput(Outcome.NEEDS_HUMAN, "Requested recipe is not installed.")
+            recipe, reason = self._resolve_recipe(experiment)
+            output = self._run_recipe(recipe, experiment, pending) if recipe else RecipeOutput(Outcome.NEEDS_HUMAN, reason)
             self._record_output(pending, output)
             return self._finish_candidate(pending)
         self._uncertain(pending)
@@ -573,12 +585,12 @@ class TargetAgent:
         self.client.start(pending["attempt_id"], pending["token"], pending["boot_id"])
         pending["stage"] = "started"
         self._save()
-        recipe = self.recipes.get(experiment.recipe)
+        recipe, reason = self._resolve_recipe(experiment)
         if recipe is None:
             output = RecipeOutput(
                 Outcome.NEEDS_HUMAN,
-                f"Recipe {experiment.recipe} is not installed on this target.",
-                limitations=["Only locally registered recipes may run."],
+                reason,
+                limitations=["Only eligible, locally installed and authorized recipes may run."],
             )
         elif "deployment" in experiment.artifacts:
             # Physical handoff is deliberately gated until M3 reconciliation exists.

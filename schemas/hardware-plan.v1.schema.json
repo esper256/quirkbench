@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quirkbench:schema:hardware-plan:v1",
+  "title": "HardwarePlan P1b v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "inventory_digest", "profile_id", "profile_digest", "platform_adapter_id", "target_architecture", "boot_method", "controller_architecture", "locked_build_inputs", "recovery_requirements", "baseline_requirements", "selected_network_devices", "storage_protection_policy_digest", "capacity_requirements", "blocking_reasons", "warnings"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "inventory_digest": {"$ref": "#/$defs/digest"},
+    "profile_id": {"$ref": "#/$defs/nullable-id"},
+    "profile_digest": {"$ref": "#/$defs/nullable-digest"},
+    "platform_adapter_id": {"oneOf": [{"const": "x86_64-uefi-usb-v1"}, {"type": "null"}]},
+    "target_architecture": {"type": "string", "minLength": 1, "maxLength": 64},
+    "boot_method": {"type": "string", "minLength": 1, "maxLength": 64},
+    "controller_architecture": {"type": "string", "minLength": 1, "maxLength": 64},
+    "locked_build_inputs": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/locked-build-inputs"}]},
+    "recovery_requirements": {"oneOf": [{"$ref": "#/$defs/recovery"}, {"type": "null"}]},
+    "baseline_requirements": {"oneOf": [{"const": {"catalog_status": "pending", "selected_baseline_id": null}}, {"$ref": "#/$defs/baseline-selection"}]},
+    "selected_network_devices": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 128}},
+    "storage_protection_policy_digest": {"$ref": "#/$defs/nullable-digest"},
+    "capacity_requirements": {
+      "type": "object", "additionalProperties": false,
+      "required": ["minimum_ram_kib", "observed_ram_kib"],
+      "properties": {
+        "minimum_ram_kib": {"$ref": "#/$defs/nullable-positive"},
+        "observed_ram_kib": {"$ref": "#/$defs/nullable-positive"}
+      }
+    },
+    "blocking_reasons": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+    "warnings": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "nullable-id": {"oneOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
+    "nullable-digest": {"oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "nullable-positive": {"oneOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]},
+    "ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+    "baseline-selection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["catalog_status", "catalog_digest", "selected_baseline_id", "selected_baseline_digest", "selection_reason"],
+      "properties": {
+        "catalog_status": {"enum": ["selected", "unavailable", "unsupported", "ambiguous"]},
+        "catalog_digest": {"$ref": "#/$defs/digest"},
+        "selected_baseline_id": {"$ref": "#/$defs/nullable-id"},
+        "selected_baseline_digest": {"$ref": "#/$defs/nullable-digest"},
+        "selection_reason": {"enum": ["exact_profile_platform_and_retained_inputs", "baseline_input_unavailable", "unsupported_baseline_combination", "baseline_ambiguous"]}
+      }
+    },
+    "locked-build-inputs": {
+      "type": "object", "additionalProperties": false,
+      "required": ["baseline_id", "baseline_digest", "kernel_srpm_sha256", "kernel_config_sha256", "userspace_source_sha256", "rpm_snapshot_sha256", "build_rpm_lock_sha256", "target_rpm_lock_sha256", "toolchain_lock_sha256", "repo_config_sha256", "dracut_config_sha256", "builder_image_digest", "build_recipe_digest", "target_recipe_digests"],
+      "properties": {
+        "baseline_id": {"$ref": "#/$defs/id"},
+        "baseline_digest": {"$ref": "#/$defs/digest"},
+        "kernel_srpm_sha256": {"$ref": "#/$defs/digest"},
+        "kernel_config_sha256": {"$ref": "#/$defs/digest"},
+        "userspace_source_sha256": {"$ref": "#/$defs/digest"},
+        "rpm_snapshot_sha256": {"$ref": "#/$defs/digest"},
+        "build_rpm_lock_sha256": {"$ref": "#/$defs/digest"},
+        "target_rpm_lock_sha256": {"$ref": "#/$defs/digest"},
+        "toolchain_lock_sha256": {"$ref": "#/$defs/digest"},
+        "repo_config_sha256": {"$ref": "#/$defs/digest"},
+        "dracut_config_sha256": {"$ref": "#/$defs/digest"},
+        "builder_image_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "build_recipe_digest": {"$ref": "#/$defs/digest"},
+        "target_recipe_digests": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/digest"}}
+      }
+    },
+    "recovery": {
+      "type": "object", "additionalProperties": false,
+      "required": ["boot_transport", "required_boot_drivers", "compatibility_network_drivers"],
+      "properties": {
+        "boot_transport": {"const": "usb"},
+        "required_boot_drivers": {"$ref": "#/$defs/ids"},
+        "compatibility_network_drivers": {"$ref": "#/$defs/ids"}
+      }
+    }
+  }
+}
