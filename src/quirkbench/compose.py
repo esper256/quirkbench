@@ -28,7 +28,7 @@ from .build_pipeline import DISK_RESERVE, ResourceLimits, _sync_tree
 from .contracts import canonical
 
 ROLES = {"kernel", "config", "initramfs", "modules", "userspace", "build_provenance"}
-PACKAGES = ["fedora-release", "systemd", "systemd-udev", "systemd-networkd", "bash",
+PACKAGES = ["fedora-release", "systemd", "systemd-udev", "NetworkManager", "NetworkManager-tui", "NetworkManager-wifi", "linux-firmware", "bash",
             "coreutils", "util-linux", "rpm", "nss-altfiles", "ostree", "dracut", "python3", "python3-gobject-base", "kmod", "iproute",
             "e2fsprogs", "gdisk", "parted", "grub2-tools-minimal", "ca-certificates"]
 UNSAFE_UNITS = ["fwupd.service", "fwupd-refresh.service", "fwupd-refresh.timer", "udisks2.service",
@@ -465,7 +465,7 @@ class FedoraComposer:
                         "exclude-packages": ["kernel", "kernel-core", "kernel-modules", "fwupd", "udisks2"],
                         "recommends": False, "documentation": False, "selinux": False,
                         "boot-location": "modules", "no-initramfs": True,
-                        "default-target": "multi-user.target", "units": ["systemd-networkd.service"],
+                        "default-target": "multi-user.target", "units": ["NetworkManager.service"],
                         "add-commit-metadata": {"quirkbench.protection-profile": inputs.protection_profile,
                             "quirkbench.build-provenance-sha256": inputs.artifact_sha256["build_provenance"],
                             "quirkbench.config-sha256": inputs.artifact_sha256["config"],

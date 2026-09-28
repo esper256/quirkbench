@@ -63,10 +63,10 @@ def test_arm_and_reboot_require_verified_mounts_and_matching_attempt(tmp_path):
             elif argv[2]=='set':values.update(x.split('=',1) for x in argv[3:])
             else:return '\n'.join(f'{k}={v}' for k,v in values.items())
         return ''
-    kwargs=dict(config=CONFIG,data_mount=data,state_mount=state,runner=run,identity_verifier=lambda *a,**k:layout,mountinfo=inventory)
+    kwargs=dict(config=CONFIG,data_mount=data,state_mount=state,runner=run,identity_verifier=lambda *a,**k:layout,mountinfo=inventory,system_uuid_reader=lambda:UUIDS[0])
     with pytest.raises(BootError,match='another attempt'):arm_once(p,'other',kernel_log=LOG,**kwargs)
     entry=arm_once(p,'attempt',kernel_log=LOG,**kwargs)
-    assert entry.is_file() and values=={'next_entry':'candidate','candidate_id':'a'*64}
+    assert entry.is_file() and values=={'next_entry':'candidate','candidate_id':'a'*64,'target_uuid':UUIDS[0]}
     assert arm_once(p,'attempt',kernel_log=LOG,**kwargs)==entry
     with pytest.raises(BootError,match='explicit'):reboot_candidate(p,permit_reboot=False,**kwargs)
     reboot_candidate(p,permit_reboot=True,**kwargs)
@@ -181,13 +181,18 @@ def test_recovery_upload_storage_survives_unavailable_experiments_and_library(tm
     assert mounts[1][-2:]==[str(devices[5].path),str(tmp_path/'data/evidence')]
 
 
-def test_runtime_enables_wired_network_and_gates_supervisor_on_verified_boot(tmp_path):
+def test_runtime_enables_one_network_manager_with_transient_profiles(tmp_path):
     root=tmp_path/'root';(root/'etc').mkdir(parents=True)
     (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1')
     install_runtime(root,CONFIG)
     units=root/'etc/systemd/system'
-    assert (units/'multi-user.target.wants/systemd-networkd.service').is_symlink()
-    assert 'DHCP=yes' in (root/'etc/systemd/network/20-quirkbench-wired.network').read_text()
+    assert (units/'multi-user.target.wants/NetworkManager.service').is_symlink()
+    assert (units/'systemd-networkd.service').readlink() == Path('/dev/null')
+    mount = units / 'quirkbench-network-state.service'
+    assert 'tmpfs /etc/NetworkManager/system-connections' in mount.read_text()
+    assert 'mode=0700,nosuid,nodev,noexec' in mount.read_text()
+    assert 'Requires='+mount.name in (units/'NetworkManager.service.d/quirkbench.conf').read_text()
+    assert not (root/'etc/systemd/network/20-quirkbench-wired.network').exists()
     assert 'Requires=quirkbench-recovery.service' in (units/'quirkbench-supervisor.service.d/boot.conf').read_text()
     assert (root/'usr/lib/quirkbench/quirkbench/transport.py').exists()
 

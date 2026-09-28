@@ -10,12 +10,15 @@ Hardware discovery selects versioned platform profiles and adapters, including
 explicit architecture/boot constraints. Unsupported profiles remain unsupported;
 generic architecture does not imply unqualified universal hardware support.
 
-The installed target OS runs only a read-only inventory collector. A versioned,
-reviewed HardwarePlan maps observations to protected recovery/baseline builds.
-The controller prepares a private image with device-only provisioning; first boot
-installs it durably into evidence/control. Internal storage remains excluded and
-all physical writes require positive USB identity. Candidate OSTree updates cannot
-change fixed recovery, private provisioning or the bootloader.
+The target boots generic protected recovery media before discovery. Local setup
+configures networking and securely pairs with the controller; recovery collects the
+hardware inventory used to plan the experimental baseline. The installed-OS
+collector is optional. Private network/credential/binding generations live in
+independent evidence/control storage; factory images contain none. Early boot and
+runtime identity checks prevent a moved drive from resuming another target's work.
+See C4 in the implementation contracts for the enrollment and retargeting boundary.
+Internal storage remains excluded and every privileged write requires positive USB
+identity. Candidate OSTree updates cannot change recovery or the fixed bootloader.
 
 Agents use a local CLI with typed application services, JSON and idempotent
 operation IDs. A persistent worker performs long work without a waiting agent;
@@ -87,9 +90,12 @@ OSTree generates candidate boot entries without regenerating the system bootload
 
 The protection requirement is that internal disks cannot be accidentally selected or mutated. The initial hardware profile retains internal-controller exclusion in both recovery and candidate kernels, combined with positive USB identity and allowlisted privileged destinations. Disable internal discovery, automount, swap/resume, firmware updates, EFI writes and EFI-backed pstore. Secure Boot must be verified disabled. Candidate data mounts must permit OS execution; evidence mounts remain restricted. Candidate roots follow OSTree semantics: read-only `/usr`, an exactly identified writable deployment root and attempt-local `/etc` and `/var`; recovery alone uses a wholly read-only root. Any replacement protection mechanism requires review and equivalent sentinel tests, not preservation of one implementation at all costs.
 
-M1 is achieved. The earlier revised M2 OSTree build/VM qualification was achieved for layout revision 1; [fresh layout revision 2 qualification](v1-qualification.md) records the replacement image results and their limits. Old prototype image results do not qualify the replacement backend. See [recovery and evidence](recovery-and-evidence.md) for the separate selection, reset and diagnostic requirements. Current no-kexec policy means kdump is unavailable until reviewed and implemented.
-
-QEMU tests image assembly, deployment and fallback using disposable internal-disk sentinels and settled OVMF variable snapshots. The [reviewed firmware gate](m2-ostree-review.md) compares effective settings, permits only the exact firmware-owned MTC counter step, and retains raw snapshots. It does not establish target hardware behavior or physical recovery. Actual experiments boot directly on the target computer; complete hangs may require human reset.
+See [recovery and evidence](recovery-and-evidence.md) for separate selection, reset
+and diagnostic requirements. Current no-kexec policy leaves kdump unavailable.
+QEMU tests disposable infrastructure, internal-disk sentinels and settled firmware
+variables under the [acceptance policy](../acceptance/README.md). It does not establish
+physical hardware behavior. Experiments run directly on the target; unsupported
+complete hangs require human reset.
 
 ## Human visibility
 
@@ -97,7 +103,7 @@ Progress is a versioned protocol record, not ephemeral terminal output. The cont
 
 ## Verification claims
 
-Unit and integration tests exercise record rejection, durable state transitions, protocol retry and identity rules, target journaling, and local demo flows. The QEMU acceptance path is opt-in because it needs a built image and OVMF fixtures. CI can establish software behavior under its fixtures; it cannot establish a real hardware safety claim or 30-hour endurance result. Any capability report describes what one boot observed or advertises, not a universal property of the device. Keep each result's limitations and evidence alongside the outcome so a later reader can audit the claim.
+Unit and integration tests exercise record rejection, durable state transitions, protocol retry and identity rules, target journaling, and local demo flows. The QEMU acceptance path is opt-in because it needs a built image and OVMF fixtures. CI can establish software behavior under its fixtures; it cannot establish a real hardware safety claim or physical endurance result. Any capability report describes what one boot observed or advertises, not a universal property of the device. Keep each result's limitations and evidence alongside the outcome so a later reader can audit the claim.
 
 ## Physical execution and reset
 

@@ -32,7 +32,7 @@ directly follows the same release-only policy. Hardware endurance is also releas
 validate an existing hardware or patch report do not themselves run a campaign.
 
 Distinguish infrastructure qualification from using the product. An explicitly
-requested tailored image or scientific kernel experiment necessarily builds its
+requested recovery image or scientific kernel experiment necessarily builds its
 artifacts; that is not a request to run the release qualification suite. Likewise,
 the attended device commissioning step in [the product plan](product-roadmap.md)
 checks that delivered device and baseline. Do not attach full VM/repository/endurance

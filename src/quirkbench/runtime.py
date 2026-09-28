@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 
+from .binding import BindingError, verify_binding
 from .boot import RecoveryConfig, parse_cmdline, arm_once, reboot_candidate, _verify_stage_identity
 from .commission import BootIdentity, verify_boot_identity
 from .contracts import CapabilityReport, ContractError, Outcome, canonical, identifier
@@ -54,7 +55,7 @@ def load_provisioning(path=CONTROL/'runtime.json'):
     raw = json.loads(path.read_bytes())
     required = {'schema_version', 'device_id', 'controller_url', 'ca', 'token_file', 'remotes'}
     if (not isinstance(raw, dict) or required - raw.keys()
-            or raw.keys() - required - {'recovery_profile', 'recovery_profiles', 'qualification_run'}
+            or raw.keys() - required - {'recovery_profile', 'recovery_profiles', 'qualification_run', 'target_binding'}
             or type(raw['schema_version']) is not int or raw['schema_version'] != 1):
         raise ContractError('invalid target provisioning fields')
     identifier(raw['device_id'])
@@ -139,11 +140,11 @@ class UsbBootControl:
         if self.mode == 'recovery':
             _verify_stage_identity(self.config, data_mount=BASE/'experiments', state_mount=Path('/boot/quirkbench-state'))
             env = Path('/boot/quirkbench-state/quirkbench/next.env')
-            self.runner(['grub2-editenv', str(env), 'unset', 'next_entry', 'candidate_id'])
+            self.runner(['grub2-editenv', str(env), 'unset', 'next_entry', 'candidate_id', 'target_uuid'])
             with env.open('rb') as stream:
                 os.fsync(stream.fileno())
             from .boot import _read_env
-            if any(_read_env(env, self.runner).get(key) for key in ('next_entry', 'candidate_id')):
+            if any(_read_env(env, self.runner).get(key) for key in ('next_entry', 'candidate_id', 'target_uuid')):
                 raise ContractError('cannot disarm uncertain boot selection')
             return
         request_recovery(CONTROL, 'Experiment completed or stopped; return to fixed recovery.',
@@ -276,6 +277,8 @@ def main(argv=None):
                     print('QUIRKBENCH waiting for device provisioning on evidence/control/runtime.json', flush=True)
                 else:
                     provision = load_provisioning(CONTROL/'runtime.json')
+                    verify_binding(provision.get('target_binding'))
+                    supervisor.needs_human = False
                     profile = provision['recovery_profile']
                     if provision.get('recovery_profile_invalidation'):
                         print('QUIRKBENCH watchdog unqualified: '+provision['recovery_profile_invalidation'], flush=True)
@@ -295,6 +298,15 @@ def main(argv=None):
                 # liveness; successful steps must also feed the service timer.
                 supervisor.pulse(waiting=result in {'idle', 'busy'}, advanced=result == 'completed')
             atomic_write(CONTROL/'status.json', canonical(supervisor.snapshot()))
+        except BindingError as exc:
+            supervisor.needs_human = True
+            supervisor.begin('target-setup-required', 1800)
+            supervisor.pulse(waiting=True)
+            atomic_write(CONTROL/'status.json', canonical(supervisor.snapshot()))
+            print('QUIRKBENCH human intervention required; '+str(exc), flush=True)
+            if mode == 'experiment':
+                request_recovery(CONTROL, str(exc), mode=mode)
+                return 1
         except TransportError as exc:
             # Network failure is not a kernel failure. Candidate finish has its
             # own bounded upload deadline; recovery retries without reboot loops.

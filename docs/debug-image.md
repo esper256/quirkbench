@@ -5,10 +5,19 @@ always the default boot. Each physical attempt gets an isolated OSTree deploymen
 with fresh `/etc` and `/var`. A successful experiment uploads its results and
 returns through recovery; it cannot prepare or authorize the next experiment.
 
-The [forward product plan](product-roadmap.md) adds hardware-tailored builds and
-automatic first-boot provisioning. The six-partition layout remains unchanged.
-The existing image is an infrastructure artifact; its kernel still needs the
-actual target hardware profile, including network and watchdog support before claiming device readiness.
+The [product plan](product-roadmap.md) adds generic recovery compatibility, local
+network setup, secure pairing and recovery inventory. Setup must work without an
+experimental deployment. Current low-level build/runtime code is not yet that
+complete user experience; existing images require rebuilding for changed boot code.
+
+## Recovery build policy
+
+The [recovery decision](recovery-base.md) specifies the synthesis pipeline: Fedora
+RPMs installed with locked DNF5 inputs, a protected broadly configured Fedora kernel,
+dracut and the existing image adapter. Recovery runs without SELinux enforcement
+(`selinux=0`), desktop, installer or automatic updates. It uses read-only ext4 plus
+bounded RAM runtime state and NetworkManager/nmtui. These are P3a implementation
+requirements, not claims that the current prototype includes the complete recipe.
 
 ## Layout revision 2
 
@@ -85,6 +94,7 @@ and 0600 for credentials. `runtime.json` contains:
 {
   "schema_version": 1,
   "device_id": "target-01",
+  "target_binding": {"schema_version": 1, "system_uuid": "01234567-89ab-cdef-0123-456789abcdef"},
   "controller_url": "https://192.168.1.10:8443",
   "ca": "controller-ca.pem",
   "token_file": "device-token",
@@ -100,26 +110,27 @@ and 0600 for credentials. `runtime.json` contains:
 }
 ```
 
-**Current manual path:** first boot completes partition commissioning. Shut down
-and attach the USB to the controller, then copy device configuration/trust files
-into the positively identified evidence partition using normal Linux filesystem
-tools. Subsequent boots reuse that configuration.
+The current low-level configuration reader supports manual development fixtures.
+Activation now also requires `target_binding` with schema_version 1 and a valid
+`system_uuid` matching the running target. Old unbound files remain readable but
+cannot silently activate credentials or experiments. This guard is not a complete
+enrollment system; do not treat copying configuration files as the product setup UI.
 
-**Planned normal path (P3):** image preparation embeds a private device-only bootstrap
-bundle in a reserved experiments directory. Verified first-boot recovery installs
-it atomically into evidence/control before registration. The controller retains
-the matching device registration and public build provenance. The image contains
-device secrets and is private; it must not enter public artifact/evidence exports.
-AI credentials and signing/CA private keys are never included. See the roadmap for
-retry/conflict semantics. This removes the second physical transfer; it adds no
-USB writer and no internal-disk mount.
+**Planned normal path (P3):** recovery offers local Ethernet/Wi-Fi setup and controller
+pairing, then publishes a complete private configuration generation atomically.
+NetworkManager is the sole network manager. Saved profiles belong to control state
+and are copied into RAM for each boot only after binding checks. No AI credentials
+or controller private signing keys enter media. Generic factory images have no
+controller/device credentials. See [C4](implementation-contracts.md#c4--recovery-setup-enrollment-and-target-binding-p3).
 
-Wired interfaces use DHCP; the controller can have a static IP. Provisioning is an
-explicit commissioning step, never an AI credential transfer. Only the spool is
-exported as evidence; the adjacent control directory must never be exported.
-The installed `system-observation` recipe collects real kernel identity and logs
-without claiming a hardware issue was reproduced. Additional recipes are installed
-as local code through the experimental OSTree composition, not remote shell text.
+GRUB consumes one-shot selection and compares its expected system UUID before loading
+a candidate. Missing/mismatched identity returns to recovery. Runtime checks enrollment
+binding again before authentication or watchdog activation. Retargeting needs explicit
+setup; old evidence retains original attribution and cannot authorize another attempt.
+Only the spool is exported as evidence, never the adjacent private control directory.
+The installed `system-observation` recipe collects kernel identity and logs without
+claiming a hardware issue was reproduced. Additional recipes are local versioned code
+in the deployment, never remote shell text.
 
 Library selections are immutable ordinary artifacts (`library` role) naming exact
 pack-manifest hashes. Packs declare architecture, runtime requirements, file hashes
@@ -146,8 +157,7 @@ missing observation is reported honestly; software heartbeat is not hardware pro
 
 This hardware reset primarily protects the experimental OS. Recovery services the
 same watchdog if configured/armed; there is no second hardware-watchdog subsystem.
-The current built kernels lack a usable driver, so integration code is not yet
-target reset coverage. The roadmap distinguishes exact-kernel qualification from a
+Integration code alone does not establish driver support or target reset coverage. The roadmap distinguishes exact-kernel qualification from a
 future explicit campaign authorization to activate it on experimental kernels.
 
 The supervisor has systemd service supervision, caller-driven heartbeat and bounded
@@ -172,12 +182,8 @@ Software tests cover commissioning retries, strict identities, library publicati
 live uploads, stale leases, uncertain arming, controller restart, pause, bounded
 finish, service deadlines and missing watchdog observations. Real QEMU acceptance
 must commission this layout, boot recovery/candidate/fallback and preserve fixed
-recovery, library, internal sentinels and effective firmware settings. Old M2 VM
-results qualify only the old image. target USB/reset/suspend/crash-capture coverage
-and the campaign exceeding 30 hours remain explicit hardware gates.
-
-[Recorded layout-2 qualification](v1-qualification.md) includes the fresh ten-boot
-suite, standard-image supervisor trial, signed composition and backup/restore.
+recovery, library, internal sentinels and effective firmware settings. Target USB/reset/suspend/crash-capture coverage and the release-specific endurance
+objective remain separate physical gates. Changed image bytes need fresh qualification.
 
 For the first attended protocol trial, adapt
 [`examples/physical-experiment.json`](../examples/physical-experiment.json), replacing

@@ -1,5 +1,3 @@
-> Current image contract: [six-partition v1 layout, live evidence and qualified reset](docs/debug-image.md). [Fresh layout-2 qualification](docs/v1-qualification.md) passed 405 software tests and ten real UEFI boot trials; physical target qualification remains outstanding.
-
 # Quirkbench
 
 Quirkbench investigates Linux hardware issues across computer models and form
@@ -10,12 +8,21 @@ scope](docs/terminology.md): the current backend is x86-64/UEFI with USB boot;
 additional platforms need explicit support, not model-specific changes to the core.
 
 The [forward product plan](docs/product-roadmap.md) defines the remaining work:
-read-only target inventory → tailored provisioned image → attended target cycle →
+generic recovery media → local network setup and pairing → recovery inventory →
+attended baseline cycle →
 CLI-driven problem-solving sessions → qualified unattended operation. Its new
 commands are planned interfaces, not features already available. MCP is deferred;
 the local CLI and durable operations will be the agent API.
 
-Quirkbench implements a durable controller/target lab with a human monitor, authenticated HTTPS, strict contracts and fault tests. The current six-partition image includes a physical handoff supervisor, live evidence and watchdog integration, and has passed fresh VM boot qualification. **It is not yet commissioned for unattended target operation.** Its hardware, reset and extended-campaign acceptance gates remain separate from software and VM results.
+The [recovery synthesis decision](docs/recovery-base.md) selects locked Fedora RPMs,
+a protected Fedora-configured kernel, dracut and the existing disk assembler.
+It specifies boot/runtime policy, annual refreshes and implementation stages.
+
+Implementation agents should use the [bounded handoff tasks](docs/implementation-handoff.md)
+and their contract sections, rather than fill in missing state/authority semantics
+from the roadmap summary.
+
+Quirkbench implements a durable controller/target lab with a human monitor, authenticated HTTPS, strict contracts and fault tests. The current six-partition image includes a physical handoff supervisor, live evidence and watchdog integration, with focused software fixtures. **The recovery setup/enrollment flow and unattended target qualification remain incomplete.** Its hardware, reset and extended-campaign acceptance gates remain separate from software and VM results.
 
 ## Run the software acceptance gate
 
@@ -65,12 +72,14 @@ A controller command defaults to a 20 GiB free-space reserve. The simulation opt
 
 ## Architecture and remaining work
 
-[Architecture](docs/architecture.md), [milestone briefs](docs/milestones.md), [M1 review](docs/m1-review.md), and [OSTree build and boot workflow](docs/build-and-boot.md) define ownership, public interfaces, acceptance commands and limitations. The existing v1 experiment envelope is preserved; its `deployment` artifact role references a versioned deployment manifest. Schemas live in `schemas/` with examples in `examples/`.
+[Architecture](docs/architecture.md), [milestone briefs](docs/milestones.md), and [OSTree build and boot workflow](docs/build-and-boot.md) define ownership, public interfaces, acceptance commands and limitations. The existing v1 experiment envelope is preserved; its `deployment` artifact role references a versioned deployment manifest. Schemas live in `schemas/` with examples in `examples/`.
 
 The approved OS deployment backend is **OSTree/rpm-ostree**, using a traditional signed OSTree repository published by the controller over authenticated HTTPS. Each experiment authorizes an exact commit containing matching kernel, modules, initramfs and userspace. Quirkbench owns experiment authorization, one-shot boot control and evidence; OSTree owns candidate filesystem deployment. Recovery is independent and never updated by an experiment. See [deployment architecture](docs/architecture.md) and [build and boot](docs/build-and-boot.md).
 
 The external image uses six partitions: fixed EFI/recovery, narrowly writable GRUB state, experiments, a read-only library and independent evidence storage. A compact factory image commissions the remaining capacity on first boot, preserving interrupted work. Use a normal writer such as Etcher; Quirkbench does not provide a USB writer. Existing prototype images need rebuilding, not in-place conversion. Existing campaign records, source checkpoints and evidence remain readable.
 
-M1 is achieved. **Historical M2 layout revision 1** passed 286 software tests and ten real UEFI VM boot trials, plus composition, incremental deployment, container recreation and complete backup/restore checks. [Qualification observations](docs/ostree-review.md) link the evidence. Passing unit tests alone does not qualify an image. QEMU tests boot infrastructure and disk/firmware sentinels, not target behavior. Hardware recovery, watchdogs, netconsole, kdump, target diagnostics, the campaign exceeding 30 hours and evidence-backed fixes have separate acceptance gates. See [qualification fixtures](acceptance/README.md).
-
-The [OSTree architecture revision review](docs/m2-ostree-review.md) records implemented boundaries, observed qualification and remaining integration gates. New deployment submissions retain an explicit build-evidence closure containing matching symbols, configuration, modules and source archives; an OS revision alone is not a complete debugging checkpoint.
+M1 is achieved. Generic recovery setup, target-bound enrollment and durable session
+orchestration remain in the forward plan. QEMU qualifies infrastructure and preservation;
+real investigations boot on the target. Hardware reset, diagnostic survival and release
+endurance require their own evidence. See [qualification fixtures](acceptance/README.md).
+New deployments retain source, configuration, matching symbols, modules and build provenance.

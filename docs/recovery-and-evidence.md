@@ -4,7 +4,7 @@ Quirkbench experiments boot the candidate Linux kernel directly on the physical
 target computer through its firmware and USB GRUB. QEMU tests Quirkbench's infrastructure:
 image assembly, kernel/initramfs smoke boot, one-shot consumption, recovery
 selection, and storage/firmware protection under controlled fixtures. It cannot
-establish that an target audio, input, power-management, or microphone issue is
+establish that a target hardware issue is
 reproduced or fixed. A hardware-specific candidate need not support virtual
 hardware; any VM smoke requirement must declare the applicable hardware profile.
 
@@ -72,8 +72,6 @@ automatic recovery and a useful trace from every arbitrarily early hard hang.
 
 ## Current implementation versus planned capability
 
-The historical revised M2 OSTree build and VM qualification was achieved for layout revision 1; [recorded results](ostree-review.md) include explicit initramfs-load failure and kernel panic/reset/recovery. Earlier custom-bundle work produced kernel, initramfs and image artifacts; those historical results do not qualify the replacement OSTree deployment. No such build or VM result constitutes target crash-recovery acceptance.
-
 The current kernel protection policy explicitly disables KEXEC and KEXEC_FILE,
 so **kdump is not implemented or available in the current image**. Enabling it
 requires a reviewed policy revision, tests for the capture kernel's identical
@@ -90,14 +88,14 @@ is evidence of missing progress, not proof that a reboot or crash occurred.
 
 M2 owns the boot-selection fixture; M3 owns durable upload/reconciliation; M4's
 first hardware gate owns reset and diagnostic coverage. This gate must precede
-adaptive or overnight hardware campaigns, rather than being inferred from them.
+unattended hardware campaigns, rather than being inferred from them.
 New kernel policy or relevant driver changes invalidate affected qualifications.
 
 ## OSTree supplies deployment, not crash recovery
 
 V1 uses Silverblue's OSTree/rpm-ostree technology with minimal Fedora userspace. Each exact commit describes coherent kernel, modules, initramfs and userspace, reducing custom deployment and interrupted-update handling. Quirkbench retains an independent recovery image and explicitly arms each candidate for one boot. OSTree rollback alone does not reset a hung CPU or preserve diagnostics.
 
-Traditional OSTree repository transport is the v1 choice; bootc and the full Silverblue desktop are deferred. The installed Bazzite deployment and its bootloader remain outside Quirkbench. Neither OSTree nor a change of deployment adapter relaxes the internal-disk or firmware protections.
+Traditional OSTree repository transport is the v1 choice; bootc and the full Silverblue desktop are deferred. The installed operating system and its bootloader remain outside Quirkbench. Neither OSTree nor a change of deployment adapter relaxes the internal-disk or firmware protections.
 
 ## Primary references
 

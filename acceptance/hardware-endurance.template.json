@@ -4,11 +4,34 @@
   "status": "unqualified",
   "device": "Target computer; fill model and hardware identifiers locally",
   "duration_seconds": 0,
-  "required_events": ["controller_restart", "network_interruption", "agent_session_replacement", "pause_resume_1", "pause_resume_2", "storage_pressure", "human_recovery_classification"],
+  "required_events": [
+    "controller_restart",
+    "network_interruption",
+    "agent_session_replacement",
+    "pause_resume_1",
+    "pause_resume_2",
+    "storage_pressure",
+    "human_recovery_classification"
+  ],
   "observed_events": [],
-  "capabilities": {"usb_boot": "untested", "internal_storage_exclusion": "untested", "firmware_preservation": "untested", "watchdog": "untested", "kdump": "untested", "netconsole": "untested", "suspend_resume": "untested"},
+  "capabilities": {
+    "usb_boot": "untested",
+    "internal_storage_exclusion": "untested",
+    "firmware_preservation": "untested",
+    "watchdog": "untested",
+    "kdump": "untested",
+    "netconsole": "untested",
+    "suspend_resume": "untested"
+  },
   "evidence": [],
   "unresolved_attempts": [],
   "operator": "",
-  "limitations": ["No hardware qualification has been performed."]
+  "limitations": [
+    "No hardware qualification has been performed."
+  ],
+  "duration_objective": {
+    "seconds": 0,
+    "rationale": "",
+    "declared_before_run": ""
+  }
 }

@@ -111,7 +111,7 @@ def qemu_command(inputs: QemuInputs, *, vars_copy: Path,
         if not item.is_absolute() or item.parent != inputs.work_dir:
             raise QemuError("QEMU outputs must be direct children of work_dir")
     return (
-        "qemu-system-x86_64", "-machine", "q35,accel=tcg", "-cpu", "max", "-m", str(inputs.memory_mib),
+        "qemu-system-x86_64", "-uuid", "01234567-89ab-cdef-0123-456789abcdef", "-machine", "q35,accel=tcg", "-cpu", "max", "-m", str(inputs.memory_mib),
         "-smp", "1", "-nodefaults", "-display", "none", "-monitor", "none", "-serial", "stdio",
         "-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={inputs.ovmf_code}",
         "-drive", f"if=pflash,format=raw,unit=1,file={vars_copy}",
@@ -386,17 +386,17 @@ def qualify_boot_cycle(inputs: QemuInputs, manifest_path: Path, *, event=None) -
     code_digest=sha256_file(inputs.ovmf_code)
     offset=manifest['partitions'][2]['start']*512
     state_image=f'{trial}@@{offset}'
-    def arm(candidate_id):
+    def arm(candidate_id, target_uuid="01234567-89ab-cdef-0123-456789abcdef"):
         env=work/'next.env'
         image_tool('mcopy','-o','-i',state_image,'::/quirkbench/next.env',str(env))
-        image_tool('grub-editenv',str(env),'set','next_entry=candidate','candidate_id='+candidate_id)
+        image_tool('grub-editenv',str(env),'set','next_entry=candidate','candidate_id='+candidate_id,'target_uuid='+target_uuid)
         image_tool('mcopy','-o','-i',state_image,str(env),'::/quirkbench/next.env')
         with trial.open('rb') as handle:os.fsync(handle.fileno())
     def state_consumed():
         env=work/'observed.env'
         image_tool('mcopy','-o','-i',state_image,'::/quirkbench/next.env',str(env))
         values=dict(line.split('=',1) for line in image_tool('grub-editenv',str(env),'list').splitlines() if '=' in line)
-        return not values.get('next_entry') and not values.get('candidate_id')
+        return not values.get('next_entry') and not values.get('candidate_id') and not values.get('target_uuid')
     def hash_partition(part):
         state=hashlib.sha256()
         with trial.open('rb') as handle:
@@ -413,13 +413,17 @@ def qualify_boot_cycle(inputs: QemuInputs, manifest_path: Path, *, event=None) -
     previous_values=None
     commissioned_parts=None
     library_digest=None
-    trials=[('settle','recovery',None),('recovery','recovery',None),('candidate','candidate',manifest['candidate_id']),('after-candidate','recovery',None),('missing-candidate','recovery','0'*64),('after-missing','recovery',None),('load-failure','recovery',manifest['load_failure_candidate_id']),('after-load-failure','recovery',None),('panic-candidate','candidate',manifest['panic_candidate_id']),('after-panic','recovery',None)]
+    trials=[('settle','recovery',None),('recovery','recovery',None),('candidate','candidate',manifest['candidate_id']),('after-candidate','recovery',None),('missing-candidate','recovery','0'*64),('after-missing','recovery',None),('load-failure','recovery',manifest['load_failure_candidate_id']),('after-load-failure','recovery',None),('panic-candidate','candidate',manifest['panic_candidate_id']),('after-panic','recovery',None),('foreign-target','recovery',manifest['candidate_id']),('unbound-target','recovery',manifest['candidate_id'])]
     for name,mode,candidate in trials:
         event('qemu-'+name,'Booting '+mode+'; waiting for verified target serial marker and poweroff.')
-        if candidate:arm(candidate)
+        if candidate:
+            expected_uuid = ('11234567-89ab-cdef-0123-456789abcdef' if name == 'foreign-target'
+                             else '' if name == 'unbound-target'
+                             else '01234567-89ab-cdef-0123-456789abcdef')
+            arm(candidate, expected_uuid)
         serial=work/(name+'.serial.log')
         command=(
-            'qemu-system-x86_64','-machine','q35,accel=tcg','-cpu','max','-m',str(inputs.memory_mib),'-smp','2',
+            'qemu-system-x86_64','-uuid','01234567-89ab-cdef-0123-456789abcdef','-machine','q35,accel=tcg','-cpu','max','-m',str(inputs.memory_mib),'-smp','2',
             '-nodefaults','-display','none','-monitor','none','-serial','stdio',
             '-drive',f'if=pflash,format=raw,unit=0,readonly=on,file={inputs.ovmf_code}',
             '-drive',f'if=pflash,format=raw,unit=1,file={variables}',
@@ -445,7 +449,11 @@ def qualify_boot_cycle(inputs: QemuInputs, manifest_path: Path, *, event=None) -
         terminal_marker = 'Kernel panic - not syncing: sysrq triggered crash' if name == 'panic-candidate' else 'QUIRKBENCH_RECOVERY_SMOKE_READY'
         if proc.returncode or (name != 'panic-candidate' and f'QUIRKBENCH_BOOT mode={mode}' not in log) or terminal_marker not in log:
             raise QemuError(f'{name} boot did not qualify (exit {proc.returncode}); inspect {serial}; QEMU: {proc.stderr[-1000:]}')
-        mounts = None if name == 'panic-candidate' else verify_mount_proof(log,mode)
+        if name in {'foreign-target', 'unbound-target'}:
+            if ('QUIRKBENCH target identity unavailable or changed; recovery setup required' not in log
+                    or 'QUIRKBENCH_GRUB candidate\n' in log or 'QUIRKBENCH_BOOT mode=candidate' in log):
+                raise QemuError('target binding did not refuse candidate before kernel loading')
+        mounts = None if name == 'panic-candidate'  else verify_mount_proof(log,mode)
         observed_parts = commissioned_partition_report(trial,manifest)
         if commissioned_parts is None:
             commissioned_parts=observed_parts
@@ -474,5 +482,5 @@ def qualify_boot_cycle(inputs: QemuInputs, manifest_path: Path, *, event=None) -
         atomic_write(work/'progress.json',canonical({'completed':len(results),'total':len(trials),'trials':results,'active_trial':None}))
     report={'schema_version':2,'layout_version':2,'qualification':'qemu-uefi-boot-cycle','fixture_size_bytes':fixture_bytes,'commissioned_partitions':commissioned_parts,'library_sha256':library_digest,'image_sha256':manifest['image_sha256'],'firmware_code_sha256':code_digest,'firmware_template_sha256':template_digest,'fixed_partitions_sha256':fixed_before,'trials':results,'limitations':['VM fixture only; physical firmware, USB and crash recovery remain unqualified.', 'Panic trial covers late-boot panic/reset/fallback; early-boot failures, hard hangs and crash capture remain unqualified.', 'A panic can drop queued userspace markers; panic proof uses kernel-emitted release, exact authorized fault command line and actual panic. The normal candidate trial separately verifies userspace and modules.']}
     atomic_write(work/'qualification.json',canonical(report))
-    event('qemu-complete','All ten boot trials and preservation checks passed.')
+    event('qemu-complete',f'All {len(trials)} boot trials and preservation checks passed.')
     return work/'qualification.json'

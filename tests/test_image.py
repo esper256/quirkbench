@@ -18,6 +18,9 @@ def _inputs(tmp_path: Path) -> ImageInputs:
     (root / "etc").mkdir()
     (root / "etc/os-release").write_text("ID=fedora\n")
     (root / "etc/quirkbench-rootfs").write_text("quirkbench-fedora-target-v1\n")
+    for name in ('usr/sbin/NetworkManager', 'usr/bin/nmtui'):
+        program=root/name;program.parent.mkdir(parents=True,exist_ok=True)
+        program.write_text('fixture');program.chmod(0o755)
     configs = []
     for name in ("recovery.config",):
         cfg = tmp_path / name
@@ -45,7 +48,8 @@ def test_grub_defaults_to_recovery_and_checks_one_shot_clear():
     clear=cfg.index("save_env")
     assert clear < cfg.index("unset next_entry") < cfg.index("load_env",cfg.index("unset next_entry"))
     assert "set default=1" in cfg
-    assert '-a -f $data/quirkbench/boot/$chosen_candidate.cfg ]; then\n              set default=1' in cfg
+    assert '-a -f $data/quirkbench/boot/$chosen_candidate.cfg ]; then' in cfg
+    assert cfg.index('smbios --type 1') < cfg.index('set default=1')
     assert "source $data/quirkbench/boot/$chosen_candidate.cfg" in cfg
     assert "rootflags=noload fsck.mode=skip rd.skipfsck" in cfg
     assert "init=/bin/sh" not in cfg
@@ -202,3 +206,11 @@ def test_source_change_during_image_staging_refuses_all_publication(tmp_path,mon
     assert not inputs.output.exists()
     assert not Path(str(inputs.output)+'.json').exists()
     assert not Path(str(inputs.output)+'.pending.json').exists()
+
+
+@pytest.mark.parametrize('missing', ['usr/sbin/NetworkManager', 'usr/bin/nmtui'])
+def test_old_rootfs_cannot_publish_an_image_without_new_network_stack(tmp_path, missing):
+    inputs=_inputs(tmp_path)
+    (inputs.rootfs_dir/missing).unlink()
+    with pytest.raises(ImageError,match='networking prerequisite missing'):
+        inputs.validate()

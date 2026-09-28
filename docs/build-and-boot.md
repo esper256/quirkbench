@@ -2,7 +2,16 @@
 
 The production deployment backend is minimal Fedora composed with rpm-ostree and published through a traditional signed OSTree repository. The old four-file kernel/initramfs bundle is retired. Historical artifacts remain available, but old images require rebuilding; there is no in-place image conversion.
 
-The earlier M2 gate qualified layout revision 1; [fresh layout-2 results](v1-qualification.md) now record the replacement image checks. Neither result qualifies the target. The [forward product plan](product-roadmap.md) adds a read-only target inventory, reviewed HardwarePlan and background `target prepare` workflow; those commands are planned. The lower-level build/compose/image commands below already exist.
+The [product plan](product-roadmap.md) makes generic recovery media the entry point:
+local network setup and pairing precede recovery inventory and baseline composition.
+The setup/enrollment interfaces are planned; the lower-level commands below exist.
+No target inventory or device credentials are prerequisites for a factory image.
+
+Recovery follows the [selected synthesis pipeline](recovery-base.md): locked DNF5
+installroot, protected Fedora-configured kernel, dracut, and the existing GRUB/GPT
+assembler. P3a implements recipe-driven orchestration; KIWI/Lorax evaluation is closed.
+SELinux disablement is recovery-only and must be explicit in its boot arguments and
+release provenance. Existing artifacts are not retroactively changed or qualified.
 
 ## Build and compose on the controller
 
@@ -76,7 +85,7 @@ All paths are placeholders. The output's parent must exist and the output must b
 PYTHONPATH=src python3 -m quirkbench image /workspace/inputs/image.json
 ```
 
-The command produces the regular-file disk image, a `.sha256` checksum and an adjacent image manifest. Qualification uses `quirkbench qualify-image --help` or `make acceptance-qemu`; [the acceptance guide](../acceptance/README.md) lists its required inputs. `smoke: true` enables VM trial behavior and is not a commissioned hardware image. Hardware preparation must use `smoke: false` and pass its separate gates before writing with Etcher.
+The command produces the regular-file disk image, a `.sha256` checksum and an adjacent image manifest. Qualification uses `quirkbench qualify-image --help` or `make acceptance-qemu`; [the acceptance guide](../acceptance/README.md) lists its required inputs. `smoke: true` enables VM trial behavior and is not a commissioned hardware image. User-facing media must use `smoke: false`. Release images need the separate release gates; attended commissioning happens after flashing with Etcher.
 
 ## Protection and qualification
 
@@ -86,7 +95,7 @@ The current no-kexec policy does not support kdump. Review that policy and indep
 
 QEMU proves infrastructure behavior, not target fixes. The revised M2 gate requires a clean-container compose, preserved state after container recreation, one revision changing kernel and userspace with matching modules, interrupted update fault cases, recovery/candidate/subsequent-recovery/failed-candidate boots, and unchanged sentinel disks, fixed recovery and settled persistent firmware settings. Record controller package and boot configuration inventories before and after. A process exit, timeout or immutable OVMF template hash alone is not successful boot qualification.
 
-The hardware gate separately verifies actual storage protection, reset, diagnostic capture and evidence upload before unattended campaigns. See [recovery coverage](recovery-and-evidence.md). Unit tests and old bundle-based VM results must not be represented as completion of the OSTree M2 gate.
+The hardware gate separately verifies actual storage protection, reset, diagnostic capture and evidence upload before unattended campaigns. See [recovery coverage](recovery-and-evidence.md). Software tests cannot substitute for physical qualification.
 
 ## References
 
@@ -94,3 +103,16 @@ The hardware gate separately verifies actual storage protection, reset, diagnost
 - [OSTree atomic upgrades](https://ostreedev.github.io/ostree/atomic-upgrades/)
 - [OSTree deployment state](https://ostreedev.github.io/ostree/deployment/)
 - [GRUB environment block requirements](https://www.gnu.org/software/grub/manual/grub/html_node/Environment-block.html)
+
+
+Recovery and candidate package recipes now use NetworkManager, its TUI/Wi-Fi packages
+and Fedora firmware packages. The runtime mounts connection state in RAM before
+starting NetworkManager and masks networkd. This supplies packaging for setup; it
+does not yet persist selected profiles or qualify a broad recovery driver set.
+Rebuild staged rootfs/package locks and image bytes after this change; do not reuse
+a completed networkd-only rootfs and call it a supported recovery image.
+
+The fixed GRUB image includes `smbios` and binds one-shot selection to the system
+UUID before candidate loading. See [GRUB SMBIOS](https://www.gnu.org/software/grub/manual/grub/html_node/smbios.html).
+QEMU fixtures assign their own UUID; software branch tests do not qualify firmware
+formatting or bootloader execution. These changes require fresh release evidence.

@@ -57,9 +57,10 @@ with the initial driver-exclusion policy. Report unsupported capabilities and bl
 the affected operation until reviewed support exists. A generic tool must be able
 to describe these limitations rather than pretend one mechanism works everywhere.
 
-The Acer SF14-61T and its audio, media-key and microphone issues are the initial
-investigation case, not product constraints. Generic examples and acceptance
-templates use neutral identities. Tests for discovery/planning must include
-different vendors and form factors, absent optional capabilities, and unsupported
-architecture/boot combinations; fixture coverage must not be mistaken for physical
-qualification of all those platforms.
+Generic examples and acceptance templates use neutral identities. Discovery/planning
+fixtures cover different vendors and form factors, absent optional capabilities and
+unsupported platforms. Fixture coverage does not qualify those physical platforms.
+
+A **media instance** is one enrolled external drive, distinct from a factory image
+release or its filesystem IDs. A **target binding** detects accidental movement to
+another computer; it is neither a login credential nor hardware attestation.

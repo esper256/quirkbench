@@ -20,7 +20,8 @@ def provision(directory, **changes):
     for name in ('ca.pem', 'device.token'):
         (directory / name).write_text('fixture')
     value = dict(schema_version=1, device_id='target-one', controller_url='https://controller.invalid',
-                 ca='ca.pem', token_file='device.token', remotes={})
+                 ca='ca.pem', token_file='device.token', remotes={},
+                 target_binding={'schema_version':1,'system_uuid':UUIDS[0]})
     value.update(changes)
     path = directory / 'runtime.json'
     path.write_text(json.dumps(value))
@@ -82,6 +83,7 @@ def setup_main(tmp_path, monkeypatch, mode='recovery', *, configured=True, error
     control = tmp_path / 'control'
     control.mkdir()
     monkeypatch.setattr(runtime, 'CONTROL', control)
+    monkeypatch.setattr('quirkbench.binding.read_system_uuid', lambda:UUIDS[0])
     boot = {'quirkbench.mode': 'candidate' if mode == 'experiment' else 'recovery'}
     monkeypatch.setattr(runtime, 'boot_context', lambda: (CONFIG, boot, lambda: True))
     messages, resets, steps = [], [], []
@@ -276,3 +278,22 @@ def test_mismatching_profile_never_activates_but_agent_still_runs(tmp_path, monk
     monkeypatch.setattr('quirkbench.watchdog.activate_watchdog', forbidden)
     assert runtime.main(['--once']) == 0
     assert len(context.steps) == 1
+
+
+@pytest.mark.parametrize('binding', [None, {'schema_version':1, 'system_uuid':UUIDS[1]}])
+def test_unbound_or_moved_media_never_authenticates_or_activates_watchdog(tmp_path, monkeypatch, binding):
+    context = setup_main(tmp_path, monkeypatch)
+    provision(context.control, target_binding=binding)
+    monkeypatch.setattr('quirkbench.watchdog.activate_watchdog', lambda *a, **k:pytest.fail('must not arm'))
+    monkeypatch.setattr(runtime, 'create_agent', lambda *a:pytest.fail('must not authenticate'))
+    assert runtime.main(['--once']) == 0
+    assert context.steps == [] and context.resets == []
+    assert context.supervisor.needs_human
+    assert (context.control/'runtime.json').exists()
+
+
+def test_moved_candidate_returns_to_recovery_without_execution(tmp_path, monkeypatch):
+    context = setup_main(tmp_path, monkeypatch, 'experiment')
+    provision(context.control, target_binding={'schema_version':1, 'system_uuid':UUIDS[1]})
+    assert runtime.main(['--once']) == 1
+    assert context.steps == [] and len(context.resets) == 1

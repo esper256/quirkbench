@@ -78,6 +78,12 @@ class ImageInputs:
             raise ImageError('target rootfs marker missing')
         if not re.search(r'(?m)^ID="?fedora"?$',(root/'etc/os-release').read_text()):raise ImageError('Fedora target sysroot required')
         if not (root/'sbin/init').exists():raise ImageError('target init missing')
+        for program, candidates in (('NetworkManager', ('usr/sbin/NetworkManager', 'usr/bin/NetworkManager')),
+                                    ('nmtui', ('usr/bin/nmtui',))):
+            if not any((root/path).resolve().is_relative_to(root.resolve())
+                       and (root/path).is_file() and os.access(root/path, os.X_OK)
+                       for path in candidates):
+                raise ImageError('recovery networking prerequisite missing: '+program+'; rebuild rootfs and package locks')
         for directory in ('root/.ssh','root/.codex','root/.aws','home'):
             path=root/directory
             if path.exists() and any(path.iterdir()):raise ImageError('credentials/user home content forbidden in target rootfs')
@@ -173,6 +179,9 @@ set fallback=0
 set timeout=1
 set candidate_id=
 set chosen_candidate=
+set target_uuid=
+set chosen_target=
+set current_target=
 echo "QUIRKBENCH_GRUB origin root=$root"
 # mkimage has a path-only prefix: GRUB initializes root from its EFI device.
 # Capture that unmodified root before reading any mutable state.
@@ -183,19 +192,32 @@ if regexp --set=1:boot_disk '^([^,)]+),gpt1$' "$root"; then
   set data=($boot_disk,gpt4)
   # Markers include the expected partition identity on this exact boot disk.
   if [ -f $esp/quirkbench-{esp_uuid} -a -f $state/quirkbench-{state_uuid} ]; then
-    if load_env --file=$state/quirkbench/next.env next_entry candidate_id; then
+    if load_env --file=$state/quirkbench/next.env next_entry candidate_id target_uuid; then
       if [ "$next_entry" = "candidate" ]; then
         if regexp '^[0-9a-f]{{64}}$' "$candidate_id"; then
           set chosen_candidate=$candidate_id
+          set chosen_target=$target_uuid
         fi
         set next_entry=
         set candidate_id=
-        if save_env --file=$state/quirkbench/next.env next_entry candidate_id; then
+        set target_uuid=
+        if save_env --file=$state/quirkbench/next.env next_entry candidate_id target_uuid; then
           unset next_entry
           unset candidate_id
-          if load_env --file=$state/quirkbench/next.env next_entry candidate_id; then
-            if [ -z "$next_entry" -a -z "$candidate_id" -a -n "$chosen_candidate" -a -f $data/quirkbench/boot/$chosen_candidate.cfg ]; then
-              set default=1
+          unset target_uuid
+          if load_env --file=$state/quirkbench/next.env next_entry candidate_id target_uuid; then
+            if [ -z "$next_entry" -a -z "$candidate_id" -a -z "$target_uuid" -a -n "$chosen_candidate" -a -f $data/quirkbench/boot/$chosen_candidate.cfg ]; then
+              # Missing/changed identity must never reach a candidate kernel.
+              if smbios --type 1 --get-uuid 8 --set current_target; then
+                if regexp '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$' "$chosen_target"; then
+                  if [ "$chosen_target" = "$current_target" -a "$chosen_target" != "00000000-0000-0000-0000-000000000000" -a "$chosen_target" != "ffffffff-ffff-ffff-ffff-ffffffffffff" ]; then
+                    set default=1
+                  fi
+                fi
+              fi
+              if [ "$default" != "1" ]; then
+                echo 'QUIRKBENCH target identity unavailable or changed; recovery setup required'
+              fi
             fi
           fi
         fi
@@ -375,7 +397,7 @@ def _create_image(inputs: ImageInputs) -> Path:
                     efi=work/'BOOTX64.EFI'
                     early=work/'early.cfg'
                     early.write_text('normal\n')
-                    _run('grub-mkimage','--format=x86_64-efi','--output',str(efi),'--prefix=/EFI/BOOT','--config',str(early),'part_gpt','fat','ext2','normal','linux','boot','loadenv','test','regexp','serial','halt','configfile','echo')
+                    _run('grub-mkimage','--format=x86_64-efi','--output',str(efi),'--prefix=/EFI/BOOT','--config',str(early),'part_gpt','fat','ext2','normal','linux','boot','loadenv','test','regexp','serial','halt','configfile','echo','smbios')
                     _run('mcopy','-i',str(fs),str(cfg),'::/EFI/BOOT/grub.cfg')
                     for file,destination in ((efi,'EFI/BOOT/BOOTX64.EFI'),(inputs.recovery_kernel,'vmlinuz-recovery'),(inputs.recovery_initramfs,'initramfs-recovery.img')):
                         _run('mcopy','-i',str(fs),str(file),'::/'+destination)
@@ -390,7 +412,7 @@ def _create_image(inputs: ImageInputs) -> Path:
         _emit('image-hash',status='running',total_bytes=image.stat().st_size)
         checksum=sha256_file(image)
         _emit('image-hash',status='complete',total_bytes=image.stat().st_size)
-        record={'schema_version':2,'layout_version':2,'commissioned':False,'commissioning':commissioned,'image_sha256':checksum,'size_bytes':image.stat().st_size,'partitions':parts,'identity':config,'candidate_id':candidate_id,'smoke':inputs.smoke,'boot_policy':'fixed recovery; same-disk consumed one-shot; no EFI writes','recovery_kernel_sha256':sha256_file(inputs.recovery_kernel),'recovery_initramfs_sha256':sha256_file(inputs.recovery_initramfs),'candidate_revision':candidate_revision,'candidate_kernel_release':candidate_kernel_release,'candidate_health_sha256':candidate_health_sha256,'panic_candidate_id':panic_candidate_id,'load_failure_candidate_id':load_failure_candidate_id,'deployment_backend':'ostree'}
+        record={'schema_version':2,'layout_version':2,'commissioned':False,'commissioning':commissioned,'image_sha256':checksum,'size_bytes':image.stat().st_size,'partitions':parts,'identity':config,'candidate_id':candidate_id,'smoke':inputs.smoke,'boot_policy':'fixed recovery; same-disk consumed one-shot; matching SMBIOS UUID; no EFI writes','recovery_kernel_sha256':sha256_file(inputs.recovery_kernel),'recovery_initramfs_sha256':sha256_file(inputs.recovery_initramfs),'candidate_revision':candidate_revision,'candidate_kernel_release':candidate_kernel_release,'candidate_health_sha256':candidate_health_sha256,'panic_candidate_id':panic_candidate_id,'load_failure_candidate_id':load_failure_candidate_id,'deployment_backend':'ostree'}
         _emit('image-input-fingerprint',status='running')
         record['builder_identity']=_builder_identity()
         record['input_identity']=_input_identity(inputs)
@@ -411,7 +433,7 @@ def _builder_identity():
     assets=package.parents[1]/'target-assets'
     sources={f'python/{path.name}':path for path in package.glob('*.py')}
     sources.update({f'assets/{name}':assets/name for name in
-                    ('quirkbench-recovery.service','quirkbench-candidate.service','quirkbench-supervisor.service','quirkbench-supervisor-failure.service','20-quirkbench-wired.network','var.mount','tmp.mount')})
+                    ('quirkbench-recovery.service','quirkbench-candidate.service','quirkbench-supervisor.service','quirkbench-supervisor-failure.service','var.mount','tmp.mount')})
     return hashlib.sha256(canonical({name:sha256_file(path) for name,path in sorted(sources.items())})).hexdigest()
 
 

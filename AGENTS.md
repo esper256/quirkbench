@@ -13,7 +13,17 @@ choosing validation. This policy applies to delegated work as well.
 Follow [the authoritative forward plan](docs/product-roadmap.md), briefs P1–P8.
 Inventory/provisioning/session commands in that plan are proposed, not implemented.
 Use a bounded brief and focused tests; request higher-reasoning review for storage,
-watchdog authorization or durable execution boundary changes. No MCP service in v1.
+watchdog authorization or durable execution boundary changes. No MCP service in v1. Recovery synthesis is settled in
+[the recovery decision](docs/recovery-base.md): DNF5 installroot, Fedora-configured
+protected kernel, dracut and existing image assembly. Do not reopen KIWI/Lorax selection
+or introduce a second builder during P3a implementation.
+
+Use the [implementation handoff](docs/implementation-handoff.md) to select one
+subtask and its [contract sections](docs/implementation-contracts.md). These settle
+worker fencing, recovery enrollment, target binding and agent/reset authority; do not improvise
+those boundaries from the roadmap's short table. Read only the relevant sections,
+preserve compatibility, and apply the completion checklist. A proposed test suite
+or schema is not existing passing implementation evidence.
 
 - For ordinary edits, run the smallest relevant software tests. Documentation-only
   changes need link/consistency checks, not pytest or an image rebuild.

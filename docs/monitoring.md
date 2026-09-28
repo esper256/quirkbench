@@ -37,3 +37,14 @@ progress. Live recipe chunks and uploads have measured counts; long library
 verification emits hashed-byte progress. A heartbeat cannot extend a phase deadline.
 Recovery waits visibly for provisioning/network, while authentication, protocol,
 storage and identity errors stop with a preserved human-intervention reason.
+
+
+## Recovery setup visibility
+
+Before pairing, the target must provide local status; a controller monitor cannot
+report a target it has never contacted. P3 adds explicit phases for storage readiness,
+network configuration/link/address, controller reachability, trust confirmation,
+enrollment, inventory upload and baseline waiting. Distinguish operator input from
+a timed network operation. Never display passwords, enrollment codes or private keys
+in diagnostic logs. A changed/ambiguous target binding visibly requires setup while
+retaining prior evidence. The existing runtime waits safely; the guided UI is planned.

@@ -7,9 +7,8 @@ a kernel hang. Current target hardware coverage remains **untested**.
 
 ## What is already set up
 
-The service units, activation code and profile checks exist. The current built
-kernel lacks a usable hardware-watchdog driver, and no physical reset has been
-demonstrated. The service watchdog checks the supervisor's notifications; the
+The service units, activation code and profile checks exist. Physical reset support
+must be established for each target and kernel profile. The service watchdog checks the supervisor's notifications; the
 hardware watchdog resets a machine that stops servicing its timer. Systemd's
 [service setting](https://github.com/systemd/systemd/blob/main/man/systemd.service.xml)
 and [hardware settings](https://github.com/systemd/systemd/blob/main/man/systemd-system.conf.xml)
@@ -18,7 +17,7 @@ are distinct. Hardware settings have no effect without a supported device.
 The primary purpose is resetting the **experimental OS** into fixed recovery.
 Recovery may service that same hardware timer, particularly across handoff. It is
 not a second watchdog or an independent reset device. No controller/network outage
-should turn healthy recovery into a reboot loop. Discovery on the installed OS
+should turn healthy recovery into a reboot loop. Discovery in recovery or the optional installed-OS collector
 must never open `/dev/watchdog*`: opening can activate a timer, as described by the
 [kernel watchdog API](https://docs.kernel.org/watchdog/watchdog-api.html).
 
@@ -39,6 +38,11 @@ versioned capability negotiation, stale/revoked authorization tests and
 higher-reasoning review before activation; older targets must fail explicitly.
 There is no requirement to repeat an entire destructive qualification campaign on
 every build or every recovery boot.
+
+[Contract C6](implementation-contracts.md#c6--watchdog-authorization-and-revocation-p5)
+specifies the planned signed grant fields, separate route, cached activation order,
+policy epochs and offline revocation limits. P5 implementers must use those rules;
+neither free-form provenance nor a copied baseline profile is authorization.
 
 ## Current profile contract
 
@@ -74,8 +78,8 @@ Malformed profiles still fail validation rather than silently changing policy.
 
 ## Build prerequisites
 
-The existing minimal qualification kernel has no functional watchdog driver or
-lockup detectors. Do not infer watchdog coverage from those earlier VM results.
+A recovery image or VM boot result does not imply a functional watchdog driver or
+lockup detectors. Verify the final kernel configuration and observed hardware.
 Choose the driver after observing the target hardware; no driver is assumed to
 match the target merely because of its model name. Keep the normal storage and
 firmware protection policy. For the reviewed initial driver families,

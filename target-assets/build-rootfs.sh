@@ -37,7 +37,7 @@ fi
 # This flag uses the dedicated builder container's repositories, never host DNF.
 dnf -y --installroot="$output" --use-host-config --releasever="$release" \
   --setopt=install_weak_deps=False --setopt=tsflags=nodocs install \
-  fedora-release systemd systemd-udev systemd-networkd bash coreutils util-linux \
+  fedora-release systemd systemd-udev NetworkManager NetworkManager-tui NetworkManager-wifi linux-firmware bash coreutils util-linux \
   e2fsprogs dracut ostree python3 python3-gobject-base iproute ethtool pciutils usbutils procps-ng \
   gdisk parted grub2-tools-minimal cloud-utils-growpart
 mkdir -p "$output/etc"

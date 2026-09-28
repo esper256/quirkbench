@@ -5,6 +5,8 @@ its only privileged caller; tests supply a command runner and temporary paths.
 """
 from __future__ import annotations
 
+from .binding import read_system_uuid, system_uuid
+
 from dataclasses import asdict, dataclass
 import argparse
 import hashlib
@@ -293,7 +295,7 @@ def prepare_recovery(config: RecoveryConfig, *, cmdline: str, kernel_log: str,
         if len(roots) != 1 or not re.fullmatch(r"/ostree/deploy/[A-Za-z0-9_-]+/deploy/" + args["quirkbench.revision"] + r"\.[0-9]+", roots[0][3]):
             raise BootError("running OSTree revision differs from authorized revision")
         value = _read_env(state_mount / "quirkbench/next.env", runner)
-        if value.get("next_entry") or value.get("candidate_id"):
+        if value.get("next_entry") or value.get("candidate_id") or value.get("target_uuid"):
             raise BootError("candidate one-shot state was not consumed before boot")
     else:
         try:
@@ -340,41 +342,43 @@ def _verify_stage_identity(config: RecoveryConfig, *, data_mount: Path, state_mo
 
 def arm_once(prepared, attempt_id: str, *, config: RecoveryConfig, data_mount: Path,
              state_mount: Path, kernel_log: str, runner=_run, identity_verifier=None,
-             mountinfo: str | None = None) -> Path:
+             mountinfo: str | None = None, system_uuid_reader=None) -> Path:
     if prepared.attempt_id != attempt_id:
         raise BootError("prepared deployment belongs to another attempt")
     require_secure_boot_disabled(kernel_log)
     _verify_stage_identity(config, data_mount=data_mount, state_mount=state_mount,
                            identity_verifier=identity_verifier, mountinfo=mountinfo)
+    target_uuid = system_uuid((system_uuid_reader or read_system_uuid)())
     entry = write_candidate_entry(prepared, data_mount, config)
     env = state_mount / "quirkbench/next.env"
     if env.is_symlink() or not env.is_file() or env.stat().st_size != 1024:
         raise BootError("preallocated GRUB state block missing")
-    runner(["grub2-editenv", str(env), "unset", "next_entry", "candidate_id"])
-    if any(_read_env(env, runner).get(key) for key in ("next_entry", "candidate_id")):
+    runner(["grub2-editenv", str(env), "unset", "next_entry", "candidate_id", "target_uuid"])
+    if any(_read_env(env, runner).get(key) for key in ("next_entry", "candidate_id", "target_uuid")):
         raise BootError("could not disarm previous candidate")
     _verify_stage_identity(config, data_mount=data_mount, state_mount=state_mount,
                            identity_verifier=identity_verifier, mountinfo=mountinfo)
-    runner(["grub2-editenv", str(env), "set", "next_entry=candidate", "candidate_id=" + prepared.deployment_id])
+    runner(["grub2-editenv", str(env), "set", "next_entry=candidate", "candidate_id=" + prepared.deployment_id, "target_uuid=" + target_uuid])
     with env.open("rb") as stream:
         os.fsync(stream.fileno())
     _fsync_dir(env.parent)
     values = _read_env(env, runner)
-    if values.get("next_entry") != "candidate" or values.get("candidate_id") != prepared.deployment_id:
+    if values.get("next_entry") != "candidate" or values.get("candidate_id") != prepared.deployment_id or values.get("target_uuid") != target_uuid:
         raise BootError("candidate one-shot state was not saved")
     return entry
 
 
 def reboot_candidate(prepared, *, config: RecoveryConfig, data_mount: Path,
                      state_mount: Path, permit_reboot: bool, runner=_run,
-                     identity_verifier=None, mountinfo: str | None = None) -> None:
+                     identity_verifier=None, mountinfo: str | None = None, system_uuid_reader=None) -> None:
     if not permit_reboot:
         raise BootError("privileged reboot requires explicit permit_reboot=True")
     _verify_stage_identity(config, data_mount=data_mount, state_mount=state_mount,
                            identity_verifier=identity_verifier, mountinfo=mountinfo)
     read_boot_entry(prepared, data_mount)
+    target_uuid = system_uuid((system_uuid_reader or read_system_uuid)())
     values = _read_env(state_mount / "quirkbench/next.env", runner)
-    if values.get("next_entry") != "candidate" or values.get("candidate_id") != prepared.deployment_id:
+    if values.get("next_entry") != "candidate" or values.get("candidate_id") != prepared.deployment_id or values.get("target_uuid") != target_uuid:
         raise BootError("candidate one-shot state is not armed")
     runner(["systemctl", "reboot"])
 
@@ -428,7 +432,6 @@ def commission_boot(config: RecoveryConfig, *, identity_path: Path = Path("/etc/
     journal = Path("/boot/quirkbench-state/quirkbench/commission.json")
     previous = json.loads(journal.read_text()) if journal.exists() else None
     if previous and previous.get("complete"):
-        from dataclasses import asdict
         if (previous.get("identity") != json.loads(json.dumps(asdict(identity)))
                 or previous.get("geometry") != [[p.start, p.end] for p in layout.partitions]):
             raise BootError("completed commissioning geometry or identity changed")
@@ -511,9 +514,14 @@ def install_runtime(rootfs: Path, config: RecoveryConfig | dict | None = None, a
     assets = Path(assets_dir) if assets_dir is not None else Path(__file__).resolve().parents[2] / "target-assets"
     if not assets.is_dir():
         raise BootError("target runtime assets missing")
-    network = rootfs / "etc/systemd/network"
+    # Recovery's root is read-only. NetworkManager profiles must be transient;
+    # the setup adapter will explicitly persist selected profiles in control state.
+    network = rootfs / "etc/NetworkManager/system-connections"
     network.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(assets / "20-quirkbench-wired.network", network / "20-quirkbench-wired.network")
+    network.chmod(0o700)
+    old_network = rootfs / "etc/systemd/network/20-quirkbench-wired.network"
+    if old_network.exists() or old_network.is_symlink():
+        old_network.unlink()
     fstab = rootfs / "etc/fstab"
     if fstab.exists() and any(line.strip() and not line.lstrip().startswith("#") for line in fstab.read_text().splitlines()):
         raise BootError("target fstab may not contain automatic mounts")
@@ -551,11 +559,25 @@ def install_runtime(rootfs: Path, config: RecoveryConfig | dict | None = None, a
     supervisor_dropin.mkdir(exist_ok=True)
     prerequisite = "quirkbench-candidate.service" if candidate else "quirkbench-recovery.service"
     (supervisor_dropin / "boot.conf").write_text(f"[Unit]\nRequires={prerequisite}\nAfter={prerequisite}\n")
-    network_link = units / "multi-user.target.wants/systemd-networkd.service"
+    old_network_link = units / "multi-user.target.wants/systemd-networkd.service"
+    if old_network_link.exists() or old_network_link.is_symlink():
+        old_network_link.unlink()
+    network_mount = "quirkbench-network-state.service"
+    (units / network_mount).write_text(
+        "[Unit]\nDescription=Quirkbench transient network profiles\nBefore=NetworkManager.service\n"
+        "[Service]\nType=oneshot\nRemainAfterExit=yes\n"
+        "ExecStartPre=/usr/bin/mkdir -p -m 0700 /etc/NetworkManager/system-connections\n"
+        "ExecStart=/usr/bin/mount -t tmpfs -o mode=0700,nosuid,nodev,noexec,size=1M tmpfs /etc/NetworkManager/system-connections\n"
+        "ExecStop=/usr/bin/umount /etc/NetworkManager/system-connections\n")
+    network_dropin = units / "NetworkManager.service.d"
+    network_dropin.mkdir(exist_ok=True)
+    (network_dropin / "quirkbench.conf").write_text(
+        f"[Unit]\nRequires={network_mount}\nAfter={network_mount}\n")
+    network_link = units / "multi-user.target.wants/NetworkManager.service"
     if network_link.exists() or network_link.is_symlink():
         network_link.unlink()
-    network_link.symlink_to("/usr/lib/systemd/system/systemd-networkd.service")
-    for name in ("fwupd.service", "udisks2.service", "systemd-pstore.service",
+    network_link.symlink_to("/usr/lib/systemd/system/NetworkManager.service")
+    for name in ("systemd-networkd.service", "systemd-networkd.socket", "fwupd.service", "udisks2.service", "systemd-pstore.service",
                  "systemd-hibernate.service", "systemd-suspend.service",
                  "systemd-hybrid-sleep.service", "systemd-suspend-then-hibernate.service",
                  "systemd-zram-setup@.service", "systemd-remount-fs.service"):

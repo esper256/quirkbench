@@ -16,8 +16,14 @@ def verify(path, kind):
     entries=list(report['evidence'])
     if kind=='hardware-endurance':
         required={'controller_restart','network_interruption','agent_session_replacement','pause_resume_1','pause_resume_2','storage_pressure','human_recovery_classification'}
-        if report.get('status')!='qualified' or report.get('duration_seconds',0)<=30*3600:
-            raise ValueError('qualification requires more than 30 real hours')
+        objective = report.get('duration_objective', {})
+        minimum = objective.get('seconds') if isinstance(objective, dict) else None
+        observed = report.get('duration_seconds')
+        if (report.get('status') != 'qualified' or type(minimum) is not int or minimum <= 0
+                or type(observed) is not int or observed < minimum
+                or not isinstance(objective.get('rationale'), str) or not objective['rationale'].strip()
+                or not isinstance(objective.get('declared_before_run'), str) or not objective['declared_before_run'].strip()):
+            raise ValueError('qualification requires a predeclared duration objective, rationale and sufficient observed duration')
         if not required <= set(report.get('observed_events',[])) or report.get('unresolved_attempts'):
             raise ValueError('fault events or attempt resolutions missing')
         capabilities=report.get('capabilities',{})

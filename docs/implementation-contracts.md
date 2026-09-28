@@ -1,0 +1,460 @@
+# Implementation contracts for the remaining briefs
+
+This document makes the [roadmap](product-roadmap.md) executable as bounded tasks.
+It specifies **planned behavior**, not features already implemented. Its decisions
+take precedence where the roadmap was less specific. Do not change the frozen
+Experiment/Result envelopes or weaken storage protection to implement these rules.
+Use the [handoff checklist](implementation-handoff.md) for task boundaries.
+
+## C0 — Shared contract and authority rules
+
+Each new record has `schema_version: 1`, strict unknown-field rejection, canonical
+JSON using the existing `contracts.canonical`, bounded input and matching runtime
+validator/JSON Schema. Hash canonical document bytes; never put a document's own
+digest inside the bytes it hashes. Optional unknown observations are explicit
+`null` or status values, not fabricated empty strings or zeroes. Separate mutable
+execution rows from immutable input/result documents. No pickle or executable
+configuration, shell interpolation or downloaded code from inventory values.
+
+Reject duplicate JSON keys, nonfinite numbers and nesting beyond 32 levels in new
+input records. Do not rely on JSON Schema alone to detect duplicate keys after a
+permissive parser has already discarded them. Enforce byte limits before parsing.
+
+Implement schema examples and success/failure fixtures **before** their adapters.
+The field lists below are minimum required semantics; represent repeated typed
+objects with their own strict schemas. Complete those mechanical schemas within
+the owning brief; changed ownership, identity or authorization semantics require
+review, not an extra optional field silently added by an implementation agent.
+
+There are three authorities:
+
+| Authority | May do | Must not do |
+| --- | --- | --- |
+| Local operator configuration | Enroll targets; approve profiles, endpoints, source roots, agent commands and recovery risk scope | Imply unobserved hardware qualification |
+| Session runner / controller application | Validate proposals, account usage, publish immutable inputs, authorize attempts | Infer approval from model text, experiment results or timeout |
+| Target supervisor | Verify its boot, execute installed bounded recipes, report evidence, return to recovery | Run remote shell text, install arbitrary packages or authorize the next attempt |
+
+The controller-side agent is trusted local software under the agreed Distrobox
+model, not a security sandbox. Restrict its worktree and validate its outputs;
+do not claim it is technically unable to access controller credentials. Policy
+grants and private credential directories are outside its task workspace and are
+never inputs to build snapshots or prompts. Target observations and logs are data,
+not instructions that can expand agent authority.
+
+## C1 — Discovery and hardware planning (P1)
+
+`HardwareInventory` fields: version, collector revision, UTC collection timestamp,
+platform object, observations array, collection summary. Each observation has a
+stable logical key, allowlisted source kind, status (`observed`, `absent`,
+`permission_denied`, `tool_missing`, `timed_out`, `truncated`), and a typed value or
+null. Do not store arbitrary command output or absolute source paths supplied by
+the target. `absent` means an enumerated item was absent, not that its capability
+is impossible on that hardware.
+
+Default limits: 8 MiB report, 8,192 enumerated items, 64 KiB per probe, 5 seconds
+per optional command and 60 seconds total collection. Exceeding a limit emits an
+explicit partial status. Do not silently truncate a value and label it observed.
+Version these defaults; tests use smaller injected limits and clocks. Collector
+exit codes: 0 complete, 2 usable partial inventory, 1 no valid report. Import of a
+partial inventory succeeds, but candidate preparation can remain blocked.
+
+Use explicit sysfs/proc property allowlists, never recursively archive `/sys` or
+`/proc`. Sysfs class links may resolve only within the configured sysfs root.
+Do not read device nodes, PCI config spaces, firmware table blobs, partition data,
+raw journals or arbitrary module parameters. Do not run `blkid`, `udevadm trigger`,
+`modprobe`, watchdog query tools or active network/device probes. Missing inventory
+tools do not authorize installation or sudo. Collection normally runs in recovery and records that environment explicitly. An
+optional installed-OS report uses the same read-only rules and is not a first-boot
+prerequisite. The standalone collector may copy
+small validation helpers but must not import the installed Quirkbench package.
+An absolute interpreter path is not assumed; Python 3.11+ is the documented v1
+prerequisite, and an older/missing interpreter is an explicit unsupported setup.
+
+Store the exact validated inventory bytes as immutable evidence. A separately
+computed hardware fingerprint excludes timestamp and observation ordering; it is
+for profile comparison, **not authentication**. Cloned models may have the same
+fingerprint. Target identity is the controller's enrolled ID and credentials.
+Profile matching is deterministic: exact requirements against a pinned profile
+catalog; equally applicable profiles with incompatible policies yield a conflict,
+not whichever profile is first in a directory. Optional peripherals do not block
+recovery; a missing required boot/network/protection fact does.
+
+`HardwarePlan` fields: version, inventory digest, profile ID/digest, platform
+adapter ID, target architecture and boot method, controller architecture, locked
+build-input references, recovery requirements, baseline requirements, selected
+network device(s), storage protection policy digest, capacity requirements,
+blocking reasons and warnings. Required packages/source URLs originate only in
+the reviewed catalog, never report strings. Resolve Kconfig dependencies later in
+the builder and revalidate the actual config/modules/initramfs; a plan is not proof
+that a build satisfies protection.
+
+The initial adapter is x86-64/UEFI/USB. Reject unsupported platform combinations
+before queueing a build. P1 does not implement ARM, cross-compilation or a new
+bootloader. Its fixtures must still represent those inputs and verify rejection.
+The compatibility network-driver set is an explicit list in the profile, not an
+instruction to enable all storage/peripheral drivers.
+
+Inventory import stores observations, not enrollment authority or a fabricated
+CapabilityReport/boot ID. Enrollment occurs through C4, then the real recovery boot
+registers. Reimport is idempotent; different observations produce a new plan without
+replacing credentials, qualification or existing evidence. HardwarePlan normally
+selects the experimental baseline. Generic recovery is built independently from a
+reviewed platform profile; inventory may report that profile incompatible but cannot
+silently authorize a weaker recovery build.
+
+## C2 — Local operations, ownership and restart (P2)
+
+New CLI mutations use `--request-id`; interactive calls may generate and print one.
+Scope uniqueness by controller plus request ID, and hash canonical operation kind,
+campaign/target identity and immutable arguments. Exact replay returns the same
+operation; different reuse is `CONFLICT`. Normalize local paths before intent is
+recorded. Status/query commands never invoke controller startup recovery.
+
+New `--json` responses have `{schema_version, ok, operation_id, data, error}`.
+Unused values are null; an error has a stable code, bounded message and retryable
+boolean. New command exit codes: 0 accepted/query successful, 2 invalid input,
+3 conflict, 4 blocked/paused, 5 infrastructure failure. Legacy commands keep their
+current behavior until explicitly adapted. Acceptance of background work is not
+completion. Status returns operation state even when that operation failed.
+
+An operation result distinguishes a public CAS reference from a private deliverable
+descriptor (credential generation and private-store key). Generic factory images
+are public artifacts; credential generations are not. Status can report that an originally successful private deliverable
+is unavailable after restore without rewriting the historical terminal state or
+silently regenerating credentials.
+
+An operation row records ID, kind, request/input digests, target/campaign, state,
+stage, worker epoch, worker unit identity, start/deadline timestamps, last heartbeat,
+last measured progress and result/error reference. States/transitions:
+
+| From | Permitted next state and reason |
+| --- | --- |
+| QUEUED | RUNNING after an atomic claim; FAILED for invalid immutable prerequisites |
+| RUNNING | WAITING on a named event; SUCCEEDED after durable publication; FAILED on a definite operation failure; INTERRUPTED on lost worker ownership |
+| WAITING | RUNNING on the expected event; FAILED on its bounded deadline; INTERRUPTED on restart |
+| INTERRUPTED | QUEUED only after explicit resume and reconciliation of safe stages; FAILED if continuation is impossible |
+| SUCCEEDED / FAILED | Terminal and immutable; explicit retry creates a new operation referring to the old one |
+
+Campaign pause is separate: it blocks admission of the **next stage**, not merely
+new top-level operations. An already-running build may finish and publish; its
+queued compose/submit stages wait. An already-started bounded physical attempt
+finishes and returns to recovery. Pause never turns success into failure or erases
+queued work. Non-campaign image preparation has explicit operation resume after
+restart; do not auto-resume it just because it has no campaign.
+
+One controller lifecycle owner holds an OS file lock for the state directory.
+It advances a persistent startup epoch and runs `Controller.startup()` once, before
+accepting new scheduling. Repository-serving and read-only CLI processes do not
+advance that epoch. Workers capture the epoch and a monotonically increasing claim
+generation; every stage/reference publication verifies both in the same SQLite
+transaction as its reference commit. Leases alone cannot fence filesystem writes.
+
+Each worker runs in a uniquely named service/cgroup and writes to its private
+staging directory. On coordinator restart, fence old workers and stop/reconcile
+their complete process groups before letting a replacement use those resources.
+PID alone is insufficient because it can be reused. If termination cannot be
+established, pause for intervention; never run two agents in the same worktree.
+Only the current owner can publish references; stale output can remain unreferenced
+for later cleanup. Pure build stages can reuse verified immutable outputs after
+resume. Never automatically replay a physical attempt or an interrupted agent edit.
+
+Use short SQLite transactions with the existing durability settings. Never hold a
+transaction while compiling, waiting for an agent, hashing an image, making network
+requests or rebooting. Serialize schema migrations under a migration lock; refuse
+an upgrade while an older active worker can still mutate state. Backup includes
+operation rows and all referenced public input/output/source artifacts. Restored running
+operations are interrupted and scheduling is paused; no service PID or lock is
+restored as live ownership. Private configuration is restored separately.
+
+An operation deadline/failure never releases a physical attempt fence or invents
+its terminal result. Use the existing uncertain-attempt/recovery reconciliation
+rules for a target that may still be executing, and retain late evidence.
+
+The managed rootless container service manager owns workers, not the initiating
+CLI, terminal, agent turn or a bare `Popen` child. Controller setup must verify
+that management facility before accepting background work. Report whether logout,
+sleep and reboot stop it; never promise power-loss continuity or silently change
+controller power policy, enable lingering, open a firewall or install host packages.
+Bind only the operator-configured LAN interfaces. Missing host prerequisites produce
+exact setup instructions. No additional scheduler/database or polling AI process.
+
+Progress uses existing Activity/Progress semantics. Default queries return at most
+100 events or 64 KiB of summaries; evidence reads use explicit byte ranges and
+maximum lengths. Waiting has an event/reason/deadline; output bytes count as output
+activity, not percent complete. No second progress stream with incompatible meaning.
+
+Preparation before a target's first boot has no campaign. Store its progress and
+events against the operation ID in additive tables in the same database; do not
+create a fake target/campaign to satisfy the existing non-null campaign fields.
+Reuse progress validation/rendering helpers without altering the frozen target
+Progress envelope. Event cursors are explicitly scoped to an operation or campaign;
+do not compare unrelated sequence numbers as a global order.
+
+## C3 — Source identity and agent proposals (P2/P6)
+
+Freeze source bytes before build. A checkpoint records approved repository roots,
+base commit identities, exact tracked contents plus explicitly allowed untracked
+edits, file modes/deletions and any permitted internal relative symlinks. Use a
+streaming archive/tree manifest, not the current small in-memory snapshot helper
+for an entire kernel tree. Submodules need independently pinned source references;
+never silently follow mutable network refs. Escaping symlinks, special files,
+credential directories and uncontrolled generated files are excluded or rejected.
+Record incomplete snapshots as incomplete, not usable build inputs.
+
+The agent must exit/quiesce before a final source snapshot. Checkpoint at every
+decision boundary and preserve interrupted edits on timeout/restart before another
+agent touches the worktree. Periodic snapshots cannot claim a consistent tree while
+the agent is writing; use an explicit checkpoint handshake if supporting them.
+Build from the immutable snapshot in a separate output tree. A cache key includes
+source/config/toolchain/recipe identities; timestamps and branch names are not keys.
+
+`AgentProposal` fields: version, decision ID, campaign ID, input-context digest,
+action (`experiment`, `needs_human`, `conclude`), hypothesis/summary, rejected
+approaches, source snapshot references, optional typed experiment proposal and
+usage observation. The experiment proposal selects an approved build recipe ID,
+installed target recipe ID, bounded parameters/repetitions/deadline and baseline
+reference. It cannot contain shell commands, arbitrary artifact URLs, private paths,
+watchdog grants, qualification claims or credentials. The runner binds the actual
+composed deployment hash when constructing the existing Experiment record.
+
+Persist proposal, usage and the intent to validate/dispatch in one transaction.
+Use a durable outbox/reference for the subsequent build/submit stages; replay uses
+the same IDs. Existing `run_decision()` records a decision and submits separately;
+do not copy that sequence into the autonomous runner without closing the crash gap.
+The model returns a proposal; it does not call a nested runner or submit an attempt
+on behalf of that same proposal. External CLI-driven investigations may submit
+explicitly; their campaign ownership must exclude an autonomous coordinator.
+
+Session metadata records `execution_owner` as `external` or `session_runner` under
+an application-level lock; switching requires a paused/reconciled campaign. Default
+session admission allows one running investigation per target and one source writer
+per worktree. Other targets can have independent campaigns, subject to the existing
+global single-build/resource budget. Do not serialize unrelated target evidence
+uploads behind a build or hold the build slot while waiting for a target reboot.
+
+Keep the current `CommandAgent` adapter compatible. Add a separate versioned
+proposal adapter; do not relax existing response validation to accept arbitrary
+provider output. A configured command is an argv list launched without a shell in
+the designated worktree, with a bounded timeout and process-group cleanup. V1 uses
+one operator-selected installed coding-agent command adapter, not a provider SDK
+framework. Its brief must identify and document that concrete adapter and test its
+format/auth failure behavior; a scripted fake alone is not a usable integration.
+
+Known token usage is counted exactly once. Unknown usage is null in a new usage
+observation, not zero inserted into the old integer ledger. Default behavior pauses
+after an unknown-usage invocation; an operator may configure explicit time/call
+budgets as fallback. The display distinguishes known totals from incomplete totals.
+Bound each invocation (default 600 seconds) and enforce provider output-token caps
+where supported; retrospective token accounting is not a guaranteed hard spending
+ceiling for an in-flight call. Auth failure is not an automatic retry loop.
+
+Protocol output is at most 1 MiB; raw stdout/stderr are bounded private diagnostic
+files (stderr defaults to an 8 MiB limit), never automatically evidence or prompt
+content. Enforce limits while draining pipes, not after child exit. Kill/stop a provider that
+exceeds its declared output limit instead of filling disk and validating afterward.
+Build/test execution remains on the controller; physical recipes remain on the
+target. Neither agent suggestions nor build logs may modify protection policy.
+
+## C4 — Recovery setup, enrollment and target binding (P3)
+
+Factory image construction has no dependency on inventory, controller endpoints,
+private credentials or a baseline deployment. Distinguish image digest, GPT/partition
+IDs, per-enrollment media-instance ID and target ID. Identical flashed factory bytes
+have identical partition IDs; they must not imply identical enrolled identities.
+Generate a random media-instance ID and enrollment request ID once on first setup
+and fsync them before contacting the controller. Preserve them across retries.
+
+Recovery setup operates only after boot/protection and evidence-mount verification.
+Never scan/mount internal OS partitions for Wi-Fi passwords or hardware discovery.
+Use NetworkManager as the only network manager, with nmtui for attended connection
+configuration. Disable systemd-networkd in assembled images. Stage connection files
+in RAM. Persist only explicitly selected connections in root-only control state;
+no log, public inventory, snapshot, OSTree commit or evidence export may contain
+passwords, token bytes or private keys. Candidate networking uses a read-only copy
+of the selected saved configuration, with runtime changes confined to RAM.
+
+Do not replay saved connections, authenticate under an old target ID or activate
+its watchdog profile until target binding is checked. On mismatch, show local setup
+and keep previous profiles inactive. The operator may explicitly reuse a network
+profile when rebinding, but credentials for the old target never enroll the new one.
+Unknown clocks, invalid certificates, bad endpoint SANs and expired credentials are
+specific blocking states, not reasons to disable TLS verification. LAN connectivity
+is sufficient; target public internet access is optional.
+
+Pairing uses an operator-created short-lived, high-entropy one-use enrollment code
+and out-of-band controller certificate fingerprint verification. The recovery screen
+must show the endpoint and fingerprint for comparison before transmitting the code.
+The TLS bootstrap client may inspect the server certificate without transmitting any
+secret; the authenticated exchange must pin that exact approved certificate and then
+install controller CA/endpoint trust. No TOFU auto-accept, HTTP enrollment or permanent
+verification bypass. Enforce expiry, rate limits, bounded payloads and request IDs.
+
+Before exchange, persist a target-generated keypair and request ID privately. Bind
+code redemption to that request and public key in one controller transaction. A lost
+reply is retrievable only with proof of the same key and request, including after code
+redemption; retries cannot mint another identity or retrieve another target's secrets.
+Use maintained TLS/cryptography libraries for proof-of-possession, not custom crypto.
+Enrollment result includes the assigned target/media IDs, credential generation,
+controller/repository endpoints, pinned CA/OSTree verification key and scoped protocol
+and repository credentials. Enrollment does not create a campaign or grant a boot.
+Controller authentication configuration must be durable before returning success.
+
+Publish private generations under evidence/control with files 0600/directories 0700:
+validate bounded strict records and fixed filenames, reject symlinks/traversal, verify
+all files, fsync the staging directory, rename to an immutable generation, fsync the
+parent, then atomically publish runtime.json last. Identical retry reuses verified
+bytes; a different active generation requires explicit paused maintenance. An ACK
+loss never reformats evidence or discards an enrollment key. Repository certificate
+revocation must be enforced as well as device token revocation; CA membership alone
+is insufficient. Back up private enrollment state separately from public evidence.
+
+TargetBinding v1 contains exactly schema_version and system_uuid (the observed SMBIOS
+system UUID). The enclosing enrollment generation binds it to target/media IDs and
+may retain separate secondary observations; do not add fields to TargetBinding v1.
+UUID is an accidental mismatch guard, not a secret
+or attestation. CPUID/model name, network MAC and portable machine-id are not valid
+substitutes. All-zero/all-ones, missing or controller-known duplicate identities block
+automatic candidate boot. Expose ambiguity and require a reviewed attended path;
+never silently bypass the early gate or guess the closest enrolled target.
+
+The bootloader checks identity BEFORE loading an experiment kernel. Initial GRUB
+support uses SMBIOS type 1 UUID (offset 8); arm_once records a validated expected UUID
+in USB one-shot state, alongside candidate identity. GRUB consumes and verifies cleared
+state even on mismatch, and selects recovery unless the current UUID matches. Missing
+SMBIOS support fails to recovery. Runtime checks the active enrollment binding again
+before using its credentials or watchdog profile. Recheck binding at arm/reboot.
+The UUID comparison must be qualified against actual firmware/Linux formatting;
+platforms without a dependable early identity source remain unsupported for automatic
+experiments. Recovery can still boot for setup and diagnosis.
+
+Retargeting requires recovery, paused/reconciled old work and explicit local operator
+confirmation. Clear and verify one-shot state first; fence old controller authorization,
+then atomically activate a new binding/credential generation. Partial retargeting
+remains paused. Never move old pending chunks into the new target's spool or relabel
+attempts. Provide an explicit old-evidence drain using original attribution and scoped
+credentials after approval; it cannot register the new hardware as the old target.
+New media/target binding invalidates reset qualification and all old attempt grants.
+
+Current implementation is partial: the low-level runtime configuration reader and
+boot identity guard are available; the setup UI, enrollment protocol, persistent
+network-profile selection and retargeting transaction are planned P3 work. Existing
+unbound provisioning remains readable but cannot be activated automatically. Rebuild
+older bootloader images; no in-place conversion or silent binding migration.
+
+## C5 — Commissioning and physical safety (P4/P7)
+
+Commissioning is an explicit controller workflow while a person can reset the
+target. It uses the ordinary attempt/lease/handoff/evidence machinery, not an SSH
+shortcut or special direct reboot. Record separate outcomes for external boot,
+internal-storage exclusion, network/trust, exact baseline identity, live upload,
+terminal acknowledgement and subsequent recovery. Tests must exercise the actual
+runtime assembly with fake privileged adapters, not just separate protocol classes.
+
+The baseline inventory recipe is bounded and non-stressing. A CLI `--attended`
+flag records the operator's declared mode; it cannot prove someone is present.
+Fault/suspend/audio stress recipes need explicit recipe eligibility and a visible
+warning in their description. Never inject a hang on the installed production OS
+or copy QEMU panic injection into the generic collector. If only a reset is observed,
+report uncertainty about the cause and surviving logs; do not label it a kernel bug.
+
+Recipes are registry code deployed in the candidate. Parameters cannot be arbitrary
+commands/device paths. Resolve hardware selections against observed capabilities
+and allowlists. An initial recipe may collect real input events only during an
+explicit bounded test window; no permanent keylogger. Audio output defaults to a
+bounded duration and conservative level, requires operator-controlled acoustic
+observation where needed, and does not increase volume unattended to force failure.
+Include recipe version, stimulus hash, exposure counts and limitations in evidence.
+
+Baselines/patched/revert runs compare exact source/deployment/recipe identities and
+conditions. A different environment is a recorded confounder, not silently equivalent
+to the installed OS. Export inconclusive investigations honestly. No implicit patch
+publication or installed-OS modification.
+
+## C6 — Watchdog authorization and revocation (P5)
+
+Keep `RecoveryProfile` exact-build qualification unchanged. Add the capability
+`watchdog.authorization.v1` and a **separate** signed `WatchdogAuthorization`.
+Do not insert a new field into Experiment v1 or overload its provenance as authority.
+
+Operator policy lives outside the agent workspace. It records campaign/target,
+qualified baseline evidence, settings digest, permitted experiment classes and a
+monotonic policy epoch. Creating/changing it is explicit local administration;
+AgentProposal cannot create it. Known reset/boot/power/watchdog/config/firmware
+changes block unattended admission pending review. Unknown diff classification or
+an unpinned source tree also blocks it. This screening does not guarantee reset
+under an arbitrary kernel patch; that experimental risk remains visible.
+
+Deliver grants through a new authenticated, versioned route
+`POST /v1/watchdog-authorization`. Request fields are `schema_version`, `attempt_id`,
+`token`, `boot_id`; existing device authentication also applies. Recovery may fetch
+after the existing handoff is durably authorized and before arming. Controller
+checks attempt ownership, deadline, policy epoch and exact deployment evidence.
+Candidate may retrieve the same grant under its authorized next boot. Replays of
+the same attempt/policy return the same signed bytes; any identity change conflicts.
+
+Grant fields: version, purpose `quirkbench-watchdog-authorization-v1`, grant ID,
+campaign/target/attempt IDs, media ID, origin recovery boot ID, expected next device
+generation, deployment manifest digest/revision, kernel build ID, hardware/profile
+and settings digests, baseline qualification digest, policy epoch and existing
+attempt deadline. Sign canonical bytes with controller trust and verify purpose
+as well as signature. No token or private key is part of the signed grant.
+
+Recovery stores it in durable control state with the handoff. At candidate boot,
+the runtime verifies it against the local handoff journal, loaded build ID, current
+media, observed hardware and settings **before activation**. This ordering matters:
+the current runtime activates its configured profile before the normal target loop,
+so fetching a grant only after recipe start is too late. A valid cached grant may
+enable bounded reset protection offline; it does not authorize recipe execution.
+Actual recipe start still needs live candidate adoption/start checks and the current
+policy epoch. Missing/expired/mismatched grant permits no unattended recipe; preserve
+the reason and request recovery without replay.
+
+Revocation blocks further grants and new controller authorization for arming or
+recipe starts. It cannot instantly reach an offline target or prevent an already
+issued handoff from completing. Never claim that
+distributed revocation undoes physical execution. A started bounded attempt follows
+pause/finish/recovery semantics; an already armed watchdog is not abruptly disarmed
+on policy expiry, network loss or revocation. A stale grant cannot authorize another
+attempt. Recovery uses its own fixed-build profile; candidate grants are invalid in
+recovery and cannot turn an offline recovery wait into repeated reboots.
+
+If current-clock plausibility cannot establish the grant deadline, do not start an
+experiment. Preserve/handle any already-armed hardware timer through the qualified
+systemd path. A device that cannot be safely serviced in recovery is an unsupported
+unattended profile, not a reason to invent a second watchdog owner.
+
+Never set coverage to passed when activation succeeds. Report platform baseline
+qualification, current kernel identity, authorization and actual armed/timeout
+observations separately. Do not substitute an attended flag, software heartbeat,
+panic reboot or historical VM result for hardware qualification. Unsupported
+pre-userspace hangs remain a manual-recovery limit in v1.
+
+## C7 — Required failure matrix and release evidence
+
+Each owning brief must implement these observable cases with fixtures and injected
+clocks/process/storage adapters; a missing physical target is not a skipped test.
+
+| Boundary | Required observable outcome |
+| --- | --- |
+| Unknown/partial inventory | Import retains observations; plan identifies exact blockers; no build queued |
+| Inventory contains paths/commands/duplicate JSON keys | Rejected before dispatch or writes outside report/state roots |
+| Profile ambiguity or architecture mismatch | Explicit conflict/unsupported result; no fallback to a permissive config |
+| CLI exits after submitting intent | Operation survives in managed worker; repeated request returns same ID |
+| Old worker completes after restart | Epoch check rejects publication; no duplicate source writer or attempt |
+| Pause during build/agent decision | Active bounded unit preserved; no next stage/attempt admitted |
+| Crash after proposal persistence, before submit acknowledgement | Same dispatch intent reconciled; usage and experiment not duplicated |
+| Partial source snapshot / concurrent edit | Snapshot not publishable/buildable; dirty edits retained for recovery |
+| Enrollment redemption/reply/activation interrupted | Same request and key retrieve the same enrollment; only complete private generations activate |
+| Generic image/export inspected for secrets | No credentials in factory media, public artifacts or evidence; private state restored separately |
+| Armed USB moved to another target | GRUB clears one-shot state and selects recovery before candidate kernel load |
+| Binding missing/ambiguous or retarget interrupted | No old credentials, network profiles, watchdog grant or recipe activated |
+| Revoked bearer or repository certificate | Both services deny their revoked identity; queued target work pauses |
+| Watchdog grant replay on wrong kernel/attempt/media/epoch | Rejected; no claimed qualification and no new recipe |
+| Network lost after candidate boot or completion | Bounded finish/reset path; evidence retained; recovery waits without reboot loop |
+| Controller restored without private credentials | Readable history; visibly blocked service/dispatch until separate restoration |
+| Unknown usage or provider output exceeds limit | Bounded invocation stops/pauses; no fake zero-usage or infinite retries |
+
+Final release evidence still requires the applicable real build/VM/physical and
+endurance gates. These fixture tests do not establish hardware support. During
+development run only the owning focused suites; do not run expensive acceptance
+because a brief mentions its eventual physical outcome.

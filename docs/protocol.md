@@ -6,6 +6,14 @@ server or remote administrative route. Its operation IDs, JSON envelopes and
 watchdog authorization records require explicit versioned implementation; examples
 in the roadmap do not extend this protocol implicitly.
 
+The [contract supplement](implementation-contracts.md) specifies local operation
+fencing (C2), planned first-boot enrollment (C4) and a planned watchdog grant route
+(C6). Enrollment and watchdog grants are **not implemented** by the protocol tables
+below. Registration authenticates an already enrolled target; it must not be reused
+as unauthenticated pairing. New capabilities/routes need explicit negotiation.
+The current physical runtime checks its private target binding before connecting;
+missing or changed identity leaves recovery waiting for explicit setup.
+
 The controller listens on HTTPS only. `make_server` binds to `127.0.0.1` by
 default; a LAN address requires `allow_lan=True`, a configured certificate and
 private key, and one random token of at least 32 characters per device. Device

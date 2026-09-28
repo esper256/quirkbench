@@ -118,9 +118,8 @@ protects cached package hardlinks during scriptlets. `/dev/fuse` is its virtual
 filesystem interface, not a storage disk. NET_ADMIN permits bubblewrap to set up
 loopback in its private network namespace. The seccomp/unmask flags permit nested
 namespace creation and procfs mounts. These capabilities do not become host-root
-capabilities in rootless Podman. Qualification verified no block devices in the
-container and successful package scriptlets and metadata finalization with this
-profile. Target storage protection is unchanged.
+capabilities in rootless Podman. The release gate must verify no block devices in the container and successful
+package scriptlets and metadata finalization. Target storage protection is unchanged.
 
 ### Retained build evidence
 

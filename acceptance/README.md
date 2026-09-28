@@ -8,16 +8,16 @@ uses focused software tests; see [testing and agent quota](../docs/testing-polic
 Do not keep an agent waiting on long runs unless their results block development.
 
 The [remaining implementation briefs](../docs/product-roadmap.md) use focused
-software fixtures for discovery, bootstrap, background operations and sessions.
+software fixtures for discovery, enrollment, background operations and sessions.
 Their proposed suites are not current passing evidence. Target hardware inventory
 and first device commissioning do not replace physical watchdog/endurance gates,
 nor do they automatically trigger the full release suite.
 
 Templates intentionally fail acceptance. Copy one outside this directory, fill observations from an actual run, and reference evidence files relative to the report with `{"path":"relative/file", "sha256":"64 lowercase hex"}`. The verifier checks report completeness and referenced bytes; it cannot authenticate an operator's observations or establish causality from a manifest alone. Higher-reasoning/human review still assesses evidence and limitations.
 
-Hardware endurance requires more than 30 real hours, the listed injected events, evaluated recovery capabilities, resource-use and safety evidence, and no silently unresolved attempts. Patch bundles require separately matched baseline/patched/revert/regression observations, source/build identities, actual patch files and exposure counts. Keep an unreproduced issue inconclusive instead of manufacturing a passing report.
+Hardware endurance requires a positive duration objective and rationale declared before the run, observed duration meeting that objective, the listed injected events, evaluated recovery capabilities, resource-use and safety evidence, and no silently unresolved attempts. Patch bundles require separately matched baseline/patched/revert/regression observations, source/build identities, actual patch files and exposure counts. Keep an unreproduced issue inconclusive instead of manufacturing a passing report.
 
-QEMU uses `make acceptance-qemu` with real IMAGE, OVMF_CODE, OVMF_VARS and an empty WORK_DIR. Ten trials cover initial firmware settling, recovery, candidate, subsequent recovery, missing-entry fallback, subsequent recovery, initramfs-load-failure fallback, subsequent recovery, a deliberate candidate kernel panic and subsequent recovery. The load-failure case loads a valid kernel but references a missing initramfs; it must report the GRUB failure marker and recovery in the same boot; reaching the ordinary default alone is insufficient. Candidate execution measures the running kernel, matching module tree and userspace fixture. The panic trial requires kernel-emitted authorization/running-kernel identity, actual sysrq panic output and consumed one-shot state. Userspace markers can be lost during a panic and are recorded only as optional observations; the normal candidate trial separately verifies userspace and modules. All trials after initialization must preserve settled firmware settings and fixed USB recovery partitions. The [reviewed firmware comparison](../docs/m2-ostree-review.md) permits only the exact firmware-owned MTC counter increment; raw snapshots remain retained and every other effective variable must match. This is a VM infrastructure gate; it does not qualify early-boot hangs or physical crash capture.
+QEMU uses `make acceptance-qemu` with real IMAGE, OVMF_CODE, OVMF_VARS and an empty WORK_DIR. Twelve trials cover initial firmware settling, recovery, candidate, subsequent recovery, missing-entry fallback, subsequent recovery, initramfs-load-failure fallback, subsequent recovery, a deliberate candidate kernel panic subsequent recovery, and refusal of a valid candidate bound to a different or missing target identity. These last two trials must prove recovery before candidate loading and consumed one-shot state. The load-failure case loads a valid kernel but references a missing initramfs; it must report the GRUB failure marker and recovery in the same boot; reaching the ordinary default alone is insufficient. Candidate execution measures the running kernel, matching module tree and userspace fixture. The panic trial requires kernel-emitted authorization/running-kernel identity, actual sysrq panic output and consumed one-shot state. Userspace markers can be lost during a panic and are recorded only as optional observations; the normal candidate trial separately verifies userspace and modules. All trials after initialization must preserve settled firmware settings and fixed USB recovery partitions. The firmware comparison described below permits only the exact firmware-owned MTC counter increment; raw snapshots remain retained and every other effective variable must match. This is a VM infrastructure gate; it does not qualify early-boot hangs or physical crash capture.
 
 `make acceptance-ostree-repository REPOSITORY_WORK=/absolute/new-directory` checks real repository retention, independent backup/restore, repeatability and corruption rejection. It requires the OSTree executable and cannot be replaced by fake command results.
 
@@ -35,7 +35,7 @@ PYTHONPATH=src python3 acceptance/qualify-ostree-signatures.py --work /absolute/
 
 Run inside the isolated builder with OSTree, GnuPG and `python3-gobject-base`. It generates disposable fixture keys and proves trusted cached commits are accepted while unsigned and untrusted cached commits are rejected. `ostree show --gpg-verify-remote` returning zero is explicitly not sufficient. These fixture keys are never target or agent credentials.
 
-Current transition review and outstanding qualification are recorded in [the OSTree architecture review](../docs/m2-ostree-review.md). Repository and signature fixtures do not imply a successful OS composition or candidate boot.
+Repository and signature fixtures do not imply a successful OS composition or candidate boot.
 
 A complete published result can also be qualified through `acceptance/qualify-ostree-controller-backup.py --controller EXISTING_STATE --repository PUBLISHED_REPO --manifest DEPLOYMENT_JSON --work NEW_DIRECTORY`. This exercises the real controller backup and restore APIs, retaining matching build evidence and independent OSTree objects. It checks source-backup immutability and exclusion of synthetic private files, partial uploads and unreferenced artifacts. It reports campaign pause as unexercised when the source has no campaigns; empty tables are not evidence of pause behavior.
 
@@ -47,7 +47,7 @@ A complete published result can also be qualified through `acceptance/qualify-os
 runs software tests and the fresh six-partition QEMU image gate. The fixture grows
 only its copied sparse image, observes first-boot commissioning, verifies all six
 GPT identities, observes distinct experiment/evidence/library mounts, and preserves
-fixed recovery/ESP and library bytes across the subsequent ten boot trials. It
+fixed recovery/ESP and library bytes across the boot trials. It
 never enlarges or writes the source image or a physical block device. Fixture
 partition capacities may be smaller than the production defaults and are recorded.
 
@@ -57,7 +57,7 @@ and observes the actual supervisor waiting for more than its 30-second service
 watchdog interval. It verifies a single boot, repeated visible provisioning waits,
 mount identities, fixed recovery and internal sentinel preservation. It then stops
 the disposable VM through QMP; this fixture does not claim a graceful guest
-shutdown, controller communication or physical watchdog coverage. The ten-trial
+shutdown, controller communication or physical watchdog coverage. The boot-cycle
 gate separately compares settled persistent firmware settings.
 
 `tests/test_physical_handoff.py` runs the same handoff/streamed-evidence lifecycle
@@ -73,3 +73,7 @@ must follow [the explicit watchdog matrix](../docs/watchdog-qualification.md):
 activation, boot handoff, runtime reset, shutdown and suspend are separate outcomes.
 Do not substitute a successful late panic reboot or software heartbeat for those
 observations. Missing hardware remains an unmet gate, not a skipped passing test.
+
+## Firmware preservation comparison
+
+The OVMF acceptance gate compares decoded effective variables after initial firmware settling, while retaining raw before/after flash snapshots and hashes. EDK2 increments its own `MTC` variable on each boot and may rewrite flash log records. The sole permitted semantic difference is one increment modulo 2^32 of the four-byte, attributes-7 `MTC` under GUID `eb704011-1402-11d3-8e77-00a0c969723b`; unchanged is also accepted. All other variable names, values, attributes and authentication metadata must match exactly. Added/deleted variables or larger counter changes fail. This is firmware-owned bookkeeping, not permission for Quirkbench to write firmware settings. [EDK2 counter initialization](https://github.com/tianocore/edk2/blob/master/MdeModulePkg/Universal/MonotonicCounterRuntimeDxe/MonotonicCounter.c) explains the observed increment. Physical target firmware remains separately unqualified.
