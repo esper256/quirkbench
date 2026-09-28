@@ -9,7 +9,7 @@ from jsonschema import Draft202012Validator
 
 from quirkbench.build import BuildError
 from quirkbench.contracts import canonical
-from quirkbench.image import _builder_identity, _input_identity
+from quirkbench.image import _builder_identity, _input_identity, partition_layout
 from quirkbench.recovery_release import (load_release_candidate,
                                          recovery_release_candidate,
                                          validate_release_candidate)
@@ -28,20 +28,25 @@ def assembled(tmp_path, monkeypatch):
     inputs.output.write_bytes(b"synthetic image placeholder")
     monkeypatch.setattr(release, "_image_identity",
                         lambda path: (FAKE_IMAGE_SHA, recipe["layout"]["factory_size_mib"] * 1024**2))
+    identity = {"schema_version": 2, "disk_guid": "00000000-0000-0000-0000-000000000001",
+                "esp_partuuid": "00000000-0000-0000-0000-000000000002",
+                "root_partuuid": "00000000-0000-0000-0000-000000000003",
+                "state_partuuid": "00000000-0000-0000-0000-000000000004",
+                "data_partuuid": "00000000-0000-0000-0000-000000000005",
+                "library_partuuid": "00000000-0000-0000-0000-000000000006",
+                "evidence_partuuid": "00000000-0000-0000-0000-000000000007"}
+    parts = partition_layout(inputs.size_mib, inputs.root_mib)
+    for part, name in zip(parts, ("esp_partuuid", "root_partuuid", "state_partuuid",
+                                   "data_partuuid")):
+        part["partuuid"] = identity[name]
     manifest = {
         "schema_version": 2, "layout_version": 2, "commissioned": False,
         "smoke": False, "candidate_id": None, "candidate_revision": None,
         "candidate_kernel_release": None, "candidate_health_sha256": None,
         "panic_candidate_id": None, "load_failure_candidate_id": None,
         "deployment_backend": "ostree", "boot_policy": "synthetic factory policy",
-        "identity": {"schema_version": 2, "disk_guid": "00000000-0000-0000-0000-000000000001",
-                     "esp_partuuid": "00000000-0000-0000-0000-000000000002",
-                     "root_partuuid": "00000000-0000-0000-0000-000000000003",
-                     "state_partuuid": "00000000-0000-0000-0000-000000000004",
-                     "data_partuuid": "00000000-0000-0000-0000-000000000005",
-                     "library_partuuid": "00000000-0000-0000-0000-000000000006",
-                     "evidence_partuuid": "00000000-0000-0000-0000-000000000007"},
-        "partitions": [],
+        "identity": identity,
+        "partitions": parts,
         "image_sha256": FAKE_IMAGE_SHA,
         "size_bytes": recipe["layout"]["factory_size_mib"] * 1024**2,
         "recovery_kernel_sha256": record["kernel_stage"]["outputs"]["kernel"],
@@ -49,7 +54,13 @@ def assembled(tmp_path, monkeypatch):
         "recovery_profile_digest": inputs.recovery_profile_digest,
         "recovery_kernel_release": inputs.recovery_kernel_release,
         "builder_identity": _builder_identity(), "input_identity": _input_identity(inputs),
-        "commissioning": {"experiment_mib": inputs.experiment_mib,
+        "commissioning": {"schema_version": 2, "disk_guid": identity["disk_guid"],
+                          "partition_uuids": [part["partuuid"] for part in parts] +
+                                             [identity["library_partuuid"],
+                                              identity["evidence_partuuid"]],
+                          "partition_starts": [part["start"] for part in parts],
+                          "fixed_ends": [part["end"] for part in parts[:3]],
+                          "experiment_mib": inputs.experiment_mib,
                           "library_mib": inputs.library_mib,
                           "log_budget_mib": inputs.log_budget_mib},
     }
@@ -140,6 +151,20 @@ def test_candidate_validator_rejects_qualification_claim(tmp_path, monkeypatch):
     candidate["esp_required_bytes"] = candidate["esp_payload_bytes"]
     with pytest.raises(BuildError, match="identity or layout"):
         validate_release_candidate(candidate)
+
+
+@pytest.mark.parametrize("change", ["spacing", "duplicate", "trailing_newline"])
+def test_candidate_loader_requires_exact_canonical_bytes(tmp_path, monkeypatch, change):
+    catalog, recipe, store, record, inputs, _ = assembled(tmp_path, monkeypatch)
+    raw = canonical(recovery_release_candidate(recipe, catalog, store, record, inputs))
+    if change == "spacing":
+        raw = b" " + raw
+    elif change == "duplicate":
+        raw = raw.replace(b'"schema_version":1', b'"schema_version":1,"schema_version":1')
+    else:
+        raw += b"\n"
+    with pytest.raises(BuildError):
+        load_release_candidate(raw)
 
 
 def test_image_changed_while_hashing_is_rejected(tmp_path, monkeypatch):

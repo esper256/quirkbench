@@ -2,6 +2,7 @@
 from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import asdict
+import base64
 import fcntl
 import hmac
 import json
@@ -10,6 +11,7 @@ from pathlib import Path
 import secrets
 import shutil
 import sqlite3
+import stat
 import time
 import uuid
 from .contracts import sha256, CapabilityReport, Checkpoint, Conflict, ContractError, Experiment, Progress, Result, canonical, digest, identifier
@@ -425,6 +427,125 @@ class Controller:
                                       data=self._operation_status(db, operation_id))
         finally:
             db.close()
+
+    def operation_failure(self, operation_id):
+        """Read a small, attached failure record for the human status view."""
+        row = self.operation_status(operation_id)['data']
+        value = row['error_digest']
+        if value is None:
+            return None
+        sha256(value)
+        if self.store.objects.is_symlink() or self.store.objects.resolve() != self.store.objects:
+            raise ContractError('operation failure store is unavailable')
+        try:
+            fd = os.open(self.store.path(value), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except OSError as exc:
+            raise ContractError('operation failure record is unavailable') from exc
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode) or not 0 < before.st_size <= 8192:
+                raise ContractError('operation failure record is invalid')
+            with os.fdopen(fd, 'rb') as stream:
+                fd = -1
+                raw = stream.read(8193)
+                after = os.fstat(stream.fileno())
+            if (len(raw) != before.st_size or digest(raw) != value
+                    or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+                    != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
+                raise ContractError('operation failure record changed or failed verification')
+            try:
+                document = json.loads(raw)
+            except (TypeError, ValueError) as exc:
+                raise ContractError('operation failure record is invalid') from exc
+            if (not isinstance(document, dict)
+                    or set(document) != {'schema_version', 'code', 'message', 'retryable'}
+                    or document['schema_version'] != 1
+                    or not isinstance(document['code'], str) or len(document['code']) > 64
+                    or not isinstance(document['message'], str) or len(document['message']) > 512
+                    or type(document['retryable']) is not bool):
+                raise ContractError('operation failure record is invalid')
+            return document
+        finally:
+            if fd >= 0:
+                os.close(fd)
+
+    def operation_events(self, operation_id, *, after=0, limit=100):
+        """Page durable operation events without starting the lifecycle owner."""
+        if type(after) is not int or after < 0 or type(limit) is not int or not 1 <= limit <= 100:
+            raise ContractError('invalid operation event cursor or limit')
+        db = self._connect()
+        try:
+            self._operation_status(db, operation_id)
+            rows = db.execute(
+                'SELECT id,created,kind,document FROM operation_events '
+                'WHERE operation=? AND id>? ORDER BY id LIMIT ?',
+                (operation_id, after, limit + 1)).fetchall()
+            items = []
+            for row in rows[:limit]:
+                try:
+                    document = json.loads(row['document'])
+                except (TypeError, ValueError) as exc:
+                    raise ContractError('stored operation event is invalid') from exc
+                item = {'id': row['id'], 'created': row['created'],
+                        'kind': row['kind'], 'document': document}
+                candidate = operation_response(
+                    operation_id=operation_id,
+                    data={'items': items + [item], 'next_cursor': row['id']})
+                if len(canonical(candidate)) > 64 * 1024:
+                    if not items:
+                        raise ContractError('stored operation event exceeds query budget')
+                    break
+                items.append(item)
+            next_cursor = items[-1]['id'] if len(rows) > len(items) else None
+            return operation_response(operation_id=operation_id,
+                                      data={'items': items, 'next_cursor': next_cursor})
+        finally:
+            db.close()
+
+    def operation_output(self, operation_id, artifact_digest, *, offset=0, length=16384):
+        """Read only a bounded range of an output referenced by this operation."""
+        identifier(operation_id)
+        sha256(artifact_digest)
+        if (type(offset) is not int or offset < 0 or type(length) is not int
+                or not 1 <= length <= 16384):
+            raise ContractError('invalid operation output range')
+        db = self._connect()
+        try:
+            self._operation_status(db, operation_id)
+            attached = db.execute(
+                "SELECT 1 FROM operation_refs WHERE operation=? AND role='output' AND digest=?",
+                (operation_id, artifact_digest)).fetchone()
+            if attached is None:
+                raise ContractError('artifact is not a public output of this operation')
+        finally:
+            db.close()
+        path = self.store.path(artifact_digest)
+        if self.store.objects.is_symlink() or self.store.objects.resolve() != self.store.objects:
+            raise ContractError('operation output store is unavailable')
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except OSError as exc:
+            raise ContractError('operation output is unavailable') from exc
+        try:
+            metadata = os.fstat(fd)
+            if not stat.S_ISREG(metadata.st_mode) or offset > metadata.st_size:
+                raise ContractError('operation output range is unavailable')
+            with os.fdopen(fd, 'rb') as stream:
+                fd = -1
+                stream.seek(offset)
+                chunk = stream.read(length)
+                after = os.fstat(stream.fileno())
+            identity = lambda info: (info.st_dev, info.st_ino, info.st_size,
+                                     info.st_mtime_ns, info.st_ctime_ns)
+            if identity(metadata) != identity(after):
+                raise ContractError('operation output changed during read')
+            return operation_response(operation_id=operation_id, data={
+                'sha256': artifact_digest, 'offset': offset,
+                'length': len(chunk), 'total_bytes': metadata.st_size,
+                'content_base64': base64.b64encode(chunk).decode('ascii')})
+        finally:
+            if fd >= 0:
+                os.close(fd)
 
     def _publish_operation(self, operation_id, worker_epoch, worker_generation, *,
                            output_refs=(), state=None, result=None, error=None):

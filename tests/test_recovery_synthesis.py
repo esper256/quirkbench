@@ -10,6 +10,7 @@ from quirkbench.build_pipeline import ResourceLimits
 from quirkbench.recovery_synthesis import run_recovery_base_stage
 from quirkbench.recovery_synthesis import run_recovery_initramfs_from_recipe
 from quirkbench.recovery_synthesis import run_recovery_runtime_stage
+from quirkbench.recovery_synthesis import prepare_recovery_image_stage
 from quirkbench.boot import BootError, install_recovery_runtime_base
 from quirkbench.contracts import canonical
 from test_recovery_kernel_stage import FakeRunner as KernelRunner
@@ -49,6 +50,43 @@ def run(catalog, recipe, store, stage, runner, *, installer=install_rootfs):
     return run_recovery_base_stage(recipe, catalog, store, stage,
                                    runner=runner, limits=LIMITS,
                                    rootfs_installer=installer)
+
+
+def test_joined_private_synthesis_returns_audited_image_inputs(tmp_path, monkeypatch):
+    from test_recovery_image_plan import image_rootfs
+
+    monkeypatch.setattr("quirkbench.build.recommended_jobs", lambda: 1)
+    catalog, recipe, store, _ = recipe_fixture(tmp_path)
+    stage = tmp_path / "base-stage"
+    output = tmp_path / "factory.img"
+    runner = CombinedRunner(kernel=DracutRunner())
+    result = prepare_recovery_image_stage(
+        recipe, catalog, store, stage, output, runner=runner,
+        limits=LIMITS, rootfs_installer=image_rootfs)
+    assert result["base"]["recipe_digest"] == result["runtime"]["recipe_digest"]
+    assert result["initramfs"]["recipe_digest"] == result["base"]["recipe_digest"]
+    assert result["image_inputs"].output == output
+    result["image_inputs"].validate()
+    assert not output.exists()
+    assert runner.phases[-2:] == ["initramfs-recovery", "audit-recovery-initramfs"]
+
+
+def test_joined_synthesis_rejects_bad_output_before_creating_stage(tmp_path):
+    catalog, recipe, store, _ = recipe_fixture(tmp_path)
+    stage = tmp_path / "base-stage"
+    runner = CombinedRunner()
+    with pytest.raises(BuildError, match="output must be a new regular-file path"):
+        prepare_recovery_image_stage(recipe, catalog, store, stage, stage / "factory.img",
+                                     runner=runner, limits=LIMITS)
+    assert not stage.exists() and runner.phases == []
+    actual = tmp_path / "actual"
+    actual.mkdir()
+    linked = tmp_path / "linked"
+    linked.symlink_to(actual, target_is_directory=True)
+    with pytest.raises(BuildError, match="output must be a new regular-file path"):
+        prepare_recovery_image_stage(recipe, catalog, store, stage, linked / "factory.img",
+                                     runner=runner, limits=LIMITS)
+    assert not stage.exists() and runner.phases == []
 
 
 def test_locked_rootfs_source_and_kernel_share_one_stage(tmp_path, monkeypatch):

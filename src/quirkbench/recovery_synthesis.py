@@ -1,8 +1,8 @@
-"""Locked recovery base, runtime and initramfs staging before image assembly.
+"""Locked recovery staging and signed unqualified image completion.
 
 This joins the reviewed DNF5 rootfs, Fedora SRPM preparation and protected
-kernel build in one private directory. Runtime and Dracut results remain
-private; this module does not publish a factory image.
+kernel build in one private directory. The final coordinator can assemble an
+image and publish verified distribution sidecars when real locked inputs exist.
 """
 from __future__ import annotations
 
@@ -107,7 +107,8 @@ def run_recovery_runtime_stage(recipe: dict, catalog: dict, store, stage: Path,
             or rootfs.is_symlink() or not rootfs.is_dir()):
         raise BuildError("recovery runtime requires the matching private base stage")
     package_dir = Path(__file__).resolve().parent
-    assets_dir = Path(assets_dir) if assets_dir is not None else Path(__file__).resolve().parents[2] / "target-assets"
+    from .package_resources import target_assets_dir
+    assets_dir = Path(assets_dir) if assets_dir is not None else target_assets_dir()
     manifest = capture_runtime_revision(package_dir, assets_dir)
     if manifest != checked["runtime_revision"]:
         raise BuildError("recovery runtime sources differ from retained revision")
@@ -208,3 +209,67 @@ def run_recovery_initramfs_from_recipe(recipe: dict, catalog: dict, store,
             "source_tree_sha256": base_record["source_stage"]["source_tree_sha256"],
             "rootfs": str(rootfs), "kernel_stage": base_record["kernel_stage"],
             "initramfs_stage": initramfs}
+
+
+def prepare_recovery_image_stage(recipe: dict, catalog: dict, store, stage: Path,
+                                 output: Path, *, runner: CommandRunner,
+                                 limits: ResourceLimits,
+                                 rootfs_installer: RootfsInstaller = _install,
+                                 runtime_installer: Callable[[Path, Path | None], None] = install_recovery_runtime_base) -> dict:
+    """Join locked private stages and return audited image inputs without assembly."""
+    from .recovery_image_plan import prepare_recovery_image_inputs
+
+    preflight_recipe(recipe, catalog, store)
+    stage, output = Path(stage), Path(output)
+    _safe_build_path(stage)
+    if (not output.is_absolute() or output == Path("/") or output.resolve(strict=False) != output
+            or output.is_relative_to(stage)
+            or output.exists() or output.is_symlink() or not output.parent.is_dir()
+            or output.parent.is_symlink()):
+        raise BuildError("recovery image output must be a new regular-file path outside the private stage")
+    base = run_recovery_base_stage(recipe, catalog, store, stage, runner=runner,
+                                   limits=limits, rootfs_installer=rootfs_installer)
+    runtime = run_recovery_runtime_stage(recipe, catalog, store, stage, base,
+                                         runtime_installer=runtime_installer)
+    initramfs = run_recovery_initramfs_from_recipe(
+        recipe, catalog, store, stage, base, runtime, runner=runner, limits=limits)
+    inputs = prepare_recovery_image_inputs(recipe, catalog, store, stage,
+                                           initramfs, output)
+    return {"base": base, "runtime": runtime, "initramfs": initramfs,
+            "image_inputs": inputs}
+
+
+def assemble_signed_recovery_image(recipe: dict, catalog: dict, store,
+                                   stage_record: dict, image_inputs,
+                                   signing_home: Path, trusted_public_key: Path,
+                                   fingerprint: str, *, image_builder=None,
+                                   signing_run=None, verification_run=None) -> dict:
+    """Complete a prepared factory image and its signed unqualified sidecars.
+
+    An already assembled image is verified against the exact staged inputs so
+    interrupted signing can resume without rebuilding or replacing image bytes.
+    """
+    import subprocess
+
+    from .image import ImageInputs, create_image
+    from .recovery_distribution import (publish_signed_recovery_bundle,
+                                        sign_recovery_checksums)
+    from .recovery_release import recovery_release_candidate
+
+    if not isinstance(image_inputs, ImageInputs):
+        raise BuildError("recovery image inputs are required")
+    output = Path(image_inputs.output)
+    pending = Path(str(output) + ".pending.json")
+    if not output.exists() or pending.exists() or pending.is_symlink():
+        (image_builder or create_image)(image_inputs)
+    candidate = recovery_release_candidate(recipe, catalog, store,
+                                           stage_record, image_inputs)
+    statement, signature = sign_recovery_checksums(
+        candidate, output, Path(signing_home), fingerprint,
+        run=signing_run or subprocess.run)
+    verified = publish_signed_recovery_bundle(
+        output, canonical(candidate), statement, signature,
+        Path(trusted_public_key), fingerprint,
+        run=verification_run or subprocess.run)
+    return {"image": str(output), "manifest": str(Path(str(output) + ".json")),
+            "candidate": candidate, "verified_checksums": verified}

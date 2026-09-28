@@ -10,7 +10,7 @@ from jsonschema import Draft202012Validator
 from quirkbench.build import BuildError
 from quirkbench.contracts import canonical, digest
 from quirkbench.recovery_rootfs import (CASReader, _install, preflight,
-                                        inspect_local_rpm_closure,
+                                        inspect_candidate_rpm_directory, inspect_local_rpm_closure,
                                         validate_lock, validate_snapshot)
 from test_baseline_catalog import retained_fixture
 
@@ -172,6 +172,29 @@ def test_local_rpm_inspection_produces_reviewable_snapshot_without_mutation(tmp_
     assert sorted(path.name for path in directory.iterdir()) == sorted(Path(path).name for path in mapping)
 
 
+def test_candidate_rpm_inspection_needs_no_installed_baseline_and_rejects_duplicates(tmp_path):
+    directory = tmp_path / 'candidate-rpms'
+    directory.mkdir()
+    first = directory / 'first.rpm'
+    first.write_bytes(b'first')
+    second = directory / 'second.rpm'
+    second.write_bytes(b'second')
+
+    def runner(argv, timeout_s):
+        name = 'fedora-release' if argv[-1] == str(first) else 'NetworkManager-wifi'
+        return f'{name}\t0:1-1.fc44\tx86_64\n'
+
+    snapshot, target_lock = inspect_candidate_rpm_directory(directory, runner=runner)
+    assert [item['name'] for item in snapshot['packages']] == ['NetworkManager-wifi', 'fedora-release']
+    assert target_lock.count(b'\n') == 2
+
+    def duplicate(argv, timeout_s):
+        return 'fedora-release\t0:1-1.fc44\tx86_64\n'
+
+    with pytest.raises(BuildError, match='duplicated'):
+        inspect_candidate_rpm_directory(directory, runner=duplicate)
+
+
 def test_local_rpm_inspection_rejects_extra_symlink_wrong_or_changed_bytes(tmp_path):
     catalog, _, _, _, _ = locked_fixture(tmp_path)
     entry = catalog['entries'][0]
@@ -201,7 +224,7 @@ def test_local_rpm_inspection_rejects_extra_symlink_wrong_or_changed_bytes(tmp_p
     def wrong(argv, timeout_s):
         return 'not-a-package\t0:1-1\tx86_64\n'
 
-    with pytest.raises(BuildError, match='RPM header differs'):
+    with pytest.raises(BuildError, match='RPM header'):
         inspect_local_rpm_closure(entry, directory, runner=wrong)
 
     def changed(argv, timeout_s):

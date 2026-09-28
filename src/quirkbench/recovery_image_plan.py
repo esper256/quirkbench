@@ -81,7 +81,8 @@ def prepare_recovery_image_inputs(recipe: dict, catalog: dict, store,
     if initramfs.get("initramfs_bytes") != artifacts["initramfs"].stat().st_size:
         raise BuildError("recovery image initramfs size differs from audited stage")
     package = Path(__file__).resolve().parent
-    assets = package.parents[1] / "target-assets"
+    from .package_resources import target_assets_dir
+    assets = target_assets_dir()
     if capture_runtime_revision(package, assets) != checked["runtime_revision"]:
         raise BuildError("recovery image runtime sources differ from retained revision")
     audit_installed_runtime(rootfs, checked["runtime_revision"])

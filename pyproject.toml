@@ -15,11 +15,22 @@ test = ["pytest>=8,<10", "cryptography>=43", "jsonschema>=4"]
 [project.scripts]
 quirkbench = "quirkbench.cli:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools]
+packages = ["quirkbench", "quirkbench.assets", "quirkbench.schemas", "quirkbench.examples", "quirkbench.guide"]
+
+[tool.setuptools.package-dir]
+quirkbench = "src/quirkbench"
+"quirkbench.assets" = "target-assets"
+"quirkbench.schemas" = "schemas"
+"quirkbench.examples" = "examples"
+"quirkbench.guide" = "docs"
 
 [tool.setuptools.package-data]
 quirkbench = ["profiles/*.json", "baselines/*.json", "recipes/*.json"]
+"quirkbench.assets" = ["*.service", "*.mount", "*.conf", "*.fragment", "*.sh"]
+"quirkbench.schemas" = ["*.json"]
+"quirkbench.examples" = ["*.json"]
+"quirkbench.guide" = ["agent-guide.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

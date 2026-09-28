@@ -148,14 +148,8 @@ def _run(argv, timeout_s, *, log=None):
     return result.stdout
 
 
-def inspect_local_rpm_closure(entry: dict, directory: Path, *, runner=_run) -> tuple[dict, bytes]:
-    """Read a candidate local RPM set for catalog review, without retaining it.
-
-    This only checks names, NEVRAs and bytes against an entry's package list.
-    Production still requires a separately reviewed catalog and retained CAS
-    closure through ``preflight`` before any DNF transaction.
-    """
-    entry = validate_entry(entry)
+def inspect_candidate_rpm_directory(directory: Path, *, runner=_run) -> tuple[dict, bytes]:
+    """Describe local RPM bytes for review; this does not authorize a baseline."""
     directory = Path(directory)
     if (not directory.is_absolute() or directory.is_symlink()
             or not directory.is_dir() or directory.resolve() != directory):
@@ -168,9 +162,6 @@ def inspect_local_rpm_closure(entry: dict, directory: Path, *, runner=_run) -> t
     sizes = [path.stat().st_size for path in files]
     if any(size < 1 or size > MAX_RPM_BYTES for size in sizes) or sum(sizes) > MAX_CLOSURE_BYTES:
         raise BuildError('RPM directory exceeds retained closure byte bounds')
-    expected = {(item['name'], item['nevra']) for item in entry['packages']}
-    if len(files) != len(expected):
-        raise BuildError('RPM directory count differs from reviewed package list')
     packages = []
     seen = set()
     query = '%{NAME}\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\t%{ARCH}\n'
@@ -181,8 +172,9 @@ def inspect_local_rpm_closure(entry: dict, directory: Path, *, runner=_run) -> t
             raise BuildError('RPM header query returned an ambiguous identity')
         name, evr, arch = rows[0].split('\t')
         nevra = f'{name}-{evr}.{arch}'
-        if (name, nevra) not in expected or nevra in seen:
-            raise BuildError('RPM header differs from reviewed package list')
+        if (not RPM_NAME.fullmatch(name) or not NEVRA.fullmatch(nevra)
+                or arch not in ('x86_64', 'noarch') or nevra in seen):
+            raise BuildError('RPM header is invalid or duplicated')
         seen.add(nevra)
         file_digest = sha256_file(path)
         after = path.stat()
@@ -194,6 +186,17 @@ def inspect_local_rpm_closure(entry: dict, directory: Path, *, runner=_run) -> t
     snapshot = validate_snapshot({'schema_version': 1, 'packages': packages})
     target_lock = ('\n'.join(sorted(_rpm_row(item['name'], item['nevra'])
                                      for item in packages)) + '\n').encode()
+    return snapshot, target_lock
+
+
+def inspect_local_rpm_closure(entry: dict, directory: Path, *, runner=_run) -> tuple[dict, bytes]:
+    """Compare candidate RPM bytes with a reviewed catalog package list."""
+    entry = validate_entry(entry)
+    snapshot, target_lock = inspect_candidate_rpm_directory(directory, runner=runner)
+    expected = {(item['name'], item['nevra']) for item in entry['packages']}
+    observed = {(item['name'], item['nevra']) for item in snapshot['packages']}
+    if observed != expected:
+        raise BuildError('RPM header differs from reviewed package list')
     return snapshot, target_lock
 
 

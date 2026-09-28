@@ -123,13 +123,14 @@ class ComposeInputs:
             raise BuildError("kernel release differs from build provenance")
 
     def identity(self) -> str:
+        from .package_resources import target_assets_dir
         return hashlib.sha256(canonical({"artifacts": self.artifact_sha256,
             "kernel_release": self.kernel_release, "fedora_release": self.fedora_release,
             "fedora_repo_sha256": self.fedora_repo_sha256, "source_date_epoch": self.source_date_epoch,
             "composer_sha256": sha256_file(Path(__file__)), "protection_profile": self.protection_profile,
             "replacement_rpm_sha256": sorted(self.replacement_rpms.values()),
             "build_evidence_sha256": self.evidence_sha256,
-            "runtime_assets_sha256": {p.name: sha256_file(p) for p in sorted((Path(__file__).parents[2]/"target-assets").iterdir()) if p.is_file()},
+            "runtime_assets_sha256": {p.name: sha256_file(p) for p in sorted(target_assets_dir().iterdir()) if p.is_file()},
             "candidate_runtime_sha256": {name: sha256_file(Path(__file__).parent / name)
                 for name in sorted(path.name for path in Path(__file__).parent.glob("*.py"))}})).hexdigest()
 

@@ -1,0 +1,1 @@
+"""Installed Quirkbench example documents."""

@@ -1,5 +1,6 @@
 """P2a storage contract. Synthetic ownership rows exercise future P2b publication hooks."""
 import json
+import base64
 import sqlite3
 from pathlib import Path
 
@@ -152,6 +153,107 @@ def test_cli_status_json_does_not_reconcile_running_operation(tmp_path, capsys):
     assert main(['--state', str(c.root), '--reserve-gib', '0', 'operation', 'status', 'unknown', '--json']) == 2
     error = json.loads(capsys.readouterr().out)
     assert error['ok'] is False and error['error']['code'] == 'INVALID_INPUT'
+
+
+def test_human_operation_status_renders_measured_progress_and_attached_failure(tmp_path, capsys):
+    c = controller(tmp_path)
+    with c.lifecycle() as owner:
+        row = c.admit_operation('req', 'image_prepare', {})
+        claim = owner.claim(row['id'], stage='rootfs', deadline=c.clock() + 30)
+        with c.transaction() as db:
+            db.execute('UPDATE operations SET progress=? WHERE id=?',
+                       (json.dumps({'phase': 'rootfs', 'state': 'ACTIVE',
+                                    'message': 'Installing retained packages',
+                                    'completed': 4, 'total': None, 'unit': 'packages'}), row['id']))
+        args = ['--state', str(c.root), '--reserve-gib', '0', 'operation', 'status', row['id']]
+        assert main(args) == 0
+        running = capsys.readouterr().out
+        assert 'rootfs: ACTIVE | Installing retained packages' in running
+        assert 'Measured: 4 packages; total unknown' in running
+        assert '%' not in running
+        c._publish_operation(row['id'], claim['worker_epoch'], claim['worker_generation'],
+                             state='FAILED', error={'code': 'BUILD_FAILED',
+                                                    'message': 'Pinned RPM unavailable', 'retryable': False})
+    assert main(args) == 0
+    failed = capsys.readouterr().out
+    assert 'FAILED' in failed and 'Failure BUILD_FAILED: Pinned RPM unavailable' in failed
+    assert c.operation_status(row['id'])['data']['state'] == 'FAILED'
+    failure_path = c.store.path(c.operation_status(row['id'])['data']['error_digest'])
+    failure_path.unlink()
+    failure_path.symlink_to(c.store.path(row['input_digest']))
+    assert main(args) == 0
+    unavailable = capsys.readouterr().out
+    assert 'Failure details unavailable' in unavailable
+    assert c.operation_status(row['id'])['data']['state'] == 'FAILED'
+
+
+def test_operation_events_are_bounded_paged_and_read_only(tmp_path, capsys):
+    c = controller(tmp_path)
+    row = c.admit_operation('req', 'image_prepare', {})
+    with c.transaction() as db:
+        for number in range(5):
+            db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
+                       (row['id'], c.clock(), 'measured', json.dumps({'bytes': number})))
+    first = c.operation_events(row['id'], limit=3)
+    assert [item['kind'] for item in first['data']['items']] == ['accepted', 'measured', 'measured']
+    assert first['data']['next_cursor'] == first['data']['items'][-1]['id']
+    second = c.operation_events(row['id'], after=first['data']['next_cursor'], limit=3)
+    assert len(second['data']['items']) == 3 and second['data']['next_cursor'] is None
+    assert c.operation_status(row['id'])['data']['state'] == 'QUEUED'
+    assert main(['--state', str(c.root), '--reserve-gib', '0', 'operation', 'events',
+                 row['id'], '--limit', '2', '--json']) == 0
+    cli_page = json.loads(capsys.readouterr().out)
+    assert len(cli_page['data']['items']) == 2 and cli_page['data']['next_cursor'] is not None
+
+
+@pytest.mark.parametrize('after,limit', [(-1, 1), (0, 0), (0, 101), (True, 1), (0, False)])
+def test_operation_event_query_rejects_invalid_bounds(tmp_path, after, limit):
+    c = controller(tmp_path)
+    row = c.admit_operation('req', 'image_prepare', {})
+    with pytest.raises(ContractError, match='cursor or limit'):
+        c.operation_events(row['id'], after=after, limit=limit)
+
+
+def test_operation_events_stop_at_response_byte_budget(tmp_path):
+    c = controller(tmp_path)
+    row = c.admit_operation('req', 'image_prepare', {})
+    with c.transaction() as db:
+        for number in range(2):
+            db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
+                       (row['id'], c.clock(), 'summary', json.dumps({'text': 'x' * 40000})))
+    page = c.operation_events(row['id'])
+    assert len(json.dumps(page).encode()) <= 64 * 1024
+    assert len(page['data']['items']) == 2
+    assert page['data']['next_cursor'] is not None
+    final = c.operation_events(row['id'], after=page['data']['next_cursor'])
+    assert len(final['data']['items']) == 1 and final['data']['next_cursor'] is None
+
+
+def test_operation_output_reads_only_attached_public_bytes(tmp_path, capsys):
+    c = controller(tmp_path)
+    output = c.store.put(b'abcdef\x00gh')
+    unlisted = c.store.put(b'private-looking input')
+    with c.lifecycle() as owner:
+        row = c.admit_operation('req', 'image_prepare', {}, input_refs=[unlisted.sha256])
+        claim = owner.claim(row['id'], stage='build', deadline=c.clock() + 30)
+        c._publish_operation(row['id'], claim['worker_epoch'], claim['worker_generation'],
+                             output_refs=[output.sha256])
+    response = c.operation_output(row['id'], output.sha256, offset=2, length=4)
+    assert base64.b64decode(response['data']['content_base64']) == b'cdef'
+    assert response['data']['total_bytes'] == 9
+    assert main(['--state', str(c.root), '--reserve-gib', '0', 'operation', 'output',
+                 row['id'], output.sha256, '--offset', '6', '--length', '3', '--json']) == 0
+    printed = json.loads(capsys.readouterr().out)
+    assert base64.b64decode(printed['data']['content_base64']) == b'\x00gh'
+    with pytest.raises(ContractError, match='not a public output'):
+        c.operation_output(row['id'], unlisted.sha256)
+    with pytest.raises(ContractError, match='invalid operation output range'):
+        c.operation_output(row['id'], output.sha256, length=16385)
+    object_path = c.store.path(output.sha256)
+    object_path.unlink()
+    object_path.symlink_to(c.store.path(unlisted.sha256))
+    with pytest.raises(ContractError, match='unavailable'):
+        c.operation_output(row['id'], output.sha256)
 
 
 def test_operation_json_schemas_match_persisted_documents(tmp_path):

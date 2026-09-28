@@ -389,7 +389,8 @@ def _create_image(inputs: ImageInputs) -> Path:
         from .build import BuildError
         from .recovery_runtime_revision import audit_installed_runtime, capture_runtime_revision
         package = Path(__file__).resolve().parent
-        assets = package.parents[1]/'target-assets'
+        from .package_resources import target_assets_dir
+        assets = target_assets_dir()
         try:
             audit_installed_runtime(inputs.rootfs_dir,
                                     capture_runtime_revision(package, assets))
@@ -473,7 +474,8 @@ def _create_image(inputs: ImageInputs) -> Path:
 def _builder_identity():
     from .recovery_runtime_revision import RUNTIME_ASSETS
     package=Path(__file__).resolve().parent
-    assets=package.parents[1]/'target-assets'
+    from .package_resources import target_assets_dir
+    assets=target_assets_dir()
     sources={f'python/{path.name}':path for path in package.glob('*.py')}
     sources.update({f'python/recipes/{path.name}':path for path in (package/'recipes').glob('*.json')})
     sources.update({f'assets/{name}':assets/name for name in

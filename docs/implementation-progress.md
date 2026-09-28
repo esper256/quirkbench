@@ -75,6 +75,23 @@ were not rebuilt, flashed or qualified. Tests use synthetic hardware trees.
   activating any entry. Catalog selection still leaves
   `build_validation_pending`; it does not claim a built kernel satisfies storage
   protection or that a target can boot.
+- A candidate Fedora 44 kernel source input is now retained locally under
+  `.quirkbench/inputs/fedora44-kernel-7.2.7/`: DNF5 `updates-source` supplied
+  `kernel-7.2.7-200.fc44.src.rpm` (SHA256
+  `7dfc6f39d52fbae59e0024fc1bc1d666900b6848d7e1fff53813d8b6b03aa5e8`).
+  An isolated RPM key database verified header and payload signatures against
+  Fedora 44 fingerprint `36F612DCF27F7D1A48A835E4DBFCF71C6D9F90A6`,
+  checked against [Fedora's published key list](https://fedoraproject.org/security/).
+  The SRPM yielded `kernel-x86_64-fedora.config` (SHA256
+  `cd11b96fabf3cbdaf1063eff6b66fb012edba411762ad994e3eed6236911ce18`)
+  and `kernel.spec` (SHA256
+  `2a5e8ca46b9ced20510bd068cb16c5a1fc7bfb9067ff403cf6414dd461470885`).
+  Acquisition used read-only repository metadata and an isolated extraction
+  directory; no host package was installed. The initial sandbox DNS query failed;
+  the network-approved retry downloaded the SRPM. The source preparation and
+  complete rootfs RPM closure still need a pinned rootless builder and review,
+  so this candidate is **not** an installed baseline or image input yet. Exact
+  commands and retained identities are in [the acquisition record](fedora44-input-candidate.md).
 - Focused acceptance: `.venv/bin/python -m pytest -q tests/test_baseline_catalog.py`
   passed (15 tests). No image bytes changed, built or qualified.
 
@@ -155,6 +172,150 @@ passed. No release qualification was run.
   CLI-exit survival. The adapter's manager calls and stop proof have only been
   exercised with injected responses. No image bytes changed or hardware/release
   qualification ran.
+
+## P2c — bounded operation event query (partial, 2026-09-28)
+
+- A read-only `Controller.operation_events` query and `quirkbench operation
+  events ID` command page durable events with integer cursors, at most 100
+  entries and a 64 KiB canonical response budget. A large first event fails
+  explicitly; later events return a continuation cursor. The query does not
+  start lifecycle recovery or infer progress percentages. Contracts: C2/C8 and
+  P2c; files: `src/quirkbench/controller.py`, `src/quirkbench/cli.py`,
+  `tests/test_operations.py`. Focused check: `.venv/bin/python -m pytest -q
+  tests/test_operations.py tests/test_cli.py` passed (19 tests);
+  `git diff --check` passed. Event rendering and private deliverable availability
+  remain open. No image bytes changed or qualification ran.
+- P2c also adds `quirkbench operation output ID DIGEST --offset N --length N
+  --json` for at most 16 KiB of base64 public bytes per call. It reads only a
+  CAS object attached to that operation with role `output`; input/source refs
+  and private deliverables cannot be read through it. Linked objects and a
+  changing file fail closed. Contracts: C2/C8 and P2c; files:
+  `src/quirkbench/controller.py`, `src/quirkbench/cli.py`,
+  `tests/test_operations.py`. Focused check: `.venv/bin/python -m pytest -q
+  tests/test_operations.py tests/test_cli.py` passed (20 tests);
+  `git diff --check` passed. The API reads existing output bytes and does not
+  certify release artifacts or create image bytes.
+- Human `operation status` now renders the durable stage, wait event, deadline,
+  measured counters without inventing a denominator, public-output count and
+  attached failure code/message. The bounded failure read verifies the CAS digest
+  and rejects links; a missing record leaves the historical FAILED state visible
+  with an explicit unavailable-detail message. Focused check: `.venv/bin/python
+  -m pytest -q tests/test_operations.py tests/test_cli.py tests/test_monitor.py`
+  passed (40 tests); `git diff --check` passed. Operation progress production still
+  depends on the P2b worker path. No image bytes or release evidence changed.
+
+## P2d — packaged target-asset foundation (partial, 2026-09-28)
+
+- The wheel now carries the existing `target-assets` tree as
+  `quirkbench.assets`. A resource resolver uses those installed bytes and falls
+  back to the source tree only during development. Recovery runtime staging,
+  synthesis, image input identity and composition no longer require a sibling
+  checkout `target-assets` directory after installation. The source tree remains
+  the single asset source for wheel construction.
+- Contracts: C8 and the P2d handoff; files: `pyproject.toml`,
+  `target-assets/__init__.py`, `src/quirkbench/package_resources.py`,
+  `src/quirkbench/boot.py`, `src/quirkbench/image.py`,
+  `src/quirkbench/recovery_image_plan.py`,
+  `src/quirkbench/recovery_synthesis.py`, `src/quirkbench/compose.py`,
+  `tests/test_package_resources.py`. A clean copied project built a wheel; an
+  isolated Python process loaded its recovery service from the extracted wheel
+  without the checkout. Focused check: `.venv/bin/python -m pytest -q
+  tests/test_package_resources.py` passed (2 tests), and the affected boot,
+  image, synthesis, runtime-revision and compose suites passed (117 tests);
+  `git diff --check` passed. No image bytes or hardware/release qualification
+  were produced; builder and runtime source identities changed.
+- A further P2d resource packet packages the published JSON Schemas, example
+  documents and agent guide from their existing source directories. Installed
+  callers can resolve those resources without a checkout; development callers
+  retain the source-tree fallback. The wheel test compares all packaged schema
+  and example bytes plus the guide against the source files in an isolated
+  process. Contracts: C8 and the P2d handoff; files: `pyproject.toml`,
+  `src/quirkbench/package_resources.py`, package marker files in `schemas/`,
+  `examples/` and `docs/`, and `tests/test_package_resources.py`. Focused check:
+  `.venv/bin/python -m pytest -q tests/test_package_resources.py` passed
+  (2 tests); `git diff --check` passed. The example documents are fixtures,
+  not installed supported baselines or authorization to run an experiment.
+  Controller installation, setup, service behavior and image qualification
+  remain open. No image bytes changed or qualification ran.
+- A bounded P2d state-discovery packet reads a versioned controller selection
+  from `XDG_CONFIG_HOME/quirkbench/controller.json` (or the user's default config
+  home). An explicit `--state` retains priority; absence of a selection retains
+  the legacy current-directory `.quirkbench` behavior. A present but invalid,
+  linked or unavailable selection fails closed before a controller can create a
+  fresh database in the wrong location. This is read-only discovery; it does not
+  migrate state or install services. Contracts: C0/C8 and P2d; files:
+  `src/quirkbench/state_config.py`, `src/quirkbench/cli.py`, the selection schema
+  and example, and `tests/test_installation.py`. Focused check:
+  `.venv/bin/python -m pytest -q tests/test_installation.py tests/test_cli.py
+  tests/test_operations.py tests/test_package_resources.py` passed (25 tests);
+  `git diff --check` passed.
+  Setup must still write this selection after creating and validating its state
+  root; the archive/launcher, user-service checks and clean-home setup flow
+  remain open. No image bytes changed or qualification ran.
+- A further P2d packet adds the provisional `quirkbench setup-state` command for
+  state selection while the full public `setup` command remains unimplemented. It creates
+  a private controller state directory, writes the versioned selection atomically
+  under a setup lock, verifies the selected path and returns the same selection
+  on repeat calls. An existing current-directory `.quirkbench` requires explicit
+  `--state`; a selected root cannot be switched implicitly, and linked,
+  nonprivate or unrelated nonempty default directories are refused. Setup does
+  not initialize a controller database or claim that user services are ready;
+  its response reports `service_management: pending` and
+  `background_work_ready: false`. Contracts: C0/C2/C8 and P2d; files:
+  `src/quirkbench/state_config.py`, `src/quirkbench/cli.py`,
+  `tests/test_installation.py` and `tests/test_package_resources.py`. The
+  extracted-wheel test runs setup in an isolated Python process and clean home
+  without the checkout. Focused check: `.venv/bin/python -m pytest -q
+  tests/test_installation.py tests/test_cli.py tests/test_operations.py
+  tests/test_package_resources.py tests/test_product_contracts.py` passed
+  (75 tests); `git diff --check`
+  passed. The controller archive/launcher and service-manager setup remain
+  open. No image bytes changed or qualification ran.
+- Another bounded P2d packet adds `quirkbench setup-check` and an injected,
+  read-only systemd user-manager probe. It makes bounded `systemctl --user show`
+  and `loginctl show-user` queries, reports manager reachability and the observed
+  lingering setting, and gives optional logout instructions without enabling
+  lingering or starting services. Missing, timed-out or malformed replies remain
+  unavailable/unknown; captured stderr is never returned. It explicitly reports
+  service installation unverified and background work not ready. Contracts: C2/C8
+  and P2d; files: `src/quirkbench/controller_setup.py`,
+  `src/quirkbench/cli.py`, `tests/test_controller_setup.py`. Focused check:
+  `.venv/bin/python -m pytest -q tests/test_controller_setup.py
+  tests/test_installation.py tests/test_cli.py tests/test_package_resources.py`
+  passed (25 tests); `git diff --check` passed. The controller coordinator unit,
+  installed launcher and service lifecycle still need implementation. No image
+  bytes changed or qualification ran.
+- The read-only setup report now also states whether `podman` and `distrobox`
+  are available and lists missing builder tools without installing host
+  packages. In the `dev` Distrobox both are absent from PATH, although the
+  Bazzite host has Podman 5.8.4 and Distrobox 1.8.2.5. A host-scope probe
+  reached `systemctl --user` (version `259.8-1.fc44`) and found lingering
+  disabled. The earlier `loginctl` PID 1 error was from the Distrobox namespace,
+  not evidence that the host lacks systemd. Service lifecycle remains unverified.
+  Focused check: `.venv/bin/python -m pytest -q tests/test_controller_setup.py
+  tests/test_installation.py tests/test_cli.py` passed (23 tests);
+  `git diff --check` passed. Background-work readiness remains false until
+  the installed service path is implemented and checked.
+- The setup probe now labels its process scope and reports absent tools inside
+  Distrobox as `not_visible`, not missing from the controller host. It does not
+  query `loginctl` from inside Distrobox, where PID 1 can be misleading, and
+  directs the operator to run the check from a controller host shell. The
+  Bazzite host tools above were independently confirmed through host execution;
+  no service was installed or started.
+- P3a1 input acquisition confirmed a Fedora 44 rootless base image by immutable
+  digest and retained 248 candidate recovery RPMs after a weak-dependency solve
+  that includes `NetworkManager-wifi` and `parted`. An isolated Fedora 44 key
+  database verified each RPM signature and payload digest. A new read-only
+  candidate directory inspector produced exact snapshot and target-lock bytes
+  without requiring a prematurely installed baseline catalog. See
+  [the candidate record](fedora44-input-candidate.md) for digests and logs.
+  This is input review, not a rootfs install or image qualification; catalog
+  approval, CAS retention, builder toolchain and runtime audits remain open.
+  The Podman pull, DNF download, signature check and candidate inspection all
+  completed successfully. Focused software check: `.venv/bin/python -m pytest
+  -q tests/test_recovery_rootfs.py tests/test_recovery_recipe.py
+  tests/test_baseline_catalog.py` passed (66 tests); `git diff --check` passed.
+  No recovery disk image bytes changed and no release qualification ran.
 
 ## P7a — installed recipe registry foundation
 
@@ -481,6 +642,81 @@ passed. No release qualification was run.
   publication, independent public-key verification, real Fedora inputs, image
   assembly and release qualification remain open. A higher-reasoning review is
   still needed before the storage publication boundary is enabled.
+- The next P3a3 packet adds independent verification of that private statement
+  using a separately supplied public key and an isolated temporary GPG home.
+  It rejects changed image/sidecar/candidate bytes, a missing or invalid key,
+  wrong fingerprint and invalid signature before returning an unqualified
+  statement. Contracts: C0/C4 and `recovery-base.md`; files:
+  `src/quirkbench/recovery_distribution.py`,
+  `tests/test_recovery_distribution.py`. Focused check: `.venv/bin/python -m
+  pytest -q tests/test_recovery_distribution.py tests/test_recovery_release.py`
+  passed (39 tests, one opt-in GPG test skipped in the sandbox); `git diff
+  --check` passed. The disposable-key GPG test passed separately with socket
+  access enabled. No real
+  recovery image was built or published; atomic publication and release
+  qualification remain open.
+- A further P3a3 verification packet closes the candidate wire-byte gap:
+  `load_release_candidate` now rejects noncanonical and duplicate-key JSON, and
+  independent checksum verification accepts exact candidate bytes rather than a
+  parsed object. The signed statement therefore binds the bytes a distributor
+  would deliver; changed recipe hashes or qualification claims fail before GPG
+  verification. Contracts: C0/C4 and `recovery-base.md`; files:
+  `src/quirkbench/recovery_release.py`,
+  `src/quirkbench/recovery_distribution.py`,
+  `tests/test_recovery_release.py`, `tests/test_recovery_distribution.py`.
+  Focused check: `.venv/bin/python -m pytest -q
+  tests/test_recovery_distribution.py tests/test_recovery_release.py` passed
+  (46 tests, one opt-in GPG test skipped in the sandbox); the opt-in
+  disposable-key GPG test passed with socket access; `git diff --check` passed.
+  No image bytes or release qualification were produced. Atomic distribution
+  publication and its required storage-boundary review remain open.
+- Another P3a3 packet adds read-only signed-bundle inspection over exact
+  `release-candidate.json`, `checksums.json` and detached-signature sidecars.
+  It refuses missing, linked, oversized or changing files and an image adapter
+  pending journal. Both signing and inspection now reject a factory manifest
+  that carries commissioned/candidate state, extra enrollment fields, invalid
+  partition identities or geometry, even if a matching candidate hash is
+  supplied. Contracts: C0/C4 and `recovery-base.md`; files:
+  `src/quirkbench/recovery_distribution.py`,
+  `tests/test_recovery_distribution.py`, `tests/test_recovery_release.py`.
+  Focused check: `.venv/bin/python -m pytest -q
+  tests/test_recovery_distribution.py tests/test_recovery_release.py` passed
+  (59 tests, one opt-in GPG test skipped in the sandbox); the disposable-key
+  GPG test passed with socket access; `git diff --check` passed. Tests use
+  synthetic image bytes. No image or public release was produced. Atomic
+  publication and its required storage-boundary review remain open.
+- The P3a1–P3a3 private handoff now has one coordinator that reuses the locked
+  base, generic runtime, audited Dracut and image-input stages in order. It
+  preflights the recipe and output path before creating the private stage,
+  rejects linked output parents, and returns only audited `ImageInputs` without
+  running external image tools or publishing an image. Contracts: C1/C4 and
+  `recovery-base.md`; files: `src/quirkbench/recovery_synthesis.py` and
+  `tests/test_recovery_synthesis.py`. Focused check: `.venv/bin/python -m
+  pytest -q tests/test_recovery_synthesis.py tests/test_recovery_image_plan.py`
+  passed (38 tests); `git diff --check` passed. The synthetic joined run does
+  not establish a real Fedora closure, image assembly or release qualification.
+- P3a3 signed sidecars now have a publication transaction separate from image
+  assembly. It verifies exact unqualified candidate, statement, signature and
+  image bytes before writing; a synced pending marker blocks readers during
+  interruption. Identical retries complete only matching sidecars, and a
+  different pending or published bundle fails closed. The read-only inspector
+  checks both image and signed-publication markers. Focused check:
+  `.venv/bin/python -m pytest -q tests/test_recovery_distribution.py
+  tests/test_recovery_release.py` passed (62 tests; one opt-in GPG socket test
+  skipped); `git diff --check` passed. Independent storage review found that a
+  sidecar could change during final GPG verification; final persisted-byte and
+  marker rechecks now keep the marker in place on that race. This uses synthetic
+  image bytes and does not publish an actual Fedora image or confer flash
+  qualification. Noncooperating same-user filesystem mutation after commit is
+  outside the cooperating publisher lock and remains a local integrity risk.
+- The prepared image handoff now has a final coordinator that calls the existing
+  image adapter only when no assembled image exists or its image journal needs
+  repair, validates the exact staged result, signs the checksum statement and
+  publishes the verified unqualified bundle. An interrupted signing step can
+  resume without rebuilding image bytes. Focused check: `.venv/bin/python -m
+  pytest -q tests/test_recovery_distribution.py tests/test_recovery_release.py
+  tests/test_recovery_synthesis.py` passed (83 tests; one opt-in GPG socket test
+  skipped). No real Fedora closure or factory image was used.
 
 ### P3a2 recovery boot policy and network staging (partial, 2026-09-28)
 
@@ -529,6 +765,19 @@ passed. No release qualification was run.
   selected network profile replay, and cold/restored network operation still
   need implementation and validation. Commissioning still uses one bounded
   `udevadm settle` after creating new partitions.
+- A further bounded P3a2 packet inventories `/usr/lib/systemd/system`
+  dependency links before staging recovery runtime files and refuses links
+  absent from the exact reviewed vendor allowlist. Missing, escaping or linked
+  vendor unit destinations also fail closed. The allowlist is empty until the
+  real Fedora RPM closure is reviewed; the scanner reports observed links for
+  that review. This check covers vendor `.wants`, `.requires` and `.upholds`
+  links, not all vendor unit dependencies, presets or generators. Contracts:
+  C4 and `recovery-base.md`; files: `src/quirkbench/boot.py`,
+  `tests/test_boot.py`. Focused check: `.venv/bin/python -m pytest -q
+  tests/test_boot.py tests/test_recovery_image_plan.py tests/test_image.py`
+  passed (79 tests); `git diff --check` passed. No real Fedora rootfs, image or
+  hardware qualification was produced. Runtime image inputs changed and remain
+  unqualified.
 
 ### P3a5 attended commissioning gate (partial, 2026-09-28)
 

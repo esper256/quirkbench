@@ -1,5 +1,6 @@
 """Human-readable monitoring with measured bars and explicit uncertainty."""
 from datetime import datetime, timezone
+import json
 
 def duration(seconds):
     if seconds is None:
@@ -14,6 +15,49 @@ def bar(done, total, width=20):
         return 'no measured denominator'
     filled = min(width, int(width * done / total))
     return '[' + '#' * filled + '-' * (width-filled) + f'] {done}/{total} ({100*done/total:.0f}%)'
+
+
+def render_operation(status, failure=None):
+    """Render persisted operation facts without treating liveness as progress."""
+    row = status['data']
+    lines = [f"Operation {row['id']}  {row['kind']}  {row['state']}"]
+    if row['stage']:
+        lines.append('Stage: ' + row['stage'])
+    if row['state'] == 'WAITING':
+        lines.append('Waiting for: ' + (row['wait_event'] or 'unspecified event'))
+    if row['deadline'] is not None and row['state'] in ('RUNNING', 'WAITING'):
+        deadline = datetime.fromtimestamp(row['deadline'], timezone.utc).isoformat(timespec='seconds')
+        lines.append('Deadline: ' + deadline)
+    try:
+        progress = json.loads(row['progress']) if isinstance(row['progress'], str) else row['progress']
+    except (TypeError, ValueError):
+        progress = None
+    if isinstance(progress, dict):
+        phase = progress.get('phase')
+        state = progress.get('state')
+        message = progress.get('message')
+        if isinstance(phase, str) and isinstance(state, str) and isinstance(message, str):
+            lines.append(f'{phase}: {state} | {message}')
+        completed, total, unit = (progress.get(name) for name in ('completed', 'total', 'unit'))
+        if (type(completed) is int and completed >= 0 and type(total) is int
+                and total > 0 and completed <= total and isinstance(unit, str)):
+            lines.append('Measured: ' + bar(completed, total) + ' ' + unit)
+        elif type(completed) is int and completed >= 0 and isinstance(unit, str):
+            lines.append(f'Measured: {completed} {unit}; total unknown')
+        else:
+            lines.append('Measured progress: unavailable')
+    else:
+        lines.append('Measured progress: unavailable')
+    if row['state'] == 'FAILED':
+        if failure is None:
+            lines.append('Failure details unavailable; historical state remains FAILED.')
+        else:
+            lines.append(f"Failure {failure['code']}: {failure['message']}")
+    if row['state'] == 'INTERRUPTED':
+        lines.append('Worker ownership was interrupted; continuation requires reconciliation.')
+    if row['references']['output']:
+        lines.append(f"Public outputs: {len(row['references']['output'])}; inspect digests with --json")
+    return '\n'.join(lines)
 
 def render(status):
     progress = status['progress']

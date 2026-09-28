@@ -579,6 +579,56 @@ RECOVERY_MASKED_UNITS = frozenset({
     "systemd-remount-fs.service", "getty@tty1.service",
 })
 
+# The installed Fedora closure is not selected yet. Vendor enablement is an
+# explicit reviewed input, not permission inherited from a package preset.
+RECOVERY_VENDOR_ENABLED_LINKS: dict[str, str] = {}
+
+
+def recovery_vendor_enabled_links(rootfs: Path) -> dict[str, str]:
+    """Inventory vendor unit enablement without following links outside the root."""
+    rootfs = Path(rootfs)
+    vendor = rootfs / "usr/lib/systemd/system"
+    if (vendor.is_symlink() or (vendor.exists() and not vendor.is_dir())
+            or not vendor.resolve().is_relative_to(rootfs.resolve())):
+        raise BootError("staged vendor unit directory is invalid")
+    if not vendor.exists():
+        return {}
+    links = {}
+    for directory in sorted(vendor.iterdir()):
+        if not directory.name.endswith((".wants", ".requires", ".upholds")):
+            continue
+        if directory.is_symlink() or not directory.is_dir():
+            raise BootError("staged vendor unit dependency directory is invalid")
+        for link in sorted(directory.iterdir()):
+            if not link.is_symlink():
+                raise BootError("staged vendor unit dependency is not a link")
+            relative = f"{directory.name}/{link.name}"
+            target = str(link.readlink())
+            if target.startswith("/"):
+                if not target.startswith("/usr/lib/systemd/system/"):
+                    raise BootError("staged vendor unit link escapes target rootfs: " + relative)
+                destination = vendor / target.removeprefix("/usr/lib/systemd/system/")
+            else:
+                destination = directory / target
+            if destination.is_symlink():
+                raise BootError("staged vendor unit link is not a regular local unit: " + relative)
+            destination = destination.resolve(strict=False)
+            if (not destination.is_relative_to(vendor.resolve())
+                    or not destination.is_file()):
+                raise BootError("staged vendor unit link is not a regular local unit: " + relative)
+            links[relative] = target
+    return links
+
+
+def _check_recovery_vendor_unit_links(rootfs: Path) -> None:
+    observed = recovery_vendor_enabled_links(rootfs)
+    for relative, target in observed.items():
+        if RECOVERY_VENDOR_ENABLED_LINKS.get(relative) != target:
+            raise BootError("unreviewed recovery vendor unit enablement: " + relative)
+    missing = set(RECOVERY_VENDOR_ENABLED_LINKS) - set(observed)
+    if missing:
+        raise BootError("reviewed recovery vendor unit enablement missing: " + sorted(missing)[0])
+
 
 def _check_recovery_unit_links(rootfs: Path, *, strict_direct_links: bool = False) -> None:
     """Reject unreviewed recovery enablement in the staged /etc unit graph."""
@@ -637,7 +687,8 @@ def _install_runtime_files(rootfs: Path, assets_dir: Path | None = None, *, cand
         or not rootfs.is_dir() or not (rootfs / "etc/quirkbench-rootfs").is_file()
         or (rootfs / "etc/quirkbench-rootfs").read_text().strip() != "quirkbench-fedora-target-v1"):
         raise BootError("runtime installation requires a staged Fedora target rootfs")
-    assets = Path(assets_dir) if assets_dir is not None else Path(__file__).resolve().parents[2] / "target-assets"
+    from .package_resources import target_assets_dir
+    assets = Path(assets_dir) if assets_dir is not None else target_assets_dir()
     if not assets.is_dir():
         raise BootError("target runtime assets missing")
     etc = rootfs / "etc"
@@ -671,6 +722,7 @@ def _install_runtime_files(rootfs: Path, assets_dir: Path | None = None, *, cand
         raise BootError("staged NetworkManager settings may not be a symlink")
     if not candidate:
         _check_recovery_unit_links(rootfs)
+        _check_recovery_vendor_unit_links(rootfs)
         # An empty mount point lets systemd supply an ID in RAM on a read-only
         # root. Remove both factory ID sources before installing the runtime.
         # Unlink first so a staged hard link cannot truncate a file elsewhere.

@@ -8,14 +8,17 @@ import sys
 import time
 from .contracts import CapabilityReport, Experiment, canonical
 from .controller import Controller
+from .state_config import configure_state_root, discover_state_root
 
 
 def parser():
     result = argparse.ArgumentParser(prog='quirkbench', description=__doc__)
-    result.add_argument('--state', type=Path, default=Path('.quirkbench'))
+    result.add_argument('--state', type=Path, help='explicit controller state root; overrides configured selection')
     result.add_argument('--reserve-gib', type=float, default=20)
     result.add_argument('--repositories', type=Path, help='JSON mapping of configured OSTree repository aliases to absolute directories')
     commands = result.add_subparsers(dest='command', required=True)
+    commands.add_parser('setup-state', help='select private controller state; service setup is still pending')
+    commands.add_parser('setup-check', help='inspect user service availability without changing host settings')
     commands.add_parser('demo', help='run the fake build/target/agent durability demonstration')
     device = commands.add_parser('register'); device.add_argument('report', type=Path)
     campaign = commands.add_parser('campaign')
@@ -30,6 +33,14 @@ def parser():
     operation_actions = operation.add_subparsers(dest='action', required=True)
     operation_status = operation_actions.add_parser('status', help='read one operation without invoking recovery or scheduling')
     operation_status.add_argument('operation_id'); operation_status.add_argument('--json', action='store_true')
+    operation_events = operation_actions.add_parser('events', help='page durable operation events')
+    operation_events.add_argument('operation_id'); operation_events.add_argument('--after', type=int, default=0)
+    operation_events.add_argument('--limit', type=int, default=100); operation_events.add_argument('--json', action='store_true')
+    operation_output = operation_actions.add_parser('output', help='read a bounded public output range')
+    operation_output.add_argument('operation_id'); operation_output.add_argument('digest')
+    operation_output.add_argument('--offset', type=int, required=True)
+    operation_output.add_argument('--length', type=int, required=True)
+    operation_output.add_argument('--json', action='store_true')
     session = commands.add_parser('session', help='durable investigation observation records')
     session_actions = session.add_subparsers(dest='action', required=True)
     observations = session_actions.add_parser('observations', help='list typed human requests and answers')
@@ -61,11 +72,23 @@ def parser():
 
 def main(argv=None):
     args = parser().parse_args(argv)
+    if args.command == 'setup-state':
+        try:
+            print(json.dumps(configure_state_root(args.state), sort_keys=True))
+            return 0
+        except (ValueError, OSError) as exc:
+            print(f'setup blocked: {exc}', file=sys.stderr)
+            return 2
+    if args.command == 'setup-check':
+        from .controller_setup import inspect_user_manager
+        print(json.dumps(inspect_user_manager(), sort_keys=True))
+        return 0
     if args.command == 'session':
         from .contracts import Conflict, ContractError
         from .operations import operation_response
         from .product_contracts import MAX_DOCUMENT_BYTES
         try:
+            args.state = discover_state_root(args.state)
             if args.reserve_gib < 0:
                 raise ContractError('reserve must be nonnegative')
             raw = None
@@ -106,14 +129,35 @@ def main(argv=None):
         from .contracts import Conflict, ContractError
         from .operations import operation_response
         try:
+            args.state = discover_state_root(args.state)
             if args.reserve_gib < 0:
                 raise ContractError('reserve must be nonnegative')
-            answer = Controller(args.state.resolve(), reserve_bytes=int(args.reserve_gib*1024**3)).operation_status(args.operation_id)
+            controller = Controller(args.state.resolve(), reserve_bytes=int(args.reserve_gib*1024**3))
+            if args.action == 'status':
+                answer = controller.operation_status(args.operation_id)
+            elif args.action == 'events':
+                answer = controller.operation_events(args.operation_id, after=args.after, limit=args.limit)
+            else:
+                answer = controller.operation_output(args.operation_id, args.digest,
+                                                     offset=args.offset, length=args.length)
             if args.json:
                 print(json.dumps(answer, sort_keys=True))
+            elif args.action == 'events':
+                for event in answer['data']['items']:
+                    print(f"{event['id']} {event['kind']}")
+                if answer['data']['next_cursor'] is not None:
+                    print(f"More events: --after {answer['data']['next_cursor']}")
+            elif args.action == 'output':
+                print(f"Read {answer['data']['length']} bytes from public output {answer['data']['sha256']}; use --json for content")
             else:
-                data = answer['data']
-                print(f"{data['id']} {data['kind']} {data['state']}")
+                from .monitor import render_operation
+                failure = None
+                if answer['data']['state'] == 'FAILED':
+                    try:
+                        failure = controller.operation_failure(args.operation_id)
+                    except (ContractError, OSError):
+                        pass
+                print(render_operation(answer, failure))
             return 0
         except Exception as exc:
             code = 'CONFLICT' if isinstance(exc, Conflict) else 'INVALID_INPUT' if isinstance(exc, ContractError) else 'INFRASTRUCTURE'
@@ -126,6 +170,7 @@ def main(argv=None):
                 print(f'{code}: {message}', file=sys.stderr)
             return status
     try:
+        args.state = discover_state_root(args.state)
         if args.reserve_gib < 0:
             raise ValueError('reserve must be nonnegative')
         repository_paths = {}

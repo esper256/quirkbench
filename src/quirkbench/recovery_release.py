@@ -117,14 +117,17 @@ def _load_json(path: Path, *, limit: int, label: str,
 
 
 def load_release_candidate(raw: bytes) -> dict:
-    if len(raw) > MAX_RECORD_BYTES:
+    if not isinstance(raw, bytes) or len(raw) > MAX_RECORD_BYTES:
         raise BuildError("recovery release candidate exceeds 64 KiB")
     try:
         value = json.loads(raw, object_pairs_hook=_pairs,
                            parse_constant=lambda _: (_ for _ in ()).throw(BuildError("nonfinite JSON number")))
     except (UnicodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:
         raise BuildError("invalid recovery release candidate JSON") from exc
-    return validate_release_candidate(value)
+    validate_release_candidate(value)
+    if raw != canonical(value):
+        raise BuildError("recovery release candidate must be canonical JSON")
+    return value
 
 
 def _image_identity(path: Path) -> tuple[str, int]:

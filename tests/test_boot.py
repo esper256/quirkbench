@@ -254,6 +254,64 @@ def test_generic_recovery_runtime_precedes_image_boot_identity(tmp_path):
     assert json.loads((root/'etc/quirkbench/boot.json').read_text()) == asdict(CONFIG)
 
 
+def test_recovery_rejects_unreviewed_vendor_enablement_before_staging(tmp_path):
+    from quirkbench.boot import install_recovery_runtime_base, recovery_vendor_enabled_links
+
+    root = tmp_path / 'recovery'
+    (root/'etc').mkdir(parents=True)
+    (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1\n')
+    vendor = root/'usr/lib/systemd/system'
+    wants = vendor/'multi-user.target.wants'
+    wants.mkdir(parents=True)
+    (vendor/'sshd.service').write_text('[Service]\nExecStart=/usr/sbin/sshd\n')
+    (wants/'sshd.service').symlink_to('../sshd.service')
+    assert recovery_vendor_enabled_links(root) == {
+        'multi-user.target.wants/sshd.service': '../sshd.service'}
+    with pytest.raises(BootError, match='unreviewed recovery vendor unit enablement'):
+        install_recovery_runtime_base(root)
+    assert not (root/'etc/systemd/system/quirkbench-recovery.service').exists()
+
+
+def test_recovery_vendor_allowlist_requires_exact_link_and_target(tmp_path, monkeypatch):
+    import quirkbench.boot as boot
+
+    root = tmp_path/'recovery'
+    (root/'etc').mkdir(parents=True)
+    (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1\n')
+    vendor = root/'usr/lib/systemd/system'
+    wants = vendor/'multi-user.target.wants'
+    wants.mkdir(parents=True)
+    (vendor/'reviewed.service').write_text('[Service]\nType=oneshot\n')
+    link = wants/'reviewed.service'
+    link.symlink_to('../reviewed.service')
+    monkeypatch.setattr(boot, 'RECOVERY_VENDOR_ENABLED_LINKS', {
+        'multi-user.target.wants/reviewed.service': '../reviewed.service'})
+    boot.install_recovery_runtime_base(root)
+    link.unlink()
+    with pytest.raises(BootError, match='reviewed recovery vendor unit enablement missing'):
+        boot.install_recovery_runtime_base(root)
+    link.symlink_to('../other.service')
+    with pytest.raises(BootError, match='not a regular local unit'):
+        boot.install_recovery_runtime_base(root)
+
+
+def test_recovery_vendor_enablement_rejects_escaping_or_linked_directory(tmp_path):
+    from quirkbench.boot import recovery_vendor_enabled_links
+
+    root = tmp_path/'recovery'
+    vendor = root/'usr/lib/systemd/system'
+    wants = vendor/'multi-user.target.wants'
+    wants.mkdir(parents=True)
+    (wants/'foreign.service').symlink_to('/etc/systemd/system/foreign.service')
+    with pytest.raises(BootError, match='escapes target rootfs'):
+        recovery_vendor_enabled_links(root)
+    (wants/'foreign.service').unlink()
+    wants.rmdir()
+    wants.symlink_to(tmp_path, target_is_directory=True)
+    with pytest.raises(BootError, match='dependency directory is invalid'):
+        recovery_vendor_enabled_links(root)
+
+
 def test_generic_runtime_rejects_preexisting_boot_identity_and_linked_destination(tmp_path):
     from quirkbench.boot import install_recovery_runtime_base
 
