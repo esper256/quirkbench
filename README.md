@@ -30,7 +30,7 @@ You need:
 | Target | An x86-64 UEFI computer that can boot USB storage, with Secure Boot disabled. Peripheral support is checked after boot. |
 | External drive | A USB SSD is preferable to a small thumb drive. 256 GB is a useful starting size; targets with substantial RAM or large logs may need more. **Flashing erases the selected external drive.** |
 | Network | Both computers on the same trusted local network. Ethernet is simplest; Wi-Fi setup is available. Guest networks that isolate devices will not work. |
-| Coding agent | An account or credentials for a supported coding-agent command. Setup lists supported adapters and walks you through authentication on the controller. Agent usage may incur charges. |
+| Coding agent | For managed investigations, a supported coding-agent command and its account or credentials. Alternatively, use your own interactive agent with shell access to the controller. Agent usage may incur charges. |
 
 Keep both computers connected to power. Keep the controller awake during an
 investigation; putting it to sleep interrupts builds and communication. Quirkbench
@@ -68,9 +68,10 @@ The wizard guides you through:
 2. **Build environment:** create the isolated Fedora containers and check CPU,
    memory and disk limits. Experimental kernels and packages stay inside build
    directories; they are never installed into the controller's OS.
-3. **Coding agent:** select an adapter and authenticate in the controller environment
-   that will run it. Set usage limits before the first investigation. Credentials
-   stay on the controller and are not copied into target images or evidence bundles.
+3. **Coding agent:** choose managed operation and authenticate a supported adapter,
+   or choose “Use my own agent” and skip adapter setup. Managed calls run in the
+   controller environment; set usage limits before starting. Credentials are not
+   copied into target images or evidence bundles.
 4. **Connection:** choose the controller's LAN address. Quirkbench creates its TLS
    identity and checks the device and repository endpoints. If your firewall needs
    a change, setup shows the specific local-network rules for you to apply.
@@ -144,14 +145,34 @@ keeps its original attribution; retargeting does not erase it.
 
 ## 5. Start an investigation
 
+**The agent does the reasoning and source editing. Quirkbench runs the lab:** it
+builds the proposed changes, boots the target, collects evidence and saves progress.
+The agent works on the controller, never inside the recovery image.
+
+Choose how to drive the investigation:
+
+| Mode | Who asks the agent for the next experiment? | Use it when |
+| --- | --- | --- |
+| **Managed — recommended** | Quirkbench invokes your configured agent when there is a decision to make. | You want the investigation to continue across builds and reboots without keeping an agent chat open. Requires a supported noninteractive command adapter. |
+| **Bring your own agent** | You direct your existing agent, which calls Quirkbench through the shell. | You want to work in your normal agent UI, or your agent has no managed adapter. Requires shell and workspace access on the controller. |
+
+Both modes use the same saved investigation, experiment API and evidence. No MCP
+server is required. Quirkbench allows only one driver for a session; switching
+requires pausing and reconciling it first. “Managed” describes who drives the AI
+calls; it does not mean the target is qualified to run unattended.
+
+### Managed: describe the problem and let the loop run
+
 On the controller:
 
 ```sh
 quirkbench session start --device target-01
 ```
 
-The wizard asks what is wrong, how you trigger it, what you expect instead, and
-whether someone can observe or reset the target. A useful description is concrete:
+The wizard uses the agent configured during setup, or offers configuration/external
+mode if none is available. It asks what is wrong, how you
+trigger it, what you expect instead, and whether someone can observe or reset the
+target. A useful description is concrete:
 
 > After waking from suspend, the built-in trackpad sometimes stops responding.
 > A USB mouse still works. I can reproduce it by closing and reopening the lid,
@@ -163,36 +184,94 @@ You can also provide a prepared description:
 quirkbench session start --device target-01 --problem ./problem.md
 ```
 
-Review the proposed scope and usage budget. Quirkbench selects a compatible baseline,
-shows the kernel/source versions and any differences from your installed environment,
-and downloads the required sources. Advanced setup lets you select a local source
-tree or a specific supported version. Missing driver/profile support is reported as
-a blocker rather than silently guessed.
+Review the scope, source versions, agent settings and usage budget before starting.
+Quirkbench prepares a compatible baseline and a dedicated source workspace. You can
+select an existing source tree or supported version in advanced setup. Missing
+hardware/profile support is a visible blocker, not something the agent can bypass.
 
-**The first session includes an attended baseline check.** Quirkbench builds the
-baseline OS, boots it on the target, collects a small observation, uploads the result
-and confirms the return to recovery. Stay nearby for this first cycle. If it fails,
-the session preserves the evidence and asks for the necessary recovery action.
+**The first session includes an attended baseline check:** build, boot, observation,
+upload and return to recovery. Stay nearby for this cycle. It establishes that the
+lab works; it does not yet prove the reported issue is reproduced.
 
-Once the baseline check passes, the agent establishes a reproduction before trying
-fixes. Each physical attempt follows the same cycle:
+After that, the managed loop works as follows:
+
+1. **Brief the agent.** Quirkbench supplies its [agent guide](docs/agent-guide.md),
+   your problem, target capabilities, approved source workspace, previous hypotheses
+   and a compact summary of new evidence. The agent can query older experiments and
+   specific log excerpts through the CLI.
+2. **Design one useful iteration.** The agent proposes a hypothesis, what observation
+   would support or refute it, and a bounded test. It may edit source to add diagnostics
+   or try a fix. It returns a structured proposal, or asks for your input.
+3. **Run the work.** Quirkbench validates the proposal, freezes the source edits,
+   records the decision, builds the deployment and runs the authorized attempts.
+   The agent invocation ends while that work runs; no model watches a progress bar.
+4. **Interpret the evidence.** When a result or actionable failure is available,
+   Quirkbench calls the agent again. The agent compares observations, updates its
+   hypotheses and proposes the next iteration. A build failure is also useful feedback;
+   a lost target connection is not automatically evidence of a kernel crash.
+
+This is a persistent investigation, not a single enormous prompt or an agent chat
+that must remember everything. Replacing an agent session does not erase the ledger,
+source edits or previous results. Only approved source changes and bounded recipe
+proposals can become experiments; model text cannot disable protection, grant reset
+qualification or execute arbitrary shell commands on the target.
+
+### Bring your own agent: use the same lab from your existing workflow
+
+Create the session with an external driver:
+
+```sh
+quirkbench session start --device target-01 --driver external
+```
+
+The wizard performs the same scope and baseline setup, but does not launch an AI.
+It prints the session ID, source workspace and a local **agent handoff file** with
+absolute paths, the matching agent guide and the command for reading current state.
+Open your preferred coding agent on the controller with access to that workspace
+and the `quirkbench` command, then give it a prompt like:
+
+> Investigate session SESSION_ID. Read the Quirkbench agent guide and the handoff
+> file at HANDOFF_PATH. Inspect the existing experiments before proposing more work.
+> Establish a reproducing baseline, design a discriminating test, and use Quirkbench
+> to submit it. Preserve your reasoning and source edits. If a build or experiment
+> is still running, return its operation ID and stop rather than repeatedly polling.
+
+Replace the two placeholders with the values printed by the wizard. A chat-only
+agent without controller shell access cannot operate the lab this way.
+
+The [agent guide](docs/agent-guide.md) explains how to read the session context,
+find old attempts and evidence, select available recipes, record hypotheses and
+submit a proposal with a retry-safe request ID. You should not have to relay logs
+between the target and the agent or teach it Quirkbench's commands yourself.
+
+Already submitted builds and attempts continue when the agent chat closes. **The
+next reasoning step waits for you to continue the agent**, unless your agent platform
+has its own explicit completion-event integration. Quirkbench does not silently
+launch another agent in external mode, and cannot enforce spending limits on calls
+made independently by your agent application.
+
+### What actually runs on the target
+
+Every physical attempt follows this cycle, regardless of which mode drives it:
 
 ```text
 Recovery → prepare experiment → reboot → run and upload → reboot → recovery
 ```
 
 You flash the drive once. Subsequent experiments transfer changed OSTree objects;
-they do not rewrite the recovery image. Builds may change the kernel, drivers or
-userspace components relevant to the issue.
+they do not rewrite recovery. Changes may involve the kernel, drivers or userspace.
+If a needed diagnostic is not available, the agent can develop a bounded recipe in
+source and submit it through the build/review path; it cannot improvise remote shell
+commands on the target.
 
 Some observations need you: confirming that sound actually played, moving a physical
 pointer, or supplying a microphone stimulus. The monitor gives a specific instruction
-and records your response with the attempt. Quirkbench does not treat software
-loopback or simulated input as proof of physical behavior.
+and records your response with the attempt. Software loopback or simulated input is
+not proof of physical behavior.
 
-If the problem does not reproduce in the debugging environment, the session records
-that limitation and investigates relevant differences. It does not call the issue
-fixed or modify the installed OS to force a reproduction.
+If the problem does not reproduce in the debugging environment, the agent investigates
+relevant differences and records the limitation. It does not call the issue fixed or
+modify the installed OS to force a reproduction.
 
 ## 6. See what is happening
 
@@ -219,9 +298,10 @@ as finished, and a heartbeat is not counted as scientific progress.
 | Needs recovery | Execution is uncertain or automatic reset is unavailable. Follow the displayed target-reset instructions; the attempt will not silently repeat. |
 | Paused | Progress is saved and no new experiment will start. |
 
-Monitoring does not invoke the coding agent. The agent runs at decision points;
-it does not spend quota watching builds or waiting for reboots. Budget exhaustion,
-expired authentication and storage pressure pause the session with an actionable reason.
+Monitoring does not invoke the coding agent. In managed mode, Quirkbench invokes it
+only at decision points and pauses on exhausted budgets or expired authentication.
+In external mode, continue your agent when results are ready; its own application
+controls its AI usage. Storage pressure pauses new lab work in either mode.
 
 For a quick summary instead of a live display:
 
@@ -235,10 +315,12 @@ quirkbench session status SESSION_ID
 quirkbench session pause SESSION_ID
 ```
 
-Pause stops new scheduling immediately. The active bounded build or agent decision
+Pause stops new scheduling immediately. The active bounded build or managed agent decision
 finishes and saves its output; an active physical attempt preserves its results and
 returns to recovery. The monitor distinguishes **Pausing** from **Paused**. It pauses
-between individual repetitions, not after the entire batch.
+between individual repetitions, not after the entire batch. In external mode, also
+stop your agent from editing the shared source workspace; pausing Quirkbench does
+not terminate a separately launched application.
 
 Resume when you are ready:
 
