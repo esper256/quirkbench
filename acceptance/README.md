@@ -60,6 +60,11 @@ the disposable VM through QMP; this fixture does not claim a graceful guest
 shutdown, controller communication or physical watchdog coverage. The boot-cycle
 gate separately compares settled persistent firmware settings.
 
+These QEMU image fixtures still expect automatic first-boot commissioning. Recovery
+now requires an attended capacity confirmation. The console screen and larger
+sizing choices exist in software, but the fixture adapter remains pending P3a5.
+The fixtures cannot qualify current image bytes until adapted.
+
 `tests/test_physical_handoff.py` runs the same handoff/streamed-evidence lifecycle
 through local and real HTTPS clients, injecting the boot boundary. It covers lost
 acknowledgements, old generations, wrong revisions, controller restart, interrupted

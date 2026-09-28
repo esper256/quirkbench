@@ -97,6 +97,15 @@ V1 uses Silverblue's OSTree/rpm-ostree technology with minimal Fedora userspace.
 
 Traditional OSTree repository transport is the v1 choice; bootc and the full Silverblue desktop are deferred. The installed operating system and its bootloader remain outside Quirkbench. Neither OSTree nor a change of deployment adapter relaxes the internal-disk or firmware protections.
 
+## Deferred accessories
+
+The [external-hardware design](external-hardware.md) adds optional media presentation
+and observation, not another recovery authority. A Pi gadget does not inherently
+reset a hung target or capture early console output. Accessory logs, target liveness,
+recovery registration and controller acknowledgement remain separate facts. Media
+support and each diagnostic channel need their own coverage evidence; no accessory
+capability is currently implemented or qualified.
+
 ## Primary references
 
 - [Fedora Silverblue: retained previous versions and rollback](https://fedoraproject.org/atomic-desktops/silverblue/)

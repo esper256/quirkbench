@@ -14,6 +14,7 @@ def cmdline(mode='recovery'):
     root=UUIDS[3 if mode=='candidate' else 1]
     access='rw rootflags=nosuid,nodev' if mode=='candidate' else 'ro'
     value=f'root=PARTUUID={root} {access} quirkbench.esp=PARTUUID={UUIDS[0]} quirkbench.state=PARTUUID={UUIDS[2]} quirkbench.data=PARTUUID={UUIDS[3]} quirkbench.library=PARTUUID={UUIDS[4]} quirkbench.evidence=PARTUUID={UUIDS[5]} quirkbench.mode={mode}'
+    if mode == 'recovery': value += ' selinux=0'
     if mode=='candidate':value+=' quirkbench.candidate='+'a'*64+' quirkbench.revision='+'b'*64+' ostree=/ostree/boot.0/attempt/'+'c'*64+'/0'
     return value
 
@@ -31,6 +32,11 @@ def test_cmdline_matches_actual_boot_mode():
     assert parse_cmdline(cmdline('candidate'),CONFIG)['root']=='PARTUUID='+UUIDS[3]
     for bad in (cmdline().replace(' ro ',' rw '),cmdline()+' root=other',cmdline('candidate').replace(UUIDS[3],UUIDS[1]),cmdline('candidate').replace('rw rootflags=nosuid,nodev','ro'),cmdline('candidate').replace('rootflags=nosuid,nodev','rootflags=nodev')):
         with pytest.raises(BootError):parse_cmdline(bad,CONFIG)
+    for bad in (cmdline().replace(' selinux=0', ''), cmdline().replace('selinux=0', 'selinux=1')):
+        with pytest.raises(BootError, match='selinux'):
+            parse_cmdline(bad, CONFIG)
+    with pytest.raises(BootError, match='duplicate'):
+        parse_cmdline(cmdline() + ' selinux=0', CONFIG)
 
 def test_bls_is_data_and_cannot_override_protected_kernel_arguments(tmp_path):
     p=prepared(tmp_path)
@@ -39,6 +45,7 @@ def test_bls_is_data_and_cannot_override_protected_kernel_arguments(tmp_path):
     assert 'init=/bin/sh' not in result and 'LABEL=wrong' not in result
     assert 'linux $data/boot/ostree/fedora-test/vmlinuz' in result
     assert 'quirkbench.revision='+'b'*64 in result
+    assert 'selinux=0' not in result
     p.boot_entry.write_text(p.boot_entry.read_text().replace('/ostree/fedora-test/vmlinuz','/ostree/x;reboot'))
     with pytest.raises(BootError):read_boot_entry(p,tmp_path)
 
@@ -89,6 +96,129 @@ def test_secureboot_unknown_blocks_before_mutation(tmp_path):
     with pytest.raises(BootError,match='Secure Boot'):
         prepare_recovery(CONFIG,cmdline=cmdline(),kernel_log='',mountinfo='',runner=lambda _:pytest.fail('no writes'))
 
+
+@pytest.mark.parametrize('journal_state,partition_count,allowed', [
+    ('missing', 4, False),
+    ('incomplete', 6, False),
+    ('complete', 6, True),
+    ('mismatched', 6, False),
+])
+def test_boot_requires_matching_completed_commission_journal(
+        tmp_path, monkeypatch, journal_state, partition_count, allowed):
+    import quirkbench.commission as commission
+    from quirkbench.boot import require_commissioned_boot
+    identity = commission.CommissionIdentity(
+        CONFIG.disk_guid, UUIDS, (2048, 4096, 8192, 16384),
+        (4095, 8191, 16383), 16, 16, 4)
+    identity_path = tmp_path/'identity.json'
+    identity_path.write_text(json.dumps({'schema_version': 2, **asdict(identity)}))
+    state = tmp_path/'state'
+    (state/'quirkbench').mkdir(parents=True)
+    device = tmp_path/'state-device'
+    device.touch()
+    final_geometry = ((2048, 4095), (4096, 8191), (8192, 16383),
+                      (16384, 49151), (49152, 81919), (81920, 202751))
+    partitions = [SimpleNamespace(path=device, start=start, end=end)
+                  for start, end in final_geometry[:partition_count]]
+    journal = state/'quirkbench/commission.json'
+    if journal_state != 'missing':
+        geometry = [[p.start, p.end] for p in partitions]
+        if journal_state == 'mismatched':
+            geometry[-1][1] += 1
+        journal.write_text(json.dumps({
+            'schema_version': 2, 'identity': asdict(identity),
+            'geometry': geometry, 'target_ram_mib': 8,
+            'format_intents': [5, 6], 'complete': journal_state != 'incomplete',
+        }))
+    monkeypatch.setattr(commission, 'plan_commission', lambda *a, **k: pytest.fail('no planning on boot'))
+    monkeypatch.setattr(commission, 'execute_commission', lambda *a, **k: pytest.fail('no writes on boot'))
+    mountinfo = f'1 1 0:3 / {state} rw,nosuid,nodev,noexec - vfat {device} rw\n'
+    call = lambda: require_commissioned_boot(
+        CONFIG, identity_path=identity_path, state_mount=state, mountinfo=mountinfo,
+        identity_verifier=lambda *a, **k: SimpleNamespace(
+            partitions=partitions, logical_sector_size=512,
+            disk_sectors=204800, entry_sectors=32),
+        ram_reader=lambda: 8,
+        runner=lambda _: pytest.fail('verified state already mounted'))
+    if allowed:
+        assert call()['eligible'] is True
+    else:
+        with pytest.raises(BootError, match='attended capacity|geometry'):
+            call()
+
+
+@pytest.mark.parametrize('selected_sizes,allowed', [((20, 24), True), ((15, 24), False)])
+def test_boot_checks_selected_sizing_against_factory_minimum_and_geometry(
+        tmp_path, selected_sizes, allowed):
+    from quirkbench.boot import require_commissioned_boot
+    import quirkbench.commission as commission
+    identity = commission.CommissionIdentity(
+        CONFIG.disk_guid, UUIDS, (2048, 4096, 8192, 16384),
+        (4095, 8191, 16383), 16, 16, 4)
+    identity_path = tmp_path/'identity.json'
+    identity_path.write_text(json.dumps({'schema_version': 2, **asdict(identity)}))
+    state = tmp_path/'state'
+    (state/'quirkbench').mkdir(parents=True)
+    device = tmp_path/'state-device'
+    device.touch()
+    experiment, library = selected_sizes
+    start5 = 16384 + experiment * 2048
+    start6 = start5 + library * 2048
+    geometry = ((2048, 4095), (4096, 8191), (8192, 16383),
+                (16384, start5 - 1), (start5, start6 - 1), (start6, 202751))
+    partitions = [SimpleNamespace(path=device, start=a, end=b) for a, b in geometry]
+    selection = asdict(identity)
+    selection.update(experiment_mib=experiment, library_mib=library)
+    (state/'quirkbench/commission.json').write_text(json.dumps({
+        'schema_version': 2, 'identity': selection, 'geometry': geometry,
+        'target_ram_mib': 8, 'format_intents': [5, 6], 'complete': True,
+        'confirmed': True,
+    }))
+    mountinfo = f'1 1 0:3 / {state} rw,nosuid,nodev,noexec - vfat {device} rw\n'
+    call = lambda: require_commissioned_boot(
+        CONFIG, identity_path=identity_path, state_mount=state, mountinfo=mountinfo,
+        identity_verifier=lambda *a, **k: SimpleNamespace(
+            partitions=partitions, logical_sector_size=512,
+            disk_sectors=204800, entry_sectors=32),
+        ram_reader=lambda: 8,
+        runner=lambda _: pytest.fail('verified state already mounted'))
+    if allowed:
+        assert call()['eligible'] is True
+        high_ram = require_commissioned_boot(
+            CONFIG, identity_path=identity_path, state_mount=state, mountinfo=mountinfo,
+            identity_verifier=lambda *a, **k: SimpleNamespace(
+                partitions=partitions, logical_sector_size=512,
+                disk_sectors=204800, entry_sectors=32),
+            ram_reader=lambda: 100000,
+            runner=lambda _: pytest.fail('verified state already mounted'))
+        assert high_ram['eligible'] is False
+        assert high_ram['current_ram_mib'] == 100000
+        assert high_ram['evidence_mib'] < high_ram['required_evidence_mib']
+    else:
+        with pytest.raises(BootError, match='sizing'):
+            call()
+
+
+def test_recovery_service_checks_commission_gate_before_preparation(tmp_path, monkeypatch):
+    import quirkbench.boot as boot
+    config_path = tmp_path/'boot.json'
+    config_path.write_text(json.dumps(CONFIG.to_dict()))
+    command_line = tmp_path/'cmdline'
+    command_line.write_text(cmdline())
+    calls = []
+    monkeypatch.setattr(boot, 'wait_for_boot_partitions', lambda *a, **k: calls.append('nodes'))
+    def blocked(_):
+        calls.append('commission-gate')
+        raise BootError('attended capacity setup required')
+    monkeypatch.setattr(boot, 'require_commissioned_boot', blocked)
+    monkeypatch.setattr(boot, 'prepare_recovery', lambda *a, **k: pytest.fail('no data or evidence mount'))
+    monkeypatch.setattr(boot, '_run', lambda *a, **k: pytest.fail('no external command'))
+
+    with pytest.raises(BootError, match='attended capacity setup'):
+        boot.service_main(['--config', str(config_path)], cmdline_path=command_line)
+
+    assert calls == ['nodes', 'commission-gate']
+
 def test_runtime_keeps_candidate_var_separate(tmp_path):
     recovery=tmp_path/'recovery';(recovery/'etc').mkdir(parents=True);(recovery/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1')
     install_runtime(recovery,CONFIG)
@@ -101,9 +231,187 @@ def test_runtime_keeps_candidate_var_separate(tmp_path):
         recovery/'usr/lib/quirkbench/quirkbench/runtime.py')
     candidate=tmp_path/'candidate';candidate.mkdir();install_candidate_runtime(candidate)
     assert (candidate/'usr/etc/systemd/system/quirkbench-candidate.service').is_file()
+    assert (candidate/'usr/etc/resolv.conf').is_symlink()
+    assert (candidate/'usr/etc/resolv.conf').readlink() == Path('/run/NetworkManager/resolv.conf')
     assert (candidate/'usr/lib/quirkbench/quirkbench/recipes/system-observation.v1.json').read_bytes() == recipe.read_bytes()
     assert not (candidate/'usr/etc/systemd/system/var.mount').exists()
     assert not (candidate/'usr/etc/quirkbench/boot.json').exists()
+    assert not (candidate/'usr/etc/machine-id').exists()
+    assert not (candidate/'usr/etc/systemd/system/default.target').exists()
+
+
+def test_generic_recovery_runtime_precedes_image_boot_identity(tmp_path):
+    from quirkbench.boot import install_recovery_runtime_base
+
+    root = tmp_path / 'recovery'
+    (root/'etc').mkdir(parents=True)
+    (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1\n')
+    install_recovery_runtime_base(root)
+    assert not (root/'etc/quirkbench/boot.json').exists()
+    assert (root/'etc/systemd/system/quirkbench-recovery.service').is_file()
+    assert (root/'usr/lib/quirkbench/quirkbench/runtime.py').is_file()
+    install_runtime(root, CONFIG)
+    assert json.loads((root/'etc/quirkbench/boot.json').read_text()) == asdict(CONFIG)
+
+
+def test_generic_runtime_rejects_preexisting_boot_identity_and_linked_destination(tmp_path):
+    from quirkbench.boot import install_recovery_runtime_base
+
+    root = tmp_path / 'recovery'
+    (root/'etc/quirkbench').mkdir(parents=True)
+    (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1\n')
+    boot_record = root/'etc/quirkbench/boot.json'
+    boot_record.write_text('old identity')
+    with pytest.raises(BootError, match='must not contain a boot identity'):
+        install_recovery_runtime_base(root)
+    boot_record.unlink()
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (root/'etc/quirkbench').rmdir()
+    (root/'etc/quirkbench').symlink_to(outside, target_is_directory=True)
+    with pytest.raises(BootError, match='runtime destination escapes'):
+        install_recovery_runtime_base(root)
+    assert not any(outside.iterdir())
+
+
+def test_generic_runtime_rejects_linked_python_destination(tmp_path):
+    from quirkbench.boot import install_recovery_runtime_base
+
+    root = tmp_path / 'recovery'
+    (root/'etc').mkdir(parents=True)
+    (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1\n')
+    package = root/'usr/lib/quirkbench/quirkbench'
+    package.mkdir(parents=True)
+    outside = tmp_path/'outside.py'
+    outside.write_text('preserve me')
+    (package/'runtime.py').symlink_to(outside)
+    with pytest.raises(BootError, match='runtime module destination'):
+        install_recovery_runtime_base(root)
+    assert outside.read_text() == 'preserve me'
+
+
+def test_recovery_runtime_removes_factory_machine_identity(tmp_path):
+    root = tmp_path/'root'
+    (root/'etc').mkdir(parents=True)
+    (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1')
+    machine_id = root/'etc/machine-id'
+    outside = tmp_path/'linked-machine-id'
+    outside.write_text('outside identity\n')
+    machine_id.hardlink_to(outside)
+    dbus_id = root/'var/lib/dbus/machine-id'
+    dbus_id.parent.mkdir(parents=True)
+    dbus_id.write_text('factory identity\n')
+
+    install_runtime(root, CONFIG)
+
+    assert machine_id.is_file() and machine_id.read_bytes() == b''
+    assert machine_id.stat().st_mode & 0o777 == 0o644
+    assert outside.read_text() == 'outside identity\n'
+    assert not dbus_id.exists()
+    install_runtime(root, CONFIG)
+    assert machine_id.read_bytes() == b''
+
+
+@pytest.mark.parametrize('path', ['etc/machine-id', 'var/lib/dbus'])
+def test_recovery_runtime_refuses_escaping_machine_identity_path(tmp_path, path):
+    root = tmp_path/'root'
+    (root/'etc').mkdir(parents=True)
+    (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1')
+    outside = tmp_path/'outside'
+    outside.mkdir()
+    (outside/'machine-id').write_text('outside identity\n')
+    link = root/path
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(outside/'machine-id' if path == 'etc/machine-id' else outside)
+
+    with pytest.raises(BootError, match='machine-id'):
+        install_runtime(root, CONFIG)
+
+    assert (outside/'machine-id').read_text() == 'outside identity\n'
+    assert not (root/'etc/resolv.conf').exists()
+
+
+def test_recovery_runtime_pins_default_target(tmp_path):
+    root = tmp_path/'root'
+    units = root/'etc/systemd/system'
+    units.mkdir(parents=True)
+    (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1')
+    (units/'default.target').symlink_to('/usr/lib/systemd/system/graphical.target')
+
+    install_runtime(root, CONFIG)
+
+    assert (units/'default.target').readlink() == Path('/usr/lib/systemd/system/multi-user.target')
+
+
+@pytest.mark.parametrize('relative', [
+    'multi-user.target.wants/sshd.service',
+    'sockets.target.wants/sshd.socket',
+    'sysinit.target.requires/unknown.service',
+    'multi-user.target.upholds/unknown.service',
+])
+def test_recovery_runtime_refuses_unreviewed_enabled_units(tmp_path, relative):
+    root = tmp_path/'root'
+    units = root/'etc/systemd/system'
+    units.mkdir(parents=True)
+    (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1')
+    link = units/relative
+    link.parent.mkdir()
+    link.symlink_to('/usr/lib/systemd/system/'+link.name)
+
+    with pytest.raises(BootError, match='unreviewed recovery systemd enablement'):
+        install_runtime(root, CONFIG)
+
+    assert not (root/'etc/machine-id').exists()
+    assert not (root/'etc/resolv.conf').exists()
+
+
+def test_recovery_runtime_refuses_changed_allowlisted_unit_link(tmp_path):
+    root = tmp_path/'root'
+    units = root/'etc/systemd/system'
+    (units/'multi-user.target.wants').mkdir(parents=True)
+    (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1')
+    (units/'multi-user.target.wants/NetworkManager.service').symlink_to('../sshd.service')
+
+    with pytest.raises(BootError, match='unreviewed recovery systemd enablement'):
+        install_runtime(root, CONFIG)
+
+    assert not (root/'etc/machine-id').exists()
+
+
+def test_recovery_runtime_refuses_escaping_unit_dependency_directory(tmp_path):
+    root = tmp_path/'root'
+    units = root/'etc/systemd/system'
+    units.mkdir(parents=True)
+    (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1')
+    outside = tmp_path/'outside'
+    outside.mkdir()
+    (units/'multi-user.target.wants').symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(BootError, match='dependency directory'):
+        install_runtime(root, CONFIG)
+
+    assert not any(outside.iterdir())
+
+
+@pytest.mark.parametrize('relative', [
+    'system/quirkbench-recovery.service',
+    'system/NetworkManager.service.d',
+    'system-generators',
+])
+def test_recovery_runtime_refuses_escaping_unit_destination(tmp_path, relative):
+    root = tmp_path/'root'
+    (root/'etc/systemd').mkdir(parents=True)
+    (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1')
+    outside = tmp_path/'outside'
+    outside.mkdir()
+    link = root/'etc/systemd'/relative
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(BootError, match='staged systemd'):
+        install_runtime(root, CONFIG)
+
+    assert not any(outside.iterdir())
 
 
 def test_candidate_smoke_measures_running_kernel_modules_and_real_fixture(tmp_path):
@@ -190,6 +498,7 @@ def test_recovery_upload_storage_survives_unavailable_experiments_and_library(tm
 def test_runtime_enables_one_network_manager_with_transient_profiles(tmp_path):
     root=tmp_path/'root';(root/'etc').mkdir(parents=True)
     (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1')
+    (root/'etc/resolv.conf').write_text('nameserver 192.0.2.1\n')
     install_runtime(root,CONFIG)
     units=root/'etc/systemd/system'
     assert (units/'multi-user.target.wants/NetworkManager.service').is_symlink()
@@ -198,9 +507,55 @@ def test_runtime_enables_one_network_manager_with_transient_profiles(tmp_path):
     assert 'tmpfs /etc/NetworkManager/system-connections' in mount.read_text()
     assert 'mode=0700,nosuid,nodev,noexec' in mount.read_text()
     assert 'Requires='+mount.name in (units/'NetworkManager.service.d/quirkbench.conf').read_text()
+    assert (root/'etc/resolv.conf').is_symlink()
+    assert (root/'etc/resolv.conf').readlink() == Path('/run/NetworkManager/resolv.conf')
+    assert (root/'etc/NetworkManager/conf.d/99-quirkbench-dns.conf').read_text() == '[main]\ndns=default\nrc-manager=symlink\n'
     assert not (root/'etc/systemd/network/20-quirkbench-wired.network').exists()
     assert 'Requires=quirkbench-recovery.service' in (units/'quirkbench-supervisor.service.d/boot.conf').read_text()
     assert (root/'usr/lib/quirkbench/quirkbench/transport.py').exists()
+    for name in ('quirkbench-recovery.service', 'quirkbench-candidate.service'):
+        unit = (Path(__file__).resolve().parents[1] / 'target-assets' / name).read_text()
+        assert 'systemd-udev-settle.service' not in unit
+        assert 'network-online.target' not in unit
+
+
+def test_runtime_refuses_factory_network_profiles_and_escaping_configuration(tmp_path):
+    root = tmp_path / 'root'
+    (root/'etc/NetworkManager/system-connections').mkdir(parents=True)
+    (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1')
+    (root/'etc/NetworkManager/system-connections/secret.nmconnection').write_text('password=secret')
+    with pytest.raises(BootError, match='saved network profiles'):
+        install_runtime(root, CONFIG)
+    (root/'etc/NetworkManager/system-connections/secret.nmconnection').unlink()
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (root/'etc/NetworkManager/conf.d').symlink_to(outside, target_is_directory=True)
+    with pytest.raises(BootError, match='escape'):
+        install_runtime(root, CONFIG)
+    assert not any(outside.iterdir())
+
+
+def test_boot_partition_readiness_waits_only_for_expected_nodes(tmp_path):
+    from quirkbench.boot import wait_for_boot_partitions
+    directory = tmp_path / 'by-partuuid'
+    directory.mkdir()
+    device = tmp_path / 'device'
+    device.touch()
+    values = CONFIG.to_dict()
+    for role in ('esp', 'root', 'state', 'data'):
+        (directory / values[role + '_partuuid']).symlink_to(device)
+    ticks = [0.0]
+    def sleep(duration):
+        ticks[0] += duration
+    wait_for_boot_partitions(CONFIG, 'recovery', directory=directory, clock=lambda: ticks[0], sleep=sleep)
+    assert ticks == [0.0]
+    with pytest.raises(BootError, match='library, evidence'):
+        wait_for_boot_partitions(CONFIG, 'candidate', directory=directory, timeout_s=0.5,
+                                 clock=lambda: ticks[0], sleep=sleep)
+    assert ticks[0] == 0.5
+    for role in ('library', 'evidence'):
+        (directory / values[role + '_partuuid']).symlink_to(device)
+    wait_for_boot_partitions(CONFIG, 'candidate', directory=directory, clock=lambda: ticks[0], sleep=sleep)
 
 
 def test_mount_destination_symlink_refused_before_external_command(tmp_path):

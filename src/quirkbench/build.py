@@ -205,6 +205,63 @@ class KernelBuild:
             Command(("make", "-C", source, f"O={out}", "ARCH=x86_64", "olddefconfig"), self.source),
         )
 
+    def stage_recovery_config(self, base: bytes, fragment: bytes,
+                              expected_sha256: str) -> Path:
+        """Stage only the pinned Fedora config plus reviewed recovery overrides.
+
+        A new object directory is required so interruption never causes an old
+        or partially written .config to be mistaken for this input.
+        """
+        from .contracts import sha256
+        from .recovery_fragment import merge_recovery_config
+
+        sha256(expected_sha256)
+        merged = merge_recovery_config(base, fragment)
+        if hashlib.sha256(merged).hexdigest() != expected_sha256:
+            raise BuildError("staged recovery config differs from recipe preflight")
+        _safe_build_path(self.build_dir)
+        if self.build_dir.exists() or self.build_dir.is_symlink():
+            raise BuildError("recovery kernel object directory must be new")
+        self.build_dir.mkdir(parents=True, mode=0o700)
+        config = self.build_dir / ".config"
+        with config.open("xb") as handle:
+            handle.write(merged)
+            handle.flush()
+            os.fsync(handle.fileno())
+        directory_fd = os.open(self.build_dir, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+        return config
+
+    def recovery_configure_plan(self, expected_sha256: str) -> tuple[Command, ...]:
+        """Resolve Kconfig dependencies from the staged Fedora configuration."""
+        from .contracts import sha256
+
+        sha256(expected_sha256)
+        config = self.build_dir / ".config"
+        if (not self.source.is_dir() or not self.build_dir.is_dir()
+                or config.is_symlink() or not config.is_file()
+                or sha256_file(config) != expected_sha256):
+            raise BuildError("staged recovery config missing or changed")
+        return (Command(("make", "-C", str(self.source),
+                         f"O={self.build_dir}", "ARCH=x86_64", "olddefconfig"),
+                        self.source),)
+
+    def recovery_compile_plan(self, profile: dict) -> tuple[Command, ...]:
+        """Reject an unsafe resolved config before planning recovery compilation."""
+        from .recovery_module_audit import validate_recovery_final_config
+
+        validate_recovery_final_config(self.build_dir / ".config", profile)
+        return self.compile_plan()
+
+    def kernel_release_plan(self) -> tuple[Command, ...]:
+        return (Command(("make", "-C", str(self.source),
+                         f"O={self.build_dir}", "ARCH=x86_64",
+                         "--no-print-directory", "-s", "kernelrelease"),
+                        self.source),)
+
     def compile_plan(self) -> tuple[Command, ...]:
         source, out = str(self.source), str(self.build_dir)
         common = ("make", "-C", source, f"O={out}", "ARCH=x86_64")
@@ -214,19 +271,20 @@ class KernelBuild:
         )
 
     def initramfs_plan(self, kernel_release: str, *,
-                       dracut_config: Path | None = None) -> tuple[Command, ...]:
+                       dracut_config: Path, dracut_confdir: Path) -> tuple[Command, ...]:
         if not re.fullmatch(r"[A-Za-z0-9._+-]+", kernel_release):
             raise ValueError("invalid kernel release")
         modules = self.sysroot / "lib/modules" / kernel_release
         initramfs = self.output_dir / f"initramfs-{kernel_release}.img"
-        config_args: tuple[str, ...] = ()
-        if dracut_config is not None:
-            if not dracut_config.is_absolute() or not dracut_config.is_file():
-                raise BuildError("dracut config must be an existing absolute file")
-            config_args = ("--conf", str(dracut_config))
+        if (not dracut_config.is_absolute() or dracut_config.is_symlink()
+                or not dracut_config.is_file()):
+            raise BuildError("dracut config must be an existing absolute regular file")
+        _validate_empty_dracut_confdir(dracut_confdir)
         return (Command(("dracut", "--force", "--reproducible", "--no-hostonly",
                          "--sysroot", str(self.sysroot),
-                         *config_args, "--kmoddir", str(modules), "--kver", kernel_release,
+                         "--conf", str(dracut_config),
+                         "--confdir", str(dracut_confdir),
+                         "--kmoddir", str(modules), "--kver", kernel_release,
                          str(initramfs)), self.output_dir),)
 
     def artifacts(self, kernel_release: str) -> dict[str, Path]:
@@ -237,6 +295,13 @@ class KernelBuild:
                 "initramfs": self.output_dir / f"initramfs-{kernel_release}.img",
                 "config": self.build_dir / ".config"}
 
+
+def _validate_empty_dracut_confdir(path: Path) -> None:
+    if not path.is_absolute() or path.is_symlink() or not path.is_dir():
+        raise BuildError("dracut confdir must be an absolute real directory")
+    _safe_build_path(path)
+    if any(path.iterdir()):
+        raise BuildError("dracut confdir must be empty")
 
 def _require_container() -> None:
     marker = Path("/etc/quirkbench-container")
@@ -261,7 +326,8 @@ def _validate_command(command: Command) -> bool:
         _safe_build_path(source)
         _safe_build_path(Path(argv[3][2:]))
         tail = argv[5:]
-        if tail in (("x86_64_defconfig",), ("olddefconfig",)):
+        if tail in (("x86_64_defconfig",), ("olddefconfig",),
+                    ("--no-print-directory", "-s", "kernelrelease")):
             return False
         if (len(tail) == 4 and re.fullmatch(r"-j[1-9][0-9]*", tail[0])
                 and tail[1:] == ("bzImage", "modules", "vmlinux")):
@@ -282,17 +348,17 @@ def _validate_command(command: Command) -> bool:
             raise BuildError("scripts/config switches are not allowlisted")
         return False
     if argv[0] == "dracut":
-        if len(argv) < 11 or argv[1:5] != ("--force", "--reproducible", "--no-hostonly", "--sysroot"):
+        if len(argv) != 15 or argv[1:5] != ("--force", "--reproducible", "--no-hostonly", "--sysroot"):
             raise BuildError("dracut command does not match target plan")
         sysroot = Path(argv[5])
         _safe_build_path(sysroot)
-        remainder = list(argv[6:])
-        if remainder[:1] == ["--conf"]:
-            if len(remainder) < 2 or not Path(remainder[1]).is_absolute():
-                raise BuildError("dracut config path invalid")
-            remainder = remainder[2:]
-        if (len(remainder) != 5 or remainder[0] != "--kmoddir"
-                or remainder[2] != "--kver"
+        if argv[6] != "--conf" or not Path(argv[7]).is_absolute() or Path(argv[7]).is_symlink() or not Path(argv[7]).is_file():
+            raise BuildError("dracut config path invalid")
+        if argv[8] != "--confdir":
+            raise BuildError("dracut confdir missing")
+        _validate_empty_dracut_confdir(Path(argv[9]))
+        remainder = argv[10:]
+        if (remainder[0] != "--kmoddir" or remainder[2] != "--kver"
                 or not re.fullmatch(r"[A-Za-z0-9._+-]+", remainder[3])):
             raise BuildError("dracut target arguments invalid")
         if Path(remainder[1]) != sysroot / "lib/modules" / remainder[3]:

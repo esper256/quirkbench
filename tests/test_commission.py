@@ -5,7 +5,7 @@ import json
 import subprocess
 import pytest
 from quirkbench.commission import (BootIdentity, CommissionIdentity, CommissionError, ProbePaths,
-    plan_commission, execute_commission, verify_boot_identity, secure_boot_disabled, _parse_info)
+    plan_commission, confirm_commission, execute_commission, verify_boot_identity, secure_boot_disabled, _parse_info)
 
 GUID = '11111111-1111-1111-1111-111111111111'
 UUIDS = tuple(f'{n:08d}-2222-3333-4444-555555555555' for n in range(1,7))
@@ -72,8 +72,12 @@ class Lab:
         return plan_commission(self.disk,self.identity,paths=self.paths,runner=self.run,block_rdev=self.rdev,target_ram_mib=8)
 
     def execute(self,plan=None):
-        return execute_commission(plan or self.plan(),commissioned_identity=self.identity,allow_write=True,
-            paths=self.paths,runner=self.run,block_rdev=self.rdev,journal=self.journal)
+        chosen=plan or self.plan()
+        if not self.journal.exists() or not json.loads(self.journal.read_text()).get('complete'):
+            confirm_commission(chosen,confirmed_disk_guid=GUID,paths=self.paths,runner=self.run,
+                block_rdev=self.rdev,journal=self.journal,current_ram_mib=8)
+        return execute_commission(chosen,commissioned_identity=self.identity,allow_write=True,
+            paths=self.paths,runner=self.run,block_rdev=self.rdev,journal=self.journal,current_ram_mib=8)
 
 @pytest.fixture
 def lab(tmp_path):
@@ -97,6 +101,102 @@ def test_plan_is_inert_and_factory_is_not_a_commissioned_device(lab):
         verify_boot_identity(lab.identity,paths=lab.paths,runner=lab.run,block_rdev=lab.rdev)
     with pytest.raises(CommissionError,match='explicit'):
         execute_commission(plan,commissioned_identity=lab.identity)
+
+
+def test_execution_needs_durable_attended_confirmation(lab):
+    plan = lab.plan()
+    with pytest.raises(CommissionError, match='confirmation journal'):
+        execute_commission(plan, commissioned_identity=lab.identity, allow_write=True,
+            paths=lab.paths, runner=lab.run, block_rdev=lab.rdev,
+            journal=lab.journal, current_ram_mib=8)
+    with pytest.raises(CommissionError, match='typed disk GUID'):
+        confirm_commission(plan, confirmed_disk_guid='wrong', paths=lab.paths,
+            runner=lab.run, block_rdev=lab.rdev, journal=lab.journal, current_ram_mib=8)
+    assert not lab.journal.exists() and lab.mutations == 0
+
+
+def test_confirmation_rechecks_displayed_disk_and_current_ram(lab):
+    plan = lab.plan()
+    lab.disk_sectors += 2048
+    lab.sysfs()
+    with pytest.raises(CommissionError, match='plan changed'):
+        confirm_commission(plan, confirmed_disk_guid=GUID, paths=lab.paths,
+            runner=lab.run, block_rdev=lab.rdev, journal=lab.journal, current_ram_mib=8)
+    assert not lab.journal.exists() and lab.mutations == 0
+    refreshed = lab.plan()
+    with pytest.raises(CommissionError, match='current target RAM'):
+        confirm_commission(refreshed, confirmed_disk_guid=GUID, paths=lab.paths,
+            runner=lab.run, block_rdev=lab.rdev, journal=lab.journal, current_ram_mib=100000)
+    assert not lab.journal.exists() and lab.mutations == 0
+
+
+def test_confirmation_respects_existing_commission_lock(lab):
+    from quirkbench.commission import _commission_lock
+    plan = lab.plan()
+    with _commission_lock(lab.journal):
+        with pytest.raises(CommissionError, match='already active'):
+            confirm_commission(plan, confirmed_disk_guid=GUID, paths=lab.paths,
+                runner=lab.run, block_rdev=lab.rdev, journal=lab.journal,
+                current_ram_mib=8)
+    assert not lab.journal.exists() and lab.mutations == 0
+
+
+def test_existing_final_partitions_cannot_gain_fresh_confirmation(lab):
+    plan = lab.plan()
+    lab.rows[5] = list(plan.geometry[4])
+    lab.last = lab.disk_sectors - 34
+    lab.sysfs()
+    changed = lab.plan()
+    with pytest.raises(CommissionError, match='without journal'):
+        confirm_commission(changed, confirmed_disk_guid=GUID, paths=lab.paths,
+            runner=lab.run, block_rdev=lab.rdev, journal=lab.journal, current_ram_mib=8)
+    assert not lab.journal.exists() and lab.mutations == 0
+
+
+def test_reconfirmation_preserves_uncertain_format_intent(lab):
+    plan = lab.plan()
+    confirm_commission(plan, confirmed_disk_guid=GUID, paths=lab.paths,
+        runner=lab.run, block_rdev=lab.rdev, journal=lab.journal, current_ram_mib=8)
+    record = json.loads(lab.journal.read_text())
+    record['format_intents'] = [5]
+    record.pop('confirmed')
+    lab.journal.write_text(json.dumps(record))
+    confirm_commission(plan, confirmed_disk_guid=GUID, paths=lab.paths,
+        runner=lab.run, block_rdev=lab.rdev, journal=lab.journal, current_ram_mib=8)
+    assert json.loads(lab.journal.read_text())['format_intents'] == [5]
+    with pytest.raises(CommissionError, match='uncertain'):
+        lab.execute()
+
+
+def test_filesystem_appearing_after_format_intent_is_never_reformatted(lab, monkeypatch):
+    import quirkbench.commission as module
+    original = module._write_journal
+
+    def publish(path, record):
+        original(path, record)
+        if record['format_intents'] == [5]:
+            lab.filesystems[5] = 'ext4'
+
+    monkeypatch.setattr(module, '_write_journal', publish)
+    with pytest.raises(CommissionError, match='filesystem appeared'):
+        lab.execute()
+    assert [call for call in lab.calls if call[0] == 'mkfs.ext4'] == []
+    assert json.loads(lab.journal.read_text())['format_intents'] == [5]
+
+
+def test_completed_legacy_journal_never_reexecutes_commands(lab):
+    lab.execute()
+    record = json.loads(lab.journal.read_text())
+    record.pop('confirmed')
+    lab.journal.write_text(json.dumps(record))
+    plan = lab.plan()
+    before = len(lab.calls)
+    execute_commission(plan, commissioned_identity=lab.identity, allow_write=True,
+        paths=lab.paths, runner=lab.run, block_rdev=lab.rdev,
+        journal=lab.journal, current_ram_mib=8)
+    assert all(not (call[0] in {'resize2fs', 'mkfs.ext4'}
+                    or (call[0] == 'sgdisk' and call[1] not in {'--print', '--info=1', '--info=2', '--info=3', '--info=4', '--info=5', '--info=6'}))
+               for call in lab.calls[before:])
 
 @pytest.mark.parametrize('boundary',range(1,8))
 def test_retry_after_every_device_mutation_preserves_fixed_partitions(lab,boundary):

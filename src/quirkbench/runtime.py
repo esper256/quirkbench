@@ -174,6 +174,18 @@ def boot_context(path=Path('/run/quirkbench-boot.json'), *, allow_library_mainte
     for key in ('quirkbench.experiments_unavailable', 'quirkbench.library_unavailable'):
         if key in context['boot']:
             boot[key] = context['boot'][key]
+    capacity = context['boot'].get('quirkbench.capacity')
+    if capacity is not None:
+        if (not isinstance(capacity, dict)
+                or set(capacity) != {'eligible', 'current_ram_mib', 'evidence_mib', 'required_evidence_mib'}
+                or type(capacity['eligible']) is not bool
+                or type(capacity['evidence_mib']) is not int or capacity['evidence_mib'] < 0
+                or any(value is not None and (type(value) is not int or value < 1)
+                       for value in (capacity['current_ram_mib'], capacity['required_evidence_mib']))
+                or (capacity['eligible'] and (capacity['required_evidence_mib'] is None
+                     or capacity['evidence_mib'] < capacity['required_evidence_mib']))):
+            raise ContractError('invalid verified capacity assessment')
+        boot['quirkbench.capacity'] = capacity
     return config, boot, verify
 
 
@@ -212,6 +224,7 @@ def create_agent(config, boot, verify, provision, supervisor):
                               'requested_profile': provision.get('requested_recovery_profile'),
                               'invalidation_reason': provision.get('recovery_profile_invalidation')},
                  'library_packs': packs, 'partition_capacity': capacities,
+                 'media_capacity': boot.get('quirkbench.capacity'),
                  'boot_stage': 'supervisor-ready'}
     if mode == 'experiment':
         inventory.update(deployment_id=boot['quirkbench.candidate'], revision=boot['quirkbench.revision'])
@@ -225,7 +238,8 @@ def create_agent(config, boot, verify, provision, supervisor):
         registry = UnavailableRegistry()
         capabilities = []
     backend = None
-    can_prepare = mode == 'recovery' and not boot.get('quirkbench.experiments_unavailable')
+    can_prepare = (mode == 'recovery' and not boot.get('quirkbench.experiments_unavailable')
+                   and boot.get('quirkbench.capacity', {}).get('eligible') is True)
     if mode == 'experiment' or can_prepare:
         sysroot = Path('/sysroot') if mode == 'experiment' else BASE/'experiments'
         def verify_deployment(path):

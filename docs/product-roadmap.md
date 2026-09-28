@@ -198,3 +198,12 @@ No automatic firmware changes, installed-OS writes, custom USB writer, moving-re
 updates, automatic repeat after uncertain execution or unattended operation without
 appropriate qualification. Keep hardware outcomes inconclusive when observations
 cannot establish causality. Do not publish patches or alter the installed OS implicitly.
+
+## Deferred external hardware
+
+Post-v1 Pi USB gadget media support is reserved in the
+[external-hardware design](external-hardware.md) and X1–X5 handoff packets. It is
+unimplemented and unqualified, outside the P0–P8 dependency chain. Continue the
+direct-drive recovery/OSTree path; no gadget framework, hardware purchase or extra
+release qualification is required for v1. Future presentation must preserve target
+protection, evidence durability and experiment authority.

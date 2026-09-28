@@ -71,6 +71,22 @@ def test_boot_context_revalidates_external_identity_before_return(tmp_path, monk
         runtime.boot_context(path)
 
 
+def test_boot_context_preserves_specific_capacity_block_and_rejects_forged_eligibility(tmp_path, monkeypatch):
+    capacity = {'eligible': False, 'current_ram_mib': 100000,
+                'evidence_mib': 51, 'required_evidence_mib': 250005}
+    boot = {'quirkbench.mode': 'recovery', 'quirkbench.capacity': capacity}
+    path = tmp_path/'boot.json'
+    path.write_text(json.dumps({'config': CONFIG.to_dict(), 'boot': boot}))
+    monkeypatch.setattr(runtime, 'parse_cmdline', lambda *a: {'quirkbench.mode': 'recovery'})
+    monkeypatch.setattr(runtime, 'verify_boot_identity', lambda *a, **k: True)
+    _, parsed, _ = runtime.boot_context(path)
+    assert parsed['quirkbench.capacity'] == capacity
+    boot['quirkbench.capacity'] = {**capacity, 'eligible': True}
+    path.write_text(json.dumps({'config': CONFIG.to_dict(), 'boot': boot}))
+    with pytest.raises(ContractError, match='capacity assessment'):
+        runtime.boot_context(path)
+
+
 def test_boot_marker_cannot_supply_different_current_mode(tmp_path, monkeypatch):
     path = tmp_path / 'boot.json'
     path.write_text(json.dumps({'config': CONFIG.to_dict(), 'boot': {'quirkbench.mode': 'candidate'}}))
@@ -224,6 +240,22 @@ def test_agent_can_report_missing_hardware_identity_without_false_coverage(tmp_p
                                   lambda: True, provision_data, SupervisorMonitor(notify=lambda *a: None))
     assert report.inventory['watchdog']['qualification_matches'] is False
     assert report.inventory['watchdog']['earliest_covered_stage'] == 'unqualified'
+
+
+def test_insufficient_media_capacity_withholds_new_deployment_but_keeps_agent(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime, 'hardware_identity', lambda: None)
+    monkeypatch.setattr(runtime.os.path, 'ismount', lambda path: False)
+    monkeypatch.setattr(runtime, 'HTTPSDeviceClient', lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(runtime, 'TargetAgent', lambda client, path, report, **k: report)
+    provision_data = runtime.load_provisioning(provision(tmp_path))
+    capacity = {'eligible': False, 'current_ram_mib': 100000,
+                'evidence_mib': 51, 'required_evidence_mib': 250005}
+    report = runtime.create_agent(CONFIG, {'quirkbench.mode': 'recovery',
+                                           'quirkbench.capacity': capacity},
+                                  lambda: True, provision_data,
+                                  SupervisorMonitor(notify=lambda *a: None))
+    assert report.inventory['media_capacity'] == capacity
+    assert 'deployment.ostree.v1' not in report.capabilities
 
 
 def test_invalid_installed_recipe_registry_preserves_recovery_control(tmp_path, monkeypatch):

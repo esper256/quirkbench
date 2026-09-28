@@ -167,3 +167,13 @@ complete are different claims. Do not label a backup fully resumable while requi
 sources, credentials or evidence are missing. Restore verifies content and stays paused
 until private identity is restored and outstanding execution is reconciled. Public
 exports still exclude private credentials and are not resumable backups.
+
+## Deferred external media
+
+Direct USB storage remains the sole v1 media implementation. The
+[external-hardware design](external-hardware.md) reserves post-v1 Pi gadget support
+without new public commands or frozen-record changes now. Media export has its own
+accessory identity and exclusive ownership; it does not replace target binding,
+HTTPS trust, recovery authority or backup completeness. A private backing image is
+not a public export or a consistent live backup. Accessory health remains separate
+from target readiness and safe-shutdown status.

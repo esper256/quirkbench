@@ -82,6 +82,15 @@ A signed OSTree repository is served through authenticated HTTPS. Device credent
 
 Backend commands and filesystem paths stay behind adapters. A fake backend exercises shared behavior; the old four-file bundle is not a second supported deployment backend. Unsupported or legacy kernel-only execution must fail explicitly. Build artifacts may remain readable even when they cannot be deployed by the current adapter.
 
+## Deferred media presentation
+
+Direct USB storage is the sole v1 media implementation. The deferred
+[external-hardware design](external-hardware.md) reserves a Pi USB gadget media
+adapter below deployment: the target still runs recovery and OSTree, while the
+accessory presents backing storage. Keep media ownership and accessory identity
+separate from `DeploymentBackend`, `BootControl` and target execution authority.
+This extension is unimplemented and unqualified; no v1 interface changes are needed.
+
 ## Boot and protection boundary
 
 Layout revision 2 has six named roles: fixed EFI boot, fixed read-only recovery, dedicated GRUB state, experiments, library and evidence. The compact factory image has the first four GPT entries; restartable first-boot commissioning grows experiments and creates the preidentified library/evidence partitions on the positively identified USB. Candidate OSTree state and evidence use separate filesystems. Recovery remains independently bootable and can upload evidence when experiments/library are unavailable. See [the debug image contract](debug-image.md).

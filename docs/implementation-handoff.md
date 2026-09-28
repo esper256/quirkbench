@@ -56,3 +56,23 @@ setup, and the complete external-agent journey before managed scheduling. P7a/b 
 foundations required early; later P7 packets expand scientific diagnostics. P5 gates
 unattended use. P8 includes archive/image/API compatibility and signed distribution
 acceptance; release fixtures never run merely because these packets changed docs.
+
+## Deferred USB gadget extension
+
+**Post-v1 only; unimplemented and unqualified.** These packets implement the
+[external-hardware design](external-hardware.md), outside the P0–P8 dependency chain.
+They do not authorize extension work, hardware acquisition or tests during v1.
+Suite names are future acceptance targets, not existing passing tests. Preserve
+OSTree and frozen wire records.
+
+| Packet | Dependencies | Permitted scope and acceptance |
+| --- | --- | --- |
+| X1 — media ownership contracts | Stable v1; explicit extension work | Define lifecycle, versioned accessory/media associations, maintenance authorization and restart reconciliation. Fake tests/test_media_ownership.py: exclusive ownership, uncertain shutdown, request replay and stale actions. Higher-reasoning storage/trust review; no new deployment authority. |
+| X2 — Pi mass-storage adapter | X1 | Linux gadget provisioning, allocated backing capacity and one stable LUN. tests/test_gadget_media.py: geometry, rejected concurrent access/resize/replacement, duplicate identities and crash-safe ownership. No new deployment backend, firmware navigation or automatic image reset. |
+| X3 — durability and recovery integration | X2 | Reuse attempts, maintenance fences and evidence retention; add accessory failures/progress and consistent-cut private backup. tests/test_accessory_recovery.py: disconnect/restart, exhaustion, lost acknowledgements, pending evidence and accessory-alive/target-unavailable. Fakes do not qualify physical durability. |
+| X4 — optional diagnostics | X1/X3; demonstrated investigation need | One bounded packet per CDC, HID, Ethernet or DbC channel. tests/test_accessory_channels.py: authenticated provenance, unknown attribution, capability limits, target HTTPS trust and no synthetic heartbeat/recovery. DbC needs a separate USB-host path; no physical reset or independent scheduling. Optional, not a media prerequisite. |
+| X5 — hardware qualification | Stable X1–X3; X4 only for claimed channels; explicit qualification request | Recovery/candidate/fallback, interrupted commissioning, independent power, I/O/flush/power-loss durability, internal-disk/firmware preservation and actual capture coverage. Record Pi/target/kernel/storage identities and surviving evidence. No automatic heavy tests or agent polling. |
+
+X1 specifies observable failure behavior before X2 implementation. Qualify media
+and diagnostic channels independently; passing one does not qualify the other.
+Future reset/actuation authority requires a separate reviewed extension.

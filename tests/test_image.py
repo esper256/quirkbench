@@ -52,6 +52,8 @@ def test_grub_defaults_to_recovery_and_checks_one_shot_clear():
     assert cfg.index('smbios --type 1') < cfg.index('set default=1')
     assert "source $data/quirkbench/boot/$chosen_candidate.cfg" in cfg
     assert "rootflags=noload fsck.mode=skip rd.skipfsck" in cfg
+    recovery_lines = [line for line in cfg.splitlines() if line.lstrip().startswith('linux $esp/vmlinuz-recovery')]
+    assert len(recovery_lines) == 2 and all(' selinux=0 ' in line for line in recovery_lines)
     assert "init=/bin/sh" not in cfg
     fallback=cfg[cfg.index("echo 'QUIRKBENCH_GRUB candidate-load-failed'"):]
     assert 'linux $esp/vmlinuz-recovery' in fallback and 'initrd $esp/initramfs-recovery.img' in fallback
@@ -74,6 +76,21 @@ def test_image_assembly_requires_provenance_before_any_external_command(tmp_path
     monkeypatch.setattr(module,'_run',lambda *args:pytest.fail('must refuse missing provenance before external writes'))
     with pytest.raises(ImageError,match='provenance'):
         module.create_image(inputs)
+
+
+def test_image_rejects_changed_staged_runtime_before_writing(tmp_path, monkeypatch):
+    import quirkbench.image as module
+    from quirkbench.boot import install_recovery_runtime_base
+
+    inputs = _inputs(tmp_path)
+    install_recovery_runtime_base(inputs.rootfs_dir)
+    (inputs.rootfs_dir/'usr/lib/quirkbench/quirkbench/runtime.py').write_text('changed')
+    monkeypatch.setattr(module, '_verify_provenance', lambda *args: None)
+    monkeypatch.setattr(module, '_tool', lambda name: name)
+    monkeypatch.setattr(module, '_run', lambda *args: pytest.fail('must not write image'))
+    with pytest.raises(ImageError, match='staged recovery runtime differs'):
+        module.create_image(inputs)
+    assert not inputs.output.exists()
 
 
 def test_smoke_image_binds_expected_kernel_and_userspace_to_deployment(tmp_path):

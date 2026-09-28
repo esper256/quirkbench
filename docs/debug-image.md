@@ -22,8 +22,11 @@ requirements, not claims that the current prototype includes the complete recipe
 ## Layout revision 2
 
 The standard image writer receives a compact GPT `.img` plus checksum. The factory
-image contains four partitions and six preassigned partition identities. First
-recovery boot commissions the final layout on the positively identified USB:
+image contains four partitions and six preassigned partition identities. Attended
+first-boot setup will commission the final layout on the positively identified USB
+after local capacity confirmation. The screen and larger supported sizing choices
+exist in the software runtime; assembled-boot validation remains open. Factory boot
+blocks until a completed commissioning journal matches the observed layout:
 
 | Partition | Default capacity | Access and contents |
 | --- | --- | --- |
@@ -63,6 +66,16 @@ Recovery mounts evidence before optional filesystems. An unavailable experiment 
 library filesystem blocks new work but does not prevent recovery evidence upload.
 All partitions share one physical USB failure domain, so continuous controller
 uploads remain necessary.
+
+## Deferred gadget media
+
+The GPT layout is intended to support a future single-LUN USB gadget medium; direct
+USB storage remains the sole v1 implementation. See the deferred
+[backing-storage ownership contract](external-hardware.md#backing-storage-capacity-and-ownership).
+Target recovery retains commissioning and filesystem writes. Backing capacity must
+be provisioned before export and fixed while attached; the Pi cannot modify the
+image concurrently or reset it between boots. Gadget durability and boot behavior
+need separate qualification, not a storage-protection bypass.
 
 ## Live evidence and physical handoff
 

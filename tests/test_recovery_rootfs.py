@@ -10,6 +10,7 @@ from jsonschema import Draft202012Validator
 from quirkbench.build import BuildError
 from quirkbench.contracts import canonical, digest
 from quirkbench.recovery_rootfs import (CASReader, _install, preflight,
+                                        inspect_local_rpm_closure,
                                         validate_lock, validate_snapshot)
 from test_baseline_catalog import retained_fixture
 
@@ -145,6 +146,70 @@ def test_rootfs_stages_only_local_rpms_and_checks_installed_lock(tmp_path):
     assert calls[1][2].name == 'dnf.log'
     assert (output / 'etc/quirkbench-rootfs').read_text().strip() == 'quirkbench-fedora-target-v1'
     assert json.loads((output / 'usr/lib/quirkbench/recovery-rootfs-lock.json').read_text()) == lock
+
+
+def test_local_rpm_inspection_produces_reviewable_snapshot_without_mutation(tmp_path):
+    catalog, _, _, _, _ = locked_fixture(tmp_path)
+    entry = catalog['entries'][0]
+    directory = tmp_path/'candidate-rpms'
+    directory.mkdir()
+    mapping = {}
+    for index, package in enumerate(entry['packages']):
+        path = directory / f'{index:04d}.rpm'
+        path.write_bytes(package['nevra'].encode())
+        mapping[str(path)] = package
+
+    def runner(argv, timeout_s):
+        assert argv[:4] == ['rpm', '-qp', '--qf', '%{NAME}\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\t%{ARCH}\n']
+        assert timeout_s == 30
+        return _rpm_line(mapping[argv[-1]])
+
+    snapshot, target_lock = inspect_local_rpm_closure(entry, directory, runner=runner)
+    assert validate_snapshot(snapshot) == snapshot
+    assert [(item['name'], item['nevra']) for item in snapshot['packages']] == [
+        (item['name'], item['nevra']) for item in entry['packages']]
+    assert target_lock == ''.join(sorted(_rpm_line(item) for item in entry['packages'])).encode()
+    assert sorted(path.name for path in directory.iterdir()) == sorted(Path(path).name for path in mapping)
+
+
+def test_local_rpm_inspection_rejects_extra_symlink_wrong_or_changed_bytes(tmp_path):
+    catalog, _, _, _, _ = locked_fixture(tmp_path)
+    entry = catalog['entries'][0]
+    directory = tmp_path/'candidate-rpms'
+    directory.mkdir()
+    mapping = {}
+    for index, package in enumerate(entry['packages']):
+        path = directory / f'{index:04d}.rpm'
+        path.write_bytes(package['nevra'].encode())
+        mapping[str(path)] = package
+
+    def runner(argv, timeout_s):
+        return _rpm_line(mapping[argv[-1]])
+
+    extra = directory/'unexpected.txt'
+    extra.write_text('unexpected')
+    with pytest.raises(BuildError, match='only bounded regular RPM'):
+        inspect_local_rpm_closure(entry, directory, runner=runner)
+    extra.unlink()
+    first = next(directory.iterdir())
+    alias = directory/'alias.rpm'
+    alias.symlink_to(first)
+    with pytest.raises(BuildError, match='only bounded regular RPM'):
+        inspect_local_rpm_closure(entry, directory, runner=runner)
+    alias.unlink()
+
+    def wrong(argv, timeout_s):
+        return 'not-a-package\t0:1-1\tx86_64\n'
+
+    with pytest.raises(BuildError, match='RPM header differs'):
+        inspect_local_rpm_closure(entry, directory, runner=wrong)
+
+    def changed(argv, timeout_s):
+        Path(argv[-1]).write_bytes(b'changed while queried')
+        return _rpm_line(mapping[argv[-1]])
+
+    with pytest.raises(BuildError, match='changed during inspection'):
+        inspect_local_rpm_closure(entry, directory, runner=changed)
 
 
 def _rpm_line(package):

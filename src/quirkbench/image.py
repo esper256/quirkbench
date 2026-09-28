@@ -15,7 +15,7 @@ import subprocess
 import tempfile
 import uuid
 from .build import sha256_file, validate_kernel_config
-from .contracts import canonical
+from .contracts import canonical, digest
 from .store import atomic_write, sync_directory
 
 class ImageError(RuntimeError):
@@ -42,6 +42,10 @@ class ImageInputs:
     library_mib: int=32768
     log_budget_mib: int=4096
     smoke: bool=False
+    recovery_profile_id: str | None=None
+    recovery_profile_digest: str | None=None
+    recovery_kernel_release: str | None=None
+    recovery_module_files_digest: str | None=None
 
     def validate(self):
         if type(self.size_mib) is not int or self.size_mib < MIN_IMAGE_MIB or self.root_mib < 256:
@@ -65,7 +69,25 @@ class ImageInputs:
         for source in (self.recovery_kernel,self.recovery_initramfs,self.recovery_config):
             if source is None or not source.is_absolute() or source.is_symlink() or not source.is_file():
                 raise ImageError(f'missing absolute regular input: {source}')
-        validate_kernel_config(self.recovery_config)
+        recovery_identity=(self.recovery_profile_id,self.recovery_profile_digest,
+                           self.recovery_kernel_release,self.recovery_module_files_digest)
+        if any(value is not None for value in recovery_identity):
+            if not all(isinstance(value,str) and value for value in recovery_identity):
+                raise ImageError('incomplete reviewed recovery profile identity')
+            from .hardware_plan import installed_profiles
+            from .recovery_module_audit import audit_recovery_modules, validate_recovery_final_config
+            profiles=[profile for profile in installed_profiles()
+                      if profile['profile_id']==self.recovery_profile_id
+                      and digest(canonical(profile))==self.recovery_profile_digest]
+            if len(profiles)!=1:
+                raise ImageError('reviewed recovery profile is unavailable')
+            validate_recovery_final_config(self.recovery_config,profiles[0])
+            audit=audit_recovery_modules(self.recovery_config,self.rootfs_dir,
+                                         self.recovery_kernel_release,profiles[0])
+            if audit['module_files_digest']!=self.recovery_module_files_digest:
+                raise ImageError('recovery module tree differs from audited stage')
+        else:
+            validate_kernel_config(self.recovery_config)
         if self.prepared_data_tree is not None:
             tree = self.prepared_data_tree
             if not tree.is_absolute() or tree.is_symlink() or not tree.is_dir():
@@ -169,7 +191,7 @@ def grub_config(partuuid: str, *, esp_uuid=None,root_uuid=None,state_uuid=None,d
     # IDs may be omitted only by callers inspecting a sample configuration.
     esp_uuid=esp_uuid or partuuid;state_uuid=state_uuid or partuuid;data_uuid=data_uuid or partuuid
     library_uuid=library_uuid or partuuid;evidence_uuid=evidence_uuid or partuuid
-    args=f'root=PARTUUID={partuuid} ro rootflags=noload fsck.mode=skip rd.skipfsck console=tty0 console=ttyS0,115200 panic=10 oops=panic noresume rd.auto=0 rd.luks=0 rd.lvm=0 rd.md=0 rd.dm=0 quirkbench.esp=PARTUUID={esp_uuid} quirkbench.state=PARTUUID={state_uuid} quirkbench.data=PARTUUID={data_uuid} quirkbench.library=PARTUUID={library_uuid} quirkbench.evidence=PARTUUID={evidence_uuid}'
+    args=f'root=PARTUUID={partuuid} ro rootflags=noload fsck.mode=skip rd.skipfsck selinux=0 console=tty0 console=ttyS0,115200 panic=10 oops=panic noresume rd.auto=0 rd.luks=0 rd.lvm=0 rd.md=0 quirkbench.esp=PARTUUID={esp_uuid} quirkbench.state=PARTUUID={state_uuid} quirkbench.data=PARTUUID={data_uuid} quirkbench.library=PARTUUID={library_uuid} quirkbench.evidence=PARTUUID={evidence_uuid}'
     if smoke:args+=' quirkbench.smoke=1'
     return f'''serial --unit=0 --speed=115200
 terminal_input console serial
@@ -350,12 +372,29 @@ def _create_image(inputs: ImageInputs) -> Path:
     the existing image checksum, rather than overwriting unknown bytes.
     """
     inputs.validate()
+    if inputs.recovery_profile_digest is not None:
+        from .recovery_capacity import validate_recovery_capacity
+        validate_recovery_capacity(inputs.rootfs_dir,inputs.recovery_kernel,
+                                   inputs.recovery_initramfs,inputs.root_mib)
     for name in ('sgdisk','mformat','mmd','mcopy','mkfs.ext4','grub-mkimage','grub-editenv','cp'):_tool(name)
     _verify_provenance(inputs.recovery_provenance,inputs.recovery_kernel,inputs.recovery_initramfs,inputs.recovery_config)
     # Snapshot before copying runtime or rootfs; never attribute a mixed image
     # to sources that changed while assembly was running.
     initial_builder_identity = _builder_identity()
     initial_input_identity = _input_identity(inputs)
+    # A pre-staged recovery runtime must still match the code and unit bytes
+    # this image adapter would copy while adding image-specific boot IDs.
+    staged_runtime = inputs.rootfs_dir/'usr/lib/quirkbench/quirkbench'
+    if staged_runtime.exists() or staged_runtime.is_symlink():
+        from .build import BuildError
+        from .recovery_runtime_revision import audit_installed_runtime, capture_runtime_revision
+        package = Path(__file__).resolve().parent
+        assets = package.parents[1]/'target-assets'
+        try:
+            audit_installed_runtime(inputs.rootfs_dir,
+                                    capture_runtime_revision(package, assets))
+        except BuildError as exc:
+            raise ImageError('staged recovery runtime differs from image builder') from exc
     if shutil.disk_usage(inputs.output.parent).free < inputs.size_mib*MIB*2+20*1024**3:
         raise ImageError('image build would breach 20 GiB free-space reserve')
     parts=partition_layout(inputs.size_mib,inputs.root_mib)
@@ -413,6 +452,9 @@ def _create_image(inputs: ImageInputs) -> Path:
         checksum=sha256_file(image)
         _emit('image-hash',status='complete',total_bytes=image.stat().st_size)
         record={'schema_version':2,'layout_version':2,'commissioned':False,'commissioning':commissioned,'image_sha256':checksum,'size_bytes':image.stat().st_size,'partitions':parts,'identity':config,'candidate_id':candidate_id,'smoke':inputs.smoke,'boot_policy':'fixed recovery; same-disk consumed one-shot; matching SMBIOS UUID; no EFI writes','recovery_kernel_sha256':sha256_file(inputs.recovery_kernel),'recovery_initramfs_sha256':sha256_file(inputs.recovery_initramfs),'candidate_revision':candidate_revision,'candidate_kernel_release':candidate_kernel_release,'candidate_health_sha256':candidate_health_sha256,'panic_candidate_id':panic_candidate_id,'load_failure_candidate_id':load_failure_candidate_id,'deployment_backend':'ostree'}
+        if inputs.recovery_profile_digest is not None:
+            record.update(recovery_profile_digest=inputs.recovery_profile_digest,
+                          recovery_kernel_release=inputs.recovery_kernel_release)
         _emit('image-input-fingerprint',status='running')
         record['builder_identity']=_builder_identity()
         record['input_identity']=_input_identity(inputs)
@@ -429,12 +471,13 @@ def _create_image(inputs: ImageInputs) -> Path:
 
 
 def _builder_identity():
+    from .recovery_runtime_revision import RUNTIME_ASSETS
     package=Path(__file__).resolve().parent
     assets=package.parents[1]/'target-assets'
     sources={f'python/{path.name}':path for path in package.glob('*.py')}
     sources.update({f'python/recipes/{path.name}':path for path in (package/'recipes').glob('*.json')})
     sources.update({f'assets/{name}':assets/name for name in
-                    ('quirkbench-recovery.service','quirkbench-candidate.service','quirkbench-supervisor.service','quirkbench-supervisor-failure.service','var.mount','tmp.mount')})
+                    (*RUNTIME_ASSETS,'quirkbench-candidate.service')})
     return hashlib.sha256(canonical({name:sha256_file(path) for name,path in sorted(sources.items())})).hexdigest()
 
 
@@ -446,6 +489,11 @@ def _input_identity(inputs):
         values[name]=sha256_file(file) if file is not None else None
     values['prepared_data_tree']=_tree_hash(inputs.prepared_data_tree) if inputs.prepared_data_tree is not None else None
     values.update(rootfs=_tree_hash(inputs.rootfs_dir),size_mib=inputs.size_mib,root_mib=inputs.root_mib,experiment_mib=inputs.experiment_mib,library_mib=inputs.library_mib,log_budget_mib=inputs.log_budget_mib,smoke=inputs.smoke)
+    if inputs.recovery_profile_digest is not None:
+        values.update(recovery_profile_id=inputs.recovery_profile_id,
+                      recovery_profile_digest=inputs.recovery_profile_digest,
+                      recovery_kernel_release=inputs.recovery_kernel_release,
+                      recovery_module_files_digest=inputs.recovery_module_files_digest)
     return hashlib.sha256(canonical(values)).hexdigest()
 
 

@@ -1,8 +1,7 @@
 [Unit]
 Description=Quirkbench OSTree identity and evidence preparation
 DefaultDependencies=no
-After=local-fs.target systemd-udev-settle.service
-Wants=systemd-udev-settle.service
+After=local-fs.target
 Before=multi-user.target
 
 [Service]

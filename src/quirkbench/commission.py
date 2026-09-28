@@ -1,7 +1,8 @@
 """Fail-closed external USB identity and journaled six-partition commissioning."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+from contextlib import contextmanager
 import argparse
 import gzip
 import json
@@ -116,6 +117,41 @@ class CommissionPlan:
     commands: tuple[tuple[str, ...], ...]
     geometry: tuple[tuple[int, int], ...]
     target_ram_mib: int
+
+
+def selected_commission_identity(factory: CommissionIdentity, selection: dict) -> CommissionIdentity:
+    """Allow only larger local allocations; the factory identity remains fixed."""
+    original = json.loads(json.dumps(asdict(factory)))
+    if not isinstance(selection, dict):
+        raise CommissionError("selected sizing changes fixed boot identity")
+    selection = json.loads(json.dumps(selection))
+    if (set(selection) != set(original)
+            or any(selection[key] != value for key, value in original.items()
+                   if key not in {"experiment_mib", "library_mib"})):
+        raise CommissionError("selected sizing changes fixed boot identity")
+    sizes = (selection["experiment_mib"], selection["library_mib"])
+    minimums = (factory.experiment_mib, factory.library_mib)
+    if any(type(value) is not int or value < minimum or value > 1024 * 1024
+           for value, minimum in zip(sizes, minimums)):
+        raise CommissionError("selected sizing is outside supported MiB range")
+    return replace(factory, experiment_mib=sizes[0], library_mib=sizes[1])
+
+
+def planned_geometry(layout: DiskLayout, identity: CommissionIdentity) -> tuple[tuple[int, int], ...]:
+    """Compute final sector boundaries for a verified 512-byte USB layout."""
+    if layout.logical_sector_size != 512:
+        raise CommissionError("factory image requires a 512-byte logical sector device")
+    if len(layout.partitions) < 4 or any(
+            part.start != identity.partition_starts[index]
+            or (index < 3 and part.end != identity.fixed_ends[index])
+            for index, part in enumerate(layout.partitions[:4])):
+        raise CommissionError("fixed image geometry changed")
+    start4 = identity.partition_starts[3]
+    start5 = start4 + identity.experiment_mib * 2048
+    start6 = start5 + identity.library_mib * 2048
+    last = ((layout.disk_sectors - layout.entry_sectors - 1) // 2048) * 2048 - 1
+    return tuple((p.start, p.end) for p in layout.partitions[:3]) + (
+        (start4, start5 - 1), (start5, start6 - 1), (start6, last))
 
 
 def _run(argv: tuple[str, ...]) -> str:
@@ -470,15 +506,15 @@ def plan_commission(disk: Path, expected: CommissionIdentity, *, paths: ProbePat
     ram = _target_ram_mib() if target_ram_mib is None else target_ram_mib
     if type(ram) is not int or ram < 1:
         raise CommissionError("positive target RAM MiB required")
-    start4 = expected.partition_starts[3]
-    start5 = start4 + expected.experiment_mib * 2048
-    start6 = start5 + expected.library_mib * 2048
-    last = ((layout.disk_sectors - layout.entry_sectors - 1) // 2048) * 2048 - 1
+    geometry = planned_geometry(layout, expected)
+    start4 = geometry[3][0]
+    start5 = geometry[4][0]
+    start6 = geometry[5][0]
+    last = geometry[5][1]
     evidence_mib = (last + 1 - start6) // 2048
     minimum = math.ceil((expected.log_budget_mib + 2 * ram) / 0.8)
     if evidence_mib < minimum:
         raise CommissionError(f"insufficient evidence capacity: {evidence_mib} MiB available, {minimum} MiB required; use larger USB storage")
-    geometry = tuple((p.start, p.end) for p in layout.partitions[:3]) + ((start4, start5-1), (start5, start6-1), (start6, last))
     if layout.partitions[3].end > geometry[3][1]:
         raise CommissionError("factory experiment filesystem cannot be shrunk")
     for part in layout.partitions[4:]:
@@ -518,9 +554,107 @@ def _write_journal(path: Path, record: dict) -> None:
             os.unlink(temporary)
 
 
+@contextmanager
+def _commission_lock(journal: Path):
+    if not journal.parent.is_dir() or journal.parent.is_symlink() or journal.is_symlink():
+        raise CommissionError("verified boot-state journal directory required")
+    path = journal.parent / "commission.lock"
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise CommissionError("invalid commissioning lock file")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise CommissionError("commissioning already active") from exc
+        yield
+    finally:
+        os.close(fd)
+
+
+def _journal_base(plan: CommissionPlan) -> dict:
+    return json.loads(json.dumps({"schema_version": 2, "identity": asdict(plan.identity),
+                                  "geometry": plan.geometry, "target_ram_mib": plan.target_ram_mib}))
+
+
+def _read_journal(path: Path) -> dict:
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > 64 * 1024:
+        raise CommissionError("invalid or oversized commissioning journal")
+    try:
+        record = json.loads(path.read_bytes())
+    except (OSError, ValueError) as exc:
+        raise CommissionError("invalid commissioning journal") from exc
+    required = {"schema_version", "identity", "geometry", "target_ram_mib", "format_intents", "complete"}
+    if (not isinstance(record, dict) or set(record) not in (required, required | {"confirmed"})
+            or type(record["target_ram_mib"]) is not int or record["target_ram_mib"] < 1
+            or type(record["complete"]) is not bool
+            or ("confirmed" in record and type(record["confirmed"]) is not bool)
+            or not isinstance(record["format_intents"], list)
+            or record["format_intents"] not in ([], [5], [6], [5, 6])):
+        raise CommissionError("invalid commissioning journal")
+    return record
+
+
+def _require_journal_mount(plan: CommissionPlan | DiskLayout, paths: ProbePaths, journal: Path) -> None:
+    if paths != ProbePaths():
+        return
+    mount = [x.split() for x in paths.proc_mountinfo.read_text().splitlines()
+             if len(x.split()) > 5 and x.split()[4] == "/boot/quirkbench-state"]
+    layout = plan.layout if isinstance(plan, CommissionPlan) else plan
+    state = layout.partitions[2]
+    if (len(mount) != 1 or mount[0][2] != f"{state.major_minor[0]}:{state.major_minor[1]}"
+            or journal != Path("/boot/quirkbench-state/quirkbench/commission.json")):
+        raise CommissionError("journal must reside on verified boot-state partition")
+
+
+def _check_current_capacity(plan: CommissionPlan, current_ram_mib: int) -> None:
+    if type(current_ram_mib) is not int or current_ram_mib < 1:
+        raise CommissionError("positive current target RAM MiB required")
+    evidence = (plan.geometry[5][1] - plan.geometry[5][0] + 1) // 2048
+    minimum = math.ceil((plan.identity.log_budget_mib + 2 * current_ram_mib) / 0.8)
+    if evidence < minimum:
+        raise CommissionError("current target RAM exceeds confirmed evidence capacity")
+
+
+def confirm_commission(plan: CommissionPlan, *, confirmed_disk_guid: str,
+                       paths: ProbePaths = ProbePaths(), runner=_run,
+                       block_rdev=_block_rdev,
+                       journal: Path = Path("/boot/quirkbench-state/quirkbench/commission.json"),
+                       current_ram_mib: int | None = None) -> None:
+    """Persist exact attended consent before any partition command is allowed."""
+    if confirmed_disk_guid != plan.identity.disk_guid:
+        raise CommissionError("typed disk GUID does not match verified boot media")
+    _require_journal_mount(plan, paths, journal)
+    with _commission_lock(journal):
+        current = plan_commission(plan.layout.path, plan.identity, paths=paths, runner=runner,
+                                  block_rdev=block_rdev, target_ram_mib=plan.target_ram_mib)
+        if current.layout != plan.layout or current.geometry != plan.geometry:
+            raise CommissionError("commissioning plan changed after display; review again")
+        _check_current_capacity(plan, _target_ram_mib() if current_ram_mib is None else current_ram_mib)
+        base = _journal_base(plan)
+        if journal.exists():
+            record = _read_journal(journal)
+            if any(record.get(key) != value for key, value in base.items()):
+                raise CommissionError("commissioning journal disagrees with requested geometry; retain original settings")
+            if record["complete"]:
+                raise CommissionError("commissioning already complete")
+            if record.get("confirmed") is True:
+                return
+            # Retain every prior format intent when a legacy partial run is
+            # explicitly reconfirmed; uncertain mkfs is never retried.
+            record["confirmed"] = True
+        else:
+            if len(current.layout.partitions) != 4:
+                raise CommissionError("existing final partitions without journal require human reconciliation")
+            record = {**base, "format_intents": [], "complete": False, "confirmed": True}
+        _write_journal(journal, record)
+
+
 def execute_commission(plan: CommissionPlan, *, commissioned_identity: CommissionIdentity,
                        allow_write=False, paths: ProbePaths = ProbePaths(), runner=_run,
-                       block_rdev=_block_rdev, journal: Path = Path("/boot/quirkbench-state/quirkbench/commission.json")) -> DiskLayout:
+                       block_rdev=_block_rdev, journal: Path = Path("/boot/quirkbench-state/quirkbench/commission.json"),
+                       current_ram_mib: int | None = None) -> DiskLayout:
     """Complete the recorded geometry; never reformat an observed filesystem.
 
     An interrupted mkfs with no recognizable ext4 is explicitly uncertain and
@@ -529,32 +663,25 @@ def execute_commission(plan: CommissionPlan, *, commissioned_identity: Commissio
     """
     if not allow_write or commissioned_identity != plan.identity:
         raise CommissionError("execution requires explicit matching commissioned identity and allow_write=True")
-    if not journal.parent.is_dir() or journal.is_symlink():
-        raise CommissionError("verified boot-state journal directory required")
-    # Production journal storage must itself have passed the identity/mount check.
-    if paths == ProbePaths():
-        mount = [x.split() for x in paths.proc_mountinfo.read_text().splitlines() if len(x.split()) > 5 and x.split()[4] == "/boot/quirkbench-state"]
-        state = plan.layout.partitions[2]
-        if len(mount) != 1 or mount[0][2] != f"{state.major_minor[0]}:{state.major_minor[1]}" or journal != Path("/boot/quirkbench-state/quirkbench/commission.json"):
-            raise CommissionError("journal must reside on verified boot-state partition")
-    with (journal.parent / "commission.lock").open("a") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise CommissionError("commissioning already active") from exc
-        base = json.loads(json.dumps({"schema_version": 2, "identity": asdict(plan.identity), "geometry": plan.geometry, "target_ram_mib": plan.target_ram_mib}))
-        if journal.exists():
-            record = json.loads(journal.read_text())
-            if any(record.get(k) != v for k, v in base.items()):
-                raise CommissionError("commissioning journal disagrees with requested geometry; retain original settings")
-        else:
-            if len(plan.layout.partitions) != 4:
-                raise CommissionError("existing final partitions without journal require human reconciliation")
-            record = {**base, "format_intents": [], "complete": False}
-            _write_journal(journal, record)
+    _require_journal_mount(plan, paths, journal)
+    with _commission_lock(journal):
+        if not journal.exists():
+            raise CommissionError("attended confirmation journal required before device writes")
+        record = _read_journal(journal)
+        base = _journal_base(plan)
+        if any(record.get(k) != v for k, v in base.items()):
+            raise CommissionError("commissioning journal disagrees with requested geometry; retain original settings")
         def probe():
             return plan_commission(plan.layout.path, commissioned_identity, paths=paths, runner=runner,
                                    block_rdev=block_rdev, target_ram_mib=plan.target_ram_mib)
+        current = probe()
+        _check_current_capacity(plan, _target_ram_mib() if current_ram_mib is None else current_ram_mib)
+        if record["complete"] is True:
+            return current.layout
+        if record.get("confirmed") is not True:
+            raise CommissionError("attended confirmation required before device writes")
+        if current.layout != plan.layout or current.geometry != plan.geometry:
+            raise CommissionError("commissioning plan changed before execution")
         for command in plan.commands:
             current = probe()
             if command[0] == "sgdisk" and command not in current.commands:
@@ -581,7 +708,9 @@ def execute_commission(plan: CommissionPlan, *, commissioned_identity: Commissio
                 raise CommissionError(f"partition {n} format outcome uncertain; human intervention required, refusing reformat")
             record["format_intents"].append(n)
             _write_journal(journal, record)
-            probe()
+            fresh = probe().layout.partitions[n-1]
+            if fresh.filesystem:
+                raise CommissionError(f"partition {n} filesystem appeared after format intent; refusing reformat")
             runner(("mkfs.ext4", "-q", "-L", label, "-U", commissioned_identity.partition_uuids[n-1], str(part.path)))
             # mkfs returns only after initialization; sync buffers before acknowledgement.
             fd = os.open(part.path, os.O_RDONLY | os.O_NOFOLLOW)
@@ -622,12 +751,21 @@ def main(
 ) -> int:
     parser = argparse.ArgumentParser(description="Verify external boot identity and plan six-partition commissioning")
     parser.add_argument("--identity", type=Path, default=Path("/etc/quirkbench/commission.json"))
-    parser.add_argument("--apply", action="store_true", help="execute the verified and journaled external-device commissioning plan")
+    parser.add_argument("--apply", action="store_true", help="resume a locally confirmed, journaled external-device plan")
     args = parser.parse_args(argv)
     try:
         identity = _load_commission_identity(args.identity)
         boot = verify_boot_identity(identity, paths=paths, runner=runner, block_rdev=block_rdev, allow_factory=True, allow_unformatted=True)
-        plan = plan_commission(boot.path, identity, paths=paths, runner=runner, block_rdev=block_rdev)
+        recorded_ram = None
+        if args.apply:
+            journal = Path("/boot/quirkbench-state/quirkbench/commission.json")
+            _require_journal_mount(boot, paths, journal)
+            if journal.exists():
+                record = _read_journal(journal)
+                identity = selected_commission_identity(identity, record["identity"])
+                recorded_ram = record["target_ram_mib"]
+        plan = plan_commission(boot.path, identity, paths=paths, runner=runner,
+                               block_rdev=block_rdev, target_ram_mib=recorded_ram)
         if args.apply:
             final = execute_commission(plan, commissioned_identity=identity, allow_write=True, paths=paths, runner=runner, block_rdev=block_rdev)
             status = "applied"

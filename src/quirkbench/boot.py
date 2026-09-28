@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -18,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Callable
 
 
@@ -92,7 +94,7 @@ BootConfig = RecoveryConfig
 def parse_cmdline(text: str, config: RecoveryConfig) -> dict[str, str]:
     values = {}
     tracked = {"root", "quirkbench.esp", "quirkbench.state", "quirkbench.data",
-               "quirkbench.library", "quirkbench.evidence", "quirkbench.mode", "quirkbench.candidate", "quirkbench.revision", "quirkbench.smoke", "quirkbench.fault", "ostree"}
+               "quirkbench.library", "quirkbench.evidence", "quirkbench.mode", "quirkbench.candidate", "quirkbench.revision", "quirkbench.smoke", "quirkbench.fault", "ostree", "selinux"}
     for token in text.split():
         key, sep, value = token.partition("=")
         if key in tracked:
@@ -114,6 +116,8 @@ def parse_cmdline(text: str, config: RecoveryConfig) -> dict[str, str]:
     forbidden_access = "ro" if mode == "candidate" else "rw"
     if expected_access not in words or forbidden_access in words or any(x.startswith("resume=") for x in words):
         raise BootError("boot root access must match its mode without resume")
+    if mode == "recovery" and values.get("selinux") != "0":
+        raise BootError("recovery requires its explicit selinux=0 boot policy")
     if mode == "candidate" and [x for x in words if x.startswith("rootflags=")] != ["rootflags=nosuid,nodev"]:
         raise BootError("candidate root requires restricted USB mount flags")
     if mode == "candidate":
@@ -416,28 +420,62 @@ def trigger_candidate_panic(boot: dict, vendor: str, *, trigger: Path = Path("/p
     raise BootError("panic injection unexpectedly returned")
 
 
-def commission_boot(config: RecoveryConfig, *, identity_path: Path = Path("/etc/quirkbench/commission.json")) -> None:
-    """Run first-boot commissioning only from fixed recovery on its verified USB."""
-    from .commission import (_load_commission_identity, verify_boot_identity,
-                             plan_commission, execute_commission)
+def require_commissioned_boot(config: RecoveryConfig, *,
+                              identity_path: Path = Path("/etc/quirkbench/commission.json"),
+                              state_mount: Path = Path("/boot/quirkbench-state"),
+                              mountinfo: str | None = None,
+                              identity_verifier=None,
+                              ram_reader=None,
+                              runner: Callable[[list[str]], str] = _run) -> dict:
+    """Read the completed journal and assess current RAM without changing media."""
+    from .commission import (
+        CommissionError, _load_commission_identity, _target_ram_mib, planned_geometry,
+        selected_commission_identity, verify_boot_identity,
+    )
     identity = _load_commission_identity(identity_path)
     expected = (config.esp_partuuid, config.root_partuuid, config.state_partuuid,
                 config.data_partuuid, config.library_partuuid, config.evidence_partuuid)
     if identity.disk_guid != config.disk_guid or identity.partition_uuids != expected:
         raise BootError("commissioning identity differs from fixed boot configuration")
-    layout = verify_boot_identity(identity, allow_factory=True, allow_unformatted=True)
-    mountinfo = Path("/proc/self/mountinfo").read_text()
-    _mount_one(layout.partitions[2].path, Path("/boot/quirkbench-state"), "vfat",
-               "rw,nosuid,nodev,noexec,umask=0077", runner=_run, mountinfo=mountinfo)
-    journal = Path("/boot/quirkbench-state/quirkbench/commission.json")
-    previous = json.loads(journal.read_text()) if journal.exists() else None
-    if previous and previous.get("complete"):
-        if (previous.get("identity") != json.loads(json.dumps(asdict(identity)))
-                or previous.get("geometry") != [[p.start, p.end] for p in layout.partitions]):
-            raise BootError("completed commissioning geometry or identity changed")
-        return
-    plan = plan_commission(layout.path, identity, target_ram_mib=previous.get("target_ram_mib") if previous else None)
-    execute_commission(plan, commissioned_identity=identity, allow_write=True)
+    layout = (identity_verifier or verify_boot_identity)(identity, allow_factory=True, allow_unformatted=True)
+    inventory = Path("/proc/self/mountinfo").read_text() if mountinfo is None else mountinfo
+    _mount_one(layout.partitions[2].path, state_mount, "vfat",
+               "rw,nosuid,nodev,noexec,umask=0077", runner=runner, mountinfo=inventory)
+    journal = state_mount / "quirkbench/commission.json"
+    if journal.parent.is_symlink() or journal.is_symlink():
+        raise BootError("commissioning journal path is a symlink")
+    if not journal.is_file():
+        raise BootError("attended capacity setup required before commissioning")
+    if journal.stat().st_size > 64 * 1024:
+        raise BootError("commissioning journal exceeds 64 KiB")
+    try:
+        previous = json.loads(journal.read_bytes())
+    except (OSError, ValueError) as exc:
+        raise BootError("invalid commissioning journal") from exc
+    if not isinstance(previous, dict) or previous.get("schema_version") != 2:
+        raise BootError("invalid commissioning journal")
+    if previous.get("complete") is not True:
+        raise BootError("attended capacity setup or commissioning resume required")
+    try:
+        selected = selected_commission_identity(identity, previous.get("identity"))
+        expected_geometry = planned_geometry(layout, selected)
+    except CommissionError as exc:
+        raise BootError("completed commissioning identity or sizing changed") from exc
+    if (previous.get("identity") != json.loads(json.dumps(asdict(selected)))
+            or previous.get("geometry") != [list(row) for row in expected_geometry]
+            or tuple((p.start, p.end) for p in layout.partitions) != expected_geometry):
+        raise BootError("completed commissioning geometry or identity changed")
+    evidence_mib = (expected_geometry[5][1] - expected_geometry[5][0] + 1) // 2048
+    try:
+        current_ram = (_target_ram_mib if ram_reader is None else ram_reader)()
+        if type(current_ram) is not int or current_ram < 1:
+            raise CommissionError("target RAM inventory unavailable")
+    except (CommissionError, OSError, ValueError):
+        return {"eligible": False, "current_ram_mib": None,
+                "evidence_mib": evidence_mib, "required_evidence_mib": None}
+    required = math.ceil((selected.log_budget_mib + 2 * current_ram) / 0.8)
+    return {"eligible": evidence_mib >= required, "current_ram_mib": current_ram,
+            "evidence_mib": evidence_mib, "required_evidence_mib": required}
 
 
 def mount_proof(mode: str, mountinfo: str) -> dict:
@@ -458,19 +496,23 @@ def mount_proof(mode: str, mountinfo: str) -> dict:
     return report
 
 
-def service_main(argv: list[str] | None = None) -> int:
+def service_main(argv: list[str] | None = None, *,
+                 cmdline_path: Path = Path("/proc/cmdline")) -> int:
     parser = argparse.ArgumentParser(description="Quirkbench recovery boot verifier")
     parser.add_argument("--config", type=Path, default=Path("/etc/quirkbench/boot.json"))
     args = parser.parse_args(argv)
-    cmdline = Path("/proc/cmdline").read_text()
+    cmdline = cmdline_path.read_text()
     config_path = Path("/sysroot/quirkbench/identity.json") if "quirkbench.mode=candidate" in cmdline.split() else args.config
     config = RecoveryConfig.load(config_path)
-    if "quirkbench.mode=recovery" in cmdline.split():
-        commission_boot(config)
+    mode = parse_cmdline(cmdline, config)["quirkbench.mode"]
+    wait_for_boot_partitions(config, mode)
+    capacity = require_commissioned_boot(config) if mode == "recovery" else None
     log = _run(["dmesg", "--kernel"])
     mountinfo = Path("/proc/self/mountinfo").read_text()
     boot = prepare_recovery(config, cmdline=cmdline, kernel_log=log, mountinfo=mountinfo)
     mode = boot["quirkbench.mode"]
+    if capacity is not None:
+        boot["quirkbench.capacity"] = capacity
     status = Path("/run/quirkbench-boot.json")
     status.write_bytes(_canonical({"config": config.to_dict(), "boot": boot}))
     print("QUIRKBENCH_MOUNTS " + json.dumps(mount_proof(mode, Path("/proc/self/mountinfo").read_text()), sort_keys=True), flush=True)
@@ -488,6 +530,30 @@ def service_main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def wait_for_boot_partitions(config: RecoveryConfig, mode: str, *,
+                             directory: Path = Path("/dev/disk/by-partuuid"),
+                             timeout_s: float = 30, clock=time.monotonic,
+                             sleep=time.sleep) -> None:
+    """Wait only for this boot USB's expected nodes; strict identity follows."""
+    if mode not in {"recovery", "candidate"} or timeout_s <= 0 or timeout_s > 30:
+        raise BootError("invalid partition readiness deadline")
+    # Factory recovery media has four partitions; commissioning adds p5/p6.
+    identities = config.to_dict()
+    roles = ("esp", "root", "state", "data") if mode == "recovery" else (
+        "esp", "root", "state", "data", "library", "evidence")
+    end = clock() + timeout_s
+    while True:
+        missing = [role for role in roles
+                   if not (directory / identities[role + "_partuuid"]).is_symlink()
+                   or not (directory / identities[role + "_partuuid"]).exists()]
+        if not missing:
+            return
+        remaining = end - clock()
+        if remaining <= 0:
+            raise BootError("expected boot USB partition nodes unavailable: " + ", ".join(missing))
+        sleep(min(0.25, remaining))
+
+
 if __name__ == "__main__":
     try:
         raise SystemExit(service_main())
@@ -496,8 +562,72 @@ if __name__ == "__main__":
         raise SystemExit(1)
 
 
-def install_runtime(rootfs: Path, config: RecoveryConfig | dict | None = None, assets_dir: Path | None = None, *, candidate: bool = False) -> None:
-    """Install the fixed recovery verifier into a staged Fedora rootfs.
+RECOVERY_ENABLED_LINKS = {
+    "multi-user.target.wants/quirkbench-recovery.service": "../quirkbench-recovery.service",
+    "multi-user.target.wants/quirkbench-console.service": "../quirkbench-console.service",
+    "multi-user.target.wants/quirkbench-supervisor.service": "../quirkbench-supervisor.service",
+    "multi-user.target.wants/NetworkManager.service": "/usr/lib/systemd/system/NetworkManager.service",
+    "local-fs.target.wants/var.mount": "../var.mount",
+    "local-fs.target.wants/tmp.mount": "../tmp.mount",
+}
+
+RECOVERY_MASKED_UNITS = frozenset({
+    "systemd-networkd.service", "systemd-networkd.socket", "fwupd.service",
+    "udisks2.service", "systemd-pstore.service", "systemd-hibernate.service",
+    "systemd-suspend.service", "systemd-hybrid-sleep.service",
+    "systemd-suspend-then-hibernate.service", "systemd-zram-setup@.service",
+    "systemd-remount-fs.service", "getty@tty1.service",
+})
+
+
+def _check_recovery_unit_links(rootfs: Path, *, strict_direct_links: bool = False) -> None:
+    """Reject unreviewed recovery enablement in the staged /etc unit graph."""
+    units = rootfs / "etc/systemd/system"
+    for directory in (units.parent, units):
+        if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
+            raise BootError("staged systemd units escape target rootfs")
+    generators = rootfs / "etc/systemd/system-generators"
+    if generators.is_symlink() or (generators.exists() and not generators.is_dir()):
+        raise BootError("staged systemd settings escape target rootfs")
+    if not units.exists():
+        return
+    for name in ("quirkbench-recovery.service", "quirkbench-console.service",
+                 "quirkbench-supervisor.service", "quirkbench-supervisor-failure.service",
+                 "quirkbench-network-state.service", "var.mount", "tmp.mount"):
+        if (units / name).is_symlink():
+            raise BootError("staged systemd unit destination is a symlink: " + name)
+    for directory in (units / "NetworkManager.service.d",
+                      units / "quirkbench-supervisor.service.d"):
+        if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
+            raise BootError("staged systemd settings escape target rootfs")
+    for path in (units / "NetworkManager.service.d/quirkbench.conf",
+                 units / "quirkbench-supervisor.service.d/boot.conf"):
+        if path.is_symlink():
+            raise BootError("staged systemd settings may not be a symlink")
+    default = units / "default.target"
+    if default.exists() and not default.is_symlink():
+        raise BootError("invalid staged default target")
+    if strict_direct_links:
+        for path in units.iterdir():
+            if not path.is_symlink() or path.name.endswith((".wants", ".requires", ".upholds")):
+                continue
+            expected = ("/usr/lib/systemd/system/multi-user.target" if path.name == "default.target"
+                        else "/dev/null" if path.name in RECOVERY_MASKED_UNITS else None)
+            if expected != str(path.readlink()):
+                raise BootError("unreviewed recovery systemd unit link: " + path.name)
+    for directory in units.iterdir():
+        if not directory.name.endswith((".wants", ".requires", ".upholds")):
+            continue
+        if directory.is_symlink() or not directory.is_dir():
+            raise BootError("staged systemd dependency directory escapes target rootfs")
+        for link in directory.iterdir():
+            relative = f"{directory.name}/{link.name}"
+            if not link.is_symlink() or RECOVERY_ENABLED_LINKS.get(relative) != str(link.readlink()):
+                raise BootError("unreviewed recovery systemd enablement: " + relative)
+
+
+def _install_runtime_files(rootfs: Path, assets_dir: Path | None = None, *, candidate: bool = False) -> None:
+    """Install generic target runtime files before image-specific identity.
 
     The caller supplies a disposable rootfs copy. This function never runs
     systemctl, mounts a device, or writes outside that tree.
@@ -507,18 +637,61 @@ def install_runtime(rootfs: Path, config: RecoveryConfig | dict | None = None, a
         or not rootfs.is_dir() or not (rootfs / "etc/quirkbench-rootfs").is_file()
         or (rootfs / "etc/quirkbench-rootfs").read_text().strip() != "quirkbench-fedora-target-v1"):
         raise BootError("runtime installation requires a staged Fedora target rootfs")
-    if isinstance(config, dict):
-        config = RecoveryConfig(**config)
-    if not candidate and not isinstance(config, RecoveryConfig):
-        raise BootError("invalid recovery config")
     assets = Path(assets_dir) if assets_dir is not None else Path(__file__).resolve().parents[2] / "target-assets"
     if not assets.is_dir():
         raise BootError("target runtime assets missing")
+    etc = rootfs / "etc"
+    if etc.is_symlink() or not etc.resolve().is_relative_to(rootfs.resolve()):
+        raise BootError("staged configuration escapes target rootfs")
+    if not candidate:
+        machine_id = etc / "machine-id"
+        if machine_id.is_symlink() or (machine_id.exists() and not machine_id.is_file()):
+            raise BootError("invalid staged machine-id path")
+        dbus_id = rootfs / "var/lib/dbus/machine-id"
+        for directory in (rootfs / "var", rootfs / "var/lib", dbus_id.parent):
+            if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
+                raise BootError("staged D-Bus machine-id path escapes target rootfs")
+        if dbus_id.exists() and not dbus_id.is_file() and not dbus_id.is_symlink():
+            raise BootError("invalid staged D-Bus machine-id path")
     # Recovery's root is read-only. NetworkManager profiles must be transient;
     # the setup adapter will explicitly persist selected profiles in control state.
     network = rootfs / "etc/NetworkManager/system-connections"
+    network_parent = network.parent
+    if (network_parent.is_symlink() or (network_parent.exists() and not network_parent.is_dir())
+            or not network_parent.resolve().is_relative_to(rootfs.resolve())):
+        raise BootError("staged NetworkManager configuration escapes target rootfs")
+    for profile_dir in (network, rootfs / "usr/lib/NetworkManager/system-connections"):
+        if profile_dir.is_symlink() or (profile_dir.exists() and (not profile_dir.is_dir() or any(profile_dir.iterdir()))):
+            raise BootError("factory runtime may not contain saved network profiles")
+    network_conf = rootfs / "etc/NetworkManager/conf.d"
+    if (network_conf.is_symlink() or (network_conf.exists() and not network_conf.is_dir())
+            or not network_conf.resolve().is_relative_to(rootfs.resolve())):
+        raise BootError("staged NetworkManager settings escape target rootfs")
+    if (network_conf / "99-quirkbench-dns.conf").is_symlink():
+        raise BootError("staged NetworkManager settings may not be a symlink")
+    if not candidate:
+        _check_recovery_unit_links(rootfs)
+        # An empty mount point lets systemd supply an ID in RAM on a read-only
+        # root. Remove both factory ID sources before installing the runtime.
+        # Unlink first so a staged hard link cannot truncate a file elsewhere.
+        machine_id.unlink(missing_ok=True)
+        fd = os.open(machine_id, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        try:
+            os.fchmod(fd, 0o644)
+        finally:
+            os.close(fd)
+        dbus_id.unlink(missing_ok=True)
     network.mkdir(parents=True, exist_ok=True)
     network.chmod(0o700)
+    resolver = rootfs / "etc/resolv.conf"
+    if resolver.exists() or resolver.is_symlink():
+        if not (resolver.is_file() or resolver.is_symlink()):
+            raise BootError("invalid staged resolver path")
+        resolver.unlink()
+    resolver.symlink_to("/run/NetworkManager/resolv.conf")
+    network_conf.mkdir(parents=True, exist_ok=True)
+    (network_conf / "99-quirkbench-dns.conf").write_text(
+        "[main]\ndns=default\nrc-manager=symlink\n")
     old_network = rootfs / "etc/systemd/network/20-quirkbench-wired.network"
     if old_network.exists() or old_network.is_symlink():
         old_network.unlink()
@@ -526,13 +699,21 @@ def install_runtime(rootfs: Path, config: RecoveryConfig | dict | None = None, a
     if fstab.exists() and any(line.strip() and not line.lstrip().startswith("#") for line in fstab.read_text().splitlines()):
         raise BootError("target fstab may not contain automatic mounts")
     package = rootfs / "usr/lib/quirkbench/quirkbench"
+    settings = rootfs / "etc/quirkbench"
+    for destination in (package, settings):
+        if (destination.is_symlink() or (destination.exists() and not destination.is_dir())
+                or not destination.resolve().is_relative_to(rootfs.resolve())):
+            raise BootError("staged runtime destination escapes target rootfs")
     package.mkdir(parents=True, exist_ok=True)
     source = Path(__file__).resolve().parent
     for src in source.glob("*.py"):
         name = src.name
         if not src.is_file():
             raise BootError("runtime Python module missing: " + name)
-        shutil.copyfile(src, package / name)
+        destination = package / name
+        if destination.is_symlink() or (destination.exists() and not destination.is_file()):
+            raise BootError("invalid staged runtime module destination: " + name)
+        shutil.copyfile(src, destination)
     from .contracts import ContractError
     from .recipe_registry import RecipeRegistry
     from .runtime import system_observation
@@ -543,18 +724,22 @@ def install_runtime(rootfs: Path, config: RecoveryConfig | dict | None = None, a
     except ContractError as exc:
         raise BootError('installed recipe metadata and code differ') from exc
     recipe_destination = package / 'recipes'
+    if (recipe_destination.is_symlink()
+            or (recipe_destination.exists() and not recipe_destination.is_dir())
+            or not recipe_destination.resolve().is_relative_to(rootfs.resolve())):
+        raise BootError('staged recipe destination escapes target rootfs')
     recipe_destination.mkdir(exist_ok=True)
     for _, _, path in recipe_registry.records.values():
-        shutil.copyfile(path, recipe_destination / path.name)
-    settings = rootfs / "etc/quirkbench"
+        destination = recipe_destination / path.name
+        if destination.is_symlink() or (destination.exists() and not destination.is_file()):
+            raise BootError('invalid staged recipe destination')
+        shutil.copyfile(path, destination)
     settings.mkdir(parents=True, exist_ok=True)
-    if config is not None:
-        (settings / "boot.json").write_bytes(_canonical(config.to_dict()) + b"\n")
     units = rootfs / "etc/systemd/system"
     units.mkdir(parents=True, exist_ok=True)
-    for name in (("quirkbench-candidate.service",) if candidate else ("quirkbench-recovery.service", "var.mount", "tmp.mount")):
+    for name in (("quirkbench-candidate.service",) if candidate else ("quirkbench-recovery.service", "quirkbench-console.service", "var.mount", "tmp.mount")):
         shutil.copyfile(assets / name, units / name)
-    unit_links = (("multi-user.target", "quirkbench-candidate.service"),) if candidate else (("multi-user.target", "quirkbench-recovery.service"), ("local-fs.target", "var.mount"), ("local-fs.target", "tmp.mount"))
+    unit_links = (("multi-user.target", "quirkbench-candidate.service"),) if candidate else (("multi-user.target", "quirkbench-recovery.service"), ("multi-user.target", "quirkbench-console.service"), ("local-fs.target", "var.mount"), ("local-fs.target", "tmp.mount"))
     for target, unit in unit_links:
         wants = units / (target + ".wants")
         wants.mkdir(parents=True, exist_ok=True)
@@ -590,14 +775,20 @@ def install_runtime(rootfs: Path, config: RecoveryConfig | dict | None = None, a
     if network_link.exists() or network_link.is_symlink():
         network_link.unlink()
     network_link.symlink_to("/usr/lib/systemd/system/NetworkManager.service")
-    for name in ("systemd-networkd.service", "systemd-networkd.socket", "fwupd.service", "udisks2.service", "systemd-pstore.service",
-                 "systemd-hibernate.service", "systemd-suspend.service",
-                 "systemd-hybrid-sleep.service", "systemd-suspend-then-hibernate.service",
-                 "systemd-zram-setup@.service", "systemd-remount-fs.service"):
+    for name in sorted(RECOVERY_MASKED_UNITS - {"getty@tty1.service"}):
         link = units / name
         if link.exists() or link.is_symlink():
             link.unlink()
         link.symlink_to("/dev/null")
+    if not candidate:
+        getty = units / "getty@tty1.service"
+        if getty.exists() or getty.is_symlink():
+            getty.unlink()
+        getty.symlink_to("/dev/null")
+        default = units / "default.target"
+        if default.exists() or default.is_symlink():
+            default.unlink()
+        default.symlink_to("/usr/lib/systemd/system/multi-user.target")
     generators = rootfs / "etc/systemd/system-generators"
     generators.mkdir(exist_ok=True)
     for name in ("systemd-gpt-auto-generator", "systemd-hibernate-resume-generator", "zram-generator"):
@@ -607,6 +798,32 @@ def install_runtime(rootfs: Path, config: RecoveryConfig | dict | None = None, a
         link.symlink_to("/dev/null")
     for mountpoint in ("boot/quirkbench-state", "var", "tmp"):
         (rootfs / mountpoint).mkdir(parents=True, exist_ok=True)
+
+
+def install_recovery_runtime_base(rootfs: Path, assets_dir: Path | None = None) -> None:
+    """Stage generic recovery code/services without an image's GPT identities."""
+    boot_record = Path(rootfs) / "etc/quirkbench/boot.json"
+    if boot_record.exists() or boot_record.is_symlink():
+        raise BootError("generic recovery runtime must not contain a boot identity")
+    _install_runtime_files(rootfs, assets_dir)
+
+
+def install_runtime(rootfs: Path, config: RecoveryConfig | dict | None = None,
+                    assets_dir: Path | None = None, *, candidate: bool = False) -> None:
+    """Install target runtime and, for recovery, its image-specific boot ID."""
+    if isinstance(config, dict):
+        config = RecoveryConfig(**config)
+    if not candidate and not isinstance(config, RecoveryConfig):
+        raise BootError("invalid recovery config")
+    boot_record = Path(rootfs) / "etc/quirkbench/boot.json"
+    if boot_record.is_symlink() or (boot_record.exists() and not boot_record.is_file()):
+        raise BootError("invalid staged boot identity path")
+    if boot_record.exists():
+        if config is None or boot_record.read_bytes() != _canonical(config.to_dict()) + b"\n":
+            raise BootError("staged boot identity differs from image configuration")
+    _install_runtime_files(rootfs, assets_dir, candidate=candidate)
+    if config is not None:
+        boot_record.write_bytes(_canonical(config.to_dict()) + b"\n")
 
 
 def install_candidate_runtime(rootfs: Path, assets_dir: Path | None = None) -> None:

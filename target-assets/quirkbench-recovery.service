@@ -1,8 +1,7 @@
 [Unit]
 Description=Quirkbench recovery identity and data preparation
 DefaultDependencies=no
-After=local-fs.target systemd-udev-settle.service var.mount tmp.mount
-Wants=systemd-udev-settle.service
+After=local-fs.target var.mount tmp.mount
 Requires=var.mount tmp.mount
 Before=multi-user.target
 

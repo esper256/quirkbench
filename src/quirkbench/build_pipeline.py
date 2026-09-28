@@ -32,6 +32,11 @@ from .build import (BuildError, Command, KernelBuild, _require_container,
 from . import build as build_module
 from .contracts import Artifact, Experiment, canonical, sha256
 from .interfaces import ArtifactRepository
+from .hardware_plan import validate_profile
+from .baseline_catalog import validate_entry
+from .recovery_module_audit import audit_recovery_modules, validate_recovery_final_config
+from .recovery_dracut import MAX_CONFIG_BYTES as MAX_RECOVERY_DRACUT_CONFIG_BYTES, validate_recovery_dracut_config
+from .recovery_initramfs_audit import audit_recovery_initramfs_tree
 
 
 GIB = 1024 ** 3
@@ -50,13 +55,13 @@ def _file_identity(path: Path, expected: str) -> None:
         raise BuildError(f"pinned input digest mismatch: {path}")
 
 
-def _tree_hash(root: Path) -> str:
+def _tree_hash(root: Path, *, excluded_paths: frozenset[str] = frozenset(EXCLUDED_CREDENTIAL_FILES)) -> str:
     if not root.is_dir() or root.is_symlink():
         raise BuildError(f"target sysroot is not a directory: {root}")
     digest = hashlib.sha256()
     for entry in sorted(root.rglob("*")):
         relative_text = entry.relative_to(root).as_posix()
-        if relative_text in EXCLUDED_CREDENTIAL_FILES:
+        if relative_text in excluded_paths:
             continue
         relative = relative_text.encode()
         mode = stat.S_IMODE(entry.lstat().st_mode).to_bytes(4, "big")
@@ -258,7 +263,11 @@ class BoundedRunner:
             timeout_s: int, env: dict[str, str], limits: ResourceLimits,
             on_activity: Callable[[str, int, int], None]) -> None:
         _require_container()
-        if phase in {"compile-userspace", "install-userspace"}:
+        if phase == "audit-recovery-initramfs":
+            _validate_recovery_initramfs_unpack(command, self.workspace)
+        elif phase in {"query-recovery-srpm", "unpack-recovery-srpm", "prepare-recovery-source"}:
+            _validate_recovery_source_command(command, phase, self.workspace)
+        elif phase in {"compile-userspace", "install-userspace"}:
             _validate_userspace_command(command, self.workspace)
         else:
             _validate_command(command)
@@ -316,6 +325,339 @@ class BoundedRunner:
                 selector.close()
                 output.flush()
                 os.fsync(output.fileno())
+
+
+def _validate_recovery_source_command(command: Command, phase: str, stage: Path) -> None:
+    """Allow only the three fixed RPM operations in the isolated build stage."""
+    _safe_build_path(stage)
+    if command.cwd != stage or not stage.is_dir():
+        raise BuildError("recovery source command must run in its staging directory")
+    rpm_root = stage / "rpm-topdir"
+    srpm = stage / "kernel.src.rpm"
+    macro = ("--define", f"_topdir {rpm_root}", "--define", f"_tmppath {rpm_root / 'tmp'}")
+    if phase == "query-recovery-srpm":
+        expected = ("rpm", "-qp", "--qf", "%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}\\n", str(srpm))
+    elif phase == "unpack-recovery-srpm":
+        expected = ("rpm", *macro, "-i", str(srpm))
+    elif phase == "prepare-recovery-source":
+        specs = list((rpm_root / "SPECS").glob("*.spec"))
+        if len(specs) != 1 or specs[0].is_symlink():
+            raise BuildError("recovery SRPM must contain one regular spec")
+        expected = ("rpmbuild", "-bp", *macro, str(specs[0]))
+    else:
+        raise BuildError("unknown recovery source phase")
+    if command.argv != expected:
+        raise BuildError("recovery source command does not match locked plan")
+
+
+def _validate_recovery_initramfs_unpack(command: Command, stage: Path) -> None:
+    _safe_build_path(stage)
+    directory = stage / "initramfs-inspect"
+    if command.cwd != directory or not directory.is_dir() or any(directory.iterdir()):
+        raise BuildError("initramfs inspection requires a new empty private directory")
+    if len(command.argv) != 3 or command.argv[:2] != ("lsinitrd", "--unpack"):
+        raise BuildError("initramfs inspection command does not match locked plan")
+    image = Path(command.argv[2])
+    if (image.parent != stage / "artifacts"
+            or not re.fullmatch(r"initramfs-[A-Za-z0-9][A-Za-z0-9._+-]{0,127}\.img", image.name)
+            or image.is_symlink() or not image.is_file()):
+        raise BuildError("initramfs inspection image differs from staged output")
+
+
+def run_recovery_source_stage(*, srpm: Path, entry: dict, stage: Path,
+                              runner: CommandRunner, limits: ResourceLimits,
+                              source_date_epoch: int) -> dict:
+    """Prepare one pinned Fedora kernel SRPM in the dedicated rootless builder.
+
+    `%prep` is executable package code. Production callers must use BoundedRunner
+    inside the pinned container; this function provides the fixed command plan.
+    """
+    validate_entry(entry)
+    _safe_build_path(stage)
+    if not stage.is_dir() or stage.is_symlink():
+        raise BuildError("recovery source staging directory missing")
+    if type(limits.jobs) is not int or limits.jobs < 1 or type(limits.memory_bytes) is not int or limits.memory_bytes < 4 * GIB:
+        raise BuildError("bounded recovery source limits required")
+    if isinstance(runner, BoundedRunner) and runner.workspace != stage:
+        raise BuildError("bounded runner workspace must match recovery source stage")
+    _file_identity(srpm, entry["kernel_srpm_sha256"])
+    for name in ("kernel.src.rpm", "rpm-topdir", "source", "source-logs"):
+        path = stage / name
+        if path.exists() or path.is_symlink():
+            raise BuildError(f"recovery source stage already contains {name}")
+    env = _build_env_for_stage(stage, source_date_epoch)
+    staged_srpm = stage / "kernel.src.rpm"
+    shutil.copyfile(srpm, staged_srpm)
+    _file_identity(staged_srpm, entry["kernel_srpm_sha256"])
+    rpm_root = stage / "rpm-topdir"
+    for name in ("BUILD", "SOURCES", "SPECS", "tmp"):
+        (rpm_root / name).mkdir(parents=True, exist_ok=True)
+    log_dir = stage / "source-logs"
+    log_dir.mkdir()
+    macro = ("--define", f"_topdir {rpm_root}", "--define", f"_tmppath {rpm_root / 'tmp'}")
+
+    def execute(command: Command, phase: str, timeout_s: int) -> Path:
+        _validate_recovery_source_command(command, phase, stage)
+        log = log_dir / f"{phase}.log"
+        runner.run(command, phase=phase, log=log, timeout_s=timeout_s,
+                   env=env, limits=limits, on_activity=lambda _phase, _bytes, _objects: None)
+        return log
+
+    query_log = execute(Command(("rpm", "-qp", "--qf", "%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}\\n", str(staged_srpm)), stage),
+                        "query-recovery-srpm", 60)
+    if query_log.stat().st_size > 4096:
+        raise BuildError("recovery source RPM identity output too large")
+    try:
+        identity = query_log.read_text(encoding="ascii").strip()
+    except (OSError, UnicodeError) as exc:
+        raise BuildError("invalid recovery source RPM identity") from exc
+    if identity != entry["kernel_source_nevra"]:
+        raise BuildError("recovery source RPM NEVRA differs from reviewed baseline")
+    execute(Command(("rpm", *macro, "-i", str(staged_srpm)), stage),
+            "unpack-recovery-srpm", 300)
+    specs = list((rpm_root / "SPECS").glob("*.spec"))
+    if len(specs) != 1 or specs[0].is_symlink() or not specs[0].is_file():
+        raise BuildError("recovery SRPM must contain one regular spec")
+    spec_sha256 = sha256_file(specs[0])
+    execute(Command(("rpmbuild", "-bp", *macro, str(specs[0])), stage),
+            "prepare-recovery-source", 3600)
+    if sha256_file(specs[0]) != spec_sha256:
+        raise BuildError("recovery spec changed during preparation")
+    candidates = [item for item in (rpm_root / "BUILD").glob("**/Makefile")
+                  if len(item.relative_to(rpm_root / "BUILD").parts) <= 5
+                  and not item.is_symlink() and item.is_file()
+                  and (item.parent / "Kbuild").is_file()
+                  and (item.parent / "Kconfig").is_file()
+                  and (item.parent / "arch/x86/Makefile").is_file()
+                  and (item.parent / "init/main.c").is_file()]
+    if len(candidates) != 1:
+        raise BuildError("recovery SRPM prep must yield exactly one x86 kernel source tree")
+    source = stage / "source"
+    candidate = candidates[0].parent
+    if candidate.is_symlink() or not candidate.resolve().is_relative_to(rpm_root / "BUILD"):
+        raise BuildError("prepared kernel source escapes build area")
+    for item in candidate.rglob("*"):
+        if item.is_symlink():
+            if os.path.isabs(os.readlink(item)):
+                raise BuildError("prepared kernel source contains an absolute symlink")
+            try:
+                target = item.resolve(strict=True)
+            except (OSError, RuntimeError) as exc:
+                raise BuildError("prepared kernel source contains a broken symlink") from exc
+            if not target.is_relative_to(candidate.resolve()):
+                raise BuildError("prepared kernel source symlink escapes source tree")
+        elif not item.is_file() and not item.is_dir():
+            raise BuildError("prepared kernel source contains a special file")
+    source_tree_sha256 = _tree_hash(candidate, excluded_paths=frozenset())
+    candidate.rename(source)
+    return {"schema_version": 1, "kernel_srpm_sha256": entry["kernel_srpm_sha256"],
+            "kernel_source_nevra": identity, "spec_sha256": spec_sha256,
+            "source": str(source), "source_tree_sha256": source_tree_sha256,
+            "source_date_epoch": source_date_epoch}
+
+
+def run_recovery_kernel_stage(build: KernelBuild, *, base_config: bytes,
+                              fragment: bytes, staged_config_sha256: str,
+                              profile: dict, runner: CommandRunner,
+                              limits: ResourceLimits, source_date_epoch: int,
+                              log_dir: Path) -> dict:
+    """Use the existing bounded command adapter for one staged kernel build.
+
+    The caller must provide a source tree extracted from the reviewed Fedora
+    SRPM, a locked builder environment and an already staged recovery rootfs.
+    This stage does not publish an image or inspect the initramfs.
+    """
+    _safe_build_path(log_dir)
+    stage = build.build_dir.parent
+    if (not stage.is_dir() or log_dir.parent != stage
+            or build.source.parent != stage or build.sysroot.parent != stage
+            or build.output_dir.parent != stage):
+        raise BuildError("recovery kernel paths must share one staging directory")
+    if (type(limits.jobs) is not int or limits.jobs < 1
+            or type(limits.cpus) is not int or limits.cpus < 1
+            or type(limits.memory_bytes) is not int or limits.memory_bytes < 4 * GIB
+            or build.jobs != limits.jobs):
+        raise BuildError("recovery kernel jobs must match bounded runner limits")
+    validate_profile(profile)
+    if log_dir.exists() or log_dir.is_symlink():
+        raise BuildError("recovery kernel log directory must be new")
+    env = _build_env_for_stage(stage, source_date_epoch)
+    config = build.stage_recovery_config(base_config, fragment, staged_config_sha256)
+    log_dir.mkdir(parents=True)
+
+    def execute(command: Command, phase: str, timeout_s: int) -> None:
+        _validate_command(command)
+        runner.run(command, phase=phase, log=log_dir / f"{phase}.log",
+                   timeout_s=timeout_s, env=env, limits=limits,
+                   on_activity=lambda _phase, _bytes, _objects: None)
+
+    execute(build.recovery_configure_plan(staged_config_sha256)[0],
+            "configure-recovery", 1800)
+    final_config = validate_recovery_final_config(config, profile)
+    execute(build.kernel_release_plan()[0], "kernel-release", 30)
+    release_log = log_dir / "kernel-release.log"
+    if release_log.stat().st_size > 4096:
+        raise BuildError("kernel release output too large")
+    try:
+        release = release_log.read_text(encoding="ascii").strip()
+    except (OSError, UnicodeError) as exc:
+        raise BuildError("invalid kernel release output") from exc
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,127}", release):
+        raise BuildError("invalid kernel release output")
+    if validate_recovery_final_config(config, profile) != final_config:
+        raise BuildError("recovery kernel config changed while reading release")
+    compile_command, install_command = build.recovery_compile_plan(profile)
+    validate_recovery_final_config(config, profile)
+    execute(compile_command, "compile-recovery", 8 * 3600)
+    if validate_recovery_final_config(config, profile) != final_config:
+        raise BuildError("recovery kernel config changed during compilation")
+    execute(install_command, "install-recovery-modules", 1800)
+    if validate_recovery_final_config(config, profile) != final_config:
+        raise BuildError("recovery kernel config changed during compilation")
+
+    modules_root = build.sysroot / "lib" / "modules"
+    if modules_root.is_symlink() or not modules_root.is_dir():
+        raise BuildError("installed recovery module root missing")
+    releases = list(modules_root.iterdir())
+    if (len(releases) != 1 or releases[0].is_symlink() or not releases[0].is_dir()
+            or releases[0].name != release):
+        raise BuildError("recovery rootfs must contain one matching kernel release")
+    module_audit = audit_recovery_modules(config, build.sysroot, release, profile)
+    artifacts = build.artifacts(release)
+    output_hashes = {}
+    for name in ("kernel", "vmlinux", "module_symvers", "system_map"):
+        path = artifacts[name]
+        if path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
+            raise BuildError(f"recovery kernel output missing: {name}")
+        output_hashes[name] = sha256_file(path)
+    return {"schema_version": 1, "staged_config_sha256": staged_config_sha256,
+            "source_date_epoch": source_date_epoch,
+            "final_config": final_config, "kernel_release": release,
+            "outputs": output_hashes, "module_audit": module_audit}
+
+
+def run_recovery_initramfs_stage(build: KernelBuild, *, kernel_record: dict,
+                                 dracut_config: Path, dracut_config_sha256: str,
+                                 profile: dict, runner: CommandRunner,
+                                 limits: ResourceLimits, source_date_epoch: int,
+                                 log_dir: Path) -> dict:
+    """Generate an initramfs from the exact audited recovery kernel stage.
+
+    The result remains private staging evidence. Archive contents and boot
+    behavior require later checks before image publication.
+    """
+    stage = build.build_dir.parent
+    _safe_build_path(stage)
+    _safe_build_path(log_dir)
+    if (not stage.is_dir() or build.source.parent != stage
+            or build.sysroot.parent != stage or build.output_dir.parent != stage
+            or log_dir.parent != stage or build.build_dir.parent != stage):
+        raise BuildError("recovery initramfs paths must share one staging directory")
+    if (not isinstance(kernel_record, dict) or type(kernel_record.get("schema_version")) is not int
+            or kernel_record["schema_version"] != 1
+            or type(kernel_record.get("source_date_epoch")) is not int
+            or kernel_record["source_date_epoch"] != source_date_epoch):
+        raise BuildError("recovery kernel record does not match initramfs stage")
+    if (type(limits.jobs) is not int or limits.jobs < 1
+            or type(limits.cpus) is not int or limits.cpus < 1
+            or type(limits.memory_bytes) is not int or limits.memory_bytes < 4 * GIB
+            or build.jobs != limits.jobs):
+        raise BuildError("recovery initramfs jobs must match bounded runner limits")
+    if isinstance(runner, BoundedRunner) and runner.workspace != stage:
+        raise BuildError("bounded runner workspace must match recovery initramfs stage")
+    validate_profile(profile)
+    release = kernel_record.get("kernel_release")
+    if not isinstance(release, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,127}", release):
+        raise BuildError("invalid recovery kernel release record")
+    config = build.build_dir / ".config"
+    if validate_recovery_final_config(config, profile) != kernel_record.get("final_config"):
+        raise BuildError("final recovery config differs from kernel stage")
+    audit = audit_recovery_modules(config, build.sysroot, release, profile)
+    if audit != kernel_record.get("module_audit"):
+        raise BuildError("recovery module tree differs from kernel stage")
+    outputs = kernel_record.get("outputs")
+    if not isinstance(outputs, dict) or set(outputs) != {"kernel", "vmlinux", "module_symvers", "system_map"}:
+        raise BuildError("invalid recovery kernel output record")
+    artifacts = build.artifacts(release)
+    for name in outputs:
+        path = artifacts[name]
+        if path.is_symlink() or not path.is_file() or sha256_file(path) != outputs[name]:
+            raise BuildError(f"recovery kernel output differs from kernel stage: {name}")
+    _file_identity(dracut_config, dracut_config_sha256)
+    if dracut_config.stat().st_size > MAX_RECOVERY_DRACUT_CONFIG_BYTES:
+        raise BuildError("recovery dracut config exceeds size limit")
+    validate_recovery_dracut_config(dracut_config.read_bytes(), profile)
+    if (not build.output_dir.is_dir() or build.output_dir.is_symlink()
+            or artifacts["initramfs"].exists() or artifacts["initramfs"].is_symlink()):
+        raise BuildError("recovery initramfs output path must be new")
+    if log_dir.exists() or log_dir.is_symlink():
+        raise BuildError("recovery initramfs log directory must be new")
+    confdir = stage / "dracut-conf.d"
+    if confdir.exists() or confdir.is_symlink():
+        raise BuildError("recovery dracut confdir must be new")
+    env = _build_env_for_stage(stage, source_date_epoch)
+    confdir.mkdir()
+    log_dir.mkdir()
+    command = build.initramfs_plan(release, dracut_config=dracut_config,
+                                   dracut_confdir=confdir)[0]
+    _validate_command(command)
+    runner.run(command, phase="initramfs-recovery", log=log_dir / "initramfs-recovery.log",
+               timeout_s=1800, env=env, limits=limits,
+               on_activity=lambda _phase, _bytes, _objects: None)
+    image = artifacts["initramfs"]
+    if image.is_symlink() or not image.is_file() or image.stat().st_size == 0:
+        raise BuildError("recovery initramfs output missing or empty")
+    if (validate_recovery_final_config(config, profile) != kernel_record["final_config"]
+            or audit_recovery_modules(config, build.sysroot, release, profile) != audit):
+        raise BuildError("recovery kernel inputs changed during initramfs generation")
+    for name in outputs:
+        path = artifacts[name]
+        if path.is_symlink() or not path.is_file() or sha256_file(path) != outputs[name]:
+            raise BuildError(f"recovery kernel output changed during initramfs generation: {name}")
+    _file_identity(dracut_config, dracut_config_sha256)
+    image_sha256 = sha256_file(image)
+    inspection = stage / "initramfs-inspect"
+    if inspection.exists() or inspection.is_symlink():
+        raise BuildError("recovery initramfs inspection directory must be new")
+    inspection.mkdir()
+    unpack = Command(("lsinitrd", "--unpack", str(image)), inspection)
+    _validate_recovery_initramfs_unpack(unpack, stage)
+    runner.run(unpack, phase="audit-recovery-initramfs",
+               log=log_dir / "audit-recovery-initramfs.log", timeout_s=600,
+               env=env, limits=limits,
+               on_activity=lambda _phase, _bytes, _objects: None)
+    if sha256_file(image) != image_sha256:
+        raise BuildError("recovery initramfs changed during inspection")
+    archive_audit = audit_recovery_initramfs_tree(inspection, release, profile)
+    return {"schema_version": 1, "kernel_release": release,
+            "kernel_config_sha256": audit["kernel_config_sha256"],
+            "module_files_digest": audit["module_files_digest"],
+            "dracut_config_sha256": dracut_config_sha256,
+            "initramfs_sha256": image_sha256,
+            "initramfs_bytes": image.stat().st_size,
+            "archive_audit": archive_audit,
+            "source_date_epoch": source_date_epoch}
+
+
+def _build_env_for_stage(stage: Path, source_date_epoch: int) -> dict[str, str]:
+    if type(source_date_epoch) is not int or source_date_epoch < 0:
+        raise BuildError("SOURCE_DATE_EPOCH must be a nonnegative integer")
+    _safe_build_path(stage)
+    try:
+        timestamp = datetime.fromtimestamp(source_date_epoch, timezone.utc).strftime(
+            "%a %b %d %H:%M:%S UTC %Y")
+    except (OverflowError, OSError, ValueError) as exc:
+        raise BuildError("SOURCE_DATE_EPOCH is outside supported timestamps") from exc
+    build_home = stage / "build-home"
+    build_home.mkdir(exist_ok=True)
+    return {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": str(build_home),
+            "LC_ALL": "C", "TZ": "UTC", "SOURCE_DATE_EPOCH": str(source_date_epoch),
+            "KCFLAGS": f"-ffile-prefix-map={stage}=/usr/src/quirkbench",
+            "CFLAGS": f"-O2 -g -ffile-prefix-map={stage}=/usr/src/quirkbench",
+            "CXXFLAGS": f"-O2 -g -ffile-prefix-map={stage}=/usr/src/quirkbench",
+            "KBUILD_BUILD_USER": "quirkbench", "KBUILD_BUILD_HOST": "builder",
+            "KBUILD_BUILD_VERSION": "1",
+            "KBUILD_BUILD_TIMESTAMP": timestamp}
 
 
 def _extract_archive(archive: Path, destination: Path) -> Path:
@@ -477,16 +819,7 @@ class BuildPipeline:
         self._report(phase, f"completed; {latest_bytes} output bytes, {latest_objects} object mentions")
 
     def _build_env(self, stage: Path, inputs: BuildInputs) -> dict[str, str]:
-        build_home = stage / "build-home"
-        build_home.mkdir(exist_ok=True)
-        return {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": str(build_home),
-                "LC_ALL": "C", "TZ": "UTC", "SOURCE_DATE_EPOCH": str(inputs.source_date_epoch),
-                "KCFLAGS": f"-ffile-prefix-map={stage}=/usr/src/quirkbench",
-                "CFLAGS": f"-O2 -g -ffile-prefix-map={stage}=/usr/src/quirkbench",
-                "CXXFLAGS": f"-O2 -g -ffile-prefix-map={stage}=/usr/src/quirkbench",
-                "KBUILD_BUILD_USER": "quirkbench", "KBUILD_BUILD_HOST": "builder",
-                "KBUILD_BUILD_VERSION": "1",
-                "KBUILD_BUILD_TIMESTAMP": datetime.fromtimestamp(inputs.source_date_epoch, timezone.utc).strftime("%a %b %d %H:%M:%S UTC %Y")}
+        return _build_env_for_stage(stage, inputs.source_date_epoch)
 
     def build(self, inputs: BuildInputs) -> dict[str, Artifact]:
         if self.controller is not None and self.campaign_id is not None:
@@ -623,7 +956,10 @@ class BuildPipeline:
         release = release_log.strip()
         if not re.fullmatch(r"[A-Za-z0-9._+-]+", release):
             raise BuildError("invalid kernel release from source tree")
-        self._run(build.initramfs_plan(release, dracut_config=inputs.dracut_config)[0],
+        dracut_confdir = stage / "dracut-conf.d"
+        dracut_confdir.mkdir()
+        self._run(build.initramfs_plan(release, dracut_config=inputs.dracut_config,
+                                       dracut_confdir=dracut_confdir)[0],
                   stage, "initramfs", inputs, limits, 1800)
         userspace_dest = stage / "userspace-dest"
         userspace_dest.mkdir()

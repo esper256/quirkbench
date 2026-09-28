@@ -20,6 +20,8 @@ from .product_contracts import _pairs
 from .store import sync_directory
 
 MAX_DOCUMENT = 1024 * 1024
+MAX_RPM_BYTES = 8 * 1024**3
+MAX_CLOSURE_BYTES = 128 * 1024**3
 LOCK_FIELDS = {'schema_version', 'baseline_id', 'baseline_digest',
                'protection_policy_digest', 'rpm_snapshot_sha256',
                'target_rpm_lock_sha256', 'recovery_fragment_sha256'}
@@ -144,6 +146,55 @@ def _run(argv, timeout_s, *, log=None):
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise BuildError(f'locked rootfs command failed: {argv[0]}') from exc
     return result.stdout
+
+
+def inspect_local_rpm_closure(entry: dict, directory: Path, *, runner=_run) -> tuple[dict, bytes]:
+    """Read a candidate local RPM set for catalog review, without retaining it.
+
+    This only checks names, NEVRAs and bytes against an entry's package list.
+    Production still requires a separately reviewed catalog and retained CAS
+    closure through ``preflight`` before any DNF transaction.
+    """
+    entry = validate_entry(entry)
+    directory = Path(directory)
+    if (not directory.is_absolute() or directory.is_symlink()
+            or not directory.is_dir() or directory.resolve() != directory):
+        raise BuildError('RPM inspection requires a canonical directory')
+    files = sorted(directory.iterdir(), key=lambda path: path.name)
+    if not 1 <= len(files) <= 8192 or any(
+            path.is_symlink() or not path.is_file() or path.suffix != '.rpm'
+            for path in files):
+        raise BuildError('RPM directory must contain only bounded regular RPM files')
+    sizes = [path.stat().st_size for path in files]
+    if any(size < 1 or size > MAX_RPM_BYTES for size in sizes) or sum(sizes) > MAX_CLOSURE_BYTES:
+        raise BuildError('RPM directory exceeds retained closure byte bounds')
+    expected = {(item['name'], item['nevra']) for item in entry['packages']}
+    if len(files) != len(expected):
+        raise BuildError('RPM directory count differs from reviewed package list')
+    packages = []
+    seen = set()
+    query = '%{NAME}\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\t%{ARCH}\n'
+    for path in files:
+        before = path.stat()
+        rows = runner(['rpm', '-qp', '--qf', query, str(path)], 30).splitlines()
+        if len(rows) != 1 or len(rows[0].split('\t')) != 3:
+            raise BuildError('RPM header query returned an ambiguous identity')
+        name, evr, arch = rows[0].split('\t')
+        nevra = f'{name}-{evr}.{arch}'
+        if (name, nevra) not in expected or nevra in seen:
+            raise BuildError('RPM header differs from reviewed package list')
+        seen.add(nevra)
+        file_digest = sha256_file(path)
+        after = path.stat()
+        identity = lambda stat: (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+        if identity(before) != identity(after):
+            raise BuildError('RPM file changed during inspection')
+        packages.append({'name': name, 'nevra': nevra, 'sha256': file_digest})
+    packages.sort(key=lambda item: (item['name'], item['nevra']))
+    snapshot = validate_snapshot({'schema_version': 1, 'packages': packages})
+    target_lock = ('\n'.join(sorted(_rpm_row(item['name'], item['nevra'])
+                                     for item in packages)) + '\n').encode()
+    return snapshot, target_lock
 
 
 def _install(catalog, lock, store, output, *, runner=_run, marker=Path('/etc/quirkbench-container'),
