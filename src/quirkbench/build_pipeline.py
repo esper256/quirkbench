@@ -265,7 +265,8 @@ class BoundedRunner:
         _require_container()
         if phase == "audit-recovery-initramfs":
             _validate_recovery_initramfs_unpack(command, self.workspace)
-        elif phase in {"query-recovery-srpm", "unpack-recovery-srpm", "prepare-recovery-source"}:
+        elif phase in {"query-recovery-srpm", "check-recovery-rpm-macros",
+                       "unpack-recovery-srpm", "prepare-recovery-source"}:
             _validate_recovery_source_command(command, phase, self.workspace)
         elif phase in {"compile-userspace", "install-userspace"}:
             _validate_userspace_command(command, self.workspace)
@@ -337,6 +338,8 @@ def _validate_recovery_source_command(command: Command, phase: str, stage: Path)
     macro = ("--define", f"_topdir {rpm_root}", "--define", f"_tmppath {rpm_root / 'tmp'}")
     if phase == "query-recovery-srpm":
         expected = ("rpm", "-qp", "--qf", "%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}\\n", str(srpm))
+    elif phase == "check-recovery-rpm-macros":
+        expected = ("rpm", "--eval", "%{defined py3_shebang_fix}")
     elif phase == "unpack-recovery-srpm":
         expected = ("rpm", *macro, "-i", str(srpm))
     elif phase == "prepare-recovery-source":
@@ -413,6 +416,16 @@ def run_recovery_source_stage(*, srpm: Path, entry: dict, stage: Path,
         raise BuildError("invalid recovery source RPM identity") from exc
     if identity != entry["kernel_source_nevra"]:
         raise BuildError("recovery source RPM NEVRA differs from reviewed baseline")
+    macro_log = execute(Command(("rpm", "--eval", "%{defined py3_shebang_fix}"), stage),
+                        "check-recovery-rpm-macros", 60)
+    if macro_log.stat().st_size > 32:
+        raise BuildError("dedicated Fedora builder lacks required RPM macros")
+    try:
+        macro_available = macro_log.read_text(encoding="ascii").strip() == "1"
+    except (OSError, UnicodeError) as exc:
+        raise BuildError("invalid Fedora builder RPM macro response") from exc
+    if not macro_available:
+        raise BuildError("dedicated Fedora builder lacks required RPM macros")
     execute(Command(("rpm", *macro, "-i", str(staged_srpm)), stage),
             "unpack-recovery-srpm", 300)
     specs = list((rpm_root / "SPECS").glob("*.spec"))

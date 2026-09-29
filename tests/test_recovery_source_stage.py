@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from quirkbench.build import BuildError, Command
-from quirkbench.build_pipeline import (ResourceLimits, _validate_recovery_source_command,
+from quirkbench.build_pipeline import (BoundedRunner, ResourceLimits, _validate_recovery_source_command,
                                        run_recovery_source_stage)
 
 
@@ -17,10 +17,11 @@ LIMITS = ResourceLimits(1, 4 * 1024**3, 1)
 
 
 class FakeRunner:
-    def __init__(self, *, identity=None, two_specs=False, no_source=False, fail_prep=False,
+    def __init__(self, *, identity=None, macro_available=True, two_specs=False, no_source=False, fail_prep=False,
                  escaping_link=False):
         self.phases = []
         self.identity = identity
+        self.macro_available = macro_available
         self.two_specs = two_specs
         self.no_source = no_source
         self.fail_prep = fail_prep
@@ -32,6 +33,8 @@ class FakeRunner:
         log.write_text(phase + "\n")
         if phase == "query-recovery-srpm":
             log.write_text((self.identity or ENTRY["kernel_source_nevra"]) + "\n")
+        elif phase == "check-recovery-rpm-macros":
+            log.write_text("1\n" if self.macro_available else "0\n")
         elif phase == "unpack-recovery-srpm":
             specs = stage / "rpm-topdir/SPECS"
             (specs / "kernel.spec").write_text("synthetic spec")
@@ -70,13 +73,15 @@ def test_prepares_exact_reviewed_source_and_records_identity(tmp_path):
     srpm, stage, entry = fixture(tmp_path)
     runner = FakeRunner()
     record = run(srpm, stage, entry, runner)
-    assert runner.phases == ["query-recovery-srpm", "unpack-recovery-srpm", "prepare-recovery-source"]
+    assert runner.phases == ["query-recovery-srpm", "check-recovery-rpm-macros",
+                             "unpack-recovery-srpm", "prepare-recovery-source"]
     assert record["kernel_srpm_sha256"] == entry["kernel_srpm_sha256"]
     assert record["kernel_source_nevra"] == entry["kernel_source_nevra"]
     assert len(record["source_tree_sha256"]) == 64
     assert (stage / "source/arch/x86/Makefile").is_file()
     assert sorted(path.name for path in (stage / "source-logs").iterdir()) == [
-        "prepare-recovery-source.log", "query-recovery-srpm.log", "unpack-recovery-srpm.log"]
+        "check-recovery-rpm-macros.log", "prepare-recovery-source.log",
+        "query-recovery-srpm.log", "unpack-recovery-srpm.log"]
 
 
 def test_wrong_hash_and_identity_stop_before_prep(tmp_path):
@@ -94,10 +99,11 @@ def test_wrong_hash_and_identity_stop_before_prep(tmp_path):
 
 
 @pytest.mark.parametrize("runner,match,phases", [
-    (FakeRunner(two_specs=True), "one regular spec", ["query-recovery-srpm", "unpack-recovery-srpm"]),
-    (FakeRunner(no_source=True), "exactly one x86 kernel", ["query-recovery-srpm", "unpack-recovery-srpm", "prepare-recovery-source"]),
-    (FakeRunner(fail_prep=True), "synthetic prep failure", ["query-recovery-srpm", "unpack-recovery-srpm", "prepare-recovery-source"]),
-    (FakeRunner(escaping_link=True), "absolute symlink", ["query-recovery-srpm", "unpack-recovery-srpm", "prepare-recovery-source"]),
+    (FakeRunner(macro_available=False), "lacks required RPM macros", ["query-recovery-srpm", "check-recovery-rpm-macros"]),
+    (FakeRunner(two_specs=True), "one regular spec", ["query-recovery-srpm", "check-recovery-rpm-macros", "unpack-recovery-srpm"]),
+    (FakeRunner(no_source=True), "exactly one x86 kernel", ["query-recovery-srpm", "check-recovery-rpm-macros", "unpack-recovery-srpm", "prepare-recovery-source"]),
+    (FakeRunner(fail_prep=True), "synthetic prep failure", ["query-recovery-srpm", "check-recovery-rpm-macros", "unpack-recovery-srpm", "prepare-recovery-source"]),
+    (FakeRunner(escaping_link=True), "absolute symlink", ["query-recovery-srpm", "check-recovery-rpm-macros", "unpack-recovery-srpm", "prepare-recovery-source"]),
 ])
 def test_bad_prep_keeps_logs_without_publishing_source(tmp_path, runner, match, phases):
     srpm, stage, entry = fixture(tmp_path)
@@ -118,3 +124,14 @@ def test_preexisting_stage_and_wrong_command_are_rejected(tmp_path):
     with pytest.raises(BuildError, match="does not match locked plan"):
         _validate_recovery_source_command(Command(("sh", "-c", "echo bad"), stage),
                                           "query-recovery-srpm", stage)
+
+
+def test_bounded_runner_routes_macro_check_through_fixed_source_allowlist(tmp_path, monkeypatch):
+    stage = tmp_path / 'stage'
+    stage.mkdir()
+    monkeypatch.setattr('quirkbench.build_pipeline._require_container', lambda: None)
+    command = Command(('rpm', '--eval', '%{defined py3_shebang_fix}'), stage)
+    with pytest.raises(BuildError, match='command timeout'):
+        BoundedRunner(stage).run(command, phase='check-recovery-rpm-macros',
+                                 log=stage / 'macro.log', timeout_s=0, env={},
+                                 limits=LIMITS, on_activity=lambda *_: None)

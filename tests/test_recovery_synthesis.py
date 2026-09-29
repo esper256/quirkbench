@@ -31,7 +31,8 @@ class CombinedRunner:
     def run(self, command, *, phase, log, timeout_s, env, limits, on_activity):
         self.phases.append(phase)
         target = self.source if phase in {
-            "query-recovery-srpm", "unpack-recovery-srpm", "prepare-recovery-source"
+            "query-recovery-srpm", "check-recovery-rpm-macros",
+            "unpack-recovery-srpm", "prepare-recovery-source"
         } else self.kernel
         target.run(command, phase=phase, log=log, timeout_s=timeout_s,
                    env=env, limits=limits, on_activity=on_activity)
@@ -99,7 +100,8 @@ def test_locked_rootfs_source_and_kernel_share_one_stage(tmp_path, monkeypatch):
     assert record["source_date_epoch"] == recipe["source_date_epoch"]
     assert record["source_stage"]["source"] == str(stage / "source")
     assert record["kernel_stage"]["kernel_release"] == "6.12.0-test"
-    assert runner.phases == ["query-recovery-srpm", "unpack-recovery-srpm",
+    assert runner.phases == ["query-recovery-srpm", "check-recovery-rpm-macros",
+                             "unpack-recovery-srpm",
                              "prepare-recovery-source", "configure-recovery",
                              "kernel-release", "compile-recovery",
                              "install-recovery-modules"]

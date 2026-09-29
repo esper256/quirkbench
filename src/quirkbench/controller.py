@@ -16,7 +16,7 @@ import time
 import uuid
 from .contracts import sha256, CapabilityReport, Checkpoint, Conflict, ContractError, Experiment, Progress, Result, canonical, digest, identifier
 from .store import ArtifactStore, StoragePressure, atomic_write, sync_directory
-from .operations import operation_intent, operation_response
+from .operations import operation_intent, operation_response, recovery_rootfs_arguments
 
 MIGRATIONS = ["""
 CREATE TABLE devices(id TEXT PRIMARY KEY, boot TEXT NOT NULL, generation INTEGER NOT NULL, report TEXT NOT NULL);
@@ -145,6 +145,62 @@ class _LifecycleOwner:
             db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
                        (operation_id, now, 'claimed', canonical({'stage': stage, 'worker_epoch': self.epoch,
                                                                   'worker_generation': generation, 'worker_unit': unit}).decode()))
+            return controller._operation_status(db, operation_id)
+
+    def resume_operation(self, operation_id):
+        """Explicitly requeue a reconciled, pure image preparation after loss.
+
+        A new claim gets a fresh private directory and generation. Partial public
+        outputs remain attached; the old stage is never reused as an input.
+        """
+        if self.closed or self.controller._lifecycle_owner is not self:
+            raise Conflict('controller lifecycle ownership ended')
+        controller = self.controller
+        operation_id = identifier(operation_id)
+        with controller.transaction() as db:
+            row = db.execute('SELECT * FROM operations WHERE id=?', (operation_id,)).fetchone()
+            if row is None:
+                raise ContractError('unknown operation')
+            if (row['state'] != 'INTERRUPTED' or row['kind'] != 'image_prepare'
+                    or row['worker_unit'] is not None or row['worker_boot_id'] is not None
+                    or row['worker_epoch'] is not None):
+                raise Conflict('interrupted image worker requires stop reconciliation')
+            saved_input = row['input_digest']
+            saved_generation = row['worker_generation']
+            refs = [item['digest'] for item in db.execute(
+                "SELECT digest FROM operation_refs WHERE operation=? AND role IN ('input','source') ORDER BY role,digest",
+                (operation_id,))]
+        for value in refs:
+            controller.store.verify(value)
+        intent = json.loads(controller.store.get(saved_input))
+        if (intent.get('kind') != 'image_prepare' or intent.get('local_paths')
+                or intent.get('source_refs')):
+            raise Conflict('image preparation has mutable local or source inputs')
+        if intent.get('arguments') != {}:
+            try:
+                recovery_rootfs_arguments(intent)
+            except ContractError as exc:
+                raise Conflict('image preparation has mutable or unbound inputs') from exc
+        with controller.transaction() as db:
+            current = db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
+            row = db.execute('SELECT * FROM operations WHERE id=?', (operation_id,)).fetchone()
+            if (current != self.epoch or row is None or row['state'] != 'INTERRUPTED'
+                    or row['kind'] != 'image_prepare' or row['input_digest'] != saved_input
+                    or row['worker_generation'] != saved_generation
+                    or row['worker_unit'] is not None or row['worker_boot_id'] is not None
+                    or row['worker_epoch'] is not None):
+                raise Conflict('operation changed before explicit resume')
+            current_refs = [item['digest'] for item in db.execute(
+                "SELECT digest FROM operation_refs WHERE operation=? AND role IN ('input','source') ORDER BY role,digest",
+                (operation_id,))]
+            if current_refs != refs:
+                raise Conflict('operation inputs changed before explicit resume')
+            now = controller.clock()
+            db.execute("UPDATE operations SET state='QUEUED',queued_epoch=?,stage=NULL,stage_dir=NULL,"
+                       "started=NULL,deadline=NULL,heartbeat=NULL,progress=NULL,updated=? WHERE id=?",
+                       (self.epoch, now, operation_id))
+            db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
+                       (operation_id, now, 'resumed', canonical({'worker_epoch': self.epoch}).decode()))
             return controller._operation_status(db, operation_id)
 
     def dispatch(self, operation_id, *, stage, deadline, services):

@@ -139,6 +139,8 @@ class SystemdUserWorkerServices:
         argv = ['systemd-run', '--user', '--no-ask-password', '--no-block',
                 '--remain-after-exit', '--expand-environment=no', f'--unit={unit}',
                 '--property=KillMode=control-group', '--property=Restart=no',
+                '--property=CPUQuota=400%', '--property=MemoryMax=4294967296',
+                '--property=MemorySwapMax=0', '--property=TasksMax=4096',
                 '--property=TimeoutStopSec=30s', f'--property=RuntimeMaxSec={int(remaining) + 1}s',
                 f'--working-directory={stage}', '--', str(program),
                 '--state', str(root), '--operation', operation, '--worker-epoch', str(epoch),
@@ -149,8 +151,33 @@ class SystemdUserWorkerServices:
             self._managed(observed)
             if observed['ActiveState'] not in ('active', 'activating'):
                 raise WorkerServiceError('worker launch did not reach an active unit')
+            self._bounded_cgroup(observed['ControlGroup'])
         except WorkerServiceError as exc:
             raise WorkerServiceError(str(exc), possibly_started=True) from exc
+
+    def _bounded_cgroup(self, group):
+        if (not group or not group.startswith('/') or '//' in group
+                or any(part in ('.', '..') for part in group.split('/'))):
+            raise WorkerServiceError('worker cgroup path is invalid')
+        root = self.cgroup_root
+        if root.is_symlink() or not root.is_dir() or not (root / 'cgroup.controllers').is_file():
+            raise WorkerServiceError('cgroup v2 hierarchy is unavailable')
+        path = root / group.lstrip('/')
+        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
+            raise WorkerServiceError('worker cgroup path escapes hierarchy')
+        try:
+            quota, period = (path / 'cpu.max').read_text().strip().split()
+            cpu_ok = (quota != 'max' and 0 < int(quota) <= 4 * int(period)
+                      and int(period) > 0)
+            memory = (path / 'memory.max').read_text().strip()
+            swap = (path / 'memory.swap.max').read_text().strip()
+            tasks = (path / 'pids.max').read_text().strip()
+            bounded = (cpu_ok and memory != 'max' and 0 < int(memory) <= 4 * 1024**3
+                       and swap == '0' and tasks != 'max' and 0 < int(tasks) <= 4096)
+        except (OSError, ValueError) as exc:
+            raise WorkerServiceError('worker cgroup resource limits are unreadable') from exc
+        if not bounded:
+            raise WorkerServiceError('worker cgroup resource limits are not enforced')
 
     def _empty_cgroup(self, group):
         if not group:

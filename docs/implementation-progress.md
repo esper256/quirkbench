@@ -1,8 +1,9 @@
 # Implementation progress after the handoff
 
-This log records bounded software packets against source commit
-`dca51b42d14dbf331a75d5212e19839141b2a825` plus the working-tree changes
-listed below. It does not advance a physical or release milestone. The image bytes
+This log records bounded software packets since source commit
+`dca51b42d14dbf331a75d5212e19839141b2a825`. The current checkout starts at
+`066f632e3f5303960cf8a01655c24fb891a78490` plus working-tree changes.
+It does not advance a physical or release milestone. The image bytes
 were not rebuilt, flashed or qualified. Tests use synthetic hardware trees.
 
 ## P0 — product contract fixtures
@@ -168,10 +169,23 @@ passed. No release qualification was run.
   (67 tests). No user service was started in this check.
 - P2b remains open. There is no installed worker executable, verified rootless
   container containment inside the owned cgroup, production dispatch caller,
-  explicit interrupted-work resume, source-writer reservation, or demonstrated
+  source-writer reservation, or demonstrated
   CLI-exit survival. The adapter's manager calls and stop proof have only been
   exercised with injected responses. No image bytes changed or hardware/release
   qualification ran.
+- A further local-only P2b step adds read-only worker claim verification against
+  the live SQLite epoch, exact operation generation/unit/boot/deadline, private
+  staging ancestry and the process's service cgroup. It does not grant
+  publication authority: the controller still fences reference commits. An
+  explicit owner API can requeue an interrupted `image_prepare` after verified
+  unit stop, retained CAS input checks and rejection of mutable local/source
+  inputs or arbitrary arguments. It preserves partial public outputs and uses a fresh stage and claim
+  generation. It is not yet exposed by a running service or wired to a worker
+  executable. Focused check: `.venv/bin/python -m pytest -q
+  tests/test_worker_claim.py tests/test_worker.py tests/test_worker_service.py
+  tests/test_operations.py` passed (50 tests). A review caught a generation race
+  across CAS verification; the commit now checks the original generation.
+  No downloads or image work ran.
 
 ## P2c — bounded operation event query (partial, 2026-09-28)
 
@@ -203,6 +217,13 @@ passed. No release qualification was run.
   -m pytest -q tests/test_operations.py tests/test_cli.py tests/test_monitor.py`
   passed (40 tests); `git diff --check` passed. Operation progress production still
   depends on the P2b worker path. No image bytes or release evidence changed.
+- The human `operation events` view now includes UTC timestamps and fixed
+  state/stage/generation/output-count facts for known events, plus the paging
+  cursor. It never prints arbitrary event document fields or output digests;
+  `--json` retains the bounded structured page. Focused check:
+  `.venv/bin/python -m pytest -q tests/test_operations.py tests/test_cli.py
+  tests/test_monitor.py` passed (41 tests). Event production still depends on
+  the P2b worker path. No image bytes or downloads changed.
 
 ## P2d — packaged target-asset foundation (partial, 2026-09-28)
 
@@ -377,6 +398,108 @@ passed. No release qualification was run.
 ## Remaining path to first flash and kernel issue
 
 ### P3a1 locked rootfs staging (partial, 2026-09-28)
+
+- A local-only Fedora 44 kernel-config pass exposed 15 legitimate mixed-case
+  Kconfig symbols rejected by the base/final config parsers. Both parsers now
+  accept them while the exact protected override set remains unchanged. The
+  retained Fedora config and recovery fragment merged deterministically to
+  SHA-256 `95d6cc99896aa934dc4582946566b8cca600b5b3e8fe1461f1080f22f3f92029`;
+  this is pre-`olddefconfig` and not a resolved kernel. An offline rootless
+  Podman `%prep` diagnostic applied Fedora's patch but failed at missing
+  `%py3_shebang_fix` before generated configs. The incomplete private stage,
+  exact command, log and status are retained under
+  `.quirkbench/inputs/fedora44-source-prep/`. The Containerfile now requests
+  the missing macro/config-generation packages; source staging checks the
+  shebang macro before unpacking. The old local builder image still lacks
+  them. Focused software check: `.venv/bin/python -m pytest -q
+  tests/test_recovery_source_stage.py tests/test_recovery_synthesis.py
+  tests/test_recovery_recipe.py tests/test_recovery_module_audit.py` passed
+  (72 tests). A boundary review caught the macro phase missing from the real
+  bounded-runner allowlist; it is now routed and covered. No package or image
+  download ran; source prep exit was 1.
+- A config-only `olddefconfig` on that incomplete patched tree exposed Fedora
+  Kconfig selectors that re-enabled `KEXEC_FILE` and `NVME_CORE`. The reviewed
+  fragment and final-config audit now also disable handover and four remote/loop
+  NVMe selectors. A second offline config pass exited 0 and passed the
+  protected final-config audit (resolved SHA-256
+  `1dec792a0cfa1312469e4ef52d5103ab2299e2efdf0d1feaac55ca810769d0a2`).
+  The exact command, old local builder identity, hashes and log are in
+  `.quirkbench/inputs/fedora44-source-prep/config-resolve-v2.status.json`.
+  This is provisional: `%prep` stopped before generated configs, so a complete
+  source build and module audit remain open. The changed fragment invalidates
+  the earlier candidate recipe/lock identity. No download or image build ran.
+- The rootfs Podman command planner now rereads the live worker claim before it
+  returns argv and checks the caller's service cgroup, claim generation, boot,
+  deadline and private stage. Staging accepts catalog and rootfs-lock CAS digests
+  instead of arbitrary host paths, reads their exact bytes through bounded
+  no-follow file descriptors, and copies only the selected immutable closure.
+  The remaining CAS objects are copied with no-follow handles, per-object and
+  aggregate byte limits, and a hash of the bytes actually staged.
+  This remains a command plan: there is no installed executable, container
+  launch, output publication or real rootfs. Focused check:
+  `.venv/bin/python -m pytest -q tests/test_recovery_podman.py
+  tests/test_worker_claim.py tests/test_recovery_rootfs.py` passed (35 tests).
+  No downloads ran.
+- The rootfs planner now binds its derived builder config ID to the current
+  operation's immutable input record, fetched by the claim's SQLite input
+  digest. It checks that the staged catalog and rootfs lock match that record
+  and that the referenced builder OCI archive remains in controller CAS with
+  exact bytes. A different image with the same Fedora base marker, old unbound
+  operation, changed archive and stale claim fail closed. This preserves v1
+  recipe/catalog wire fields. A bounded read-only OCI inspector now confirms
+  the archive's sole manifest, exact derived config digest, x86-64/Linux config
+  and each referenced layer digest before planning execution. It accepted the
+  retained older candidate archive, with a record at
+  `.quirkbench/inputs/fedora44-builder-candidate/oci-inspection-v1.status.json`.
+  This does not launch an image. Explicit resume accepts the same exact, retained
+  rootfs input binding after worker stop; arbitrary arguments and mutable
+  source paths remain blocked. Focused check: `.venv/bin/python -m pytest -q
+  tests/test_recovery_podman.py tests/test_worker_claim.py
+  tests/test_worker.py tests/test_operations.py` passed (51 tests).
+  The new Python module changes the captured recovery runtime source revision;
+  any older candidate record is unqualified for these bytes. No download or
+  image build ran.
+- A rootless Fedora 44 builder candidate was built from the pinned base image
+  with a Containerfile guard that rejects a moving tag and a mismatched Fedora
+  release. The build succeeded; its local manifest/config identities, 595-RPM
+  installed lock, toolchain lock and retained 402 MiB OCI archive are recorded
+  in [the candidate input record](fedora44-input-candidate.md). A read-only
+  audit of the 248 candidate recovery RPM payloads found providers for 11
+  essential paths. The installed baseline catalog remains empty, and no rootfs,
+  kernel or disk image was built or qualified. The named Distrobox and
+  controller user-service integration remain open. Focused check:
+  `.venv/bin/python -m pytest -q tests/test_build_pipeline.py` passed
+  (14 tests); the real rootless builder build succeeded, while separate
+  tag-based and wrong-release preflight builds failed before DNF; `git diff
+  --check` passed.
+- The existing `environments/assemble.ini` Distrobox profile was inspected
+  with `distrobox assemble create --dry-run`. It would use `--privileged` and
+  bind the host `/dev`, contrary to recovery synthesis's no-block-device rule;
+  no new Distrobox was created. A separate rootless Podman probe with no host
+  mounts or network observed no block devices and enforced 4 CPU / 4 GiB cgroup
+  caps. The operator selected a separate restricted Podman worker for recovery,
+  keeping Distrobox for Codex and general development. A focused P3a1 adapter
+  now copies only preflighted locked inputs into a private worker stage and
+  prepares a fixed local, nonroot Podman command with no network or host device
+  mount. It uses private `:Z` relabeled copies, keeps original source/CAS
+  labels, and disables Podman cgroup creation so the future systemd user unit
+  can own launcher, conmon and payload together. The command requires an
+  active fenced claim and does not execute yet. The user-service adapter now
+  requests 400% CPU, 4 GiB memory, zero swap and 4096 tasks and rejects a
+  launched unit when its cgroup files do not enforce those bounds. Focused
+  `tests/test_recovery_podman.py tests/test_worker_service.py
+  tests/test_recovery_rootfs.py` passed (43 tests). Rootfs dispatch still
+  needs live launcher/conmon/payload membership verification, durable launch
+  and logs before a real rootfs stage. The probe does not
+  qualify a real rootfs or image build.
+- A local-only P3a1 retention pass copied the 248 verified Fedora RPMs and ten
+  associated candidate inputs into an isolated candidate CAS. It then verified
+  all 258 stored objects by digest; the command, status and manifest hashes are
+  in [the Fedora 44 candidate record](fedora44-input-candidate.md). This closes
+  the missing-byte retention task for the current candidate without adding an
+  installed catalog entry. Reviewed repository configuration, build recipe,
+  vendor boot policy and protected kernel result remain open. No network,
+  rootfs/image build or qualification was involved.
 
 - `target-assets/build-rootfs.sh` now requires a catalog, rootfs lock, CAS root
   and new absolute output. The former Fedora-release-only DNF command is gone.
@@ -778,6 +901,40 @@ passed. No release qualification was run.
   passed (79 tests); `git diff --check` passed. No real Fedora rootfs, image or
   hardware qualification was produced. Runtime image inputs changed and remain
   unqualified.
+- An offline candidate-RPM audit reverified the exact 248 retained RPM bytes
+  against the candidate snapshot and target lock, then queried their payload
+  headers for systemd units, enablement links, generators and presets. The
+  ignored report and digest are recorded in
+  [the Fedora 44 candidate record](fedora44-input-candidate.md). It found 87
+  vendor enablement links and 17 system generators, including package entries
+  for repartition and factory-reset machinery that need explicit recovery
+  policy review. The installed rootfs may differ after DNF scriptlets; no
+  allowlist, runtime image bytes or qualification changed in this audit.
+- A further P3a2 software packet added a fail-closed installed vendor-generator
+  audit before recovery runtime files are staged. It hashes bounded, executable
+  regular files under `/usr/lib/systemd/system-generators` and requires their
+  exact names and bytes in a reviewed allowlist. Symlinks, nonexecutables,
+  changed bytes and missing reviewed entries fail. The allowlist remains empty
+  pending review of the real installed Fedora closure. Candidate runtime
+  policy is unchanged. Files: `src/quirkbench/boot.py`,
+  `tests/test_boot.py` and this record. Focused checks:
+  `.venv/bin/python -m pytest -q tests/test_boot.py` passed (50 tests);
+  `tests/test_recovery_runtime_revision.py tests/test_recovery_synthesis.py`
+  passed (22 tests), and `git diff --check` passed. No rootfs/image boot or
+  release qualification ran. Recovery runtime source bytes changed and remain
+  unqualified.
+- An offline P3a2 follow-up now rejects preexisting `/etc` generator overrides
+  outside the three recovery masks and checks that all three exact `/dev/null`
+  masks survive at the strict image handoff. It also requires every recovery
+  unit mask, the multi-user default target and every required enabled service
+  link to remain present. This closes paths where package files or a later
+  stage could leave an extra generator active or remove required boot policy.
+  Vendor generator approval remains empty and separate.
+  Files: `src/quirkbench/boot.py`, `tests/test_boot.py`, this record. Focused
+  check: `.venv/bin/python -m pytest -q tests/test_boot.py
+  tests/test_recovery_image_plan.py tests/test_recovery_synthesis.py` passed
+  (93 tests). No network, RPM download, rootfs/image build, QEMU or hardware
+  qualification ran. Changed recovery runtime bytes remain unqualified.
 
 ### P3a5 attended commissioning gate (partial, 2026-09-28)
 

@@ -205,6 +205,34 @@ def test_operation_events_are_bounded_paged_and_read_only(tmp_path, capsys):
     cli_page = json.loads(capsys.readouterr().out)
     assert len(cli_page['data']['items']) == 2 and cli_page['data']['next_cursor'] is not None
 
+    assert main(['--state', str(c.root), '--reserve-gib', '0', 'operation', 'events',
+                 row['id'], '--limit', '2']) == 0
+    rendered = capsys.readouterr().out
+    assert 'accepted  state=QUEUED' in rendered
+    assert 'measured' in rendered
+    assert '"bytes"' not in rendered
+    assert f"More events: --after {cli_page['data']['next_cursor']}" in rendered
+
+
+def test_operation_event_renderer_shows_known_fields_without_unknown_document(tmp_path, capsys):
+    c = controller(tmp_path)
+    row = c.admit_operation('req', 'image_prepare', {})
+    with c.transaction() as db:
+        db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
+                   (row['id'], c.clock(), 'claimed', json.dumps({
+                       'stage': 'recovery-rootfs', 'worker_generation': 2,
+                       'unreviewed': 'private-value'})))
+        db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
+                   (row['id'], c.clock(), 'finished', json.dumps({
+                       'state': 'SUCCEEDED', 'outputs': ['a' * 64]})))
+    assert main(['--state', str(c.root), '--reserve-gib', '0', 'operation', 'events',
+                 row['id']]) == 0
+    rendered = capsys.readouterr().out
+    assert 'stage=recovery-rootfs worker_generation=2' in rendered
+    assert 'finished  state=SUCCEEDED outputs=1' in rendered
+    assert 'private-value' not in rendered
+    assert 'a' * 64 not in rendered
+
 
 @pytest.mark.parametrize('after,limit', [(-1, 1), (0, 0), (0, 101), (True, 1), (0, False)])
 def test_operation_event_query_rejects_invalid_bounds(tmp_path, after, limit):

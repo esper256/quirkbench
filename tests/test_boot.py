@@ -1,4 +1,5 @@
 from dataclasses import asdict
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -310,6 +311,113 @@ def test_recovery_vendor_enablement_rejects_escaping_or_linked_directory(tmp_pat
     wants.symlink_to(tmp_path, target_is_directory=True)
     with pytest.raises(BootError, match='dependency directory is invalid'):
         recovery_vendor_enabled_links(root)
+
+
+def test_recovery_rejects_unreviewed_vendor_generator_before_staging(tmp_path):
+    from quirkbench.boot import install_recovery_runtime_base, recovery_vendor_generators
+
+    root = tmp_path / 'recovery'
+    (root / 'etc').mkdir(parents=True)
+    (root / 'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1\n')
+    generators = root / 'usr/lib/systemd/system-generators'
+    generators.mkdir(parents=True)
+    generator = generators / 'systemd-gpt-auto-generator'
+    generator.write_bytes(b'candidate generator')
+    generator.chmod(0o755)
+    assert recovery_vendor_generators(root) == {
+        generator.name: hashlib.sha256(b'candidate generator').hexdigest()}
+    with pytest.raises(BootError, match='unreviewed recovery vendor generator'):
+        install_recovery_runtime_base(root)
+    assert not (root / 'etc/systemd/system/quirkbench-recovery.service').exists()
+
+
+def test_recovery_vendor_generator_requires_exact_reviewed_bytes(tmp_path, monkeypatch):
+    import quirkbench.boot as boot
+
+    root = tmp_path / 'recovery'
+    (root / 'etc').mkdir(parents=True)
+    (root / 'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1\n')
+    generators = root / 'usr/lib/systemd/system-generators'
+    generators.mkdir(parents=True)
+    generator = generators / 'reviewed-generator'
+    generator.write_bytes(b'reviewed')
+    generator.chmod(0o755)
+    monkeypatch.setattr(boot, 'RECOVERY_VENDOR_GENERATORS', {
+        generator.name: hashlib.sha256(b'reviewed').hexdigest()})
+    boot.install_recovery_runtime_base(root)
+    generator.write_bytes(b'changed')
+    with pytest.raises(BootError, match='unreviewed recovery vendor generator'):
+        boot.install_recovery_runtime_base(root)
+    generator.unlink()
+    with pytest.raises(BootError, match='reviewed recovery vendor generator missing'):
+        boot.install_recovery_runtime_base(root)
+
+
+def test_recovery_vendor_generator_rejects_symlink_and_nonexecutable(tmp_path):
+    from quirkbench.boot import recovery_vendor_generators
+
+    root = tmp_path / 'recovery'
+    generators = root / 'usr/lib/systemd/system-generators'
+    generators.mkdir(parents=True)
+    generator = generators / 'unsafe-generator'
+    generator.symlink_to('/dev/null')
+    with pytest.raises(BootError, match='not a regular file'):
+        recovery_vendor_generators(root)
+    generator.unlink()
+    generator.write_bytes(b'nonexecutable')
+    with pytest.raises(BootError, match='invalid'):
+        recovery_vendor_generators(root)
+
+
+def test_recovery_rejects_unreviewed_generator_override_before_staging(tmp_path):
+    from quirkbench.boot import install_recovery_runtime_base
+
+    root = tmp_path / 'recovery'
+    (root / 'etc/quirkbench-rootfs').parent.mkdir(parents=True)
+    (root / 'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1\n')
+    overrides = root / 'etc/systemd/system-generators'
+    overrides.mkdir(parents=True)
+    (overrides / 'extra-generator').symlink_to('/dev/null')
+    with pytest.raises(BootError, match='unreviewed recovery systemd generator override'):
+        install_recovery_runtime_base(root)
+    assert not (root / 'etc/systemd/system/quirkbench-recovery.service').exists()
+
+
+def test_recovery_image_check_requires_exact_generator_masks(tmp_path):
+    from quirkbench.boot import (_check_recovery_unit_links,
+                                 install_recovery_runtime_base)
+
+    root = tmp_path / 'recovery'
+    (root / 'etc/quirkbench-rootfs').parent.mkdir(parents=True)
+    (root / 'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1\n')
+    install_recovery_runtime_base(root)
+    _check_recovery_unit_links(root, strict_direct_links=True)
+    mask = root / 'etc/systemd/system-generators/systemd-gpt-auto-generator'
+    mask.unlink()
+    with pytest.raises(BootError, match='mask missing'):
+        _check_recovery_unit_links(root, strict_direct_links=True)
+    mask.symlink_to('/usr/lib/systemd/system-generators/systemd-gpt-auto-generator')
+    with pytest.raises(BootError, match='unreviewed recovery systemd generator override'):
+        _check_recovery_unit_links(root, strict_direct_links=True)
+
+
+@pytest.mark.parametrize('relative,reason', [
+    ('etc/systemd/system/systemd-networkd.service', 'unit mask missing'),
+    ('etc/systemd/system/default.target', 'default target missing'),
+    ('etc/systemd/system/multi-user.target.wants/quirkbench-supervisor.service',
+     'enablement missing'),
+])
+def test_recovery_image_check_requires_unit_masks_and_enablement(tmp_path, relative, reason):
+    from quirkbench.boot import _check_recovery_unit_links, install_recovery_runtime_base
+
+    root = tmp_path / 'recovery'
+    (root / 'etc/quirkbench-rootfs').parent.mkdir(parents=True)
+    (root / 'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1\n')
+    install_recovery_runtime_base(root)
+    _check_recovery_unit_links(root, strict_direct_links=True)
+    (root / relative).unlink()
+    with pytest.raises(BootError, match=reason):
+        _check_recovery_unit_links(root, strict_direct_links=True)
 
 
 def test_generic_runtime_rejects_preexisting_boot_identity_and_linked_destination(tmp_path):

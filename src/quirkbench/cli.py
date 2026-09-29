@@ -143,10 +143,8 @@ def main(argv=None):
             if args.json:
                 print(json.dumps(answer, sort_keys=True))
             elif args.action == 'events':
-                for event in answer['data']['items']:
-                    print(f"{event['id']} {event['kind']}")
-                if answer['data']['next_cursor'] is not None:
-                    print(f"More events: --after {answer['data']['next_cursor']}")
+                from .monitor import render_operation_events
+                print(render_operation_events(answer))
             elif args.action == 'output':
                 print(f"Read {answer['data']['length']} bytes from public output {answer['data']['sha256']}; use --json for content")
             else:

@@ -1,6 +1,7 @@
 """Human-readable monitoring with measured bars and explicit uncertainty."""
 from datetime import datetime, timezone
 import json
+import re
 
 def duration(seconds):
     if seconds is None:
@@ -57,6 +58,42 @@ def render_operation(status, failure=None):
         lines.append('Worker ownership was interrupted; continuation requires reconciliation.')
     if row['references']['output']:
         lines.append(f"Public outputs: {len(row['references']['output'])}; inspect digests with --json")
+    return '\n'.join(lines)
+
+
+def render_operation_events(page):
+    """Render known persisted event facts without dumping arbitrary documents."""
+    lines = []
+    for item in page['data']['items']:
+        try:
+            created = datetime.fromtimestamp(item['created'], timezone.utc).isoformat(timespec='seconds')
+        except (OverflowError, OSError, TypeError, ValueError):
+            created = 'time unavailable'
+        kind = item['kind'] if (isinstance(item['kind'], str) and
+                                re.fullmatch(r'[a-z][a-z_]{0,63}', item['kind'])) else 'invalid_event'
+        document = item['document']
+        fields = []
+        if isinstance(document, dict):
+            allowed = {
+                'accepted': ('state',),
+                'claimed': ('stage', 'worker_generation'),
+                'resumed': ('worker_epoch',),
+                'worker_stopped': ('proof',),
+                'output': ('state',),
+                'finished': ('state',),
+            }.get(kind, ())
+            for name in allowed:
+                value = document.get(name)
+                if ((type(value) is int and 0 <= value < 10**12)
+                        or (isinstance(value, str) and value.isascii()
+                            and 0 < len(value) <= 64 and value.isprintable())):
+                    fields.append(f'{name}={value}')
+            if kind in ('output', 'finished') and isinstance(document.get('outputs'), list):
+                fields.append(f"outputs={len(document['outputs'])}")
+        suffix = '  ' + ' '.join(fields) if fields else ''
+        lines.append(f"{item['id']}  {created}  {kind}{suffix}")
+    if page['data']['next_cursor'] is not None:
+        lines.append(f"More events: --after {page['data']['next_cursor']}")
     return '\n'.join(lines)
 
 def render(status):

@@ -14,8 +14,8 @@ from .recovery_module_audit import FINAL_CONFIG
 MAX_FRAGMENT_BYTES = 16 * 1024
 MAX_BASE_CONFIG_BYTES = 1024 * 1024
 ENABLED = re.compile(r"(CONFIG_[A-Z0-9_]+)=y\Z")
-DISABLED = re.compile(r"# (CONFIG_[A-Z0-9_]+) is not set\Z")
-BASE_SETTING = re.compile(r"(CONFIG_[A-Z0-9_]+)=(.+)\Z")
+DISABLED = re.compile(r"# (CONFIG_[A-Za-z0-9_]+) is not set\Z")
+BASE_SETTING = re.compile(r"(CONFIG_[A-Za-z0-9_]+)=(.+)\Z")
 
 
 def validate_recovery_fragment(raw: bytes) -> dict[str, str]:

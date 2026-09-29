@@ -62,6 +62,10 @@ def manager(tmp_path, fake=None, *, boot_id=BOOT):
     path = cgroup / GROUP.lstrip('/')
     path.mkdir(parents=True, exist_ok=True)
     (path / 'cgroup.events').write_text('populated 0\nfrozen 0\n')
+    (path / 'cpu.max').write_text('400000 100000\n')
+    (path / 'memory.max').write_text('4294967296\n')
+    (path / 'memory.swap.max').write_text('0\n')
+    (path / 'pids.max').write_text('4096\n')
     program = tmp_path / 'worker-program'
     program.write_text('#!/bin/sh\nexit 0\n')
     program.chmod(0o700)
@@ -84,10 +88,34 @@ def test_transient_user_unit_launch_uses_fenced_installed_program(tmp_path):
         assert '--remain-after-exit' in argv and '--collect' not in argv
         assert '--property=KillMode=control-group' in argv
         assert '--property=Restart=no' in argv
+        assert '--property=CPUQuota=400%' in argv
+        assert '--property=MemoryMax=4294967296' in argv
+        assert '--property=MemorySwapMax=0' in argv
+        assert '--property=TasksMax=4096' in argv
         assert '--expand-environment=no' in argv
         assert argv[argv.index('--') + 1] == str(service.worker_program)
         assert '--worker-epoch' in argv and str(owner.epoch) in argv
         assert claimed['worker_boot_id'] == BOOT
+
+
+@pytest.mark.parametrize('name,value', [
+    ('cpu.max', 'max 100000\n'),
+    ('memory.max', 'max\n'),
+    ('memory.swap.max', '1\n'),
+    ('pids.max', 'max\n'),
+])
+def test_unenforced_worker_limit_keeps_launch_ambiguous(tmp_path, name, value):
+    c = controller(tmp_path)
+    service, _, cgroup = manager(tmp_path)
+    (cgroup / name).write_text(value)
+    with c.lifecycle() as owner:
+        operation = c.admit_operation('request', 'image_prepare', {})
+        with pytest.raises(WorkerServiceError, match='resource limits'):
+            owner.dispatch(operation['id'], stage='build', deadline=c.clock() + 60,
+                           services=service)
+        status = c.operation_status(operation['id'])['data']
+        assert status['state'] == 'INTERRUPTED'
+        assert status['worker_unit'] is not None
 
 
 def test_ambiguous_launch_retains_unit_and_blocks_replacement(tmp_path):

@@ -2,8 +2,40 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 from .contracts import ContractError, canonical, digest, identifier, sha256
+
+
+ROOTFS_ARGUMENT_FIELDS = frozenset({
+    'builder_config_digest', 'builder_archive_sha256',
+    'catalog_sha256', 'rootfs_lock_sha256',
+})
+
+
+def recovery_rootfs_arguments(intent):
+    """Validate the immutable, replayable input binding for a rootfs worker."""
+    if (not isinstance(intent, dict) or type(intent.get('schema_version')) is not int
+            or intent['schema_version'] != 1 or intent.get('kind') != 'image_prepare'
+            or intent.get('local_paths') != {} or intent.get('source_refs') != []):
+        raise ContractError('invalid immutable rootfs operation intent')
+    arguments = intent.get('arguments')
+    if (not isinstance(arguments, dict) or set(arguments) != ROOTFS_ARGUMENT_FIELDS
+            or not isinstance(arguments['builder_config_digest'], str)
+            or not re.fullmatch(r'sha256:[0-9a-f]{64}', arguments['builder_config_digest'])):
+        raise ContractError('invalid immutable rootfs operation intent')
+    for name in ROOTFS_ARGUMENT_FIELDS - {'builder_config_digest'}:
+        if not isinstance(arguments[name], str) or not re.fullmatch(r'[0-9a-f]{64}', arguments[name]):
+            raise ContractError('invalid immutable rootfs operation intent')
+    refs = intent.get('input_refs')
+    if (not isinstance(refs, list)
+            or not all(isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value)
+                       for value in refs)
+            or set(refs) != {arguments['builder_archive_sha256'],
+                             arguments['catalog_sha256'], arguments['rootfs_lock_sha256']}
+            or len(refs) != 3):
+        raise ContractError('invalid immutable rootfs operation intent')
+    return arguments
 
 
 def _bounded(value, depth=0):

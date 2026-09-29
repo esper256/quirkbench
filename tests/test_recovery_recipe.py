@@ -224,9 +224,16 @@ def test_recovery_config_merge_rejects_malformed_fedora_base(base):
 
 def test_recovery_config_merge_is_deterministic_and_keeps_unrelated_settings():
     fragment = (ROOT / 'target-assets/recovery-kernel.fragment').read_bytes()
-    base = b'# Fedora baseline fixture\nCONFIG_MODULE_COMPRESS=y\nCONFIG_ATH9K=m\n# CONFIG_ATA is not set\n'
+    base = (b'# Fedora baseline fixture\nCONFIG_MODULE_COMPRESS=y\n'
+            b'CONFIG_ATH9K=m\nCONFIG_I2C_MUX_PCA954x=m\n'
+            b'# CONFIG_TESTx is not set\n# CONFIG_ATA is not set\n')
     first = merge_recovery_config(base, fragment)
     assert merge_recovery_config(first, fragment) == first
     assert b'CONFIG_MODULE_COMPRESS=y\n' in first
     assert b'CONFIG_ATH9K=m\n' in first
+    assert b'CONFIG_I2C_MUX_PCA954x=m\n' in first
+    assert b'# CONFIG_TESTx is not set\n' in first
     assert b'# CONFIG_ATA is not set\n' in first
+    for name in ('KEXEC_HANDOVER', 'NVME_RDMA', 'NVME_FC',
+                 'NVME_TCP', 'NVME_TARGET_LOOP'):
+        assert f'# CONFIG_{name} is not set\n'.encode() in first

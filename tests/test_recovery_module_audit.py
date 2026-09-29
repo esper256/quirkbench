@@ -40,6 +40,8 @@ def audit(config, rootfs, profile):
 
 def test_staged_final_config_and_module_inventory(tmp_path):
     config, rootfs, module_dir, profile = stage(tmp_path)
+    with config.open('a') as stream:
+        stream.write('CONFIG_I2C_MUX_PCA954x=m\n# CONFIG_TESTx is not set\n')
     assert validate_recovery_final_config(config, profile)["profile_id"] == profile["profile_id"]
     record = audit(config, rootfs, profile)
     assert record["profile_id"] == profile["profile_id"]
@@ -107,6 +109,19 @@ def test_final_config_protection_failure_rejected(tmp_path):
     config.write_text(config.read_text().replace("# CONFIG_ATA is not set", "CONFIG_ATA=y"))
     with pytest.raises(BuildError, match="protected recovery kernel config mismatch"):
         audit(config, rootfs, profile)
+
+
+@pytest.mark.parametrize('selector', [
+    'CONFIG_KEXEC_HANDOVER', 'CONFIG_NVME_RDMA', 'CONFIG_NVME_FC',
+    'CONFIG_NVME_TCP', 'CONFIG_NVME_TARGET_LOOP',
+])
+def test_resolved_config_rejects_reenabled_protected_selector(tmp_path, selector):
+    config, _, _, profile = stage(tmp_path)
+    config.write_text(config.read_text().replace(
+        f'# {selector} is not set', f'{selector}=m' if selector.startswith('CONFIG_NVME')
+        else f'{selector}=y'))
+    with pytest.raises(BuildError, match='protected recovery kernel config mismatch'):
+        validate_recovery_final_config(config, profile)
 
 
 def test_resolved_config_guard_rejects_duplicate_and_symlink(tmp_path):

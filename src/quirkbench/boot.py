@@ -582,6 +582,13 @@ RECOVERY_MASKED_UNITS = frozenset({
 # The installed Fedora closure is not selected yet. Vendor enablement is an
 # explicit reviewed input, not permission inherited from a package preset.
 RECOVERY_VENDOR_ENABLED_LINKS: dict[str, str] = {}
+# Vendor generators execute during systemd boot and can synthesize units. Keep
+# the exact installed bytes closed until the Fedora recovery closure is reviewed.
+RECOVERY_VENDOR_GENERATORS: dict[str, str] = {}
+RECOVERY_MASKED_GENERATORS = frozenset({
+    "systemd-gpt-auto-generator", "systemd-hibernate-resume-generator",
+    "zram-generator",
+})
 
 
 def recovery_vendor_enabled_links(rootfs: Path) -> dict[str, str]:
@@ -630,6 +637,42 @@ def _check_recovery_vendor_unit_links(rootfs: Path) -> None:
         raise BootError("reviewed recovery vendor unit enablement missing: " + sorted(missing)[0])
 
 
+def recovery_vendor_generators(rootfs: Path) -> dict[str, str]:
+    """Inventory exact installed vendor generator bytes without following links."""
+    rootfs = Path(rootfs)
+    vendor = rootfs / "usr/lib/systemd/system-generators"
+    if (vendor.is_symlink() or (vendor.exists() and not vendor.is_dir())
+            or not vendor.resolve().is_relative_to(rootfs.resolve())):
+        raise BootError("staged vendor generator directory is invalid")
+    if not vendor.exists():
+        return {}
+    observed = {}
+    for path in sorted(vendor.iterdir()):
+        if path.is_symlink() or not path.is_file():
+            raise BootError("staged vendor generator is not a regular file: " + path.name)
+        before = path.stat()
+        if before.st_size > 16 * 1024 * 1024 or not before.st_mode & 0o111:
+            raise BootError("staged vendor generator is invalid: " + path.name)
+        with path.open("rb") as stream:
+            value = hashlib.file_digest(stream, "sha256").hexdigest()
+        after = path.stat()
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+            raise BootError("staged vendor generator changed during audit: " + path.name)
+        observed[path.name] = value
+    return observed
+
+
+def _check_recovery_vendor_generators(rootfs: Path) -> None:
+    observed = recovery_vendor_generators(rootfs)
+    for name, value in observed.items():
+        if RECOVERY_VENDOR_GENERATORS.get(name) != value:
+            raise BootError("unreviewed recovery vendor generator: " + name)
+    missing = set(RECOVERY_VENDOR_GENERATORS) - set(observed)
+    if missing:
+        raise BootError("reviewed recovery vendor generator missing: " + sorted(missing)[0])
+
+
 def _check_recovery_unit_links(rootfs: Path, *, strict_direct_links: bool = False) -> None:
     """Reject unreviewed recovery enablement in the staged /etc unit graph."""
     units = rootfs / "etc/systemd/system"
@@ -639,7 +682,18 @@ def _check_recovery_unit_links(rootfs: Path, *, strict_direct_links: bool = Fals
     generators = rootfs / "etc/systemd/system-generators"
     if generators.is_symlink() or (generators.exists() and not generators.is_dir()):
         raise BootError("staged systemd settings escape target rootfs")
+    observed_masks = set()
+    if generators.exists():
+        for path in generators.iterdir():
+            if (path.name not in RECOVERY_MASKED_GENERATORS or not path.is_symlink()
+                    or str(path.readlink()) != "/dev/null"):
+                raise BootError("unreviewed recovery systemd generator override: " + path.name)
+            observed_masks.add(path.name)
+    if strict_direct_links and observed_masks != RECOVERY_MASKED_GENERATORS:
+        raise BootError("required recovery systemd generator mask missing")
     if not units.exists():
+        if strict_direct_links:
+            raise BootError("required recovery systemd units missing")
         return
     for name in ("quirkbench-recovery.service", "quirkbench-console.service",
                  "quirkbench-supervisor.service", "quirkbench-supervisor-failure.service",
@@ -665,6 +719,13 @@ def _check_recovery_unit_links(rootfs: Path, *, strict_direct_links: bool = Fals
                         else "/dev/null" if path.name in RECOVERY_MASKED_UNITS else None)
             if expected != str(path.readlink()):
                 raise BootError("unreviewed recovery systemd unit link: " + path.name)
+        for name in sorted(RECOVERY_MASKED_UNITS):
+            mask = units / name
+            if not mask.is_symlink() or str(mask.readlink()) != "/dev/null":
+                raise BootError("required recovery systemd unit mask missing: " + name)
+        if not default.is_symlink() or str(default.readlink()) != "/usr/lib/systemd/system/multi-user.target":
+            raise BootError("required recovery default target missing")
+    observed_links = set()
     for directory in units.iterdir():
         if not directory.name.endswith((".wants", ".requires", ".upholds")):
             continue
@@ -674,6 +735,9 @@ def _check_recovery_unit_links(rootfs: Path, *, strict_direct_links: bool = Fals
             relative = f"{directory.name}/{link.name}"
             if not link.is_symlink() or RECOVERY_ENABLED_LINKS.get(relative) != str(link.readlink()):
                 raise BootError("unreviewed recovery systemd enablement: " + relative)
+            observed_links.add(relative)
+    if strict_direct_links and observed_links != set(RECOVERY_ENABLED_LINKS):
+        raise BootError("required recovery systemd enablement missing")
 
 
 def _install_runtime_files(rootfs: Path, assets_dir: Path | None = None, *, candidate: bool = False) -> None:
@@ -723,6 +787,7 @@ def _install_runtime_files(rootfs: Path, assets_dir: Path | None = None, *, cand
     if not candidate:
         _check_recovery_unit_links(rootfs)
         _check_recovery_vendor_unit_links(rootfs)
+        _check_recovery_vendor_generators(rootfs)
         # An empty mount point lets systemd supply an ID in RAM on a read-only
         # root. Remove both factory ID sources before installing the runtime.
         # Unlink first so a staged hard link cannot truncate a file elsewhere.
@@ -843,7 +908,7 @@ def _install_runtime_files(rootfs: Path, assets_dir: Path | None = None, *, cand
         default.symlink_to("/usr/lib/systemd/system/multi-user.target")
     generators = rootfs / "etc/systemd/system-generators"
     generators.mkdir(exist_ok=True)
-    for name in ("systemd-gpt-auto-generator", "systemd-hibernate-resume-generator", "zram-generator"):
+    for name in sorted(RECOVERY_MASKED_GENERATORS):
         link = generators / name
         if link.exists() or link.is_symlink():
             link.unlink()

@@ -31,8 +31,15 @@ CONFIG_VFAT_FS=y
 # CONFIG_DEVMEM is not set
 # CONFIG_KEXEC is not set
 # CONFIG_KEXEC_FILE is not set
+# Handover selects KEXEC_FILE in Fedora's patched kernel tree.
+# CONFIG_KEXEC_HANDOVER is not set
 # CONFIG_BLK_DEV_NVME is not set
 # CONFIG_NVME_CORE is not set
+# These transports/loopback select NVME_FABRICS, then NVME_CORE.
+# CONFIG_NVME_RDMA is not set
+# CONFIG_NVME_FC is not set
+# CONFIG_NVME_TCP is not set
+# CONFIG_NVME_TARGET_LOOP is not set
 # CONFIG_ATA is not set
 # CONFIG_MMC is not set
 # CONFIG_VIRTIO_BLK is not set

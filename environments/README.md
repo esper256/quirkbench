@@ -1,11 +1,61 @@
 # Fedora build environment replay
 
-The Containerfile takes a verified immutable `registry.fedoraproject.org/fedora@sha256:...`
-base reference. `assemble.ini` creates a rootless Distrobox with a private home
-and 4 CPU / 4 GiB cgroup caps. The pipeline checks that those caps are no more
-than half the controller resources and refuses to build if the cgroup limits are
-missing. Adjust the caps downward on smaller hosts. Its controller-wide file
-lock permits one build at a time.
+The Containerfile requires a digest-pinned
+`registry.fedoraproject.org/fedora@sha256:...` base reference and checks its
+`/etc/os-release` against the `FEDORA_RELEASE` build argument. For the retained
+Fedora 44 candidate, build on the controller host with:
+
+```sh
+podman build --pull=never --build-arg=FEDORA_RELEASE=44 \
+  --build-arg=BASE_IMAGE=registry.fedoraproject.org/fedora@sha256:fb31d002de20bfa7742b8c9b0d0ff723bb9fa2534fd43ecac0101a35f703fef0 \
+  -f environments/Containerfile -t localhost/quirkbench-build:local environments
+```
+
+This locally built image is a builder candidate until its installed package and
+toolchain locks are captured and reviewed. `assemble.ini` describes a rootless
+Distrobox development profile with a private home and 4 CPU / 4 GiB cgroup caps.
+Its current Distrobox-generated command uses `--privileged` and binds the host
+`/dev`; it must not run the recovery rootfs, image or other storage-sensitive
+stages. No named Quirkbench Distrobox was created during the Fedora 44 input
+candidate work. The pipeline checks that those caps are no more than half the
+controller resources and refuses to build if the cgroup limits are missing.
+Adjust the caps downward on smaller hosts. Its controller-wide file lock permits
+one build at a time.
+
+An offline Fedora 44 SRPM `%prep` diagnostic found that the earlier local
+builder image lacks `%py3_shebang_fix`. The Containerfile now explicitly
+includes `python3-rpm-macros`, `kernel-rpm-macros` and
+`python3-jsonschema` for Fedora's source/config preparation. Rebuild and
+recapture the builder identity and installed locks before treating that new
+recipe as available; the earlier image and OCI archive have older bytes.
+
+### Restricted recovery rootfs worker
+
+`quirkbench.recovery_podman.stage_rootfs_inputs` copies only reviewed catalog,
+lock, CAS and Quirkbench source bytes into an empty, private worker stage.
+`rootfs_command` then prepares a fixed local Podman invocation against that
+stage. It mounts only staged code, the two input files and staged CAS read-only,
+plus a private staged output directory writable. Those private copies may be
+relabelled with Podman's `:Z` bind option; original source and CAS labels are
+untouched. The command uses a local nonroot Podman process with no network,
+host device or broad home mount, private PID/IPC/UTS namespaces and disabled
+Podman cgroups. It has no arbitrary command or extra-flag parameter.
+Its derived image config ID, retained builder archive, catalog and rootfs lock
+must match the current worker operation's immutable input record. The existing
+recipe `builder_image_digest` still names the Fedora base marker; admission
+must separately review the exact derived builder archive/config correspondence.
+The planner verifies an OCI archive's sole manifest, expected x86-64/Linux
+config and referenced layer hashes before returning an argv. A rebuilt builder
+needs its own newly retained archive, image ID and operation input record.
+
+The controller user-service adapter now requests `CPUQuota=400%`,
+`MemoryMax=4G`, `MemorySwapMax=0` and `TasksMax=4096` and checks the
+resulting cgroup files before accepting a launch. Rootfs dispatch still needs
+durable logs and input/exit identities, plus proof that launcher, conmon and
+payload stay in that cgroup through fenced termination. The command plan does
+not execute a product operation. The installed catalog is still empty, so
+this is not a ready-to-run recovery build. Distrobox remains the development
+and Codex environment.
 
 After the initial container and Fedora target rootfs are populated, run
 `quirkbench.build.capture_package_lock`, `capture_target_package_lock`, and

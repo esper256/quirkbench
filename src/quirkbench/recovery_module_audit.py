@@ -20,8 +20,8 @@ MAX_CONFIG_BYTES = 1024 * 1024
 MAX_MODULES = 100_000
 MODULE_SUFFIX = re.compile(r"\.ko(?:\.(?:gz|xz|zst))?\Z")
 RELEASE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,127}\Z")
-CONFIG_SETTING = re.compile(r"(CONFIG_[A-Z0-9_]+)=(.+)\Z")
-CONFIG_DISABLED = re.compile(r"# (CONFIG_[A-Z0-9_]+) is not set\Z")
+CONFIG_SETTING = re.compile(r"(CONFIG_[A-Za-z0-9_]+)=(.+)\Z")
+CONFIG_DISABLED = re.compile(r"# (CONFIG_[A-Za-z0-9_]+) is not set\Z")
 BOOT_CONFIG = {
     "xhci_hcd": "CONFIG_USB_XHCI_HCD",
     "usb_storage": "CONFIG_USB_STORAGE",
@@ -45,8 +45,13 @@ FINAL_CONFIG = {
     "CONFIG_VIRTIO_PCI": "n", "CONFIG_VIRTIO_SCSI": "n",
     "CONFIG_SWAP": "n", "CONFIG_HIBERNATION": "n",
     "CONFIG_DEVMEM": "n", "CONFIG_KEXEC": "n",
-    "CONFIG_KEXEC_FILE": "n", "CONFIG_BLK_DEV_NVME": "n",
-    "CONFIG_NVME_CORE": "n", "CONFIG_ATA": "n",
+    # Fedora's handover feature selects KEXEC_FILE; remote NVMe transports
+    # select NVME_FABRICS, which selects the hidden NVME_CORE symbol.
+    "CONFIG_KEXEC_FILE": "n", "CONFIG_KEXEC_HANDOVER": "n",
+    "CONFIG_BLK_DEV_NVME": "n", "CONFIG_NVME_CORE": "n",
+    "CONFIG_NVME_RDMA": "n", "CONFIG_NVME_FC": "n",
+    "CONFIG_NVME_TCP": "n", "CONFIG_NVME_TARGET_LOOP": "n",
+    "CONFIG_ATA": "n",
     "CONFIG_MMC": "n", "CONFIG_VIRTIO_BLK": "n",
 }
 
