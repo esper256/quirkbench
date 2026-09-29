@@ -139,7 +139,11 @@ def test_rootfs_stages_only_local_rpms_and_checks_installed_lock(tmp_path):
                     marker=marker, base_marker=base_marker, euid=0) == output
     dnf_argv = calls[1][0]
     assert dnf_argv[0] == 'dnf5'
-    assert '--no-plugins' in dnf_argv and '--disable-repo=*' in dnf_argv
+    assert '--no-plugins' in dnf_argv
+    assert not any(arg.startswith('--disable-repo') for arg in dnf_argv)
+    repos = Path(next(arg.removeprefix('--setopt=reposdir=') for arg in dnf_argv
+                      if arg.startswith('--setopt=reposdir=')))
+    assert repos.is_dir() and not any(repos.iterdir())
     assert not any('use-host-config' in arg for arg in dnf_argv)
     assert all(Path(arg).suffix == '.rpm' for arg in dnf_argv[dnf_argv.index('install') + 1:])
     assert len(dnf_argv[dnf_argv.index('install') + 1:]) == len(snapshot['packages'])

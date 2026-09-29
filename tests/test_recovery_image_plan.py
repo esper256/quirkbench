@@ -122,11 +122,13 @@ def test_bad_staged_inputs_do_not_publish_provenance(tmp_path, monkeypatch, chan
     assert not (tmp_path / "factory.img").exists()
 
 
-def test_provenance_is_new_and_output_must_be_separate(tmp_path, monkeypatch):
+def test_matching_provenance_resumes_and_output_must_be_separate(tmp_path, monkeypatch):
     catalog, recipe, store, stage, record = prepared(tmp_path, monkeypatch)
     output = tmp_path / "factory.img"
     inputs = plan(catalog, recipe, store, stage, record, output)
-    with pytest.raises(BuildError, match="provenance path must be new"):
+    assert plan(catalog, recipe, store, stage, record, output) == inputs
+    inputs.recovery_provenance.write_bytes(b"different")
+    with pytest.raises(BuildError, match="provenance differs"):
         plan(catalog, recipe, store, stage, record, output)
     inputs.recovery_provenance.unlink()
     with pytest.raises(BuildError, match="separate output"):

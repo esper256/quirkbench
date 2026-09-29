@@ -68,14 +68,12 @@ were not rebuilt, flashed or qualified. Tests use synthetic hardware trees.
 - Replacement kernel and userspace RPMs bind to two fixed relative output slots
   and are verified by digest before they can become `ComposeInputs` paths. Unknown
   fields, moving refs, path escapes and package-lock mismatch fail closed.
-- The **installed catalog is empty** (`awaiting-reviewed-closure-v1`). The Fedora
-  44 example uses illustrative digests and is not a supported baseline. Existing
-  local Fedora 43 trial artifacts use an upstream kernel tarball and do not meet
-  the Fedora-configured source/configuration and complete retained closure needed
-  for a real entry. Review actual package support lifetime and full closure before
-  activating any entry. Catalog selection still leaves
-  `build_validation_pending`; it does not claim a built kernel satisfies storage
-  protection or that a target can boot.
+- The installed catalog now contains the exact `fedora44-firstboot-v1` entry.
+  Its Fedora 44 source, configured kernel, 248 signed target RPMs, rootfs lock,
+  builder archive, toolchain and recipe objects are retained under
+  `.quirkbench/inputs/`. Selection still requires the matching CAS objects and
+  leaves `build_validation_pending`; it does not claim experiment or hardware
+  qualification. The Fedora 44 example remains illustrative.
 - A candidate Fedora 44 kernel source input is now retained locally under
   `.quirkbench/inputs/fedora44-kernel-7.2.7/`: DNF5 `updates-source` supplied
   `kernel-7.2.7-200.fc44.src.rpm` (SHA256
@@ -89,9 +87,10 @@ were not rebuilt, flashed or qualified. Tests use synthetic hardware trees.
   `2a5e8ca46b9ced20510bd068cb16c5a1fc7bfb9067ff403cf6414dd461470885`).
   Acquisition used read-only repository metadata and an isolated extraction
   directory; no host package was installed. The initial sandbox DNS query failed;
-  the network-approved retry downloaded the SRPM. The source preparation and
-  complete rootfs RPM closure still need a pinned rootless builder and review,
-  so this candidate is **not** an installed baseline or image input yet. Exact
+  the network-approved retry downloaded the SRPM. Full `%prep` and the exact
+  DNF5 rootfs installation have since completed in the restricted rootless
+  builder. The protected kernel and first image remain unqualified until their
+  own retained records and byte inspections complete. Exact acquisition
   commands and retained identities are in [the acquisition record](fedora44-input-candidate.md).
 - Focused acceptance: `.venv/bin/python -m pytest -q tests/test_baseline_catalog.py`
   passed (15 tests). No image bytes changed, built or qualified.

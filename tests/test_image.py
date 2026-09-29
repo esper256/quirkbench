@@ -37,6 +37,15 @@ def test_image_requires_independent_recovery_and_new_regular_output(tmp_path: Pa
         inputs.validate()
 
 
+def test_factory_image_rejects_private_gpg_home(tmp_path: Path) -> None:
+    inputs = _inputs(tmp_path)
+    private = inputs.rootfs_dir / 'root/.gnupg'
+    private.mkdir(parents=True)
+    (private / 'private-keys-v1.d').mkdir()
+    with pytest.raises(ImageError, match='credentials'):
+        inputs.validate()
+
+
 def test_grub_defaults_to_recovery_and_checks_one_shot_clear():
     cfg=grub_config("01234567-89ab-cdef-0123-456789abcdef")
     assert "set default=0" in cfg

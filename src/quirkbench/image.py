@@ -106,7 +106,7 @@ class ImageInputs:
                        and (root/path).is_file() and os.access(root/path, os.X_OK)
                        for path in candidates):
                 raise ImageError('recovery networking prerequisite missing: '+program+'; rebuild rootfs and package locks')
-        for directory in ('root/.ssh','root/.codex','root/.aws','home'):
+        for directory in ('root/.ssh','root/.gnupg','root/.codex','root/.aws','home'):
             path=root/directory
             if path.exists() and any(path.iterdir()):raise ImageError('credentials/user home content forbidden in target rootfs')
 

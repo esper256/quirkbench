@@ -577,18 +577,86 @@ RECOVERY_MASKED_UNITS = frozenset({
     "systemd-suspend.service", "systemd-hybrid-sleep.service",
     "systemd-suspend-then-hibernate.service", "systemd-zram-setup@.service",
     "systemd-remount-fs.service", "getty@tty1.service",
+    "systemd-repart.service", "systemd-repart.socket",
+    "systemd-factory-reset-request.service", "systemd-factory-reset.socket",
+    "systemd-bootctl.socket", "systemd-boot-random-seed.service",
+    "grub2-systemd-integration.service", "grub-boot-indeterminate.service",
+    "systemd-firstboot.service", "systemd-machine-id-commit.service",
+    "systemd-tpm2-clear.service",
+    "systemd-tpm2-setup.service", "systemd-tpm2-setup-early.service",
+    "systemd-pcrextend.socket", "systemd-pcrlock.socket",
+    "systemd-pcrmachine.service", "systemd-pcrproduct.service",
+    "systemd-pcrnvdone.service", "systemd-pcrphase.service",
+    "systemd-pcrphase-sysinit.service", "systemd-pcrphase-initrd.service",
+    "systemd-pcrphase-factory-reset.service",
+    "systemd-pcrphase-storage-target-mode.service",
+    "systemd-sysext.socket", "systemd-sysext-initrd.service",
+    "systemd-confext-initrd.service", "systemd-modules-load.service",
+    "systemd-binfmt.service",
 })
 
-# The installed Fedora closure is not selected yet. Vendor enablement is an
-# explicit reviewed input, not permission inherited from a package preset.
+# Unknown distro closures have no approved vendor enablement. Fedora 44 uses
+# its exact inventory below; package presets never grant recovery permission.
 RECOVERY_VENDOR_ENABLED_LINKS: dict[str, str] = {}
 # Vendor generators execute during systemd boot and can synthesize units. Keep
 # the exact installed bytes closed until the Fedora recovery closure is reviewed.
 RECOVERY_VENDOR_GENERATORS: dict[str, str] = {}
 RECOVERY_MASKED_GENERATORS = frozenset({
     "systemd-gpt-auto-generator", "systemd-hibernate-resume-generator",
-    "zram-generator",
+    "zram-generator", "ostree-system-generator",
+    "systemd-bless-boot-generator", "systemd-cryptsetup-generator",
+    "systemd-debug-generator", "systemd-factory-reset-generator",
+    "systemd-getty-generator", "systemd-integritysetup-generator",
+    "systemd-rc-local-generator", "systemd-run-generator",
+    "systemd-ssh-generator", "systemd-system-update-generator",
+    "systemd-sysv-generator", "systemd-tpm2-generator",
+    "systemd-veritysetup-generator",
 })
+
+
+def _fedora44_recovery_root(rootfs: Path) -> bool:
+    release = Path(rootfs) / "etc/os-release"
+    if release.exists():
+        if (not release.is_file() or not release.resolve().is_relative_to(Path(rootfs).resolve())
+                or release.stat().st_size > 4096):
+            raise BootError("staged Fedora release record is invalid")
+        lines = release.read_text().splitlines()
+        values = dict(line.split("=", 1) for line in lines if "=" in line)
+        if values.get("ID", "").strip('"') == "fedora" and values.get("VERSION_ID", "").strip('"') == "44":
+            return True
+    return False
+
+
+def _recovery_vendor_policy(rootfs: Path) -> tuple[dict[str, str], dict[str, str]]:
+    """Select the exact reviewed vendor graph for this installed Fedora root."""
+    if _fedora44_recovery_root(rootfs):
+        from .recovery_vendor_fedora44 import FEDORA44_ENABLED_LINKS, FEDORA44_GENERATORS
+        return FEDORA44_ENABLED_LINKS, FEDORA44_GENERATORS
+    return RECOVERY_VENDOR_ENABLED_LINKS, RECOVERY_VENDOR_GENERATORS
+
+
+def sanitize_recovery_etc_enablement(rootfs: Path) -> None:
+    """Remove only exact Fedora 44 RPM/scriptlet enables unwanted in recovery."""
+    rootfs = Path(rootfs)
+    if not _fedora44_recovery_root(rootfs):
+        return
+    from .recovery_vendor_fedora44 import FEDORA44_ETC_LINKS
+    units = rootfs / "etc/systemd/system"
+    if units.is_symlink() or not units.is_dir() or not units.resolve().is_relative_to(rootfs.resolve()):
+        raise BootError("staged Fedora unit directory is invalid")
+    observed = {}
+    for path in units.rglob("*"):
+        if path.is_symlink():
+            observed[path.relative_to(units).as_posix()] = str(path.readlink())
+    retained = {name: target for name, target in FEDORA44_ETC_LINKS.items()
+                if name in {"dbus.service", "sockets.target.wants/dbus.socket",
+                            "multi-user.target.wants/NetworkManager.service"}}
+    if observed == retained:
+        return
+    if observed != FEDORA44_ETC_LINKS:
+        raise BootError("Fedora recovery RPM enablement differs from reviewed closure")
+    for name in set(observed) - set(retained):
+        (units / name).unlink()
 
 
 def recovery_vendor_enabled_links(rootfs: Path) -> dict[str, str]:
@@ -617,11 +685,14 @@ def recovery_vendor_enabled_links(rootfs: Path) -> dict[str, str]:
                 destination = vendor / target.removeprefix("/usr/lib/systemd/system/")
             else:
                 destination = directory / target
-            if destination.is_symlink():
-                raise BootError("staged vendor unit link is not a regular local unit: " + relative)
+            linked_unit = destination.is_symlink()
             destination = destination.resolve(strict=False)
-            if (not destination.is_relative_to(vendor.resolve())
-                    or not destination.is_file()):
+            dracut_units = rootfs / "usr/lib/dracut/modules.d"
+            if (linked_unit and (not link.name.startswith("dracut-")
+                                 or not destination.is_relative_to(dracut_units.resolve()))) or (
+                    not destination.is_relative_to(vendor.resolve())
+                    and not (linked_unit and destination.is_relative_to(dracut_units.resolve()))
+            ) or not destination.is_file():
                 raise BootError("staged vendor unit link is not a regular local unit: " + relative)
             links[relative] = target
     return links
@@ -629,10 +700,11 @@ def recovery_vendor_enabled_links(rootfs: Path) -> dict[str, str]:
 
 def _check_recovery_vendor_unit_links(rootfs: Path) -> None:
     observed = recovery_vendor_enabled_links(rootfs)
+    enabled, _ = _recovery_vendor_policy(rootfs)
     for relative, target in observed.items():
-        if RECOVERY_VENDOR_ENABLED_LINKS.get(relative) != target:
+        if enabled.get(relative) != target:
             raise BootError("unreviewed recovery vendor unit enablement: " + relative)
-    missing = set(RECOVERY_VENDOR_ENABLED_LINKS) - set(observed)
+    missing = set(enabled) - set(observed)
     if missing:
         raise BootError("reviewed recovery vendor unit enablement missing: " + sorted(missing)[0])
 
@@ -665,10 +737,11 @@ def recovery_vendor_generators(rootfs: Path) -> dict[str, str]:
 
 def _check_recovery_vendor_generators(rootfs: Path) -> None:
     observed = recovery_vendor_generators(rootfs)
+    _, generators = _recovery_vendor_policy(rootfs)
     for name, value in observed.items():
-        if RECOVERY_VENDOR_GENERATORS.get(name) != value:
+        if generators.get(name) != value:
             raise BootError("unreviewed recovery vendor generator: " + name)
-    missing = set(RECOVERY_VENDOR_GENERATORS) - set(observed)
+    missing = set(generators) - set(observed)
     if missing:
         raise BootError("reviewed recovery vendor generator missing: " + sorted(missing)[0])
 
@@ -716,6 +789,7 @@ def _check_recovery_unit_links(rootfs: Path, *, strict_direct_links: bool = Fals
             if not path.is_symlink() or path.name.endswith((".wants", ".requires", ".upholds")):
                 continue
             expected = ("/usr/lib/systemd/system/multi-user.target" if path.name == "default.target"
+                        else "/usr/lib/systemd/system/dbus-broker.service" if path.name == "dbus.service"
                         else "/dev/null" if path.name in RECOVERY_MASKED_UNITS else None)
             if expected != str(path.readlink()):
                 raise BootError("unreviewed recovery systemd unit link: " + path.name)
@@ -725,6 +799,9 @@ def _check_recovery_unit_links(rootfs: Path, *, strict_direct_links: bool = Fals
                 raise BootError("required recovery systemd unit mask missing: " + name)
         if not default.is_symlink() or str(default.readlink()) != "/usr/lib/systemd/system/multi-user.target":
             raise BootError("required recovery default target missing")
+    expected_links = dict(RECOVERY_ENABLED_LINKS)
+    if _fedora44_recovery_root(rootfs):
+        expected_links["sockets.target.wants/dbus.socket"] = "/usr/lib/systemd/system/dbus.socket"
     observed_links = set()
     for directory in units.iterdir():
         if not directory.name.endswith((".wants", ".requires", ".upholds")):
@@ -733,10 +810,10 @@ def _check_recovery_unit_links(rootfs: Path, *, strict_direct_links: bool = Fals
             raise BootError("staged systemd dependency directory escapes target rootfs")
         for link in directory.iterdir():
             relative = f"{directory.name}/{link.name}"
-            if not link.is_symlink() or RECOVERY_ENABLED_LINKS.get(relative) != str(link.readlink()):
+            if not link.is_symlink() or expected_links.get(relative) != str(link.readlink()):
                 raise BootError("unreviewed recovery systemd enablement: " + relative)
             observed_links.add(relative)
-    if strict_direct_links and observed_links != set(RECOVERY_ENABLED_LINKS):
+    if strict_direct_links and observed_links != set(expected_links):
         raise BootError("required recovery systemd enablement missing")
 
 
@@ -785,6 +862,7 @@ def _install_runtime_files(rootfs: Path, assets_dir: Path | None = None, *, cand
     if (network_conf / "99-quirkbench-dns.conf").is_symlink():
         raise BootError("staged NetworkManager settings may not be a symlink")
     if not candidate:
+        sanitize_recovery_etc_enablement(rootfs)
         _check_recovery_unit_links(rootfs)
         _check_recovery_vendor_unit_links(rootfs)
         _check_recovery_vendor_generators(rootfs)

@@ -32,7 +32,7 @@ class FakeRunner:
         stage = command.cwd
         log.write_text(phase + "\n")
         if phase == "query-recovery-srpm":
-            log.write_text((self.identity or ENTRY["kernel_source_nevra"]) + "\n")
+            log.write_text((self.identity or "kernel\t0:6.15.1-1.fc44\tx86_64\t1") + "\n")
         elif phase == "check-recovery-rpm-macros":
             log.write_text("1\n" if self.macro_available else "0\n")
         elif phase == "unpack-recovery-srpm":
@@ -74,13 +74,15 @@ def test_prepares_exact_reviewed_source_and_records_identity(tmp_path):
     runner = FakeRunner()
     record = run(srpm, stage, entry, runner)
     assert runner.phases == ["query-recovery-srpm", "check-recovery-rpm-macros",
-                             "unpack-recovery-srpm", "prepare-recovery-source"]
+                             "unpack-recovery-srpm", "prepare-recovery-source",
+                             "clean-recovery-source"]
     assert record["kernel_srpm_sha256"] == entry["kernel_srpm_sha256"]
     assert record["kernel_source_nevra"] == entry["kernel_source_nevra"]
     assert len(record["source_tree_sha256"]) == 64
     assert (stage / "source/arch/x86/Makefile").is_file()
     assert sorted(path.name for path in (stage / "source-logs").iterdir()) == [
-        "check-recovery-rpm-macros.log", "prepare-recovery-source.log",
+        "check-recovery-rpm-macros.log", "clean-recovery-source.log",
+        "prepare-recovery-source.log",
         "query-recovery-srpm.log", "unpack-recovery-srpm.log"]
 
 
@@ -92,8 +94,16 @@ def test_wrong_hash_and_identity_stop_before_prep(tmp_path):
         run(srpm, stage, entry, runner)
     assert runner.phases == []
     srpm, stage, entry = fixture(tmp_path / "identity")
-    runner = FakeRunner(identity="kernel-0:other.fc99.src")
+    runner = FakeRunner(identity="kernel\t0:6.15.1-1.fc99\tx86_64\t1")
     with pytest.raises(BuildError, match="NEVRA differs"):
+        run(srpm, stage, entry, runner)
+    assert runner.phases == ["query-recovery-srpm"]
+
+
+def test_binary_rpm_is_rejected_even_when_name_and_version_match(tmp_path):
+    srpm, stage, entry = fixture(tmp_path)
+    runner = FakeRunner(identity="kernel\t0:6.15.1-1.fc44\tx86_64\t0")
+    with pytest.raises(BuildError, match="not a Fedora kernel source"):
         run(srpm, stage, entry, runner)
     assert runner.phases == ["query-recovery-srpm"]
 
@@ -124,6 +134,9 @@ def test_preexisting_stage_and_wrong_command_are_rejected(tmp_path):
     with pytest.raises(BuildError, match="does not match locked plan"):
         _validate_recovery_source_command(Command(("sh", "-c", "echo bad"), stage),
                                           "query-recovery-srpm", stage)
+    with pytest.raises(BuildError, match="clean path differs"):
+        _validate_recovery_source_command(Command(("make", "-C", "/tmp/other", "ARCH=x86_64", "mrproper"), stage),
+                                          "clean-recovery-source", stage)
 
 
 def test_bounded_runner_routes_macro_check_through_fixed_source_allowlist(tmp_path, monkeypatch):

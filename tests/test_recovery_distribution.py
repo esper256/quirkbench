@@ -19,7 +19,9 @@ from quirkbench.recovery_distribution import (recovery_checksum_statement,
                                                sign_recovery_checksums,
                                                verify_recovery_checksums)
 from quirkbench.recovery_release import recovery_release_candidate
-from quirkbench.recovery_synthesis import assemble_signed_recovery_image
+from quirkbench.recovery_synthesis import (assemble_recovery_image,
+                                          assemble_signed_recovery_image,
+                                          sign_and_publish_recovery_image)
 from test_recovery_release import FAKE_IMAGE_SHA, assembled
 
 
@@ -449,3 +451,23 @@ def test_prepared_image_can_resume_signing_without_reassembly(tmp_path, monkeypa
         verification_run=fake_public_gpg)
     assert first == second
     assert first["verified_checksums"]["qualification_status"] == "unqualified"
+
+
+def test_image_worker_record_has_no_signing_and_controller_can_publish(tmp_path, monkeypatch):
+    import quirkbench.recovery_distribution as distribution
+
+    catalog, recipe, store, stage_record, image_inputs, _ = assembled(tmp_path, monkeypatch)
+    candidate = recovery_release_candidate(recipe, catalog, store, stage_record, image_inputs)
+    monkeypatch.setattr(distribution, "_image_identity",
+                        lambda _: (FAKE_IMAGE_SHA, candidate["image_size_bytes"]))
+    assembled_record = assemble_recovery_image(
+        recipe, catalog, store, stage_record, image_inputs,
+        image_builder=lambda _: (_ for _ in ()).throw(AssertionError("rebuild")))
+    assert assembled_record["candidate"] == candidate
+    assert not Path(str(image_inputs.output) + ".checksums.json.sig").exists()
+    home = tmp_path.parent / f"{tmp_path.name}-split-signing-home"
+    home.mkdir()
+    published = sign_and_publish_recovery_image(
+        assembled_record, home, trusted_key(tmp_path), FINGERPRINT,
+        signing_run=fake_gpg, verification_run=fake_public_gpg)
+    assert published["verified_checksums"]["qualification_status"] == "unqualified"

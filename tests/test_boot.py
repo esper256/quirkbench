@@ -313,6 +313,53 @@ def test_recovery_vendor_enablement_rejects_escaping_or_linked_directory(tmp_pat
         recovery_vendor_enabled_links(root)
 
 
+def test_recovery_vendor_inventory_accepts_local_dracut_unit_chain(tmp_path):
+    from quirkbench.boot import recovery_vendor_enabled_links
+
+    root = tmp_path/'recovery'
+    vendor = root/'usr/lib/systemd/system'
+    wants = vendor/'initrd.target.wants'
+    wants.mkdir(parents=True)
+    target = root/'usr/lib/dracut/modules.d/77dracut-systemd/dracut-cmdline.service'
+    target.parent.mkdir(parents=True)
+    target.write_text('[Service]\nType=oneshot\n')
+    (vendor/'dracut-cmdline.service').symlink_to('../../dracut/modules.d/77dracut-systemd/dracut-cmdline.service')
+    (wants/'dracut-cmdline.service').symlink_to('../dracut-cmdline.service')
+    assert recovery_vendor_enabled_links(root) == {
+        'initrd.target.wants/dracut-cmdline.service': '../dracut-cmdline.service'}
+    (vendor/'dracut-cmdline.service').unlink()
+    (vendor/'dracut-cmdline.service').symlink_to('/etc/passwd')
+    with pytest.raises(BootError, match='not a regular local unit'):
+        recovery_vendor_enabled_links(root)
+
+
+def test_recovery_sanitizes_only_the_exact_fedora44_scriptlet_links(tmp_path, monkeypatch):
+    import quirkbench.recovery_vendor_fedora44 as vendor_policy
+    from quirkbench.boot import sanitize_recovery_etc_enablement
+
+    root = tmp_path/'recovery'
+    (root/'etc').mkdir(parents=True)
+    (root/'etc/os-release').write_text('ID=fedora\nVERSION_ID=44\n')
+    units = root/'etc/systemd/system'
+    links = {
+        'dbus.service': '/usr/lib/systemd/system/dbus-broker.service',
+        'sockets.target.wants/dbus.socket': '/usr/lib/systemd/system/dbus.socket',
+        'multi-user.target.wants/NetworkManager.service': '/usr/lib/systemd/system/NetworkManager.service',
+        'network-online.target.wants/NetworkManager-wait-online.service': '/usr/lib/systemd/system/NetworkManager-wait-online.service',
+    }
+    monkeypatch.setattr(vendor_policy, 'FEDORA44_ETC_LINKS', links)
+    for name, target in links.items():
+        link = units/name
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(target)
+    sanitize_recovery_etc_enablement(root)
+    assert not (units/'network-online.target.wants/NetworkManager-wait-online.service').is_symlink()
+    assert (units/'sockets.target.wants/dbus.socket').is_symlink()
+    (units/'network-online.target.wants/unknown.service').symlink_to('/usr/lib/systemd/system/unknown.service')
+    with pytest.raises(BootError, match='differs from reviewed closure'):
+        sanitize_recovery_etc_enablement(root)
+
+
 def test_recovery_rejects_unreviewed_vendor_generator_before_staging(tmp_path):
     from quirkbench.boot import install_recovery_runtime_base, recovery_vendor_generators
 
@@ -403,6 +450,8 @@ def test_recovery_image_check_requires_exact_generator_masks(tmp_path):
 
 @pytest.mark.parametrize('relative,reason', [
     ('etc/systemd/system/systemd-networkd.service', 'unit mask missing'),
+    ('etc/systemd/system/systemd-repart.service', 'unit mask missing'),
+    ('etc/systemd/system/systemd-tpm2-clear.service', 'unit mask missing'),
     ('etc/systemd/system/default.target', 'default target missing'),
     ('etc/systemd/system/multi-user.target.wants/quirkbench-supervisor.service',
      'enablement missing'),

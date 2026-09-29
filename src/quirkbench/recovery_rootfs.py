@@ -236,7 +236,7 @@ def _install(catalog, lock, store, output, *, runner=_run, marker=Path('/etc/qui
     repos = stage / 'empty-repos'
     repos.mkdir()
     argv = ['dnf5', '--no-plugins', f'--config={config}', f'--setopt=reposdir={repos}',
-            '--disable-repo=*', f'--installroot={rootfs}', f"--releasever={entry['fedora_release']}",
+            f'--installroot={rootfs}', f"--releasever={entry['fedora_release']}",
             '--setopt=install_weak_deps=True', '--setopt=skip_if_unavailable=False', '-y',
             'install', *paths]
     runner(argv, 3600, log=stage / 'dnf.log')

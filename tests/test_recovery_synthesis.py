@@ -102,7 +102,8 @@ def test_locked_rootfs_source_and_kernel_share_one_stage(tmp_path, monkeypatch):
     assert record["kernel_stage"]["kernel_release"] == "6.12.0-test"
     assert runner.phases == ["query-recovery-srpm", "check-recovery-rpm-macros",
                              "unpack-recovery-srpm",
-                             "prepare-recovery-source", "configure-recovery",
+                             "prepare-recovery-source", "clean-recovery-source",
+                             "configure-recovery",
                              "kernel-release", "compile-recovery",
                              "install-recovery-modules"]
     assert (stage / "rootfs/lib/modules/6.12.0-test").is_dir()
@@ -136,7 +137,7 @@ def test_failed_rootfs_or_source_keeps_private_stage_without_kernel(tmp_path, mo
 
     catalog, recipe, store, _ = recipe_fixture(tmp_path / "source")
     stage = tmp_path / "source/base-stage"
-    runner = CombinedRunner(source=SourceRunner(identity="kernel-0:wrong.fc44.src"))
+    runner = CombinedRunner(source=SourceRunner(identity="kernel\t0:wrong.fc44\tx86_64\t1"))
     with pytest.raises(BuildError, match="NEVRA differs"):
         run(catalog, recipe, store, stage, runner)
     assert runner.phases == ["query-recovery-srpm"]

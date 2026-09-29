@@ -118,8 +118,8 @@ def prepare_recovery_image_inputs(recipe: dict, catalog: dict, store,
             or ssh.is_symlink() or (ssh.is_dir() and any(ssh.glob("ssh_host_*_key")))):
         raise BuildError("factory recovery rootfs contains private credentials")
     provenance = stage / "artifacts/recovery-provenance.json"
-    if provenance.exists() or provenance.is_symlink():
-        raise BuildError("recovery image provenance path must be new")
+    if provenance.is_symlink() or (provenance.exists() and not provenance.is_file()):
+        raise BuildError("recovery image provenance path is invalid")
     layout = recipe["layout"]
     inputs = ImageInputs(
         output=output, recovery_kernel=artifacts["kernel"],
@@ -148,5 +148,10 @@ def prepare_recovery_image_inputs(recipe: dict, catalog: dict, store,
                          "config": {"sha256": sha256_file(artifacts["config"])}},
               "outputs": {"kernel": {"sha256": outputs["kernel"]},
                           "initramfs": {"sha256": initramfs["initramfs_sha256"]}}}
-    atomic_write(provenance, canonical(record) + b"\n")
+    expected_provenance = canonical(record) + b"\n"
+    if provenance.exists():
+        if provenance.read_bytes() != expected_provenance:
+            raise BuildError("existing recovery image provenance differs from audited inputs")
+    else:
+        atomic_write(provenance, expected_provenance)
     return replace(inputs, recovery_provenance=provenance)

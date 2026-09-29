@@ -1,8 +1,8 @@
 """P1c catalog selection over pinned, locally retained baseline inputs.
 
 Selection never downloads an unreviewed kernel, trusts inventory as build input,
-or authorizes a physical attempt. The installed catalog is empty until a real
-Fedora source/configuration/RPM closure and recipes are reviewed and retained.
+or authorizes a physical attempt. The installed Fedora 44 first-boot entry
+still requires its exact retained objects and does not qualify experiments.
 """
 from __future__ import annotations
 

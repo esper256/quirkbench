@@ -266,7 +266,8 @@ class BoundedRunner:
         if phase == "audit-recovery-initramfs":
             _validate_recovery_initramfs_unpack(command, self.workspace)
         elif phase in {"query-recovery-srpm", "check-recovery-rpm-macros",
-                       "unpack-recovery-srpm", "prepare-recovery-source"}:
+                       "unpack-recovery-srpm", "prepare-recovery-source",
+                       "clean-recovery-source"}:
             _validate_recovery_source_command(command, phase, self.workspace)
         elif phase in {"compile-userspace", "install-userspace"}:
             _validate_userspace_command(command, self.workspace)
@@ -337,7 +338,7 @@ def _validate_recovery_source_command(command: Command, phase: str, stage: Path)
     srpm = stage / "kernel.src.rpm"
     macro = ("--define", f"_topdir {rpm_root}", "--define", f"_tmppath {rpm_root / 'tmp'}")
     if phase == "query-recovery-srpm":
-        expected = ("rpm", "-qp", "--qf", "%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}\\n", str(srpm))
+        expected = ("rpm", "-qp", "--qf", "%{NAME}\\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\\t%{ARCH}\\t%{SOURCEPACKAGE}\\n", str(srpm))
     elif phase == "check-recovery-rpm-macros":
         expected = ("rpm", "--eval", "%{defined py3_shebang_fix}")
     elif phase == "unpack-recovery-srpm":
@@ -347,6 +348,15 @@ def _validate_recovery_source_command(command: Command, phase: str, stage: Path)
         if len(specs) != 1 or specs[0].is_symlink():
             raise BuildError("recovery SRPM must contain one regular spec")
         expected = ("rpmbuild", "-bp", *macro, str(specs[0]))
+    elif phase == "clean-recovery-source":
+        if len(command.argv) != 5 or command.argv[:2] != ("make", "-C"):
+            raise BuildError("recovery source command does not match locked plan")
+        source = Path(command.argv[2])
+        if (source.is_symlink() or not source.is_dir()
+                or not source.resolve().is_relative_to(rpm_root / "BUILD")
+                or not (source / "Kconfig").is_file()):
+            raise BuildError("recovery source clean path differs from prepared source")
+        expected = ("make", "-C", str(source), "ARCH=x86_64", "mrproper")
     else:
         raise BuildError("unknown recovery source phase")
     if command.argv != expected:
@@ -406,14 +416,19 @@ def run_recovery_source_stage(*, srpm: Path, entry: dict, stage: Path,
                    env=env, limits=limits, on_activity=lambda _phase, _bytes, _objects: None)
         return log
 
-    query_log = execute(Command(("rpm", "-qp", "--qf", "%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}\\n", str(staged_srpm)), stage),
+    query_log = execute(Command(("rpm", "-qp", "--qf", "%{NAME}\\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\\t%{ARCH}\\t%{SOURCEPACKAGE}\\n", str(staged_srpm)), stage),
                         "query-recovery-srpm", 60)
     if query_log.stat().st_size > 4096:
         raise BuildError("recovery source RPM identity output too large")
     try:
-        identity = query_log.read_text(encoding="ascii").strip()
+        fields = query_log.read_text(encoding="ascii").strip().split("\t")
     except (OSError, UnicodeError) as exc:
         raise BuildError("invalid recovery source RPM identity") from exc
+    if len(fields) != 4 or fields[0] != "kernel" or fields[2] not in {"src", "x86_64"} or fields[3] != "1":
+        raise BuildError("recovery source RPM is not a Fedora kernel source package")
+    # Fedora's kernel SRPM can report its build architecture as x86_64. The
+    # catalog records the source-package identity, not that header arch tag.
+    identity = f"{fields[0]}-{fields[1]}.src"
     if identity != entry["kernel_source_nevra"]:
         raise BuildError("recovery source RPM NEVRA differs from reviewed baseline")
     macro_log = execute(Command(("rpm", "--eval", "%{defined py3_shebang_fix}"), stage),
@@ -461,6 +476,11 @@ def run_recovery_source_stage(*, srpm: Path, entry: dict, stage: Path,
                 raise BuildError("prepared kernel source symlink escapes source tree")
         elif not item.is_file() and not item.is_dir():
             raise BuildError("prepared kernel source contains a special file")
+    # Fedora's %prep generates in-tree configuration headers. An out-of-tree
+    # protected build rejects that tree until Kbuild removes the generated
+    # state. The reviewed source files and configs/ remain intact.
+    execute(Command(("make", "-C", str(candidate), "ARCH=x86_64", "mrproper"), stage),
+            "clean-recovery-source", 300)
     source_tree_sha256 = _tree_hash(candidate, excluded_paths=frozenset())
     candidate.rename(source)
     return {"schema_version": 1, "kernel_srpm_sha256": entry["kernel_srpm_sha256"],

@@ -10,7 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from .boot import _check_recovery_unit_links, install_recovery_runtime_base
+from .boot import (_check_recovery_unit_links, install_recovery_runtime_base,
+                   sanitize_recovery_etc_enablement)
 from .build import BuildError, KernelBuild, _safe_build_path
 from .build_pipeline import (BoundedRunner, CommandRunner, ResourceLimits,
                              _tree_hash, run_recovery_initramfs_stage,
@@ -115,6 +116,7 @@ def run_recovery_runtime_stage(recipe: dict, catalog: dict, store, stage: Path,
     package_output = rootfs / "usr/lib/quirkbench/quirkbench"
     if package_output.exists() or package_output.is_symlink():
         raise BuildError("recovery runtime stage must be new")
+    sanitize_recovery_etc_enablement(rootfs)
     _check_recovery_unit_links(rootfs)
     units_dir = rootfs / "etc/systemd/system"
     if units_dir.exists():
@@ -239,21 +241,11 @@ def prepare_recovery_image_stage(recipe: dict, catalog: dict, store, stage: Path
             "image_inputs": inputs}
 
 
-def assemble_signed_recovery_image(recipe: dict, catalog: dict, store,
-                                   stage_record: dict, image_inputs,
-                                   signing_home: Path, trusted_public_key: Path,
-                                   fingerprint: str, *, image_builder=None,
-                                   signing_run=None, verification_run=None) -> dict:
-    """Complete a prepared factory image and its signed unqualified sidecars.
-
-    An already assembled image is verified against the exact staged inputs so
-    interrupted signing can resume without rebuilding or replacing image bytes.
-    """
-    import subprocess
-
+def assemble_recovery_image(recipe: dict, catalog: dict, store,
+                            stage_record: dict, image_inputs, *,
+                            image_builder=None) -> dict:
+    """Assemble and audit image bytes in a worker without access to signing keys."""
     from .image import ImageInputs, create_image
-    from .recovery_distribution import (publish_signed_recovery_bundle,
-                                        sign_recovery_checksums)
     from .recovery_release import recovery_release_candidate
 
     if not isinstance(image_inputs, ImageInputs):
@@ -264,6 +256,27 @@ def assemble_signed_recovery_image(recipe: dict, catalog: dict, store,
         (image_builder or create_image)(image_inputs)
     candidate = recovery_release_candidate(recipe, catalog, store,
                                            stage_record, image_inputs)
+    return {"image": str(output), "manifest": str(Path(str(output) + ".json")),
+            "candidate": candidate}
+
+
+def sign_and_publish_recovery_image(assembled: dict, signing_home: Path,
+                                    trusted_public_key: Path, fingerprint: str, *,
+                                    signing_run=None, verification_run=None) -> dict:
+    """Sign audited image bytes from the controller outside the build worker."""
+    import subprocess
+
+    from .recovery_distribution import (publish_signed_recovery_bundle,
+                                        sign_recovery_checksums)
+
+    if (not isinstance(assembled, dict)
+            or set(assembled) != {"image", "manifest", "candidate"}
+            or not isinstance(assembled["candidate"], dict)):
+        raise BuildError("audited recovery image record required for signing")
+    output = Path(assembled["image"])
+    if assembled["manifest"] != str(Path(str(output) + ".json")):
+        raise BuildError("recovery image manifest path differs from audited image")
+    candidate = assembled["candidate"]
     statement, signature = sign_recovery_checksums(
         candidate, output, Path(signing_home), fingerprint,
         run=signing_run or subprocess.run)
@@ -273,3 +286,16 @@ def assemble_signed_recovery_image(recipe: dict, catalog: dict, store,
         run=verification_run or subprocess.run)
     return {"image": str(output), "manifest": str(Path(str(output) + ".json")),
             "candidate": candidate, "verified_checksums": verified}
+
+
+def assemble_signed_recovery_image(recipe: dict, catalog: dict, store,
+                                   stage_record: dict, image_inputs,
+                                   signing_home: Path, trusted_public_key: Path,
+                                   fingerprint: str, *, image_builder=None,
+                                   signing_run=None, verification_run=None) -> dict:
+    """Compatibility wrapper for callers that already own the signing boundary."""
+    assembled = assemble_recovery_image(recipe, catalog, store, stage_record,
+                                        image_inputs, image_builder=image_builder)
+    return sign_and_publish_recovery_image(
+        assembled, signing_home, trusted_public_key, fingerprint,
+        signing_run=signing_run, verification_run=verification_run)

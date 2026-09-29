@@ -303,10 +303,10 @@ This is a candidate input store, not an installed supported baseline or a
 completed backup of controller state. The builder OCI archive remains retained
 separately with the identity above.
 
-The current CAS set does not settle the reviewed repository configuration,
+At that point, the CAS set did not settle the reviewed repository configuration,
 build-recipe record, protected resolved kernel configuration, installed Fedora
-unit/generator policy or rootfs behavior. Do not activate the installed catalog
-from these bytes alone.
+unit/generator policy or rootfs behavior. The catalog could not be activated
+from those bytes alone.
 
 An offline RPM header audit of the same 248 retained bytes inventoried systemd
 payloads without installing packages. The local RPM snapshot and target lock
@@ -320,18 +320,53 @@ particular, the payload includes links for `systemd-repart.service` and
 `systemd-repart.socket`, and files for
 `systemd-gpt-auto-generator` and `systemd-factory-reset-generator`.
 These are package contents, not proof that an installed recovery system
-activates them. Review the exact vendor link graph, generators and masks
-before admitting this closure to the recovery catalog. The current runtime
-allowlists are empty and deliberately reject vendor links and generator bytes
-until that review.
+activates them. The exact vendor link graph, generators and masks still needed
+review before catalog admission. Runtime allowlists were empty and rejected
+vendor links and generator bytes until that review.
 
-Review the built rootless builder and its installed RPM/toolchain locks, then
-audit the candidate recovery RPM closure and retain approved bytes in controller CAS;
-prepare the SRPM source under that builder; apply and audit the reviewed recovery
-fragment; inspect modules and generic initramfs; then activate one catalog entry
-only when all retained bytes and protection checks match. The current `dev`
-Distrobox does not expose `podman` or `distrobox` on its PATH, but the Bazzite
-controller host has both. The controller service belongs under the host user
-manager; a rootless builder can be launched from there. `rpmbuild` belongs inside
-that builder and need not be installed on the controller host. Focused software
-development can continue.
+At this earlier point, builder, closure, source and installed runtime review
+remained. The `dev` Distrobox did not expose `podman` on its PATH, but the
+Bazzite controller host had rootless Podman and systemd user services.
+`rpmbuild` belonged inside the builder and did not need host installation.
+
+## 2026-09-29 first-boot input update
+
+The paragraphs above describe the earlier candidate state. The rebuilt Fedora
+44 rootless builder now includes the missing RPM macros. Its retained OCI
+archive is `.quirkbench/inputs/fedora44-builder-rebuild-20260929/builder.oci.tar`
+(402,904,064 bytes; SHA-256
+`e879d3822960da0b1cb59e77deae2d2a0f602455d96a4892a9628e1f91cc584d`),
+with local configuration ID
+`sha256:6e51e11c610ebfb6560c231ced072827ade8eaea4a1e82ca0447e691021325db`.
+The exact builder RPM lock SHA-256 is
+`63919756df48cfdf5ceadcfffb22ef52d85ed8ba47bf97956d53840394b67a03`;
+the toolchain lock SHA-256 is
+`87eb704a94b520b1262b3911fed66c29e478bef06d5e44f6a0d7d8991b824fb3`.
+The original Fedora base digest remains
+`sha256:fb31d002de20bfa7742b8c9b0d0ff723bb9fa2534fd43ecac0101a35f703fef0`.
+
+Full Fedora `%prep` completed in the restricted rootless worker. Its prepared
+source and final `olddefconfig` accepted the protected generic profile; the
+resolved configuration SHA-256 is
+`1dec792a0cfa1312469e4ef52d5103ab2299e2efdf0d1feaac55ca810769d0a2`.
+The reviewed fragment SHA-256 is
+`65a6e41e5712ddc46ff6ba1b6baa27bb03251d8dabbda55083422066dcbe89c9`.
+The isolated Fedora key database verified all 248 retained target RPM
+signatures, headers and payload digests. An offline locked DNF5 installroot
+completed in `.quirkbench/inputs/fedora44-rootfs-diagnostic-v2-20260929/`.
+Its 87 vendor enablement links, 17 generator binaries and 33 scriptlet-created
+`/etc/systemd/system` links were inventoried against exact Fedora 44 bytes.
+The generic runtime removes unwanted scriptlet enables and masks automatic
+repartition, factory reset, TPM clear, firmware-update and other unrelated
+boot actions. Unknown Fedora vendor graphs fail closed.
+
+The installed catalog now contains the exact `fedora44-firstboot-v1` baseline,
+and the rootfs lock and current recovery recipe live in
+`.quirkbench/inputs/fedora44-firstboot-candidate-20260929/`. Their referenced
+objects are retained in the private candidate CAS. This selects inputs for an
+**unqualified first-boot recovery image**; it does not qualify a target,
+experimental kernel, release or unattended use. The protected kernel build is
+running in the bounded host user service
+`quirkbench-fedora44-kernel-build-20260929.service`, with persistent logs and
+an eventual `exit.status` in its matching input directory. Its result must be
+checked before any image is assembled.

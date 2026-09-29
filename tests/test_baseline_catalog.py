@@ -54,14 +54,15 @@ def retained_fixture(tmp_path):
     return plan, catalog, store
 
 
-def test_catalog_examples_and_installed_empty_catalog_are_explicit():
+def test_catalog_examples_and_installed_fedora44_baseline_are_explicit():
     Draft202012Validator.check_schema(SCHEMA)
     Draft202012Validator(SCHEMA).validate(example())
     assert validate_catalog(example()) == example()
     assert load_catalog(canonical(example())) == example()
     installed = installed_catalog()
     Draft202012Validator(SCHEMA).validate(installed)
-    assert installed["entries"] == []
+    assert [entry["baseline_id"] for entry in installed["entries"]] == ["fedora44-firstboot-v1"]
+    assert installed["entries"][0]["fedora_release"] == "44"
 
 
 def test_supported_fixture_binds_kernel_config_rpms_userspace_and_recipes(tmp_path):
@@ -79,9 +80,10 @@ def test_supported_fixture_binds_kernel_config_rpms_userspace_and_recipes(tmp_pa
     Draft202012Validator(json.loads((ROOT / "schemas/hardware-plan.v1.schema.json").read_text())).validate(selected)
 
 
-def test_unknown_hardware_or_empty_installed_catalog_stays_blocked(tmp_path):
+def test_unknown_hardware_or_empty_catalog_stays_blocked(tmp_path):
     plan, catalog, store = retained_fixture(tmp_path)
-    empty = select_baseline(plan, installed_catalog(), store)
+    empty = select_baseline(plan, {"schema_version": 1, "catalog_revision": "empty-fixture-v1",
+                                   "entries": []}, store)
     assert empty["baseline_requirements"]["catalog_status"] == "unsupported"
     assert empty["locked_build_inputs"] is None
     assert "unsupported_baseline_combination" in empty["blocking_reasons"]

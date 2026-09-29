@@ -22,6 +22,20 @@ MAX_CMDLINE_BYTES = 64 * 1024
 MODULE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,127}\Z")
 HOST_ROOT_SETTING = re.compile(r"(?<!\S)(?:root=|resume=|netroot=|rd\.(?:luks|md|lvm)\.)")
 REQUIRED_DRACUT_MODULES = {"base", "rootfs-block", "systemd"}
+STORAGE_WRITERS = {"systemd-repart.service", "systemd-repart.socket",
+                   "systemd-factory-reset-request.service", "systemd-factory-reset.socket"}
+STORAGE_GENERATORS = {"systemd-gpt-auto-generator", "systemd-factory-reset-generator",
+                      "systemd-hibernate-resume-generator"}
+FIRMWARE_WRITERS = {"systemd-tpm2-clear.service", "systemd-tpm2-setup.service",
+                    "systemd-tpm2-setup-early.service", "systemd-boot-random-seed.service",
+                    "systemd-bootctl.socket", "systemd-pcrextend.socket",
+                    "systemd-pcrlock.socket", "systemd-pcrmachine.service",
+                    "systemd-pcrproduct.service", "systemd-pcrnvdone.service",
+                    "systemd-pcrphase.service", "systemd-pcrphase-sysinit.service",
+                    "systemd-pcrphase-initrd.service",
+                    "systemd-pcrphase-factory-reset.service",
+                    "systemd-pcrphase-storage-target-mode.service"}
+FIRMWARE_GENERATORS = {"systemd-tpm2-generator"}
 
 
 def _normalized_target(parent: str, target: str) -> str:
@@ -106,12 +120,22 @@ def audit_recovery_initramfs_tree(root: Path, release: str, profile: dict) -> di
         raise BuildError("initramfs lacks required generic root mount modules")
     prohibited = set(profile["protection"]["excluded_internal_controller_drivers"])
     present_modules: set[str] = set()
+    enabled_writers: set[str] = set()
+    installed_generators: set[str] = set()
     entry_count = 0
     for path in root.rglob("*"):
         entry_count += 1
         if entry_count > MAX_ENTRIES:
             raise BuildError("initramfs tree exceeds entry limit")
         relative = path.relative_to(root).as_posix()
+        if (path.name in STORAGE_WRITERS | FIRMWARE_WRITERS and
+                relative.startswith(("usr/lib/systemd/system/", "lib/systemd/system/"))
+                and ".wants/" in relative):
+            enabled_writers.add(path.name)
+        if (path.name in STORAGE_GENERATORS | FIRMWARE_GENERATORS and
+                relative.startswith(("usr/lib/systemd/system-generators/",
+                                     "lib/systemd/system-generators/"))):
+            installed_generators.add(path.name)
         private_roots = ("etc/NetworkManager/system-connections", "etc/wireguard",
                          "etc/quirkbench/credentials", "root/.ssh", "root/.gnupg")
         private_files = {"etc/shadow", "etc/gshadow"}
@@ -138,6 +162,16 @@ def audit_recovery_initramfs_tree(root: Path, release: str, profile: dict) -> di
         present_modules.add(module)
     if present_modules & prohibited:
         raise BuildError("initramfs contains a protected internal controller module")
+    for name in sorted(enabled_writers):
+        mask = root / "etc/systemd/system" / name
+        if not mask.is_symlink() or os.readlink(mask) != "/dev/null":
+            kind = "firmware" if name in FIRMWARE_WRITERS else "storage"
+            raise BuildError(f"initramfs can start an automatic {kind} writer: " + name)
+    for name in sorted(installed_generators):
+        mask = root / "etc/systemd/system-generators" / name
+        if not mask.is_symlink() or os.readlink(mask) != "/dev/null":
+            kind = "firmware" if name in FIRMWARE_GENERATORS else "storage"
+            raise BuildError(f"initramfs can generate automatic {kind} actions: " + name)
     cmdline_dir = root / "etc/cmdline.d"
     if cmdline_dir.exists() or cmdline_dir.is_symlink():
         if cmdline_dir.is_symlink() or not cmdline_dir.is_dir():
