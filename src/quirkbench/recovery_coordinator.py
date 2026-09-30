@@ -29,6 +29,12 @@ class RecoveryImageCoordinator:
             except ValueError: return None
             if 'recipe_sha256' not in arguments: return None
             expired=controller.clock()>=claim['deadline']
+            if not expired:
+                try:
+                    owner.collect_activity(claim)
+                except Conflict:
+                    if controller.clock()<claim['deadline']: raise
+                    expired=True
             if not expired and not self.services.finished(claim['worker_unit'],claim['worker_boot_id']): return None
             # A collected transient unit is never re-stopped; exact proof is journaled.
             owner._stop_worker_once(claim,self.services)
@@ -36,6 +42,7 @@ class RecoveryImageCoordinator:
                 controller._publish_operation(claim['id'],owner.epoch,claim['worker_generation'],state='FAILED',
                     error={'code':'RECOVERY_IMAGE_DEADLINE','message':'Image worker deadline expired; inspect retained private diagnostics.','retryable':True},
                     expected_claim=claim,clear_stopped_worker=True)
+                owner.housekeep()
                 return {'operation_id':claim['id'],'state':'FAILED'}
             try:
                 result=owner.consume_recovery_image(claim['id'],services=self.services,**self.signing)
@@ -46,11 +53,13 @@ class RecoveryImageCoordinator:
                 controller._publish_operation(claim['id'],owner.epoch,claim['worker_generation'],state='FAILED',
                     error={'code':'RECOVERY_IMAGE_DEADLINE','message':'Image completion crossed its deadline; retained bytes remain unqualified.','retryable':True},
                     expected_claim=claim,clear_stopped_worker=True)
+                owner.housekeep()
                 return {'operation_id':claim['id'],'state':'FAILED'}
             except Exception as exc:
                 controller._publish_operation(claim['id'],owner.epoch,claim['worker_generation'],state='FAILED',
                     error={'code':'RECOVERY_IMAGE_VALIDATION_FAILED','message':'Private image validation/signing failed; inspect retained stage diagnostics. '+type(exc).__name__,'retryable':True},expected_claim=claim,clear_stopped_worker=True)
                 result={'operation_id':claim['id'],'state':'FAILED'}
+            owner.housekeep()
             return result
         for row in queued:
             try: arguments=recovery_rootfs_arguments(_json(controller.store.get(row['input_digest']),'image intent'))

@@ -1,5 +1,13 @@
 # First attended recovery boot
 
+> **Local artifact reset, 2026-09-30:** the user authorized permanent deletion of
+> the checkout-local `.quirkbench` tree, including delivered images, signing keys,
+> retained inputs and local validation/qualification logs. Historical identities
+> and results below remain records of those runs; their bytes are no longer
+> available. No replacement image or new qualification is supplied by the reset.
+> See [current local state](local-state-maintenance.md).
+
+
 This procedure records observations of the delivered artifact. The revised
 [storage policy](architecture.md#storage-protection-policy) permits stock recovery
 controller enumeration while restricting storage operations to the boot device;

@@ -7,15 +7,44 @@ confinement, candidate eligibility and operator approval separately. Later enrol
 unattended grants and backup completeness remain separate capabilities. See the
 [delivery tiers](product-roadmap.md#delivery-contract).
 
-For a pre-boot operation, use `quirkbench --state /absolute/controller-state
-operation watch ID`. It refreshes a TTY or emits timestamped snapshots to a pipe;
-`--once` reads one snapshot and `--json` emits the existing operation response
-envelope as one JSON record per sample. `--interval` accepts 0.5–60 seconds
-(default 2). It stops on success, failure or interruption; Ctrl+C ends only the
-viewer. Watching never invokes an agent, acquires lifecycle ownership or dispatches
-work. Persisted stages/deadlines/failures are shown; absent measured progress is
-explicitly unavailable. Worker private diagnostics are not yet imported into
-operation progress, so this viewer does not invent compilation percentages.
+Run `quirkbench setup-state` once, then open `quirkbench monitor` manually in an
+existing terminal. State defaults to `$XDG_STATE_HOME/quirkbench`, or
+`~/.local/state/quirkbench`. The TUI lists operations and investigations, refreshing
+bounded summaries every two seconds. Use arrows/j/k to select, Enter for details,
+`l` for bounded diagnostic logs, PgUp/PgDn to scroll and `q` to exit. No window or
+agent is launched; exiting has no execution effect. `--once` prints a snapshot;
+`--json` returns the existing C2 envelope. `--run RUN_ID` views a recorded ad hoc
+bounded development build. Development output alone is not measured compile progress.
+
+Queries open an existing database read-only, without controller construction,
+migrations, startup reconciliation or ownership changes. Missing setup, incompatible
+schemas and unavailable services are reported. The display separates phase advancement,
+heartbeat age, measured counters, waits, deadlines, worker completion and publication.
+Stock preparation reports package/runtime installation, initramfs, assembly and owner
+validation/signing/publication. Worker JSON remains advisory and is accepted only by
+the current owner under its exact epoch/generation/claim fence. Malformed advisory
+records cannot become execution authorization or terminate the coordinator.
+
+`operation list --json` pages at most 100 summaries with `--after`/`--limit`.
+`operation watch ID` retains the existing focused view and interval controls;
+Ctrl+C stops only the view. Output bytes measure activity, not percent complete.
+A quiet command is not proof of deadlock. Logs come only from the selected run's
+allowlisted directories; reads are bounded, links are rejected and terminal control
+characters are filtered in human views.
+
+Storage shows filesystem free space and the last maintenance summary without walking
+large trees on every refresh. Configurable retention keeps completed attempts,
+releases, builds, inputs and qualification outputs by count; pins and live/uncertain
+work remain protected. Required storage has no overall byte budget. Only optional
+caches default to 50 GiB of logical file bytes; Btrfs sharing/compression means this
+is not exclusive physical usage. Successful disposable staging needs verified
+publication and whole-worker stop proof. Failed staging defaults to seven days.
+Retired payload references permit shared-aware CAS collection and native OSTree
+pruning; database history remains with expired payloads unavailable. `maintenance
+prune --dry-run` describes eligible cleanup; `maintenance prune` executes it while
+idle. Mutating commands and the existing owner also trigger housekeeping. Read-only
+monitoring does no cleanup; no cron/timer or additional service is involved. See
+[settings and directory coverage](local-state-maintenance.md).
 
 Run `quirkbench --state /absolute/controller-state watch CAMPAIGN`. A TTY refreshes the same view; redirected output is a timestamped sequence of snapshots. `--once` prints one snapshot, and `--json` provides machine-readable snapshots. The watcher reads the controller directly and spends no agent tokens. `campaign status` remains a concise administrative JSON view. `Controller.events(campaign, after=cursor)` retrieves durable progress events in order.
 

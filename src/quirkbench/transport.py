@@ -134,6 +134,14 @@ def make_server(
             return _strict_json(self.rfile.read(length))
 
         def do_POST(self):
+            from .maintenance import private_lock
+            try:
+                with private_lock(controller.root/'command.lock',shared=True):
+                    self._post()
+            except Conflict:
+                self._send(409, {'error':'controller housekeeping or local publication is active; retry'})
+
+        def _post(self):
             try:
                 device_id = self._authorize()
                 data = self._read()

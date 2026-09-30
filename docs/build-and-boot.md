@@ -1,5 +1,13 @@
 # OSTree build and boot workflow
 
+> **Local artifact reset, 2026-09-30:** the user authorized permanent deletion of
+> the checkout-local `.quirkbench` tree, including delivered images, signing keys,
+> retained inputs and local validation/qualification logs. Historical identities
+> and results below remain records of those runs; their bytes are no longer
+> available. No replacement image or new qualification is supplied by the reset.
+> See [current local state](local-state-maintenance.md).
+
+
 The production deployment backend is minimal Fedora composed with rpm-ostree and published through a traditional signed OSTree repository. The old four-file kernel/initramfs bundle is retired. Historical artifacts remain available, but old images require rebuilding; there is no in-place image conversion.
 
 The [product plan](product-roadmap.md) makes generic recovery media the entry point:

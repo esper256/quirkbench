@@ -1,5 +1,13 @@
 # Stock recovery and attended execution — implementation handoff
 
+> **Local artifact reset, 2026-09-30:** the user authorized permanent deletion of
+> the checkout-local `.quirkbench` tree, including delivered images, signing keys,
+> retained inputs and local validation/qualification logs. Historical identities
+> and results below remain records of those runs; their bytes are no longer
+> available. No replacement image or new qualification is supplied by the reset.
+> See [current local state](local-state-maintenance.md).
+
+
 Updated 2026-09-30. This records software implementation and its limits, not image,
 boot, storage-preservation or release qualification. The authoritative
 [storage policy](architecture.md#storage-protection-policy) allows passive kernel
@@ -25,17 +33,23 @@ The retained RPM/key/policy/lock objects travel in CAS and through operation bac
 Available controller commands, using its existing selected private state:
 
 ```sh
-quirkbench recovery-inputs acquire-plan /absolute/new-rpm-directory
-quirkbench recovery-inputs lock /absolute/rpm-directory \
+quirkbench recovery-inputs acquire-plan /SELECTED_STATE/inputs/new-generation
+quirkbench recovery-inputs lock /SELECTED_STATE/inputs/new-generation/rpms \
   --public-key /absolute/fedora-signing-key \
   --builder-image-digest sha256:ACTUAL_DIGEST \
-  --diagnostics /absolute/new-diagnostics
+  --diagnostics /SELECTED_STATE/inputs/new-signature-run
 quirkbench recovery-inputs recipe --lock ACTUAL_LOCK_SHA256 \
   --builder-image-digest sha256:ACTUAL_DIGEST --epoch RECORDED_EPOCH
 ```
 
-`acquire-plan` prints an argument array; it does not download or start a build.
-The other commands inspect actual retained inputs. Replace placeholders with recorded
+`acquire-plan` records the managed generation but downloads nothing. Execute its
+returned wrapper argv in the controller environment before `lock`; pass the returned
+RPM directory. Diagnostics must be a fresh managed directory. See [retention and
+settings](local-state-maintenance.md). Pin the retained builder archive's
+`input:SHA256` owner if preparing multiple generations before image admission.
+Raw input and recipe histories are counted separately; successful signature staging
+does not consume an extra slot. The other commands inspect actual retained inputs.
+Replace placeholders with recorded
 identities. Download/image production are separate explicitly requested product
 operations. Unavailability of the exact recorded Fedora candidate blocks preparation.
 No source catalog, SRPM, candidate source archive, exclusion fragment or candidate

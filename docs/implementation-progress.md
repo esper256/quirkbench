@@ -1,5 +1,13 @@
 # Implementation progress after the handoff
 
+> **Local artifact reset, 2026-09-30:** the user authorized permanent deletion of
+> the checkout-local `.quirkbench` tree, including delivered images, signing keys,
+> retained inputs and local validation/qualification logs. Historical identities
+> and results below remain records of those runs; their bytes are no longer
+> available. No replacement image or new qualification is supplied by the reset.
+> See [current local state](local-state-maintenance.md).
+
+
 **Current design, revised 2026-09-29:** the historical packet entries below describe
 the contracts and bytes used at the time. Stock-kernel recovery with boot-device-only
 storage policy supersedes shared recovery/candidate exclusions. V2 contracts and

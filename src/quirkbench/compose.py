@@ -264,7 +264,8 @@ class ComposeRunner:
             # namespace. Bubblewrap itself rejects non-root ambient caps.
             if argv[0] == "rpm-ostree" and os.geteuid() != 0:
                 argv = ["setpriv", "--inh-caps=-all", "--ambient-caps=-all", *argv]
-            process = subprocess.Popen(argv, cwd=cwd, env=env, stdout=subprocess.PIPE,
+            from .retention import launch
+            process = launch(argv, workspace=self.workspace, cwd=cwd, env=env, stdout=subprocess.PIPE,
                                        stderr=subprocess.STDOUT, start_new_session=True)
             selector = selectors.DefaultSelector()
             selector.register(process.stdout, selectors.EVENT_READ)
@@ -293,6 +294,9 @@ class ComposeRunner:
                         reported_count = count
                 if process.wait(timeout=max(1, deadline-time.monotonic())):
                     raise BuildError(f"{phase} failed; see {log}")
+                if (self.workspace/'process-groups.json').is_file():
+                    from .retention import stop_proof
+                    stop_proof(self.workspace)
             except BaseException:
                 if process.poll() is None:
                     os.killpg(process.pid, signal.SIGKILL)

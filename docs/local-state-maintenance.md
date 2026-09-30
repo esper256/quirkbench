@@ -1,4 +1,154 @@
-# Local state cleanup and relocation
+# Home state and intentional reset — 2026-09-30
+
+The user selected a complete wipe, superseding the salvage/relocation proposal below.
+No local image, key, database, pinned input, kernel output or qualification evidence
+will be copied into the new state. Historical documents retain their original
+results and identities, but their local artifacts are unavailable after the reset.
+Replacement input acquisition, image production, trust provisioning and real boot
+checks are separately requested product operations. This work claims no qualification.
+
+Persistent state uses `$XDG_STATE_HOME/quirkbench`, defaulting to
+`~/.local/state/quirkbench`; user configuration retains its canonical selection.
+No command defaults to checkout-local `.quirkbench`. New state/build staging in a
+Git checkout is rejected. The ignore rule remains only a historical safeguard.
+Run `quirkbench setup-state`, then manually open `quirkbench monitor` in an existing
+terminal. No automatic Konsole windows or watching agents remain. See
+[monitoring](monitoring.md) and [development builds](../environments/README.md#observable-bounded-kernel-builds).
+
+Retention uses configurable counts, without an overall disk quota. Defaults keep the
+last **five completed physical attempts globally**, two recovery releases, five
+completed outputs per build/composition/development category, two input generations
+and two qualification runs. Active attempts and unfinished jobs retain their inputs;
+uncertain/interrupted/resumable work and explicit pins remain protected. Completed
+physical attempts are eligible only after recorded recovery return. Simulated work
+does not displace the retained physical history. Library maintenance keeps the latest
+completed library per target plus the configured input history; ongoing maintenance
+stays protected.
+
+Old payload references are retired durably before deletion. Shared CAS objects and
+OSTree revisions survive while any retained investigation, release, input or pin
+needs them. Historical database rows remain, but expired payloads are unavailable.
+Successful disposable staging is removed after verified publication and shutdown
+proof; failed disposable stages remain seven days. Resumable work needs reconciliation
+or explicit abandonment. Unreferenced CAS orphans receive a seven-day grace period.
+Optional reusable caches alone have a 50 GiB logical-byte limit, including pending
+entries; locked/resumable work is protected and can temporarily exceed it. Cache
+publication is skipped when safe eviction cannot make room. No total-size guarantee
+is made: counts, pins and protected live work determine required storage.
+
+All values are in the selected state's private `settings.json` and can be changed
+through `settings set`. Housekeeping runs with mutating commands and the existing
+owner's startup/completion. Read-only commands and the monitor never clean up.
+There is no cron job, timer or separate housekeeping service. Idle operators can
+inspect a dry run and explicitly prune:
+
+```sh
+./environments/quirkbench settings show
+./environments/quirkbench settings set completed_attempts 5
+./environments/quirkbench maintenance status
+./environments/quirkbench maintenance pin OWNER --note 'Keep this investigation'
+./environments/quirkbench maintenance unpin OWNER
+./environments/quirkbench maintenance abandon OWNER
+./environments/quirkbench maintenance prune --dry-run
+./environments/quirkbench maintenance prune
+```
+
+`maintenance status` reports owner identities, pins, settings and recent retirements.
+Pin before retirement; pinning cannot restore deleted bytes. Abandonment excludes
+publishers, requires recorded shutdown proof and begins the failed-stage grace.
+Ad hoc systemd development runs instead use the existing `retain-run --abandon`
+interface. Neither command authorizes a physical attempt.
+
+| Setting | Default | Purpose |
+| --- | ---: | --- |
+| `completed_attempts` | 5 | Completed physical attempts, globally |
+| `recovery_releases` | 2 | Verified recovery publications and managed exports |
+| `completed_builds` | 5 | Completed build, composition and development outputs; checkpoints and nonphysical attempts |
+| `input_generations` | 2 | Retained raw-input and recipe history separately; completed libraries per target |
+| `qualification_runs` | 2 | Explicit qualification output workspaces |
+| `failed_staging_days` | 7 | Stopped, failed disposable staging and diagnostics |
+| `orphan_days` | 7 | Unreferenced CAS grace; retired payloads are reclaimed immediately |
+| `cache_gib` | 50 | Optional reusable cache logical-byte limit |
+
+Recovery releases and orphan grace require at least one; other values permit zero.
+Pins and live dependencies override the counts. Inputs shared by several generations
+are stored once. Successful signature/download staging transfers its references to
+the durable lock instead of consuming extra history slots. Pin reusable builder
+archives or other inputs before preparing more generations than the configured
+raw-input history; an admitted investigation/image retains its complete closure.
+Native OSTree reference deletion and `ostree prune --refs-only`
+reclaim unreachable objects under the existing repository locks; unrelated refs
+are preserved. Repositories must live under selected-state `repositories/`; missing
+tooling or unresolved work defers native pruning visibly. No global Podman pruning
+or pruning of other applications' storage occurs.
+
+The former multigigabyte directories are covered by their producer rather than by
+blind deletion based on a directory name:
+
+| Former area | New lifecycle |
+| --- | --- |
+| `inputs` | Recorded acquisition generations; verified RPMs/locks in CAS, duplicate downloads removed after import, completed generations counted |
+| `images` / `deliveries` | Fenced image worker stages removed after publication/stop proof; two retained releases and managed exports |
+| `ostree` | Managed repositories; retained deployment/attempt/checkpoint roots, native unreachable-object pruning |
+| `m2` / `v1-layout` / `validation` | No automatic historical fixture trees; new explicit qualifications use counted managed workspaces |
+| Development kernel work | Fresh recorded workspaces, verified outputs in CAS, disposable successful work removed; bounded optional incremental cache |
+
+Reset completed on 2026-09-30. The exact canonical repository `.quirkbench` tree
+was permanently removed, with no archive or trash copy. The final inspection of
+12 legacy controller databases found no active/uncertain attempts or live owned
+operations. All 18 remaining legacy Quirkbench user units had no live payload;
+they were stopped and their failed status cleared. No Quirkbench units remained.
+The deletion guard rejected symlink roots, nested mounts and open legacy paths.
+Container-owned files were removed through native rootless Podman's user namespace:
+`distrobox-host-exec podman unshare /usr/bin/python3 environments/discard-legacy-state.py --discard`.
+It exited successfully. No global Podman pruning was performed.
+
+`./environments/quirkbench setup-state` initialized fresh private mode-0700 state at
+`/home/eric/.local/state/quirkbench` and selected it in
+`/home/eric/.config/quirkbench/controller.json`. No old inputs, images, credentials
+or execution records were imported. Service management remains pending; this reset
+does not establish background-service readiness. A manual `monitor --once` snapshot
+reported no recorded work. The filesystem reported about 603 GiB available after
+deletion; allocated directory totals are not a physical-space savings measurement.
+
+Higher-reasoning reviews covered state, cleanup and worker-reporting boundaries;
+their identified issues were corrected before deletion. Validation was limited to
+changed-file syntax, local document links, `git diff --check`, tiny read-only snapshots
+and direct code review. The initial home snapshot was sandbox-blocked by SQLite
+sidecar access; it succeeded with normal home access. Interactive curses behavior,
+new worker runs and interruption/retention behavior have not been exercised.
+No pytest, builds, flashing, QEMU/hardware campaigns or release qualification ran.
+
+## Retention implementation handoff — 2026-09-30
+
+Count-based retirement, pins, native OSTree collection and managed staging extend
+the initial reset policy above. They reuse the controller database/CAS and existing
+execution owner. Shared command publication locks permit concurrent uploads and
+heartbeats; exclusive cleanup/abandonment prevents claim-to-launch races. Retirement
+is committed before filesystem deletion and retries retain current live references.
+Higher-reasoning boundary review covered these controls.
+
+Validation remains deliberately small: changed-source syntax/import/parser inspection,
+local document links, `git diff --check`, and isolated metadata/CAS checks that
+each completed in under 0.1 seconds. They checked dry-run behavior, expired payload reclamation,
+shared-object survival, missing-stop protection and pins. No tests were added. Real
+worker interruption, native OSTree reclamation, curses interaction, package acquisition
+and image generation remain unexercised here. No new qualification is claimed.
+
+Fresh-state setup completed with controller migration 13 and private settings at
+`/home/eric/.local/state/quirkbench`. `settings show` reported the defaults above;
+an idle `maintenance prune --dry-run` found no removals, retirements or blockers.
+`monitor --once` reported no work and approximately 603 GiB free. The repository
+`.quirkbench` remains absent. User-service setup still reports pending, and deleted
+signing/trust material must be explicitly reprovisioned for replacement delivery.
+These observations establish local setup, not a produced or qualified image.
+
+## Superseded read-only audit
+
+Everything below records the earlier inventory and proposed salvage policy. It is
+historical context, not current cleanup instructions.
+
+### Earlier local-state cleanup and relocation
 
 Read-only inventory dated 2026-09-30. No files were deleted or relocated.
 

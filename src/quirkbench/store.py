@@ -48,7 +48,9 @@ class ArtifactStore:
 
     @contextmanager
     def lock(self):
-        with (self.root / 'store.lock').open('a+b') as handle:
+        fd = os.open(self.root / 'store.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'a+b') as handle:
+            os.fchmod(handle.fileno(),0o600)
             fcntl.flock(handle, fcntl.LOCK_EX)
             yield
 
@@ -81,6 +83,7 @@ class ArtifactStore:
         with self.lock():
             if destination.exists():
                 self.verify(value)
+                os.utime(destination, None)
             else:
                 self.check_space(len(raw))
                 self.fault_hook('before_publish')
@@ -164,6 +167,7 @@ class ArtifactStore:
                 destination=self.path(value)
                 if destination.exists():
                     if self.verify(value)!=size:raise ContractError('artifact size mismatch')
+                    os.utime(destination,None)
                 else:
                     self.fault_hook('before_publish')
                     os.replace(name,destination);sync_directory(self.objects)

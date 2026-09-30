@@ -19,6 +19,21 @@ class StateConfigurationError(ContractError):
     pass
 
 
+def outside_checkout(path: Path) -> Path:
+    """New persistent work must never depend on a checkout's ignore rules."""
+    path = Path(path).expanduser().resolve()
+    if any((parent / '.git').exists() for parent in (path, *path.parents)):
+        raise StateConfigurationError('persistent state/build staging must be outside a Git checkout')
+    return path
+
+
+def default_state_root(state_home: Path | None = None) -> Path:
+    home = Path(state_home or os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state')
+    if not home.is_absolute():
+        raise StateConfigurationError('controller state home must be absolute')
+    return outside_checkout(home / 'quirkbench')
+
+
 def _config_home(config_home: Path | None) -> Path:
     if config_home is None:
         xdg = os.environ.get("XDG_CONFIG_HOME")
@@ -30,14 +45,14 @@ def _config_home(config_home: Path | None) -> Path:
 
 
 def discover_state_root(explicit: Path | None = None, *, config_home: Path | None = None) -> Path:
-    """Prefer an explicit legacy path, then configured state, then legacy cwd state."""
+    """Prefer explicit/configured identity, otherwise home state; never create it."""
     if explicit is not None:
         return Path(explicit)
     selection = _config_home(config_home) / "quirkbench" / "controller.json"
     try:
         fd = os.open(selection, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
-        return Path(".quirkbench")
+        return default_state_root()
     except OSError as exc:
         raise StateConfigurationError("cannot open controller state selection") from exc
     try:
@@ -74,7 +89,7 @@ def discover_state_root(explicit: Path | None = None, *, config_home: Path | Non
 def configure_state_root(explicit: Path | None = None, *, config_home: Path | None = None,
                          state_home: Path | None = None, cwd: Path | None = None) -> dict:
     """Select one private controller root; leave service installation for P2d."""
-    config = _config_home(config_home)
+    config = outside_checkout(_config_home(config_home))
     directory = config / "quirkbench"
     if config.is_symlink() or directory.is_symlink():
         raise StateConfigurationError("controller config directory cannot be a symlink")
@@ -95,23 +110,14 @@ def configure_state_root(explicit: Path | None = None, *, config_home: Path | No
             root = current
         else:
             if explicit is None:
-                legacy = (cwd or Path.cwd()) / ".quirkbench"
-                if legacy.exists() or legacy.is_symlink():
-                    raise StateConfigurationError("existing .quirkbench requires explicit --state selection")
-                if state_home is None:
-                    xdg = os.environ.get("XDG_STATE_HOME")
-                    state_home = Path(xdg) if xdg else Path.home() / ".local/state"
-                state_home = Path(state_home)
-                if not state_home.is_absolute():
-                    raise StateConfigurationError("controller state home must be absolute")
-                requested = state_home / "quirkbench"
+                requested = default_state_root(state_home)
             else:
                 requested = Path(explicit).expanduser()
                 if not requested.is_absolute():
                     requested = (cwd or Path.cwd()) / requested
             if requested.is_symlink():
                 raise StateConfigurationError("controller state root cannot be a symlink")
-            root = requested.resolve(strict=False)
+            root = outside_checkout(requested)
             if root == Path("/"):
                 raise StateConfigurationError("controller state root cannot be filesystem root")
             if current is not None and current != root:
@@ -121,6 +127,7 @@ def configure_state_root(explicit: Path | None = None, *, config_home: Path | No
             if root.exists() and current is None and explicit is None and any(root.iterdir()):
                 raise StateConfigurationError("existing default state root requires explicit --state selection")
             root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        outside_checkout(root)
         info = root.stat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
             raise StateConfigurationError("controller state root must be owned by this user and private")

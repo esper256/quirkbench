@@ -57,45 +57,70 @@ image. Pass the existing restricted build arguments to the launcher. For example
 
 ```sh
 environments/start-bounded-podman-build.sh \
-  quirkbench-kernel-build-NEW_RUN_ID.service "$STAGE" build.log build.exit.status \
+  quirkbench-build-NEW_RUN_ID.service "$STAGE" build.log build.exit.status \
   --rm --pull=never --network=none --pid=private --ipc=private --uts=private \
   --user=0 --security-opt=no-new-privileges \
   --name quirkbench-kernel-build-NEW_RUN_ID \
   --volume "$STAGE:/work:Z" "$IMAGE_ID" python3 /work/kernel.py
 ```
 
-Set `STAGE` to the new canonical mode-0700 stage and `IMAGE_ID` to the pinned
-local builder image, and replace `NEW_RUN_ID` for each build. The launcher
-returns after dispatch; the stage's new `.log` and `.status` files contain the
-worker output and eventual exit code. The status starts as `running`; if the
-service is stopped or times out before Podman returns, it remains `running`.
-Inspect `systemctl --user show UNIT -p Result -p ExecMainStatus` and the log
-before treating that build as interrupted. Do not pass cgroup, CPU, memory or task
-override flags, detached runs, restart policies or container replacement. Choose
-only reviewed mounts, the locked image and required
-network/device restrictions; this launcher enforces the cgroup boundary, not
-the build's input or device policy. After recording the exit status, stop the
-transient unit to clear `--remain-after-exit`.
-
-The attended starter first opens a native Konsole window using
-`view-build.sh`. Inside Distrobox it invokes the desktop through
-`distrobox-host-exec`; no Konsole installation in the development container is
-needed. The shared stage and this checkout must be readable at the same absolute
-paths on the desktop. The viewer follows existing and newly created `.log` files
-under the stage (up to four directory levels), including nested compiler logs,
-and displays the numeric exit
-status when recorded. Output appears as the producer flushes it; this is log
-activity, not a completion percentage. The window stays open after completion.
-Closing it stops only its log readers and leaves the worker running. No AI polls
-the build. Missing desktop/Konsole or viewer dispatch failure prevents a new build
-from starting; successful dispatch alone cannot prove the window was rendered.
-To reopen a viewer for an existing run, use:
+First run `quirkbench setup-state`. Choose `RUN_ID=quirkbench-build-NEW_RUN_ID`
+and set `STAGE` to the canonical selected state's
+`development-runs/$RUN_ID/work` directory. Create both the run directory and work
+directory with mode 0700. `IMAGE_ID` remains the exact pinned local builder image.
+Every run needs a fresh identity; the starter rejects staging in a Git checkout.
+Logs, service/boot identity and eventual exit status live beside `work`, so they
+can survive disposal of bulky work. The launcher prints the monitor command and
+returns after dispatch. Launch acceptance is not completion.
 
 ```sh
-bash environments/view-build.sh "$STAGE" "$STAGE/build.exit.status"
+quirkbench monitor --run "$RUN_ID"
+quirkbench monitor --run "$RUN_ID" --once
 ```
 
-This is the development starter's desktop view, not yet a product operation UI.
+The monitor runs in your existing terminal. No Konsole, desktop environment,
+watching agent or popup window is required. Closing it leaves the bounded service
+running. Existing cgroup, CPU, memory and task restrictions remain mandatory;
+do not use detached/restarting/replacement containers or override the bounds.
+The starter records `queued`, then `running`, then a numeric exit status. An
+interrupted recorder can leave a nonterminal status; inspect the recorded service
+and reconcile it rather than treating silence as completion.
+
+Ad hoc commands do not declare which outputs are important. Before disposing of a
+successful run's work, explicitly retain each required artifact relative to `work`:
+
+```sh
+quirkbench maintenance retain-run "$RUN_ID" --output artifacts/bzImage --output artifacts/vmlinux
+quirkbench maintenance prune --dry-run
+quirkbench maintenance prune
+```
+
+`retain-run` refuses a live service, verifies whole-unit shutdown and retains the
+selected files in CAS. Choose the complete artifact set for the actual build,
+including matching modules, configuration, provenance and symbols; the example is
+not a complete kernel release bundle. Failed/interrupted work requires explicit
+`retain-run "$RUN_ID" --abandon` before cleanup; optional outputs can still be
+retained using `--output`. Failed work remains for seven days after abandonment.
+No command here authorizes an experimental boot or changes target storage.
+
+Retention counts, pins and the optional-cache limit are configurable with
+`quirkbench settings show/set`; see [current storage policy](../docs/local-state-maintenance.md).
+New `build`/`compose` staging defaults to a fresh selected-state `workspaces/` directory;
+explicit workspaces must also be managed beneath that state. Composition repositories
+belong in state `repositories/`. New `image` exports and qualification staging require
+fresh managed paths and are retained by count. Software-test fixtures remain temporary.
+Do not reconstruct historical `m2`, `v1-layout` or checkout-local build trees.
+Housekeeping runs with mutating commands and owner startup/completion; no cron/timer.
+
+Stock RPM acquisition starts with `recovery-inputs acquire-plan` against a fresh
+state `inputs/GENERATION` directory. This records pending acquisition and prints a
+module-wrapper argv and the exact underlying DNF5 argv; it downloads nothing. Run
+the wrapper in the controller's existing Python environment when acquisition is
+requested, then pass its returned `directory` (`GENERATION/rpms`) to `lock`. Signature
+diagnostics use another fresh managed directory. Verified imports retain RPMs/locks
+in CAS and remove the duplicate download generation. Failures preserve bounded
+diagnostics and protected/resumable work. The package manager still owns its native
+metadata cache; Quirkbench adds no second reusable RPM cache.
 
 For future kernel scripts, derive `limits = ResourceLimits.from_cgroup()` inside
 the bounded worker and pass `jobs=limits.jobs` to `KernelBuild` and the same

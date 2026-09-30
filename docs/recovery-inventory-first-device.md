@@ -1,5 +1,13 @@
 # Recovery inventory: first-device handoff
 
+> **Local artifact reset, 2026-09-30:** the user authorized permanent deletion of
+> the checkout-local `.quirkbench` tree, including delivered images, signing keys,
+> retained inputs and local validation/qualification logs. Historical identities
+> and results below remain records of those runs; their bytes are no longer
+> available. No replacement image or new qualification is supplied by the reset.
+> See [current local state](local-state-maintenance.md).
+
+
 Updated 2026-09-30. This handoff concerns the stock recovery product operation and
 first attended hardware report. It does not record boot or release qualification.
 

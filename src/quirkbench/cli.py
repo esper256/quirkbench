@@ -3,10 +3,11 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict
 import json
+import sqlite3
 from pathlib import Path
 import sys
 import time
-from .contracts import CapabilityReport, Experiment, canonical
+from .contracts import CapabilityReport, Experiment, canonical, digest
 from .controller import Controller
 from .state_config import configure_state_root, discover_state_root
 
@@ -18,7 +19,19 @@ def parser():
     result.add_argument('--repositories', type=Path, help='JSON mapping of configured OSTree repository aliases to absolute directories')
     commands = result.add_subparsers(dest='command', required=True)
     commands.add_parser('setup-state', help='select private controller state; service setup is still pending')
+    preferences = commands.add_parser('settings', help='show or configure local retention preferences')
+    preferences.add_argument('action', choices=['show','set'])
+    preferences.add_argument('key', nargs='?'); preferences.add_argument('value', type=int, nargs='?')
     commands.add_parser('setup-check', help='inspect user service availability without changing host settings')
+    monitor = commands.add_parser('monitor', help='manually opened, read-only progress dashboard; never opens windows')
+    monitor.add_argument('--run', dest='run_id'); monitor.add_argument('--once', action='store_true')
+    monitor.add_argument('--json', action='store_true')
+    housekeeping = commands.add_parser('maintenance', help='prune proven-stopped staging and optional caches')
+    housekeeping.add_argument('action', choices=['prune','retain-run','status','pin','unpin','abandon']); housekeeping.add_argument('run_id',nargs='?')
+    housekeeping.add_argument('--note', default='operator pin')
+    housekeeping.add_argument('--output', action='append', default=[]); housekeeping.add_argument('--abandon', action='store_true')
+    housekeeping.add_argument('--dry-run', action='store_true')
+    housekeeping.add_argument('--json', action='store_true')
     commands.add_parser('demo', help='run the fake build/target/agent durability demonstration')
     inventory = commands.add_parser('target-inventory', help='read reported recovery hardware and candidate planning blockers; queues nothing')
     inventory.add_argument('device_id'); inventory.add_argument('--json', action='store_true')
@@ -33,6 +46,9 @@ def parser():
     artifact = commands.add_parser('artifact'); artifact.add_argument('action', choices=['put']); artifact.add_argument('file', type=Path)
     operation = commands.add_parser('operation', help='read durable operation records')
     operation_actions = operation.add_subparsers(dest='action', required=True)
+    operation_list = operation_actions.add_parser('list', help='page existing operation summaries')
+    operation_list.add_argument('--after', type=int, default=0); operation_list.add_argument('--limit', type=int, default=100)
+    operation_list.add_argument('--json', action='store_true')
     operation_status = operation_actions.add_parser('status', help='read one operation without invoking recovery or scheduling')
     operation_status.add_argument('operation_id'); operation_status.add_argument('--json', action='store_true')
     operation_watch = operation_actions.add_parser('watch', help='watch persisted operation facts without an agent or scheduler')
@@ -66,7 +82,7 @@ def parser():
     respond.add_argument('--file', type=Path, required=True); respond.add_argument('--request-id', required=True)
     recovery = commands.add_parser('recovery-inputs', help='exact stock package acquisition plan and v2 retained inputs')
     recovery_actions = recovery.add_subparsers(dest='action', required=True)
-    acquire = recovery_actions.add_parser('acquire-plan', help='print exact DNF5 command; does not download')
+    acquire = recovery_actions.add_parser('acquire-plan', help='prepare recorded acquisition and print exact command; does not download')
     acquire.add_argument('directory',type=Path)
     lock = recovery_actions.add_parser('lock', help='verify and retain downloaded binary RPM closure')
     lock.add_argument('directory',type=Path); lock.add_argument('--public-key',type=Path,required=True)
@@ -95,10 +111,10 @@ def parser():
     serve = commands.add_parser('serve'); serve.add_argument('--host', default='127.0.0.1', help='controller service bind address'); serve.add_argument('--port', type=int, default=8443); serve.add_argument('--allow-lan', action='store_true'); serve.add_argument('--cert', required=True); serve.add_argument('--key', required=True); serve.add_argument('--tokens-file', type=Path, required=True)
     target = commands.add_parser('target'); target.add_argument('--url', required=True); target.add_argument('--ca', required=True); target.add_argument('--token-file', type=Path, required=True); target.add_argument('--report', type=Path, required=True); target.add_argument('--once', action='store_true'); target.add_argument('--interval', type=float, default=5)
     watch = commands.add_parser('watch'); watch.add_argument('campaign_id'); watch.add_argument('--interval', type=float, default=2); watch.add_argument('--once', action='store_true'); watch.add_argument('--json', action='store_true'); watch.add_argument('--session', help='include human requests for this session')
-    build = commands.add_parser('build',help='build pinned source manifests inside the dedicated Fedora container'); build.add_argument('manifest',type=Path); build.add_argument('--workspace',type=Path,required=True); build.add_argument('--campaign')
+    build = commands.add_parser('build',help='build pinned source manifests inside the dedicated Fedora container'); build.add_argument('manifest',type=Path); build.add_argument('--workspace',type=Path); build.add_argument('--campaign')
     image = commands.add_parser('image',help='assemble a new regular-file USB image'); image.add_argument('manifest',type=Path)
     qualify = commands.add_parser('qualify-image',help='run ten real UEFI recovery, candidate, load-failure, panic and fallback trials'); qualify.add_argument('image',type=Path); qualify.add_argument('--manifest',type=Path,required=True); qualify.add_argument('--ovmf-code',type=Path,required=True); qualify.add_argument('--ovmf-vars',type=Path,required=True); qualify.add_argument('--work',type=Path,required=True); qualify.add_argument('--timeout',type=int,default=180)
-    compose = commands.add_parser('compose',help='compose and sign a complete experimental Fedora OSTree revision'); compose.add_argument('manifest',type=Path); compose.add_argument('--workspace',type=Path,required=True); compose.add_argument('--publish-repo',type=Path,required=True); compose.add_argument('--campaign')
+    compose = commands.add_parser('compose',help='compose and sign a complete experimental Fedora OSTree revision'); compose.add_argument('manifest',type=Path); compose.add_argument('--workspace',type=Path); compose.add_argument('--publish-repo',type=Path,required=True); compose.add_argument('--campaign')
     repo = commands.add_parser('serve-repository',help='serve read-only OSTree content with mutual TLS'); repo.add_argument('--host',default='127.0.0.1',help='controller repository service bind address'); repo.add_argument('--port',type=int,default=8444); repo.add_argument('--allow-lan',action='store_true'); repo.add_argument('--cert',required=True); repo.add_argument('--key',required=True); repo.add_argument('--client-ca',required=True)
     serve.add_argument('--recovery-worker',type=Path,help='installed fixed worker; enables recovery-image operations only')
     serve.add_argument('--recovery-signing-home',type=Path)
@@ -110,14 +126,68 @@ def parser():
     return result
 
 
-def main(argv=None):
+def _main(argv=None):
     args = parser().parse_args(argv)
+    explicit_state = args.state is not None
     if args.command == 'setup-state':
         try:
-            print(json.dumps(configure_state_root(args.state), sort_keys=True))
+            selected = configure_state_root(args.state)
+            Controller(Path(selected['state_root']), reserve_bytes=0)
+            from .retention_settings import DEFAULTS,set_setting
+            if not (Path(selected['state_root'])/'settings.json').exists():
+                set_setting(Path(selected['state_root']),'completed_attempts',DEFAULTS['completed_attempts'])
+            print(json.dumps(selected, sort_keys=True))
             return 0
-        except (ValueError, OSError) as exc:
+        except (ValueError, OSError, sqlite3.Error) as exc:
             print(f'setup blocked: {exc}', file=sys.stderr)
+            return 2
+    if args.command == 'settings':
+        try:
+            root=discover_state_root(args.state).expanduser().absolute()
+            from .retention_settings import settings,set_setting
+            if args.action=='show':
+                if args.key is not None or args.value is not None: raise ValueError('settings show takes no arguments')
+                if not (root/'controller.sqlite').is_file(): raise ValueError('run setup-state first')
+                answer=settings(root)
+            else:
+                if args.key is None or args.value is None: raise ValueError('settings set requires KEY VALUE')
+                if not (root/'controller.sqlite').is_file(): raise ValueError('run setup-state first')
+                answer=set_setting(root,args.key,args.value)
+            print(json.dumps({'retention':answer},sort_keys=True)); return 0
+        except (OSError,ValueError) as exc:
+            print('settings unavailable: '+str(exc),file=sys.stderr); return 2
+    if args.command in ('monitor', 'maintenance'):
+        try:
+            root = discover_state_root(args.state).expanduser().absolute()
+            if args.command == 'monitor':
+                from .tui import monitor
+                return monitor(root, run_id=args.run_id, once=args.once, json_output=args.json)
+            from .maintenance import prune
+            if args.action in ('status','pin','unpin','abandon'):
+                from .retention import status,pin,abandon
+                if args.action=='status': answer=status(root)
+                elif args.action=='abandon': answer=abandon(root,args.run_id)
+                else:
+                    if not args.run_id: raise ValueError('pin/unpin requires retention OWNER')
+                    pin(root,args.run_id,args.note if args.action=='pin' else None)
+                    answer={'owner':args.run_id,'pinned':args.action=='pin'}
+            elif args.action=='retain-run':
+                if not args.run_id or args.dry_run:
+                    raise ValueError('retain-run requires RUN_ID and does not accept --dry-run')
+                from .development_run import retain
+                from .maintenance import private_lock
+                with private_lock(root/'coordinator.lock'), private_lock(root/'build.lock'):
+                    answer=retain(root,args.run_id,outputs=args.output,abandon=args.abandon)
+            else:
+                if args.run_id or args.output or args.abandon:
+                    raise ValueError('prune accepts only --dry-run and --json')
+                answer = prune(root, dry_run=args.dry_run)
+            print(json.dumps(answer, sort_keys=True))
+            return 0
+        except KeyboardInterrupt:
+            return 130
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            print(f'{args.command} unavailable: {exc}', file=sys.stderr)
             return 2
     if args.command == 'setup-check':
         from .controller_setup import inspect_user_manager
@@ -163,7 +233,9 @@ def main(argv=None):
             if args.action == 'respond':
                 with args.file.open('rb') as stream:
                     raw = stream.read(MAX_DOCUMENT_BYTES + 1)
-            controller = Controller(args.state.resolve(), reserve_bytes=int(args.reserve_gib*1024**3))
+            from .state_reader import StateReader
+            controller = (Controller(args.state.resolve(), reserve_bytes=int(args.reserve_gib*1024**3))
+                          if args.action == 'respond' else StateReader(args.state.expanduser().absolute()))
             if args.action == 'observations':
                 data = controller.list_observations(args.session_id, after=args.after, limit=args.limit)
             elif args.action == 'observation':
@@ -206,7 +278,8 @@ def main(argv=None):
                     raise ContractError('operation watch interval must be 0.5..60 seconds')
                 if not (args.state / 'controller.sqlite').is_file():
                     raise ContractError('operation watch requires existing controller state')
-            controller = Controller(args.state.resolve(), reserve_bytes=int(args.reserve_gib*1024**3))
+            from .state_reader import StateReader
+            controller = StateReader(args.state.expanduser().absolute())
             if args.action == 'watch':
                 from .operation_watch import watch_operation
                 try:
@@ -214,7 +287,9 @@ def main(argv=None):
                                            json_output=args.json, interval=args.interval)
                 except KeyboardInterrupt:
                     return 130
-            if args.action == 'status':
+            if args.action == 'list':
+                answer = controller.operation_list(after=args.after, limit=args.limit)
+            elif args.action == 'status':
                 answer = controller.operation_status(args.operation_id)
             elif args.action == 'events':
                 answer = controller.operation_events(args.operation_id, after=args.after, limit=args.limit)
@@ -228,6 +303,11 @@ def main(argv=None):
                 print(render_operation_events(answer))
             elif args.action == 'output':
                 print(f"Read {answer['data']['length']} bytes from public output {answer['data']['sha256']}; use --json for content")
+            elif args.action == 'list':
+                for row in answer['data']['items']:
+                    print(f"{row['id']} {row['kind']} {row['state']} {row['stage'] or ''}")
+                if answer['data']['next_cursor'] is not None:
+                    print(f"More operations: --after {answer['data']['next_cursor']}")
             else:
                 from .monitor import render_operation
                 failure = None
@@ -250,6 +330,25 @@ def main(argv=None):
             return status
     try:
         args.state = discover_state_root(args.state)
+        read_only = args.command in ('watch', 'target-inventory') or (args.command == 'campaign' and args.action == 'status')
+        if not read_only and args.command not in ('doctor','target','target-service','serve-repository'):
+            from .state_config import outside_checkout
+            outside_checkout(args.state)
+            if not explicit_state and not args.state.exists():
+                raise ValueError('run quirkbench setup-state before creating controller work')
+        if read_only and not (args.state / 'controller.sqlite').is_file():
+            raise ValueError('controller state unavailable; run quirkbench setup-state first')
+        if args.command in ('build', 'compose', 'image'):
+            from .state_config import outside_checkout
+            from .retention import managed_path
+            if args.command in ('build', 'compose'):
+                import uuid
+                args.workspace=args.workspace or args.state/'workspaces'/(args.command+'-'+uuid.uuid4().hex)
+                managed_path(args.state,args.workspace)
+                if args.command=='compose': managed_path(args.state,args.publish_repo)
+            else:
+                raw_image = json.loads(args.manifest.read_bytes())
+                managed_path(args.state,Path(raw_image['output']).parent)
         if args.reserve_gib < 0:
             raise ValueError('reserve must be nonnegative')
         repository_paths = {}
@@ -272,31 +371,38 @@ def main(argv=None):
             controller = Controller(args.state.resolve(), **controller_options)
             from .monitor import PhaseReporter
             reporter = PhaseReporter(controller, args.campaign, output=lambda report:print(json.dumps(report,sort_keys=True),file=sys.stderr,flush=True))
+            from .retention import work,published
             try:
-                inputs = ComposeInputs.from_mapping(json.loads(args.manifest.read_bytes()))
-                inputs.validate()
-                if repository_paths and repository_paths.get(inputs.repository) != str(args.publish_repo.resolve()):
-                    raise ValueError('composition repository must match the configured alias and path')
-                # Publish immutable build evidence before any manifest can reference it.
-                # Private signing/TLS inputs are deliberately absent from these maps.
-                for role, path in inputs.evidence_paths.items():
-                    controller.store.put_file(path, expected_digest=inputs.evidence_sha256[role])
-                composer = FedoraComposer(args.workspace.resolve(), args.publish_repo.resolve(),
-                                          event=reporter, controller_state=args.state.resolve())
-                manifest = composer.compose(inputs)
-                for role, path in composer.evidence_files.items():
-                    controller.store.put_file(path, expected_digest=manifest.provenance['build_evidence']['artifacts'][role])
+                with work(controller.root,'deployment',args.workspace.resolve()) as run_owner:
+                    inputs = ComposeInputs.from_mapping(json.loads(args.manifest.read_bytes()))
+                    inputs.validate()
+                    if repository_paths and repository_paths.get(inputs.repository) != str(args.publish_repo.resolve()):
+                        raise ValueError('composition repository must match the configured alias and path')
+                    # Publish immutable build evidence before any manifest can reference it.
+                    # Private signing/TLS inputs are deliberately absent from these maps.
+                    for role, path in inputs.evidence_paths.items():
+                        controller.store.put_file(path, expected_digest=inputs.evidence_sha256[role])
+                    composer = FedoraComposer(args.workspace.resolve(), args.publish_repo.resolve(),
+                                              event=reporter, controller_state=args.state.resolve())
+                    manifest = composer.compose(inputs)
+                    for role, path in composer.evidence_files.items():
+                        controller.store.put_file(path, expected_digest=manifest.provenance['build_evidence']['artifacts'][role])
+                    artifact = controller.store.put(canonical(manifest.to_dict()))
+                    if controller.deployment_repository is None:
+                        from .ostree_repository import OstreeRepository
+                        from .store import atomic_write
+                        repository_paths = {inputs.repository:str(args.publish_repo.resolve())}
+                        controller.deployment_repository = OstreeRepository({inputs.repository:args.publish_repo.resolve()})
+                        atomic_write(repository_config, canonical(repository_paths))
+                    controller.retain_deployment_artifact(artifact.sha256)
+                    from .retention import register
+                    register(controller.root,'deployment',[artifact.sha256],owner='deployment:'+artifact.sha256)
+                    published(controller.root,run_owner,[artifact.sha256],disposable_work=True)
             except BaseException as exc:
                 reporter.fail(exc)
                 raise
-            artifact = controller.store.put(canonical(manifest.to_dict()))
-            if controller.deployment_repository is None:
-                from .ostree_repository import OstreeRepository
-                from .store import atomic_write
-                repository_paths = {inputs.repository:str(args.publish_repo.resolve())}
-                controller.deployment_repository = OstreeRepository({inputs.repository:args.publish_repo.resolve()})
-                atomic_write(repository_config, canonical(repository_paths))
-            controller.retain_deployment_artifact(artifact.sha256)
+            from .retention import release_group
+            release_group(controller.root,run_owner)
             answer = {'deployment':manifest.to_dict(),'artifact':asdict(artifact)}
         elif args.command == 'serve-repository':
             from .repository_http import make_repository_server
@@ -314,18 +420,34 @@ def main(argv=None):
             from .build_pipeline import BuildPipeline, load_build_inputs_manifest
             from .build_cache import BuildStageCache
             controller=Controller(args.state.resolve(),**controller_options)
-            pipeline=BuildPipeline(args.workspace.resolve(),args.state.resolve(),controller.store,controller=controller if args.campaign else None,campaign_id=args.campaign,activity=lambda phase,message:print(f'{phase}: {message}',file=sys.stderr,flush=True),incremental_cache=BuildStageCache(args.state.resolve()/'intermediate-cache'))
-            answer={name:asdict(artifact) for name,artifact in pipeline.build(load_build_inputs_manifest(args.manifest)).items()}
+            from .retention import work,published
+            with work(controller.root,'build',args.workspace.resolve()) as run_owner:
+                pipeline=BuildPipeline(args.workspace.resolve(),args.state.resolve(),controller.store,controller=controller if args.campaign else None,campaign_id=args.campaign,activity=lambda phase,message:print(f'{phase}: {message}',file=sys.stderr,flush=True),incremental_cache=BuildStageCache(args.state.resolve()/'intermediate-cache'))
+                outputs=pipeline.build(load_build_inputs_manifest(args.manifest))
+                published(controller.root,run_owner,[a.sha256 for a in outputs.values()],disposable_work=True)
+                answer={name:asdict(artifact) for name,artifact in outputs.items()}
         elif args.command == 'image':
             from .image import ImageInputs, create_image
             raw=json.loads(args.manifest.read_bytes())
             if not isinstance(raw,dict) or set(raw)-set(ImageInputs.__dataclass_fields__):raise ValueError('invalid image input fields')
             fields={key:Path(value) if key not in ('size_mib','root_mib','smoke','experiment_mib','library_mib','log_budget_mib') and value is not None else value for key,value in raw.items()}
-            answer={'manifest':str(create_image(ImageInputs(**fields)))}
+            from .retention import work,published
+            image_dir=Path(raw['output']).parent
+            with work(args.state,'recovery',image_dir) as run_owner:
+                result=create_image(ImageInputs(**fields))
+                controller=Controller(args.state.resolve(),**controller_options)
+                values=[controller.store.put_file(p).sha256 for p in image_dir.iterdir() if p.is_file() and p.name!='process-groups.json']
+                published(controller.root,run_owner,values)
+                answer={'manifest':str(result)}
         elif args.command == 'qualify-image':
             from .qemu import QemuInputs, qualify_boot_cycle
-            report=qualify_boot_cycle(QemuInputs(args.image.resolve(),args.ovmf_code.resolve(),args.ovmf_vars.resolve(),args.work.resolve(),timeout_seconds=args.timeout),args.manifest.resolve(),event=lambda phase,message:print(f'{phase}: {message}',file=sys.stderr,flush=True))
-            answer={'qualification':str(report)}
+            controller=Controller(args.state.resolve(),**controller_options)
+            from .retention import work,published
+            with work(controller.root,'qualification',args.work.resolve()) as run_owner:
+                report=qualify_boot_cycle(QemuInputs(args.image.resolve(),args.ovmf_code.resolve(),args.ovmf_vars.resolve(),args.work.resolve(),timeout_seconds=args.timeout),args.manifest.resolve(),event=lambda phase,message:print(f'{phase}: {message}',file=sys.stderr,flush=True))
+                artifact=controller.store.put_file(report)
+                published(controller.root,run_owner,[artifact.sha256])
+                answer={'qualification':str(report)}
         elif args.command == 'doctor':
             import shutil
             names = ('podman','distrobox','qemu-system-x86_64','qemu-img','virt-fw-vars','grub2-mkimage','dracut','openssl','ostree','rpm-ostree','rpmbuild','createrepo_c')
@@ -358,7 +480,11 @@ def main(argv=None):
             restored = Controller.restore(args.backup, args.state, **controller_options)
             answer = {'restored': str(restored.root), 'scheduling': 'paused'}
         else:
-            controller = Controller(args.state, **controller_options)
+            if read_only:
+                from .state_reader import StateReader
+                controller = StateReader(args.state.expanduser().absolute())
+            else:
+                controller = Controller(args.state, **controller_options)
             if args.command == 'library-maintenance':
                 answer = controller.library_maintenance(args.device_id, args.selection, finish=args.action == 'finish')
             elif args.command == 'target-inventory':
@@ -397,20 +523,56 @@ def main(argv=None):
                         return 0
                     time.sleep(args.interval)
             elif args.command == 'artifact':
-                answer = asdict(controller.store.put(args.file.read_bytes()))
+                artifact=controller.store.put_file(args.file)
+                from .retention import register
+                register(controller.root,'input',[artifact.sha256])
+                answer=asdict(artifact)
             elif args.command == 'recovery-inputs':
                 from .recovery_inputs import acquisition_command,retain_packages,generate_recipe
                 if args.action=='acquire-plan':
-                    answer={'argv':acquisition_command(args.directory.resolve()),'executed':False}
+                    from .retention import managed_path,register
+                    directory=managed_path(controller.root,args.directory.resolve())
+                    if directory.exists(): raise ValueError('acquisition requires a fresh inputs directory')
+                    directory.mkdir(parents=True,mode=0o700)
+                    (directory/'rpms').mkdir(mode=0o700)
+                    from .store import atomic_write
+                    from .controller import controller_boot_id
+                    import os
+                    atomic_write(directory/'process-groups.json',canonical({'boot':controller_boot_id(),'pid_namespace':os.readlink('/proc/self/ns/pid'),'groups':[]}))
+                    owner=register(controller.root,'input',paths=(directory,),state='WAITING')
+                    answer={'argv':['python3','-m','quirkbench.recovery_inputs','--state',str(controller.root),'--owner',owner],
+                            'dnf_argv':acquisition_command(directory/'rpms'),'directory':str(directory/'rpms'),'executed':False,'retention_owner':owner}
                 elif args.action=='lock':
-                    lock=retain_packages(args.directory.resolve(),args.public_key.resolve(),controller.store,
-                        args.diagnostics.resolve(),builder_image_digest=args.builder_image_digest)
-                    answer={'lock':lock,'sha256':controller.store.put(canonical(lock)).sha256}
+                    from .retention import verified_acquisition,work,published
+                    verified_acquisition(controller.root,args.directory.resolve())
+                    with work(controller.root,'input',args.diagnostics.resolve()) as diagnostic_owner:
+                        from .ostree import CommandRunner
+                        from .store import atomic_write
+                        def failure_log(raw):
+                            atomic_write(args.diagnostics.resolve()/'package-verification.log',raw)
+                            return 'retained private package-verification.log'
+                        def query(argv):
+                            return CommandRunner(lambda *args:None,lambda:None,timeout_s=60,diagnostic=failure_log)(argv)
+                        def verify(argv,timeout_s):
+                            return CommandRunner(lambda *args:None,lambda:None,timeout_s=timeout_s,diagnostic=failure_log)(argv)
+                        lock=retain_packages(args.directory.resolve(),args.public_key.resolve(),controller.store,
+                            args.diagnostics.resolve()/'diagnostics',builder_image_digest=args.builder_image_digest,
+                            query=query,signature_runner=verify)
+                        published(controller.root,diagnostic_owner,[digest(canonical(lock))],disposable_work=True)
+                    from .retention import register,release_acquisition,release_group
+                    value=controller.store.put(canonical(lock)).sha256
+                    register(controller.root,'input',[value],owner='input:'+value)
+                    release_group(controller.root,diagnostic_owner)
+                    release_acquisition(controller.root,args.directory.resolve(),value)
+                    answer={'lock':lock,'sha256':value}
                 else:
                     layout={name:getattr(args,name) for name in ('root_mib','factory_size_mib','experiment_mib','library_mib','log_budget_mib')}
                     recipe=generate_recipe(args.lock,controller.store,recipe_id=args.id,
                         builder_image_digest=args.builder_image_digest,source_date_epoch=args.epoch,layout=layout)
-                    answer={'recipe':recipe,'sha256':controller.store.put(canonical(recipe)).sha256}
+                    from .retention import register
+                    value=controller.store.put(canonical(recipe)).sha256
+                    register(controller.root,'recipe',[value],owner='recipe:'+value)
+                    answer={'recipe':recipe,'sha256':value}
             elif args.command == 'recovery-image':
                 answer=controller.admit_recovery_image(args.request_id,args.recipe,args.builder_archive)
             elif args.command == 'attempt':
@@ -481,3 +643,31 @@ def main(argv=None):
         # Avoid accidentally echoing provider credentials or subprocess output.
         print(f'{type(exc).__name__}: {exc}' if isinstance(exc, (ValueError, FileNotFoundError)) or type(exc).__name__ in ('BuildError','ImageError','QemuError','BootError','CommissionError') else f'{type(exc).__name__}: operation failed; progress retained', file=sys.stderr)
         return 1
+
+
+def main(argv=None):
+    """A publication barrier, not a scheduler; read-only commands do no housekeeping."""
+    args=parser().parse_args(argv)
+    readonly=(args.command in ('monitor','watch','target-inventory','operation','doctor','setup-check',
+                               'target','target-service','serve-repository') or
+              (args.command=='campaign' and args.action=='status') or
+              (args.command=='settings' and args.action=='show') or
+              (args.command=='maintenance' and args.action in ('status','prune')) or
+              (args.command=='session' and args.action in ('observations','observation')) or
+              (args.command=='build-cache' and args.action=='list'))
+    if readonly or args.command in ('setup-state','serve'): return _main(argv)
+    try:
+        root=discover_state_root(args.state).expanduser().absolute()
+        if not (root/'controller.sqlite').is_file(): return _main(argv)
+        from .maintenance import private_lock,prune
+        from .contracts import Conflict
+        # Abandonment must exclude the acquisition claim-to-launch interval.
+        exclusive = args.command == 'maintenance' and args.action == 'abandon'
+        with private_lock(root/'command.lock',shared=not exclusive):
+            result=_main(argv)
+        try: prune(root)
+        except (OSError,ValueError,sqlite3.Error) as exc:
+            print('Housekeeping deferred: '+type(exc).__name__+'. Use maintenance status/prune.',file=sys.stderr)
+        return result
+    except (OSError,ValueError) as exc:
+        print('command unavailable: '+str(exc),file=sys.stderr); return 2

@@ -31,6 +31,15 @@ Extract the archive into a user-owned directory, then run:
 ./quirkbench-controller-0.1.0/bin/quirkbench setup-check
 ```
 
+`setup-state` creates private controller state at `$XDG_STATE_HOME/quirkbench`
+(default `~/.local/state/quirkbench`) and records its identity in the user configuration.
+The current directory never selects a new `.quirkbench` root. Existing configured
+selections remain authoritative; explicit legacy paths remain available for read-only
+inspection. New state/build staging inside Git checkouts is rejected.
+Use `quirkbench monitor` for the manual terminal dashboard; see [monitoring](monitoring.md).
+Without an installed archive, the checkout's `./environments/quirkbench` development
+launcher exposes the same commands without relying on a moved virtualenv's shebang.
+
 The provisional commands select durable private state and report prerequisites.
 They do not claim background-work readiness or implement the complete planned
 `setup` wizard. State selection stays valid if the extracted archive is moved.

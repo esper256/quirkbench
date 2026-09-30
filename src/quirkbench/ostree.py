@@ -65,7 +65,8 @@ class CommandRunner:
 
     def __call__(self, argv):
         start = time.monotonic()
-        process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        from .retention import launch
+        process = launch(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    start_new_session=True)
         selector = selectors.DefaultSelector()
         selector.register(process.stdout, selectors.EVENT_READ, 'stdout')

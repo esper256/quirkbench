@@ -1,5 +1,13 @@
 # Fedora 44 kernel input candidate — 2026-09-28
 
+> **Local artifact reset, 2026-09-30:** the user authorized permanent deletion of
+> the checkout-local `.quirkbench` tree, including delivered images, signing keys,
+> retained inputs and local validation/qualification logs. Historical identities
+> and results below remain records of those runs; their bytes are no longer
+> available. No replacement image or new qualification is supplied by the reset.
+> See [current local state](local-state-maintenance.md).
+
+
 **Historical record; superseded design on 2026-09-29.** Commands, custom-kernel
 inputs, digests and observations below remain evidence of their runs. Their recovery
 exclusion/build requirements do not govern future default recovery. The

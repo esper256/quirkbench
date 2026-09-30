@@ -53,7 +53,8 @@ acceptance-m2: acceptance-m1 acceptance-ostree-repository acceptance-ostree-sign
 # fail visibly when their required real-world inputs are absent.
 acceptance-m1: test
 
-DEMO_STATE ?= .quirkbench/demo
+QUIRKBENCH_STATE_HOME := $(if $(XDG_STATE_HOME),$(XDG_STATE_HOME),$(HOME)/.local/state)
+DEMO_STATE ?= $(QUIRKBENCH_STATE_HOME)/quirkbench/development-demo
 demo:
 	$(PYTHON) -m quirkbench --state "$(DEMO_STATE)" demo
 

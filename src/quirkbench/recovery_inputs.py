@@ -112,3 +112,47 @@ def generate_recipe(lock_digest,store,*,recipe_id,builder_image_digest,source_da
             'source_date_epoch':source_date_epoch,'layout':layout,'policy':dict(POLICY)}
     preflight_recipe(recipe,store)
     return recipe
+
+
+def download(root,owner):
+    """Execute the printed acquisition explicitly; never runs during housekeeping."""
+    from .retention import connection,managed_path,register,stop_proof,ACTIVE_WORK
+    from .maintenance import private_lock
+    from .ostree import CommandRunner
+    from .state_reader import read_file
+    root=Path(root)
+    with private_lock(root/'command.lock',shared=True):
+        with connection(root) as db:
+            row=db.execute('SELECT * FROM storage_groups WHERE owner=?',(owner,)).fetchone()
+        if row is None or row['kind']!='input' or row['state']!='WAITING' or row['stop_proof']:
+            raise BuildError('acquisition owner is unavailable or already downloaded')
+        generation=managed_path(root,Path(json.loads(row['paths'])[0]))
+        directory=generation/'rpms'
+        if any(directory.iterdir()): raise BuildError('acquisition RPM directory must be empty')
+        token=ACTIVE_WORK.set(generation)
+        with connection(root) as db:
+            db.execute('BEGIN IMMEDIATE')
+            changed=db.execute("UPDATE storage_groups SET state='RUNNING',updated=? WHERE owner=? AND state='WAITING' AND stop_proof IS NULL",(__import__('time').time(),owner)).rowcount
+            if changed!=1:
+                ACTIVE_WORK.reset(token)
+                raise BuildError('acquisition is already claimed')
+        try:
+            output=CommandRunner(lambda phase,message:print(message,flush=True),lambda:None,timeout_s=7200)(list(acquisition_command(directory)))
+            atomic_write(generation/'download.log',output.encode())
+            proof=stop_proof(generation)
+            proof['download_complete']=True
+            register(root,'input',owner=owner,paths=(generation,),state='WAITING',stop_proof=proof)
+        except BaseException:
+            try: proof=stop_proof(generation)
+            except (OSError,ValueError): proof=None
+            register(root,'input',owner=owner,paths=(generation,),state='FAILED',stop_proof=proof)
+            raise
+        finally: ACTIVE_WORK.reset(token)
+    return {'directory':str(directory),'retention_owner':owner}
+
+
+if __name__=='__main__':
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--state',type=Path,required=True); parser.add_argument('--owner',required=True)
+    args=parser.parse_args()
+    print(json.dumps(download(args.state,args.owner),sort_keys=True))

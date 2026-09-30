@@ -238,7 +238,8 @@ def prepare_recovery_image_stage(recipe: dict, catalog: dict, store, stage: Path
                                  cache_event: Callable[[str, str, float], None] | None = None,
                                  cache_record_event: Callable[[dict], None] | None = None,
                                  builder_config_digest: str | None = None,
-                                 resume_reconciled: bool = False) -> dict:
+                                 resume_reconciled: bool = False,
+                                 progress=None) -> dict:
     """Join locked private stages and return audited image inputs without assembly."""
     from .recovery_image_plan import prepare_recovery_image_inputs
 
@@ -266,13 +267,17 @@ def prepare_recovery_image_stage(recipe: dict, catalog: dict, store, stage: Path
             or output.exists() or output.is_symlink() or not output.parent.is_dir()
             or output.parent.is_symlink()):
         raise BuildError("recovery image output must be a new regular-file path outside the private stage")
+    if progress: progress('package-installation', 'Installing the exact retained recovery packages.')
     base = run_recovery_base_stage(recipe, catalog, store, stage, runner=runner,
                                    limits=limits, rootfs_installer=rootfs_installer,
                                    cache=cache if recipe.get("schema_version") == 2 else None)
+    if progress: progress('runtime-installation', 'Installing and auditing the fixed recovery runtime.')
     runtime = run_recovery_runtime_stage(recipe, catalog, store, stage, base,
                                          runtime_installer=runtime_installer)
+    if progress: progress('initramfs', 'Building and auditing the generic recovery initramfs.')
     initramfs = run_recovery_initramfs_from_recipe(
         recipe, catalog, store, stage, base, runtime, runner=runner, limits=limits)
+    if progress: progress('image-input-validation', 'Validating image layout and provenance.')
     inputs = prepare_recovery_image_inputs(recipe, catalog, store, stage,
                                            initramfs, output)
     return {"base": base, "runtime": runtime, "initramfs": initramfs,

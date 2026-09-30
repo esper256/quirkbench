@@ -127,3 +127,25 @@ class OstreeRepository:
                 self._command(target, 'pull-local', '--untrusted', str(source / alias), revision)
                 self._command(target, 'refs', '--force', '--create=quirkbench-restored/' + revision, revision)
                 self._detach_object_links(target)
+
+    def prune_retired(self, references, *, dry_run=False):
+        """Use native GC, retiring only refs issued by Quirkbench's publishers."""
+        expected=self._references(references)
+        removed=[]
+        for alias,path in self.repositories.items():
+            if path.resolve()!=path or path.is_symlink():
+                raise ContractError('repository cleanup requires a canonical path')
+            revisions={revision for name,revision in expected if name==alias}
+            with self._lock(path):
+                refs=self._command(path,'refs').splitlines()
+                for ref in refs:
+                    if not ref.startswith(('quirkbench-retained/','quirkbench/retained/','quirkbench-restored/')):
+                        continue
+                    revision=sha256(ref.rsplit('/',1)[-1])
+                    if revision in revisions: continue
+                    if not dry_run: self._command(path,'refs','--delete',ref)
+                    removed.append(alias+':'+ref)
+                if not dry_run and removed:
+                    self._command(path,'prune','--refs-only')
+                    sync_directory(path)
+        return removed

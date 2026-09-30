@@ -137,6 +137,8 @@ def run_rootfs_worker(state_root, operation, epoch, generation, stage_dir, *,
     verify()
     diagnostics = stage / 'diagnostics'
     diagnostics.mkdir(mode=0o700)
+    from .worker_progress import heartbeat_writer
+    verify = heartbeat_writer(stage, claim, verify)
     record = {'schema_version': 1, 'operation_id': claim.id,
               'worker_epoch': claim.worker_epoch, 'worker_generation': claim.worker_generation,
               'worker_unit': claim.worker_unit, 'input_digest': claim.input_digest,

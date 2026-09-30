@@ -40,7 +40,10 @@ credentials, database, source workspaces and retained artifacts live outside it.
 Do not reuse the prototype builder's temporary home for agent authentication.
 
 Setup persists the chosen state root under the user's controller configuration.
-Commands resolve that identity independently of the current directory. Preserve
+Commands resolve that identity independently of the current directory. Unconfigured
+resolution uses `$XDG_STATE_HOME/quirkbench` (default `~/.local/state/quirkbench`),
+never a checkout-local fallback. Setup creates state; queries never initialize it.
+New persistent state and build staging must be outside Git checkouts. Preserve
 explicit `--state` and low-level commands for development and existing data. Do not
 silently migrate or merge an existing `.quirkbench` directory into another identity.
 Terminal exit leaves services running. Setup reports logout behavior and offers
@@ -48,6 +51,21 @@ explicit instructions for optional lingering; it never enables it implicitly. Sl
 interrupts availability, and reboot restarts reporting/reconciliation with scheduling
 paused. No promise of work executing while powered off. Keep C2 ownership epochs,
 worker fencing and bounded cleanup; a second CLI cannot become another scheduler.
+
+Manual `monitor` is a read-only TUI client of existing operation/campaign records,
+with bounded `--once`/`--json` snapshots and optional recorded development `--run`.
+No automatic terminal/browser popup or monitor-owned execution is permitted.
+Local `settings show/set` configures retention counts and the optional-cache limit.
+Defaults retain five completed physical attempts globally, two recovery releases,
+five completed outputs per build category, two input generations and two qualification
+runs. Pins and live/uncertain dependencies override counts. Required storage has no
+overall byte budget; optional caches alone default to 50 GiB. Mutating commands and
+the existing owner trigger housekeeping, with no cron/timer/new service. Read-only
+queries remain read-only. `maintenance status/pin/unpin/abandon/prune` exposes local
+retention; idle dry-run pruning lists eligible work. Verified publication and stop
+proof precede staging cleanup. Failed disposable staging defaults to seven days.
+Retired references allow shared-aware CAS/native OSTree reclamation; small historical
+records remain, with expired payloads unavailable. See [current settings and coverage](local-state-maintenance.md).
 
 ## Public CLI and sessions
 

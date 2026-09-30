@@ -18,6 +18,16 @@
 > and product-operation limits.
 > Existing images remain unqualified against the changed design.
 
+Local maintenance reset: the old checkout-local artifacts were intentionally discarded.
+Persistent state now lives in the user's home; `quirkbench monitor` provides a manual
+terminal dashboard without popup windows. No replacement recovery image is included
+in this reset. See [local state maintenance](docs/local-state-maintenance.md).
+From this development checkout, use `./environments/quirkbench monitor`; an installed
+controller provides the same interface as `quirkbench monitor`.
+`./environments/quirkbench settings show` displays configurable history counts and
+the optional-cache limit. Housekeeping runs with commands; no scheduled cleanup
+service is required. Pins and active work remain protected.
+
 For the available development archive and provisional setup commands, see
 [controller installation](docs/controller-installation.md).
 

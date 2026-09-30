@@ -218,6 +218,35 @@ Reuse progress validation/rendering helpers without altering the frozen target
 Progress envelope. Event cursors are explicitly scoped to an operation or campaign;
 do not compare unrelated sequence numbers as a global order.
 
+### Home state, read-only monitoring and disposable retention
+
+Current C2 extension: no working-directory state fallback and no popup viewer.
+`monitor`, operation queries and existing read-only campaign/inventory/observation
+commands read existing state without migrations or lifecycle startup. Queries are
+bounded; oversized legacy summaries fail explicitly rather than hiding records.
+Advisory worker activity and heartbeat reports use the existing owner's exact claim
+fences; they change no deadline, attempt authority or immutable operation outcome.
+
+Housekeeping holds the existing owner/build/cache locks and an exclusive command
+publication barrier. Producers share that barrier; read-only queries neither acquire
+execution authority nor clean up. Terminal staging needs exact stop proof and verified
+publication/error records. Retain bounded diagnostics before disposing of successful
+work. Configurable counts retire completed attempt/release/build/input/qualification
+owners; pins and active, interrupted, uncertain or resumable dependencies remain live.
+Retirement commits before filesystem deletion; retries preserve current shared CAS
+closure and avoid reusing paths still pending disposal. Native OSTree refs are pruned
+only when no unresolved producer remains. Keep historical rows with expired payloads
+unavailable. See [retention settings](local-state-maintenance.md).
+
+Failed disposable staging defaults to seven days. Optional cache admission/eviction
+uses the configurable 50 GiB default, budget lock and nonblocking lineage locks;
+pending entries count and an unavailable budget skips optional publication. Completed
+build output caches may collapse to verified CAS references under the build lock.
+Ad hoc cleanup additionally requires explicit output retention/abandonment and
+whole-service stop verification. Abandonment holds the exclusive publication barrier
+before checking stop proof, excluding the acquisition claim-to-launch interval. This
+metadata is not an alternative attempt state machine. No cron, timer or new service.
+
 ## C3 — Source identity and agent proposals (P2/P6)
 
 Freeze source bytes before build. A checkpoint records approved repository roots,

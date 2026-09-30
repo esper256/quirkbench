@@ -21,10 +21,14 @@ def build_stock_image(recipe_digest,store,output,*,runner=None,limits=None,
     output=Path(output)
     if output.resolve()!=output or not output.is_dir() or any(output.iterdir()):
         raise BuildError('stock image output must be a new private empty directory')
+    from .worker_progress import StageProgress, ReportingRunner
+    progress=StageProgress(output,recipe_digest)
     stage=output/'image-stage'
     options={} if rootfs_installer is None else {'rootfs_installer':rootfs_installer}
     prepared=prepare_recovery_image_stage(recipe,None,store,stage,output/'recovery.img',
-        runner=runner or BoundedRunner(stage),limits=limits or ResourceLimits(4,4*1024**3,1),**options)
+        runner=ReportingRunner(runner or BoundedRunner(stage),progress),
+        progress=progress,limits=limits or ResourceLimits(4,4*1024**3,1),**options)
+    progress('image-assembly','Assembling the external-media disk image.')
     assembled=assemble_recovery_image(recipe,None,store,prepared['initramfs'],prepared['image_inputs'],
         image_builder=image_builder)
     # Paths in the worker's namespace are not authority for coordinator reads.
@@ -32,6 +36,7 @@ def build_stock_image(recipe_digest,store,output,*,runner=None,limits=None,
     result={'schema_version':1,'recipe_sha256':recipe_digest,'stage_record':record,
             'candidate':assembled['candidate'],'image':'recovery.img','signed':False}
     atomic_write(output/'image-result.json',canonical(result))
+    progress('worker-complete','Unsigned image staged; coordinator validation and publication remain.',state='COMPLETE')
     return result
 
 

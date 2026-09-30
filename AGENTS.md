@@ -77,3 +77,9 @@ and unattended watchdog grants are later packets, not initial prerequisites. Con
 source capture, safe shutdown, unattended eligibility or backup completeness from a
 single accepted/paused/ready state. P0 fixtures and foundational recipe/observation
 records precede the full journey; see packet dependencies rather than numeric order.
+
+Local state maintenance (2026-09-30): new state and product/build staging must live
+outside Git checkouts. Use configured home state and the manual `quirkbench monitor`;
+never launch popup Konsole viewers. The user explicitly authorized discarding all
+old checkout-local artifacts and evidence for this reset; historical records now
+refer to unavailable bytes. Do not reconstruct them or run qualification implicitly.

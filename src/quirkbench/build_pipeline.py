@@ -377,7 +377,8 @@ class BoundedRunner:
         deadline = time.monotonic() + timeout_s
 
         with log.open("xb") as output:
-            process = subprocess.Popen(command.argv, cwd=command.cwd, env=env,
+            from .retention import launch
+            process = launch(command.argv, workspace=self.workspace, cwd=command.cwd, env=env,
                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                        start_new_session=True)
             assert process.stdout is not None
@@ -410,6 +411,9 @@ class BoundedRunner:
                 code = process.wait(timeout=max(1, deadline - time.monotonic()))
                 if code:
                     raise BuildError(f"{phase} exited {code}; see {log}")
+                if (self.workspace/'process-groups.json').is_file():
+                    from .retention import stop_proof
+                    stop_proof(self.workspace)
                 output.flush()
                 os.fsync(output.fileno())
             except BaseException:
@@ -943,6 +947,9 @@ class BuildPipeline:
                  resume_reconciled: bool = False):
         _safe_build_path(workspace)
         _safe_build_path(controller_state)
+        from .state_config import outside_checkout
+        outside_checkout(workspace)
+        outside_checkout(controller_state)
         self.workspace = workspace
         self.controller_state = controller_state
         self.repository = repository
@@ -1299,11 +1306,11 @@ class BuildPipeline:
                 raise BuildError("incremental experiment source changed")
             inputs.validate()
             self._verify_environment(inputs)
-            self.incremental_cache.publish(
+            saved_cache = self.incremental_cache.publish(
                 self._incremental_lineage(inputs), "experiment-kbuild",
                 incremental_identity, {"source": source, "objects": object_dir},
                 {"source_tree_sha256": _tree_hash(source, excluded_paths=frozenset())})
-            self._report("kernel-cache", "audited Kbuild objects retained before later build stages")
+            self._report("kernel-cache", "Audited Kbuild objects retained." if saved_cache else "Optional Kbuild snapshot skipped: cache budget or lock unavailable.")
         dracut_confdir = stage / "dracut-conf.d"
         dracut_confdir.mkdir()
         self._run(build.initramfs_plan(release, dracut_config=inputs.dracut_config,
@@ -1383,6 +1390,20 @@ class BuildPipeline:
                 raise BuildError(f"module lacks matching unstripped symbols: {module}")
 
     def _publish_cached(self, directory: Path, key: str) -> dict[str, Artifact]:
+        reference = directory / 'artifact-references.json'
+        if reference.is_file():
+            if reference.is_symlink():
+                raise BuildError('build artifact reference is linked')
+            record=json.loads(reference.read_bytes())
+            if record.get('cache_key')!=key or record.get('schema_version')!=1:
+                raise BuildError('build artifact reference identity mismatch')
+            outputs={}
+            for role, details in record['outputs'].items():
+                if self.repository.verify(details['sha256'])!=details['size']:
+                    raise BuildError('retained build artifact differs')
+                outputs[role]=Artifact(details['sha256'],details['size'])
+            self._collapse_output_cache(directory,key,outputs)
+            return outputs
         manifest = directory / "artifacts/build-provenance.json"
         record = json.loads(manifest.read_text())
         if record.get("cache_key") != key or record.get("schema") != 1:
@@ -1403,7 +1424,28 @@ class BuildPipeline:
                 outputs[role] = self.repository.put(path.read_bytes(), expected_digest=details["sha256"])
         outputs["build_provenance"] = self.repository.put(manifest.read_bytes())
         self._report("published", f"published {len(outputs)} verified artifacts from {key}")
+        if callable(getattr(self.repository,'verify',None)):
+            self._collapse_output_cache(directory,key,outputs)
         return outputs
+
+    def _collapse_output_cache(self,directory,key,outputs):
+        from .maintenance import retain_diagnostics,remove_tree,disposable
+        from .store import atomic_write,sync_directory
+        disposable(directory,self.workspace)
+        retain_diagnostics(self.workspace,directory,self.controller_state/'diagnostics'/('build-'+key))
+        os.chmod(directory,0o700)
+        reference=directory/'artifact-references.json'
+        # Publish/fsync the role map before retiring any bytes. A crash leaves
+        # either the original outputs or a usable map, never an empty cache key.
+        atomic_write(reference,canonical({'schema_version':1,'cache_key':key,
+            'outputs':{role:{'sha256':artifact.sha256,'size':artifact.size} for role,artifact in outputs.items()}}))
+        for child in directory.iterdir():
+            if child==reference: continue
+            if child.is_dir() and not child.is_symlink():
+                remove_tree(child,self.workspace)
+            else:
+                child.unlink()
+        sync_directory(directory)
 
 
 class RepositoryBuilder:

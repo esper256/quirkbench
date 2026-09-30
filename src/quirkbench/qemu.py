@@ -167,7 +167,8 @@ def monitored_process(command, serial: Path, *, timeout_s: float, event=None,
               f"serial {serial_bytes} bytes; last serial advance {age}")
     try:
         with serial.open('xb') as output, serial.with_suffix('.stderr.log').open('xb') as diagnostics:
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            from .retention import launch
+            process = launch(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                        start_new_session=True)
             selector.register(process.stdout, selectors.EVENT_READ, 'serial')
             selector.register(process.stderr, selectors.EVENT_READ, 'stderr')

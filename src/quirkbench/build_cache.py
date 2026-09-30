@@ -109,9 +109,11 @@ class BuildStageCache:
     """One latest complete snapshot per stage and reviewed recipe lineage."""
 
     def __init__(self, root: Path):
+        from .state_config import outside_checkout
         self.root = Path(root)
         if self.root.exists() and (self.root.is_symlink() or self.root.resolve() != self.root):
             raise BuildError("build cache root cannot be linked")
+        self.root=outside_checkout(self.root)
         self.root.mkdir(parents=True, mode=0o700, exist_ok=True)
         _directory(self.root)
         if self.root.stat().st_uid != os.getuid() or self.root.stat().st_mode & 0o077:
@@ -171,6 +173,7 @@ class BuildStageCache:
             return None
         record = self._restore(entry, stage, destinations,
                                expected_identity=identity, exact_trees=True)
+        os.utime(entry, None)
         return record["metadata"]
 
     def load_latest(self, lineage: str, stage: str,
@@ -189,7 +192,9 @@ class BuildStageCache:
             return None
         if len(entries) != 1:
             raise BuildError("build cache has ambiguous completed generations")
-        return self._restore(entries[0], stage, destinations)
+        record=self._restore(entries[0], stage, destinations)
+        os.utime(entries[0],None)
+        return record
 
     def peek_latest(self, lineage: str, stage: str) -> dict | None:
         """Read a completed manifest without trusting or copying its trees."""
@@ -263,7 +268,23 @@ class BuildStageCache:
         return record
 
     def publish(self, lineage: str, stage: str, identity: dict,
-                trees: dict[str, Path], metadata: dict) -> str:
+                trees: dict[str, Path], metadata: dict) -> str | None:
+        from .maintenance import enforce_cache_limit, private_lock, tree_bytes
+        from .contracts import Conflict
+        key = self.key(stage, identity)
+        try:
+            incoming = 0 if (self._slot(lineage,stage)/key).exists() else sum(tree_bytes(path) for path in trees.values()) + len(canonical(metadata)) + len(canonical(identity)) + 4096
+            with private_lock(self.root / '.budget.lock'):
+                budget=enforce_cache_limit(self.root,incoming=incoming,protected_lineage=lineage,budget_held=True)
+                if not budget['room']:
+                    return None
+                return self._publish_unbounded(lineage,stage,identity,trees,metadata)
+        except (Conflict,OSError):
+            # Optional reuse must never turn a completed build into a failure.
+            return None
+
+    def _publish_unbounded(self, lineage: str, stage: str, identity: dict,
+                           trees: dict[str, Path], metadata: dict) -> str:
         """Publish after audit, then retire the previous complete generation."""
         if not isinstance(metadata, dict) or not trees:
             raise BuildError("build cache metadata and trees required")

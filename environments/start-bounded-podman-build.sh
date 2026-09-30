@@ -14,7 +14,7 @@ stage=$2
 log_name=$3
 status_name=$4
 shift 4
-[[ $unit =~ ^quirkbench-[a-z0-9-]+\.service$ ]] || fail 'invalid user service name'
+[[ $unit =~ ^quirkbench-build-[a-z0-9-]+\.service$ ]] || fail 'use a fresh quirkbench-build-NAME.service'
 [[ $stage == /* && -d $stage && ! -L $stage && $(realpath -e "$stage") == "$stage" ]] ||
   fail 'private stage must be an existing canonical directory'
 [[ $(stat -c %u "$stage") == "$EUID" && $(stat -c %a "$stage") == 700 ]] ||
@@ -35,8 +35,10 @@ cpu_percent=$(( controller_cpus * 50 ))
 memory_limit=$(( controller_memory_kib * 1024 / 2 ))
 (( memory_limit <= 8589934592 )) || memory_limit=8589934592
 
-# Establish a visible desktop log viewer before dispatching this attended build.
-/usr/bin/bash "$script_dir/view-build.sh" "$stage" "$stage/$status_name"
+# Record the run outside the checkout. No desktop, window or watcher is required.
+PYTHONPATH="$script_dir/../src${PYTHONPATH:+:$PYTHONPATH}" python3 -m quirkbench.development_run \
+  "$unit" "$stage" "$log_name" "$status_name" -- "$@"
+printf 'Build admitted to systemd; launch status does not establish completion.\n'
 
 exec systemd-run --user --no-block --remain-after-exit --no-ask-password \
   --unit="$unit" --expand-environment=no \
