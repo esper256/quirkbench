@@ -153,7 +153,7 @@ def make_server(
                 elif path == "/v1/reconcile":
                     _body(data, {"boot_id"})
                     answer = controller.reconcile(device_id, identifier(data["boot_id"]))
-                elif path in {"/v1/start", "/v1/heartbeat", "/v1/evidence", "/v1/complete", "/v1/upload", "/v1/progress", "/v1/handoff", "/v1/candidate-started", "/v1/recovery-returned"}:
+                elif path in {"/v1/attempt-approval", "/v1/start", "/v1/heartbeat", "/v1/evidence", "/v1/complete", "/v1/upload", "/v1/progress", "/v1/handoff", "/v1/candidate-started", "/v1/recovery-returned"}:
                     answer = self._attempt_action(path, device_id, data)
                 else:
                     self._send(404, {"error": "unknown route"})
@@ -206,6 +206,8 @@ def make_server(
                 return method(attempt_id, token, identifier(data["boot_id"]), sha256(data["revision"]))
             if path == "/v1/recovery-returned":
                 return controller.recovery_returned(attempt_id, token, identifier(data["boot_id"]))
+            if path == "/v1/attempt-approval":
+                return controller.attempt_approval(attempt_id, token, identifier(data["boot_id"]))
             if path == "/v1/start":
                 return controller.start(attempt_id, token, identifier(data["boot_id"]))
             if path == "/v1/heartbeat":
@@ -335,6 +337,9 @@ class HTTPSDeviceClient:
 
     def start(self, attempt_id: str, token: str, boot_id: str):
         return self._request("/v1/start", {"attempt_id": attempt_id, "token": token, "boot_id": boot_id})
+
+    def attempt_approval(self, attempt_id, token, boot_id):
+        return self._request("/v1/attempt-approval", {"attempt_id": attempt_id, "token": token, "boot_id": boot_id})
 
     def handoff(self, attempt_id, token, boot_id, revision):
         return self._request("/v1/handoff", {"attempt_id": attempt_id, "token": token, "boot_id": boot_id, "revision": revision})
@@ -476,6 +481,10 @@ class LocalDeviceClient:
     def start(self, attempt_id, token, boot_id):
         self._check(attempt_id)
         return self.controller.start(attempt_id, token, boot_id)
+
+    def attempt_approval(self, attempt_id, token, boot_id):
+        self._check(attempt_id)
+        return self.controller.attempt_approval(attempt_id, token, boot_id)
 
     def handoff(self, attempt_id, token, boot_id, revision):
         self._check(attempt_id)

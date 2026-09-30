@@ -1,9 +1,19 @@
 # Recovery image decision and synthesis contract
 
+**2026-09-29 superseding decision:** recovery uses stock packages and boot-device-only
+storage operations; candidate exclusions remain mandatory. The first delivery is
+attended with manual trust/credential provisioning. Pairing and setup wizards are
+later work. Existing recipe schemas, builder code and completed custom-kernel
+artifacts retain their old meaning. V2 stock contracts and synthesis dispatch now
+exist; see the [current software handoff](stock-recovery-attended.md) for remaining
+coordinator execution and qualification limits.
+
 **Decision: use a minimal Fedora-derived recovery appliance, synthesized with DNF5,
-dracut, systemd and GRUB through Quirkbench's existing build/image adapters.** No KIWI,
-Lorax/Anaconda, desktop live-ISO remaster or second production image builder in v1.
-This is the implementation decision, not an open tool-selection task.
+dracut, systemd and GRUB through Quirkbench's existing build/image adapters, using
+pinned stock Fedora kernel/module packages.** No custom recovery kernel compile is
+required. Upstream live-image reuse is permitted through a bounded integration
+proposal demonstrating simpler delivery under the same storage/boot contract;
+this revision introduces no second builder. The existing assembly remains default.
 
 Recovery is fixed for an investigation. Its job is setup, safe deployment preparation,
 reconciliation and reliable evidence upload. It never runs experimental recipes or
@@ -16,7 +26,7 @@ retain authority over enrollment, attempts, persistent state and protection.
 | Requirement | Chosen implementation |
 | --- | --- |
 | Fast boot | Minimal services, direct read-only ext4 root on USB, small non-host-only initramfs, no desktop/installer/update agent, no copying the whole root into RAM |
-| Broad compatibility | Pinned Fedora kernel sources/configuration, broad modular peripheral/network support and Fedora firmware packages; reviewed protection changes only |
+| Broad compatibility | Pinned stock Fedora kernel/module packages, broad peripheral/network support and matching Fedora firmware packages |
 | Infrequent maintenance | Versioned recovery releases; normally refresh the Fedora base annually, before its support ends; earlier security/hardware fixes when needed |
 | Simple networking | NetworkManager, nmtui, Fedora Wi-Fi authentication dependencies and explicit DNS/CA/clock handling |
 | Predictable workloads | systemd supervision, bounded workers, immutable recovery code, isolated RAM runtime, independent evidence and durable upload retries |
@@ -40,33 +50,32 @@ filesystems, a package manager, bootloader, networking stack or physical USB wri
 
 ## Platform and kernel policy
 
-The first release supports x86-64 UEFI computers booting external USB storage.
-Broad support means a generic image within that platform, not every architecture
-or firmware. ARM, legacy BIOS and other boot transports require explicit adapters.
-Boot compatibility and eligibility for unattended experiments are separate: recovery
-can offer setup on hardware lacking a usable watchdog or dependable target UUID.
+The first delivery supports x86-64 UEFI targets booting external USB storage.
+Broad compatibility is an intent within that platform, not universal tested support.
+ARM, legacy BIOS and other transports need explicit adapters. Attended operation
+can proceed without automatic reset coverage, with manual-reset limits visible;
+candidate boot still requires a dependable pre-kernel target identity gate.
 
-Start from a pinned Fedora kernel source RPM and that release's x86-64 configuration.
-Rebuild using recorded sources/toolchain and a reviewed recovery fragment; do not
-start from a small VM defconfig and guess individual laptop drivers. Preserve broad
-USB, HID/I2C keyboard, framebuffer/console, Ethernet and Wi-Fi support. Include DMI
-sysfs for the initial binding mechanism and a reviewed set of watchdog drivers;
-shipping a driver is not authorization to arm it. Keep networking firmware packages
-intact initially. Out-of-tree-only devices are explicit unsupported cases.
+Install retained, pinned Fedora kernel RPMs, matching modules and firmware into the
+recovery sysroot. Record package identities, hashes and the kernel release; no SRPM
+rebuild or exclusion fragment is required for recovery. Preserve broad boot, input,
+console and network support rather than pruning for one target. Recovery is fixed
+for an investigation and updated only through explicit maintenance releases.
 
-Retain the current internal-controller exclusions and firmware-write prohibitions,
-plus positive external-device identity and write destination allowlists. Resolve
-Kconfig dependencies and inspect the final kernel, modules and initramfs. A required
-driver/protection conflict blocks support; broad compatibility never silently enables
-internal storage access. The recovery kernel is not rebuilt for each enrolled target.
-An alternate protection mechanism needs a separately reviewed architecture change.
+Apply the authoritative [storage protection policy](architecture.md#storage-protection-policy):
+passive kernel disk enumeration and partition-table reads are permitted. Userspace
+filesystem and block operations are confined to expected Quirkbench roles on the
+positively identified boot device. P3a2 restricts dracut, udev helpers and all
+recovery services before any filesystem probe. Unsupported or ambiguous boot
+identities block visibly. Candidate
+kernels retain their independently reviewed internal-controller exclusions.
 
-Use dracut's generic/non-host-only mode, the explicit target sysroot and module tree.
-The initramfs needs the supported boot-storage path and recovery-root mount, not
-Wi-Fi authentication or controller contact. Load peripheral/network drivers from
-the root filesystem through udev after switch-root. Do not prune boot support using
-the controller's hardware or embed its host-only configuration. Module/firmware
-compression follows pinned Fedora defaults unless measured boot data justifies a change.
+Use dracut's generic/non-host-only mode with the explicit target sysroot and matching
+module tree. Restrict early root discovery and mounting to the validated boot-device
+path. The initramfs must not probe or repair other filesystems, activate swap/resume,
+or inherit the controller's root UUID, cmdline, keys or host-only configuration.
+Peripheral/network modules may load after switch-root under the recovery policy.
+Out-of-tree-only peripherals remain explicit unsupported cases.
 
 ## Userspace and security policy
 
@@ -92,7 +101,7 @@ Do not change controller/container SELinux settings as a consequence of this dec
 Candidate SELinux state is an explicit build/experiment property, recorded with results;
 recovery policy must not silently override experiments investigating security policy.
 No automatic global relabel, package installation or firmware update on target boot.
-Keep credential permissions, exact signatures, TLS validation and storage exclusions.
+Keep credential permissions, exact signatures, TLS validation and boot-device restrictions.
 Use systemd resource limits and service restrictions compatible with required mounts,
 network operations and watchdog handling; validate these against the actual workload.
 
@@ -110,7 +119,7 @@ unconfigured systemd-resolved stub. D-Bus and the local console must work offlin
 Start a local setup/status TUI automatically on the physical console, with no installed-OS
 account or password required. It invokes nmtui rather than implementing connection
 editing. Explicit local maintenance may open a privileged shell; remote root login
-is not provided. Status is visible before pairing. Networking needs LAN access to
+is not provided. Status is visible before manual configuration or later pairing automation. Networking needs LAN access to
 the controller, not public internet. Clock plausibility is checked before TLS; allow
 operator-supplied system time or a configured reachable time source, never a certificate
 verification bypass or an implicit firmware-clock write.
@@ -141,18 +150,20 @@ report retained evidence and unavailable paths explicitly.
 
 ## How the image is synthesized
 
-P3a implements a strict `RecoveryRecipe` v1 and one orchestration entry point over
+`RecoveryRecipe` v2 implements the stock successor to v1. The fixed recovery-image
+coordinator now joins the stages over
 existing adapters. The recipe names the platform, Fedora release, builder digest,
-RPM snapshot/lock, kernel source/configuration/fragment hashes, runtime revision,
+RPM snapshot/lock, stock kernel/module package identities and hashes, runtime revision,
 dracut configuration, package/unit allowlists, layout capacities and recovery policy.
 Use typed validated references, never shell text from a target inventory. The command
 returns a durable operation ID through P2; stages publish progress and retain resumable
-results. This recipe/entry point is planned, not an existing CLI command.
+results. V2 input generation, immutable image admission and the optional fixed executor on
+the existing authenticated controller service exist; see the [software handoff](stock-recovery-attended.md).
 
 The synthesis stages are:
 
 1. **Lock inputs.** Select a supported Fedora release, immutable builder OCI digest,
-   retained RPM repository snapshot, kernel source RPM/config, protection fragment,
+   retained RPM repository snapshot, stock kernel/module/firmware package identities,
    Quirkbench revision and resource limits. Resolve and retain complete RPM identities
    and bytes. A moving repository URL or release number is not a reproducible lock.
 2. **Create staged userspace.** In the dedicated rootless Fedora builder, run DNF5
@@ -160,10 +171,10 @@ The synthesis stages are:
    Extend `target-assets/build-rootfs.sh` to consume the locked recipe; never run it
    against the controller root or attach physical block devices. Preserve output/logs
    outside the disposable container. Replay must refuse unavailable locked packages.
-3. **Build the recovery kernel.** Use the existing resource-bounded build adapter with
-   pinned Fedora sources/config plus the protection fragment. Stage matching modules,
-   firmware and runtime inputs only into the target sysroot. Retain symbols, sources,
-   final Kconfig and provenance. Verify exclusions after dependency resolution.
+3. **Install the stock recovery kernel.** Install the locked Fedora kernel packages,
+   matching modules and firmware only into the target sysroot. Retain package bytes,
+   release/configuration identities and available debugging package references.
+   Verify package/module consistency; do not invoke the experimental kernel builder.
 4. **Install recovery integration.** Install versioned Quirkbench units/runtime, offline
    console setup, NetworkManager RAM state, resolver configuration and policy masks.
    Image-specific partition identity files are injected by the assembly adapter, not
@@ -178,9 +189,11 @@ The synthesis stages are:
    provenance to the existing `quirkbench image` adapter. It uses sgdisk, filesystem
    tools and grub-mkimage for the compact GPT image, fixed recovery and SMBIOS-bound
    one-shot loader. The established commissioning code creates the final six roles
-   on first boot after the local capacity screen confirms and journals geometry. This
-   screen runs from RAM before evidence storage or enrollment exists; retries preserve
-   the same plan and existing filesystems. No KIWI/installer resize service is introduced.
+   on first boot after explicit local device/geometry confirmation is journaled.
+   The current fixed geometry and confirmation are sufficient initially; an advanced
+   capacity wizard is deferred. Confirmation runs from RAM before evidence exists;
+   retries preserve the same plan and existing filesystems. No installer resize service
+   or automatic enrolled-media repartition is introduced.
 7. **Publish.** Verify complete staged output and provenance, synchronize, then publish
    `.img` (optionally `.img.xz`), checksum and release manifest. Sign distribution
    metadata with a release key kept on the controller. Factory media has no controller
@@ -214,7 +227,7 @@ Measure kernel-start-to-console, evidence-ready, network-ready and controller-co
 times separately from firmware time and first-boot commissioning. Record cold/warm boot,
 USB and network conditions; avoid a universal boot-seconds promise across hardware.
 Release qualification covers actual read-only recovery, offline setup, Ethernet/Wi-Fi
-and DNS, pairing/reconnect, upload during a slow preparation, corrupt/unavailable optional
+and DNS, manual authenticated setup/reconnect, upload during a slow preparation, corrupt/unavailable optional
 volumes, missing network, service/worker failures, moved media and unchanged protected
 storage/firmware. Kernel and watchdog qualification remain separate.
 

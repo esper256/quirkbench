@@ -654,7 +654,24 @@ def sanitize_recovery_etc_enablement(rootfs: Path) -> None:
     if observed == retained:
         return
     if observed != FEDORA44_ETC_LINKS:
-        raise BootError("Fedora recovery RPM enablement differs from reviewed closure")
+        # Image assembly binds GPT identity after generic runtime staging. A
+        # fully installed, strictly reviewed graph is valid on that second pass;
+        # partial or unknown graphs must still fail before any mutation.
+        try:
+            _check_recovery_unit_links(rootfs, strict_direct_links=True)
+            masks = RECOVERY_MASKED_UNITS
+            if (rootfs / "usr/lib/quirkbench/recovery-storage-policy.json").exists():
+                from .recovery_storage import EXTRA_MASKED_UNITS
+                masks = masks | EXTRA_MASKED_UNITS
+            installed = dict(retained)
+            installed.update(RECOVERY_ENABLED_LINKS)
+            installed["default.target"] = "/usr/lib/systemd/system/multi-user.target"
+            installed.update({name: "/dev/null" for name in masks})
+            if observed != installed:
+                raise BootError("unreviewed installed recovery unit graph")
+        except BootError as exc:
+            raise BootError("Fedora recovery RPM enablement differs from reviewed closure") from exc
+        return
     for name in set(observed) - set(retained):
         (units / name).unlink()
 
@@ -748,6 +765,15 @@ def _check_recovery_vendor_generators(rootfs: Path) -> None:
 
 def _check_recovery_unit_links(rootfs: Path, *, strict_direct_links: bool = False) -> None:
     """Reject unreviewed recovery enablement in the staged /etc unit graph."""
+    masked_units=RECOVERY_MASKED_UNITS
+    storage_policy=rootfs/'usr/lib/quirkbench/recovery-storage-policy.json'
+    if storage_policy.exists() or storage_policy.is_symlink():
+        from .recovery_stock import validate_policy
+        from .recovery_storage import EXTRA_MASKED_UNITS
+        if storage_policy.is_symlink() or not storage_policy.is_file() or storage_policy.stat().st_size>65536:
+            raise BootError('invalid stock recovery storage policy')
+        validate_policy(json.loads(storage_policy.read_bytes()))
+        masked_units=masked_units|EXTRA_MASKED_UNITS
     units = rootfs / "etc/systemd/system"
     for directory in (units.parent, units):
         if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
@@ -790,10 +816,10 @@ def _check_recovery_unit_links(rootfs: Path, *, strict_direct_links: bool = Fals
                 continue
             expected = ("/usr/lib/systemd/system/multi-user.target" if path.name == "default.target"
                         else "/usr/lib/systemd/system/dbus-broker.service" if path.name == "dbus.service"
-                        else "/dev/null" if path.name in RECOVERY_MASKED_UNITS else None)
+                        else "/dev/null" if path.name in masked_units else None)
             if expected != str(path.readlink()):
                 raise BootError("unreviewed recovery systemd unit link: " + path.name)
-        for name in sorted(RECOVERY_MASKED_UNITS):
+        for name in sorted(masked_units):
             mask = units / name
             if not mask.is_symlink() or str(mask.readlink()) != "/dev/null":
                 raise BootError("required recovery systemd unit mask missing: " + name)

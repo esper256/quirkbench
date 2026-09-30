@@ -790,3 +790,36 @@ def test_panic_identity_survives_kernel_console_command_line_truncation(tmp_path
     printed=('BOOT_IMAGE='+'x'*280+' '+command)[:1024]
     log='Linux version 6.12-test (builder)\nKernel command line: '+printed+'\nKernel panic - not syncing: sysrq triggered crash\n'
     verify_panic_proof(log,{'candidate_id':p.deployment_id,'candidate_revision':p.revision,'candidate_kernel_release':'6.12-test'})
+
+
+def test_fedora44_runtime_can_bind_image_identity_after_verified_staging(tmp_path, monkeypatch):
+    import quirkbench.boot as boot
+    import quirkbench.recovery_vendor_fedora44 as vendor
+    root=tmp_path/'recovery'; (root/'etc').mkdir(parents=True)
+    (root/'etc/os-release').write_text('ID=fedora\nVERSION_ID=44\n')
+    (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1\n')
+    links={
+        'dbus.service':'/usr/lib/systemd/system/dbus-broker.service',
+        'sockets.target.wants/dbus.socket':'/usr/lib/systemd/system/dbus.socket',
+        'multi-user.target.wants/NetworkManager.service':'/usr/lib/systemd/system/NetworkManager.service'}
+    monkeypatch.setattr(vendor,'FEDORA44_ETC_LINKS',links)
+    monkeypatch.setattr(boot,'_recovery_vendor_policy',lambda root: ({},{}))
+    units=root/'etc/systemd/system'
+    for name,target in links.items():
+        link=units/name;link.parent.mkdir(parents=True,exist_ok=True);link.symlink_to(target)
+    boot.install_recovery_runtime_base(root)
+    boot.install_runtime(root,CONFIG)
+    assert json.loads((root/'etc/quirkbench/boot.json').read_bytes())==CONFIG.to_dict()
+    (units/'multi-user.target.wants/unreviewed.service').symlink_to('/usr/lib/systemd/system/unreviewed.service')
+    with pytest.raises(BootError,match='differs from reviewed closure'):
+        boot.install_runtime(root,CONFIG)
+
+    (units/'multi-user.target.wants/unreviewed.service').unlink()
+    dropin=units/'NetworkManager.service.d/unreviewed.conf'
+    dropin.symlink_to('../quirkbench-network-state.service')
+    with pytest.raises(BootError,match='differs from reviewed closure'):
+        boot.install_runtime(root,CONFIG)
+    dropin.unlink()
+    (units/'systemd-remount-fs.service').unlink()
+    with pytest.raises(BootError,match='differs from reviewed closure'):
+        boot.install_runtime(root,CONFIG)

@@ -10,15 +10,15 @@ Hardware discovery selects versioned platform profiles and adapters, including
 explicit architecture/boot constraints. Unsupported profiles remain unsupported;
 generic architecture does not imply unqualified universal hardware support.
 
-The target boots generic protected recovery media before discovery. Local setup
-configures networking and securely pairs with the controller; recovery collects the
+The target boots fixed generic recovery media before discovery. Initial attended setup
+configures networking and manually provisions authenticated controller trust; recovery collects the
 hardware inventory used to plan the experimental baseline. The installed-OS
 collector is optional. Private network/credential/binding generations live in
 independent evidence/control storage; factory images contain none. Early boot and
 runtime identity checks prevent a moved drive from resuming another target's work.
 See C4 in the implementation contracts for the enrollment and retargeting boundary.
-Internal storage remains excluded and every privileged write requires positive USB
-identity. Candidate OSTree updates cannot change recovery or the fixed bootloader.
+The storage policy below separates recovery boot-device confinement from candidate
+controller exclusions. Every privileged destination needs positive boot-device identity. Candidate OSTree updates cannot change recovery or the fixed bootloader.
 
 Agents use a local CLI with typed application services, JSON and idempotent
 operation IDs. A persistent worker performs long work without a waiting agent;
@@ -97,7 +97,67 @@ Layout revision 2 has six named roles: fixed EFI boot, fixed read-only recovery,
 
 OSTree generates candidate boot entries without regenerating the system bootloader. Quirkbench validates those entries and integrates them with USB GRUB one-shot state. GRUB consumes and verifies cleared candidate state before handoff; recovery remains the permanent default. Normal experiments use full firmware reboots. A fresh deployment group and mutable state are created for every physical attempt, while preparation retries for that attempt are idempotent. Configuration starts from the commit defaults; neither shared `/var` nor modified `/etc` may contaminate a later attempt. Evidence lives outside that disposable state and remains until acknowledged.
 
-The protection requirement is that internal disks cannot be accidentally selected or mutated. The initial hardware profile retains internal-controller exclusion in both recovery and candidate kernels, combined with positive USB identity and allowlisted privileged destinations. Disable internal discovery, automount, swap/resume, firmware updates, EFI writes and EFI-backed pstore. Secure Boot must be verified disabled. Candidate data mounts must permit OS execution; evidence mounts remain restricted. Candidate roots follow OSTree semantics: read-only `/usr`, an exactly identified writable deployment root and attempt-local `/etc` and `/var`; recovery alone uses a wholly read-only root. Any replacement protection mechanism requires review and equivalent sentinel tests, not preservation of one implementation at all costs.
+Candidate data mounts must permit OS execution; evidence mounts remain restricted.
+Candidate roots follow OSTree semantics: read-only `/usr`, an exactly identified
+writable deployment root and attempt-local `/etc` and `/var`; recovery alone uses
+a wholly read-only root. Secure Boot must be verified disabled.
+
+## Storage protection policy
+
+**Normative policy, revised 2026-09-29.** Internal storage and the installed OS are
+outside investigations. The principal variable risk is the experimental kernel
+and recipe proposed by an agent. Recovery is fixed, trusted code maintained and
+verified separately; it never executes agent recipes or adopts candidate changes.
+
+**Recovery: boot-device-only storage operations.** Use a pinned stock Fedora kernel
+and matching modules/firmware. Passive kernel disk enumeration and partition-table
+reads are permitted, along with bounded sysfs/proc hardware metadata. Recovery
+userspace, including Quirkbench, udev helpers and dracut, must not open internal
+block devices or probe their filesystem signatures. Controller exclusions apply
+to experimental kernels independently of this recovery policy.
+Do not open internal block devices, read filesystem
+contents, mount their partitions, activate swap/resume, run filesystem repairs or
+write them. Apply the policy from initramfs through normal userspace, including
+udev helpers and maintenance tools. Disable automount, installed-OS discovery,
+os-prober, automatic filesystem repair, swap/resume and firmware updates. Do not
+write EFI variables, use EFI-backed pstore or load an unapproved alternate kernel
+through kexec/kdump. Stock kernel feature availability is not runtime authorization.
+This policy is not satisfied merely
+because Quirkbench itself never calls mount.
+
+Resolve the recovery-root backing chain to one positively identified physical
+external boot device. Authorize only expected Quirkbench partitions with validated
+roles and layout on that device. USB bus membership, a label, UUID or `/dev/sdX`
+name alone is insufficient. Duplicate identities, unresolved backing chains or
+changed devices block storage operations and show a local diagnostic. Never fall
+back to the first USB disk. Initramfs must apply this identity rule before mounting
+the recovery root; later privileged tools revalidate before mutation. Explicit
+commissioning can alter only the confirmed boot device through the existing
+journaled geometry plan. A privileged maintenance shell is operator administration,
+not a policy bypass or proof of containment; its actions remain within this scope.
+
+**Experiments: restricted kernels and approved execution.** Retain internal-controller
+exclusions in reviewed candidate profiles and check the final configuration, modules
+and initramfs after dependency resolution. Required internal-storage drivers block
+that experiment. Review source/configuration/recipe changes affecting storage access,
+boot, privileged destinations or firmware independently of the proposing agent.
+Bind operator approval to the exact immutable candidate/attempt before arming;
+proposal acceptance or build completion does not grant boot authority. Restrict
+writes to validated experiment/evidence roles on the boot device; candidates cannot
+modify fixed recovery, its trust/configuration or the fixed bootloader. No agent
+request expands these permissions. Preserve pre-kernel wrong-target checks.
+
+These controls reduce accidental damage; they cannot sandbox an arbitrary modified
+kernel that deliberately or accidentally bypasses them. Attendance, a successful
+recovery boot and driver-exclusion checks do not establish safety of every kernel
+patch. Record that limit with experiment evidence. No universal hardware safety
+claim follows from a generic design or passing software fixtures.
+
+Existing profiles and recovery recipes conflate these policies and require custom
+kernel provenance. A future versioned migration must represent recovery package
+identity and boot-device policy separately from candidate exclusions. Do not change
+old identifiers' meaning, relax existing validators or relabel historical artifacts.
+The implementation does not yet satisfy this revised contract.
 
 See [recovery and evidence](recovery-and-evidence.md) for separate selection, reset
 and diagnostic requirements. Current no-kexec policy leaves kdump unavailable.
@@ -126,5 +186,8 @@ workers; sessions reference campaigns. Deliver external-agent proposals first, t
 managed decision queue over the same source-capture and dispatch API. Proposal receipt
 is distinct from immutable-source readiness. Recipe extensions and human observations
 are versioned records, not arbitrary target commands. Recovery remains suspend-disabled;
-only eligible candidate recipes may exercise reviewed sleep modes. Backup completeness
-also reports uncaptured workspaces, private identity and target-only evidence.
+only eligible candidate recipes may exercise reviewed sleep modes. The first delivery
+is attended with manual authenticated setup and operator-approved attempts. Pairing
+automation, managed scheduling, unattended grants and guided backup completeness are
+later capabilities. Initial backups state contents and omissions without claiming
+whole-session completeness. See the roadmap for delivery tiers.

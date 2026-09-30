@@ -1,19 +1,26 @@
 # Quirkbench v1 debug image and execution
 
+**Revised design, 2026-09-29:** use the
+[storage policy](architecture.md#storage-protection-policy): recovery confines storage
+operations to its physical boot device; experimental kernels retain controller
+exclusions. First delivery is attended with manual authenticated setup and explicit
+candidate approval. Existing image/code/schema descriptions below are not evidence
+that stock-kernel recovery or the full attended journey is implemented.
+
 The recovery OS is fixed, independent of the experimental OSTree repository, and
 always the default boot. Each physical attempt gets an isolated OSTree deployment
 with fresh `/etc` and `/var`. A successful experiment uploads its results and
 returns through recovery; it cannot prepare or authorize the next experiment.
 
 The [product plan](product-roadmap.md) adds generic recovery compatibility, local
-network setup, secure pairing and recovery inventory. Setup must work without an
+network setup, manual authenticated controller configuration and recovery inventory. Setup must work without an
 experimental deployment. Current low-level build/runtime code is not yet that
 complete user experience; existing images require rebuilding for changed boot code.
 
 ## Recovery build policy
 
 The [recovery decision](recovery-base.md) specifies the synthesis pipeline: Fedora
-RPMs installed with locked DNF5 inputs, a protected broadly configured Fedora kernel,
+RPMs installed with locked DNF5 inputs, stock Fedora kernel/module packages,
 dracut and the existing image adapter. Recovery runs without SELinux enforcement
 (`selinux=0`), desktop, installer or automatic updates. It uses read-only ext4 plus
 bounded RAM runtime state and NetworkManager/nmtui. These are P3a implementation
@@ -133,10 +140,13 @@ The current low-level configuration reader supports manual development fixtures.
 Activation now also requires `target_binding` with schema_version 1 and a valid
 `system_uuid` matching the running target. Old unbound files remain readable but
 cannot silently activate credentials or experiments. This guard is not a complete
-enrollment system; do not treat copying configuration files as the product setup UI.
+enrollment system. Explicit manual configuration is the initial attended setup path,
+with existing trust, authentication, binding and signature validation preserved.
 
-**Planned normal path (P3):** recovery offers local Ethernet/Wi-Fi setup and controller
-pairing, then publishes a complete private configuration generation atomically.
+**Initial path (P3):** local Ethernet/Wi-Fi setup and explicitly provisioned controller
+trust/device credentials use validated private configuration. Complete state must
+activate safely; no verification bypass or credentials in public artifacts.
+**Later automation (P3d/e):** pairing publishes private generations atomically.
 NetworkManager is the sole network manager. Saved profiles belong to control state
 and are copied into RAM for each boot only after binding checks. No AI credentials
 or controller private signing keys enter media. Generic factory images have no

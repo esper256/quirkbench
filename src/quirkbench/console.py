@@ -70,9 +70,28 @@ def network_profiles_ready(directory: Path = NETWORK_PROFILES, *,
         return False
 
 
+def activate_staged_setup(*, run=subprocess.run):
+    """Activate one fixed boot-evidence bundle under the existing runtime owner."""
+    from .runtime import CONTROL
+    stopped = None
+    try:
+        stopped = run(['systemctl', 'stop', 'quirkbench-supervisor.service'], check=False, timeout=45)
+        if stopped.returncode != 0:
+            raise RuntimeError('could not stop the target supervisor; configuration was not activated')
+        return run([sys.executable, '-m', 'quirkbench.provisioning', str(CONTROL/'setup')],
+                   check=False, timeout=180)
+    finally:
+        # An interrupted stop client may already have submitted its manager job.
+        # Reconcile that uncertainty without ever proceeding to activation.
+        if stopped is None or stopped.returncode == 0:
+            restarted = run(['systemctl', 'start', 'quirkbench-supervisor.service'], check=False, timeout=120)
+            if restarted.returncode != 0:
+                raise RuntimeError('target supervisor restart failed; retained configuration remains available')
+
+
 def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
                 output_stream=None, run_nmtui=None, profiles_ready=None,
-                run_capacity_setup=None) -> int:
+                run_capacity_setup=None, run_manual_setup=None, system_uuid_reader=None) -> int:
     """Show the local status even without a cable, controller or enrollment."""
     source = input_stream or sys.stdin
     output = output_stream or sys.stdout
@@ -81,11 +100,18 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
     if run_capacity_setup is None:
         from .capacity_setup import run_attended_commission
         run_capacity_setup = run_attended_commission
+    manual_setup = run_manual_setup or activate_staged_setup
+    from .binding import read_system_uuid, BindingError
+    try:
+        target_uuid = (system_uuid_reader or read_system_uuid)()
+    except (BindingError, OSError, ValueError):
+        target_uuid = None
     commissioned_here = False
     while True:
         verified = recovery_verified(boot_record)
         ram_profiles = ready()
         print('\nQuirkbench target recovery', file=output)
+        print('Target system UUID for manual binding: ' + (target_uuid or 'unavailable'), file=output)
         print('Recovery identity and evidence: ' + ('verified' if verified else 'pending or blocked'), file=output)
         capacity = recovery_capacity(boot_record) if verified else None
         if capacity is not None and not capacity['eligible']:
@@ -93,7 +119,7 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
                 print('New experiments blocked: current target RAM could not be measured.', file=output)
             else:
                 print('New experiments blocked: evidence partition is too small for current target RAM.', file=output)
-        print('Controller pairing: not available on this screen yet', file=output)
+        print('Controller pairing: automated pairing deferred; staged manual setup below', file=output)
         if commissioned_here:
             print('Commissioning complete. Reboot the target to continue recovery.', file=output)
         available = verified and ram_profiles
@@ -101,6 +127,8 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
         print('2) Refresh status', file=output)
         print('3) Review target storage and confirm first-boot capacity setup'
               + (' (already commissioned)' if verified else ''), file=output)
+        print('4) Activate staged initial controller configuration'
+              + ('' if verified else ' (waiting for verified recovery)'), file=output)
         print('Network changes here are temporary until explicitly saved during setup.', file=output)
         print('Selection: ', end='', file=output, flush=True)
         try:
@@ -141,8 +169,20 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
                 print('Capacity setup blocked: ' + str(exc), file=output, flush=True)
             except KeyboardInterrupt:
                 print('Capacity setup cancelled; returning to status.', file=output, flush=True)
+        elif choice.strip() == '4':
+            if not verified:
+                print('Manual setup is blocked until recovery identity and evidence are verified.', file=output, flush=True)
+                continue
+            try:
+                result = manual_setup()
+                print('Manual setup activated; recovery-only reporting can connect.' if result.returncode == 0
+                      else 'Manual setup rejected; previous usable configuration retained.', file=output, flush=True)
+            except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+                print('Manual setup blocked: ' + str(exc), file=output, flush=True)
+            except KeyboardInterrupt:
+                print('Manual setup interrupted; inspect status before retrying.', file=output, flush=True)
         elif choice.strip() != '2':
-            print('Choose 1, 2 or 3.', file=output, flush=True)
+            print('Choose 1, 2, 3 or 4.', file=output, flush=True)
 
 
 def main() -> int:

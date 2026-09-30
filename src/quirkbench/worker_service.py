@@ -1,7 +1,8 @@
 """Bounded systemd user-unit adapter for fenced controller workers.
 
-The installed worker executable and rootless container containment are still
-P2b/P2d work. This adapter never selects a command from operation arguments.
+The installed recovery_worker executable is available; production coordinator
+integration and actual rootless containment evidence remain P2b/P2d work.
+This adapter never selects a command from operation arguments.
 """
 from __future__ import annotations
 
@@ -76,6 +77,14 @@ class SystemdUserWorkerServices:
         if (value['LoadState'] != 'loaded' or value['KillMode'] != 'control-group'
                 or value['Restart'] != 'no' or value['RemainAfterExit'] != 'yes'):
             raise WorkerServiceError('worker unit identity or stop policy is unverified')
+
+    def finished(self, unit, boot_id):
+        """A read-only readiness hint; adoption still requires whole-unit stop proof."""
+        if validate_boot_id(boot_id)!=validate_boot_id(self.boot_id_reader()):
+            raise WorkerServiceError('controller boot changed; worker requires reconciliation')
+        value=self._show(unit)
+        self._managed(value)
+        return value['Job'] in ('','0') and value['MainPID']=='0' and value['ActiveState'] in {'active','inactive','failed'}
 
     def preflight(self, state_root, deadline):
         """Reject definite setup failures before the database reserves a unit."""

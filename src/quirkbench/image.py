@@ -46,6 +46,7 @@ class ImageInputs:
     recovery_profile_digest: str | None=None
     recovery_kernel_release: str | None=None
     recovery_module_files_digest: str | None=None
+    recovery_storage_policy: Path | None=None
 
     def validate(self):
         if type(self.size_mib) is not int or self.size_mib < MIN_IMAGE_MIB or self.root_mib < 256:
@@ -74,19 +75,36 @@ class ImageInputs:
         if any(value is not None for value in recovery_identity):
             if not all(isinstance(value,str) and value for value in recovery_identity):
                 raise ImageError('incomplete reviewed recovery profile identity')
-            from .hardware_plan import installed_profiles
-            from .recovery_module_audit import audit_recovery_modules, validate_recovery_final_config
-            profiles=[profile for profile in installed_profiles()
-                      if profile['profile_id']==self.recovery_profile_id
-                      and digest(canonical(profile))==self.recovery_profile_digest]
-            if len(profiles)!=1:
-                raise ImageError('reviewed recovery profile is unavailable')
-            validate_recovery_final_config(self.recovery_config,profiles[0])
-            audit=audit_recovery_modules(self.recovery_config,self.rootfs_dir,
-                                         self.recovery_kernel_release,profiles[0])
-            if audit['module_files_digest']!=self.recovery_module_files_digest:
-                raise ImageError('recovery module tree differs from audited stage')
+            if self.recovery_storage_policy is not None:
+                from .recovery_stock import validate_policy, installed_stock_profile, audit_stock_modules
+                policy_path = self.recovery_storage_policy
+                if not policy_path.is_absolute() or policy_path.is_symlink() or not policy_path.is_file() or policy_path.stat().st_size > 65536:
+                    raise ImageError('stock storage policy must be a bounded regular file')
+                profile = validate_policy(json.loads(policy_path.read_bytes()))
+                if (profile != installed_stock_profile() or profile['profile_id'] != self.recovery_profile_id
+                        or digest(canonical(profile)) != self.recovery_profile_digest):
+                    raise ImageError('stock recovery policy differs from installed profile')
+                from .recovery_storage import audit_guard
+                audit_guard(self.rootfs_dir,require_module=True)
+                audit = audit_stock_modules(self.recovery_config, self.rootfs_dir, self.recovery_kernel_release)
+                if audit['module_files_digest'] != self.recovery_module_files_digest:
+                    raise ImageError('stock module tree differs from audited stage')
+            else:
+                from .hardware_plan import installed_profiles
+                from .recovery_module_audit import audit_recovery_modules, validate_recovery_final_config
+                profiles=[profile for profile in installed_profiles()
+                          if profile['profile_id']==self.recovery_profile_id
+                          and digest(canonical(profile))==self.recovery_profile_digest]
+                if len(profiles)!=1:
+                    raise ImageError('reviewed recovery profile is unavailable')
+                validate_recovery_final_config(self.recovery_config,profiles[0])
+                audit=audit_recovery_modules(self.recovery_config,self.rootfs_dir,
+                                             self.recovery_kernel_release,profiles[0])
+                if audit['module_files_digest']!=self.recovery_module_files_digest:
+                    raise ImageError('recovery module tree differs from audited stage')
         else:
+            if self.recovery_storage_policy is not None:
+                raise ImageError("stock policy requires complete profile identity")
             validate_kernel_config(self.recovery_config)
         if self.prepared_data_tree is not None:
             tree = self.prepared_data_tree
@@ -182,7 +200,7 @@ def partition_layout(size_mib,root_mib):
     return answer
 
 
-def grub_config(partuuid: str, *, esp_uuid=None,root_uuid=None,state_uuid=None,data_uuid=None,library_uuid=None,evidence_uuid=None,smoke=False):
+def grub_config(partuuid: str, *, esp_uuid=None,root_uuid=None,state_uuid=None,data_uuid=None,library_uuid=None,evidence_uuid=None,smoke=False,stock_recovery=False):
     """Bind all access to the firmware-loaded ESP's disk, never global search."""
     for value in (partuuid,esp_uuid,root_uuid,state_uuid,data_uuid,library_uuid,evidence_uuid):
         if value is not None:
@@ -192,6 +210,7 @@ def grub_config(partuuid: str, *, esp_uuid=None,root_uuid=None,state_uuid=None,d
     esp_uuid=esp_uuid or partuuid;state_uuid=state_uuid or partuuid;data_uuid=data_uuid or partuuid
     library_uuid=library_uuid or partuuid;evidence_uuid=evidence_uuid or partuuid
     args=f'root=PARTUUID={partuuid} ro rootflags=noload fsck.mode=skip rd.skipfsck selinux=0 console=tty0 console=ttyS0,115200 panic=10 oops=panic noresume rd.auto=0 rd.luks=0 rd.lvm=0 rd.md=0 quirkbench.esp=PARTUUID={esp_uuid} quirkbench.state=PARTUUID={state_uuid} quirkbench.data=PARTUUID={data_uuid} quirkbench.library=PARTUUID={library_uuid} quirkbench.evidence=PARTUUID={evidence_uuid}'
+    if stock_recovery: args+=' efi_pstore.pstore_disable=1 systemd.gpt_auto=0 rd.systemd.gpt_auto=0'
     if smoke:args+=' quirkbench.smoke=1'
     return f'''serial --unit=0 --speed=115200
 terminal_input console serial
@@ -306,7 +325,12 @@ def _verify_provenance(path,kernel,initramfs,config):
         for role,file in expected.items():
             if record['outputs'][role]['sha256']!=sha256_file(file):raise ImageError('provenance/output hash mismatch')
         if record['inputs']['config']['sha256']!=sha256_file(config):raise ImageError('provenance/config mismatch')
-        if not re.fullmatch(r'[0-9a-f]{64}',record['inputs']['source_archive']['sha256']):raise ImageError('source snapshot hash required')
+        if record.get('schema') == 2 and record.get('kernel_origin') == 'stock-rpm':
+            for key in ('rootfs_lock_sha256', 'rpm_snapshot_sha256', 'storage_policy_sha256'):
+                if not re.fullmatch(r'[0-9a-f]{64}', record.get(key, '')):
+                    raise ImageError('stock package provenance missing')
+        elif not re.fullmatch(r'[0-9a-f]{64}',record['inputs']['source_archive']['sha256']):
+            raise ImageError('source snapshot hash required')
     except (KeyError,TypeError) as exc:raise ImageError('incomplete build provenance') from exc
 
 
@@ -433,7 +457,7 @@ def _create_image(inputs: ImageInputs) -> Path:
                 _run('mcopy','-i',str(fs),str(marker),'::/quirkbench-'+part['partuuid'])
                 if part['number']==1:
                     _run('mmd','-i',str(fs),'::/EFI','::/EFI/BOOT')
-                    cfg=work/'grub.cfg';cfg.write_text(grub_config(p2['partuuid'],esp_uuid=p1['partuuid'],state_uuid=p3['partuuid'],data_uuid=p4['partuuid'],library_uuid=extra_uuids[0],evidence_uuid=extra_uuids[1],smoke=inputs.smoke))
+                    cfg=work/'grub.cfg';cfg.write_text(grub_config(p2['partuuid'],esp_uuid=p1['partuuid'],state_uuid=p3['partuuid'],data_uuid=p4['partuuid'],library_uuid=extra_uuids[0],evidence_uuid=extra_uuids[1],smoke=inputs.smoke,stock_recovery=inputs.recovery_storage_policy is not None))
                     efi=work/'BOOTX64.EFI'
                     early=work/'early.cfg'
                     early.write_text('normal\n')
@@ -489,8 +513,10 @@ def _input_identity(inputs):
     for name in ('recovery_kernel','recovery_initramfs','recovery_config','recovery_provenance'):
         file=getattr(inputs,name)
         values[name]=sha256_file(file) if file is not None else None
+    if inputs.recovery_storage_policy is not None:
+        values['recovery_storage_policy'] = sha256_file(inputs.recovery_storage_policy)
     values['prepared_data_tree']=_tree_hash(inputs.prepared_data_tree) if inputs.prepared_data_tree is not None else None
-    values.update(rootfs=_tree_hash(inputs.rootfs_dir),size_mib=inputs.size_mib,root_mib=inputs.root_mib,experiment_mib=inputs.experiment_mib,library_mib=inputs.library_mib,log_budget_mib=inputs.log_budget_mib,smoke=inputs.smoke)
+    values.update(rootfs=_tree_hash(inputs.rootfs_dir),size_mib=inputs.size_mib,root_mib=inputs.root_mib,experiment_mib=inputs.experiment_mib,library_mib=inputs.library_mib,log_budget_mib=inputs.log_budget_mib,smoke=inputs.smoke,stock_recovery=inputs.recovery_storage_policy is not None)
     if inputs.recovery_profile_digest is not None:
         values.update(recovery_profile_id=inputs.recovery_profile_id,
                       recovery_profile_digest=inputs.recovery_profile_digest,

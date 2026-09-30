@@ -62,6 +62,7 @@ REQUIRED_CONFIG = {
     "CONFIG_BLK_DEV_NVME": "n",
     "CONFIG_NVME_CORE": "n",
     "CONFIG_ATA": "n",
+    "CONFIG_VMD": "n",
     "CONFIG_MMC": "n",
     "CONFIG_VIRTIO_BLK": "n",
 }
@@ -117,35 +118,55 @@ def _safe_build_path(path: Path) -> None:
         raise BuildError(f"refusing system or mounted build path: {path}")
 
 
+def kernel_job_budget(cpus: int, memory_bytes: int) -> int:
+    """Plan 2 GiB per compiler job; enforced cgroups remain the hard limit."""
+    if cpus < 1 or memory_bytes < 2 * 1024**3:
+        raise BuildError("less than one CPU or 2 GiB available; defer kernel build")
+    return min(cpus, memory_bytes // (2 * 1024**3), 128)
+
+
 def recommended_jobs() -> int:
-    """Use at most half of CPUs and half of available RAM, retaining 2 GiB."""
+    """Reserve controller resources without halving an enforced worker cap again."""
     cpus = os.cpu_count()
     if not cpus:
         raise BuildError("CPU count unavailable; set jobs explicitly")
     memory_available = None
+    memory_total = None
     try:
         for line in Path("/proc/meminfo").read_text().splitlines():
             if line.startswith("MemAvailable:"):
                 memory_available = int(line.split()[1]) * 1024
-                break
+            elif line.startswith("MemTotal:"):
+                memory_total = int(line.split()[1]) * 1024
     except (OSError, ValueError):
         pass
+    gib = 1024 ** 3
+    if memory_available is None:
+        raise BuildError("available memory unknown; set jobs explicitly after checking resources")
+    budget = min(memory_available // 2, memory_available - 2 * gib)
+    cpu_budget = max(1, cpus // 2)
     cgroup_limit = Path("/sys/fs/cgroup/memory.max")
-    cgroup_current = Path("/sys/fs/cgroup/memory.current")
     try:
         limit = cgroup_limit.read_text().strip()
         if limit != "max":
-            cgroup_available = max(0, int(limit) - int(cgroup_current.read_text().strip()))
-            memory_available = min(memory_available, cgroup_available) if memory_available is not None else cgroup_available
+            # memory.current includes reusable Kbuild page cache. Use the fixed
+            # worker capacity for job planning, not transient cache occupancy.
+            capacity = int(limit)
+            if memory_total is not None and 0 < capacity <= memory_total // 2:
+                # This cap already reserves half the controller. Keep another
+                # 2 GiB of currently available memory for desktop use.
+                budget = min(capacity, memory_available - 2 * gib)
+            else:
+                budget = min(budget, capacity)
     except (OSError, ValueError):
         pass
-    if memory_available is None:
-        raise BuildError("available memory unknown; set jobs explicitly after checking resources")
-    gib = 1024 ** 3
-    usable = min(memory_available // 2, memory_available - 2 * gib)
-    if memory_available < 2 * gib:
-        raise BuildError("less than 2 GiB available; defer kernel build")
-    return max(1, min(cpus // 2, usable // (2 * gib)))
+    try:
+        quota, period = Path("/sys/fs/cgroup/cpu.max").read_text().split()
+        if quota != "max":
+            cpu_budget = min(cpu_budget, max(1, int(quota) // int(period)))
+    except (OSError, ValueError, ZeroDivisionError):
+        pass
+    return kernel_job_budget(cpu_budget, budget)
 
 
 @contextmanager

@@ -20,20 +20,22 @@ def recovery_rootfs_arguments(intent):
             or intent.get('local_paths') != {} or intent.get('source_refs') != []):
         raise ContractError('invalid immutable rootfs operation intent')
     arguments = intent.get('arguments')
-    if (not isinstance(arguments, dict) or set(arguments) != ROOTFS_ARGUMENT_FIELDS
+    stock = isinstance(arguments,dict) and type(arguments.get('schema_version')) is int and arguments['schema_version']==2
+    full=stock and 'recipe_sha256' in arguments
+    fields = (ROOTFS_ARGUMENT_FIELDS-{'catalog_sha256'})|{'schema_version'} if stock else ROOTFS_ARGUMENT_FIELDS
+    if full: fields=fields|{'recipe_sha256'}
+    if (not isinstance(arguments, dict) or set(arguments) != fields
             or not isinstance(arguments['builder_config_digest'], str)
             or not re.fullmatch(r'sha256:[0-9a-f]{64}', arguments['builder_config_digest'])):
         raise ContractError('invalid immutable rootfs operation intent')
-    for name in ROOTFS_ARGUMENT_FIELDS - {'builder_config_digest'}:
+    for name in fields - {'builder_config_digest','schema_version'}:
         if not isinstance(arguments[name], str) or not re.fullmatch(r'[0-9a-f]{64}', arguments[name]):
             raise ContractError('invalid immutable rootfs operation intent')
     refs = intent.get('input_refs')
+    expected={arguments[name] for name in fields if name.endswith('_sha256')}
     if (not isinstance(refs, list)
-            or not all(isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value)
-                       for value in refs)
-            or set(refs) != {arguments['builder_archive_sha256'],
-                             arguments['catalog_sha256'], arguments['rootfs_lock_sha256']}
-            or len(refs) != 3):
+            or not all(isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value) for value in refs)
+            or set(refs) != expected or len(refs) != (3 if full else 2 if stock else 3)):
         raise ContractError('invalid immutable rootfs operation intent')
     return arguments
 

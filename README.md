@@ -2,6 +2,24 @@
 > the intended finished product. The release downloads, setup wizard and commands
 > below are not all available yet; these instructions do not currently work end to
 > end. See the [implementation roadmap](docs/product-roadmap.md) for current scope.
+>
+> **First delivery:** an attended investigation using your external coding agent,
+> manual authenticated setup and approval of each exact experiment before boot.
+> Setup/pairing wizards, managed scheduling, advanced capacity/endpoint tooling,
+> guided backup completeness and unattended reset authorization are later features.
+> The wizard-based walkthrough below describes that later finished experience;
+> it is not a prerequisite checklist for the attended delivery.
+>
+> Fixed recovery will use stock Fedora kernel packages and restrict storage
+> operations to its identified boot device. Experimental kernels retain stricter
+> controller exclusions. See the [storage policy](docs/architecture.md#storage-protection-policy).
+> Stock recovery and attended approval software now exist; see the
+> [implementation handoff](docs/stock-recovery-attended.md) for available interfaces
+> and product-operation limits.
+> Existing images remain unqualified against the changed design.
+
+For the available development archive and provisional setup commands, see
+[controller installation](docs/controller-installation.md).
 
 # Quirkbench
 
@@ -18,6 +36,24 @@ You describe the problem, help with physical observations when needed, and decid
 when to pause or share the results. Quirkbench keeps the source changes, experiment
 history and debugging evidence together. An investigation can produce a patch or
 an actionable bug report; it cannot promise to reproduce or fix every issue.
+
+## Initial attended delivery
+
+The planned first journey is fixed recovery → manual network/controller trust and
+credential configuration → passive inventory → reviewed baseline → observable build
+→ explicit approval of the exact candidate/attempt → evidence upload → recovery.
+Use existing authenticated configuration and signature checks; never disable them.
+A person remains available for manual reset. Source inputs are immutable, uncertain
+attempts are reconciled, and another experiment requires fresh approval. Recovery
+may enumerate internal controllers but cannot access their block/filesystem data.
+
+[Build and boot](docs/build-and-boot.md), [debug image](docs/debug-image.md) and
+[controller installation](docs/controller-installation.md) describe current low-level
+interfaces. The attended protocol journey passes with fake privileged adapters;
+new media and real target boots still need explicitly recorded product checks.
+Basic backups must state contents and omissions, including private credentials,
+uncaptured edits and potentially pending target evidence. The later guided workflow
+below is not implemented backup-completeness evidence.
 
 ## 1. Get ready
 

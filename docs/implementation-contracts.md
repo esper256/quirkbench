@@ -1,5 +1,13 @@
 # Implementation contracts for the remaining briefs
 
+**Delivery tiers, 2026-09-29:** C0–C8 remain contract identifiers. The initial owner-controlled
+lab journey is attended, manually configured and authenticated; exact experiment
+approval is explicit. Automated enrollment/lifecycle (C4), unattended grants (C6),
+managed decisions, wizards and guided backup completeness (C8) are later capabilities,
+not prerequisites. Existing wire schemas and implemented validation remain unchanged.
+The [architecture storage policy](architecture.md#storage-protection-policy) governs
+recovery separately from candidate restrictions.
+
 This document makes the [roadmap](product-roadmap.md) executable as bounded tasks.
 It specifies **planned behavior**, not features already implemented. Its decisions
 take precedence where the roadmap was less specific. Do not change the frozen
@@ -8,7 +16,9 @@ Use the [handoff checklist](implementation-handoff.md) for task boundaries.
 
 ## C0 — Shared contract and authority rules
 
-Each new record has `schema_version: 1`, strict unknown-field rejection, canonical
+Each genuinely new record starts at `schema_version: 1`; a successor to an existing
+record uses a new version and explicit compatibility handling. Records require
+strict unknown-field rejection, canonical
 JSON using the existing `contracts.canonical`, bounded input and matching runtime
 validator/JSON Schema. Hash canonical document bytes; never put a document's own
 digest inside the bytes it hashes. Optional unknown observations are explicit
@@ -70,6 +80,16 @@ small validation helpers but must not import the installed Quirkbench package.
 An absolute interpreter path is not assumed; Python 3.11+ is the documented v1
 prerequisite, and an older/missing interpreter is an explicit unsupported setup.
 
+Recovery startup integrates the collector through authenticated registration,
+including recovery-only mode, with a 512 KiB report budget and cooperative
+10-second deadline. HardwareInventory v2 adds allowlisted modalias/driver,
+ACPI/I2C/HID, non-serial model/BIOS and first-logical-CPU identity/features; v1
+retains its original property allowlist. Registration preserves the actual boot/media
+context and references canonical validated bytes in existing CAS. Missing or partial
+collection must not block retained attempt evidence upload. `target-inventory`
+returns observations and candidate planning blockers without creating attempts,
+queueing builds or granting execution authority. See the [current handoff](stock-recovery-attended.md#automatic-first-boot-hardware-report).
+
 Store the exact validated inventory bytes as immutable evidence. A separately
 computed hardware fingerprint excludes timestamp and observation ordering; it is
 for profile comparison, **not authentication**. Cloned models may have the same
@@ -99,8 +119,15 @@ CapabilityReport/boot ID. Enrollment occurs through C4, then the real recovery b
 registers. Reimport is idempotent; different observations produce a new plan without
 replacing credentials, qualification or existing evidence. HardwarePlan normally
 selects the experimental baseline. Generic recovery is built independently from a
-reviewed platform profile; inventory may report that profile incompatible but cannot
-silently authorize a weaker recovery build.
+reviewed platform profile with stock kernel packages and boot-device confinement;
+passive internal-controller observations are permitted. Candidate exclusions remain
+independent. Inventory cannot authorize any weaker storage policy.
+
+Existing HardwarePlan/profile and RecoveryRecipe v1 validators retain their original
+exclusion/custom-kernel provenance meaning. P1b/P3a1 now provide recovery recipe,
+rootfs-lock and release v2 with distinct package/policy references; candidate
+exclusion references are unchanged. See the [software handoff](stock-recovery-attended.md). Retain old readers and artifact identities; do not use a policy digest
+to imply that an actual build or boot has passed protection checks.
 
 ## C2 — Local operations, ownership and restart (P2)
 
@@ -269,12 +296,29 @@ target. Neither agent suggestions nor build logs may modify protection policy.
 
 ## C4 — Recovery setup, enrollment and target binding (P3)
 
+### Initial manual setup; later enrollment automation
+
+For the initial attended journey, use existing local administrative configuration
+and target runtime configuration with explicitly provisioned controller CA/endpoint,
+device-scoped authentication, repository trust and a valid target/media binding.
+Verify values before activating private state; no HTTP, automatic trust acceptance
+or TLS/signature bypass. Keep credentials outside factory images, builds, logs and
+public exports. Existing activation/binding checks remain required. Show missing
+configuration as blocked, not enrolled. The operator approves the exact candidate
+and attempt before arming; proposals/build completion cannot supply this authority.
+
+The automated pairing exchange, credential lifecycle and retargeting orchestration
+below are later P3d/e contracts. Manual setup does not claim to implement them.
+Safe activation of complete private state and wrong-target boot checks are initial
+requirements; wizard availability and automated enrollment are not.
+
 Factory image construction has no dependency on inventory, controller endpoints,
 private credentials or a baseline deployment. Distinguish image digest, GPT/partition
 IDs, per-enrollment media-instance ID and target ID. Identical flashed factory bytes
 have identical partition IDs; they must not imply identical enrolled identities.
-Generate a random media-instance ID and enrollment request ID once on first setup
-and fsync them before contacting the controller. Preserve them across retries.
+Manual setup assigns and durably retains a distinct media-instance ID before
+authentication. Later automated enrollment also generates a random enrollment
+request ID before exchange. Preserve applicable identities across retries.
 
 Recovery setup operates only after boot/protection and evidence-mount verification.
 Never scan/mount internal OS partitions for Wi-Fi passwords or hardware discovery.
@@ -337,8 +381,8 @@ state even on mismatch, and selects recovery unless the current UUID matches. Mi
 SMBIOS support fails to recovery. Runtime checks the active enrollment binding again
 before using its credentials or watchdog profile. Recheck binding at arm/reboot.
 The UUID comparison must be qualified against actual firmware/Linux formatting;
-platforms without a dependable early identity source remain unsupported for automatic
-experiments. Recovery can still boot for setup and diagnosis.
+platforms without a dependable early identity source remain unsupported for candidate
+boot until a separately reviewed identity gate exists. Recovery can still boot for setup and diagnosis.
 
 Retargeting requires recovery, paused/reconciled old work and explicit local operator
 confirmation. Clear and verify one-shot state first; fence old controller authorization,
@@ -359,7 +403,7 @@ older bootloader images; no in-place conversion or silent binding migration.
 Commissioning is an explicit controller workflow while a person can reset the
 target. It uses the ordinary attempt/lease/handoff/evidence machinery, not an SSH
 shortcut or special direct reboot. Record separate outcomes for external boot,
-internal-storage exclusion, network/trust, exact baseline identity, live upload,
+recovery boot-device confinement, candidate controller exclusions, network/trust, exact baseline identity, live upload,
 terminal acknowledgement and subsequent recovery. Tests must exercise the actual
 runtime assembly with fake privileged adapters, not just separate protocol classes.
 
@@ -384,6 +428,12 @@ to the installed OS. Export inconclusive investigations honestly. No implicit pa
 publication or installed-OS modification.
 
 ## C6 — Watchdog authorization and revocation (P5)
+
+**Later unattended capability.** These new grants are not an attended-delivery
+prerequisite. Initial attempts need an available operator/manual-reset path and
+explicit exact-candidate approval; attendance is not hardware reset qualification.
+Do not automatically arm an unqualified watchdog or reinterpret an existing grant.
+Existing qualified activation checks remain binding when that capability is used.
 
 Keep `RecoveryProfile` exact-build qualification unchanged. Add the capability
 `watchdog.authorization.v1` and a **separate** signed `WatchdogAuthorization`.
@@ -444,11 +494,18 @@ pre-userspace hangs remain a manual-recovery limit in v1.
 
 ## C7 — Required failure matrix and release evidence
 
-Each owning brief must implement these observable cases with fixtures and injected
-clocks/process/storage adapters; a missing physical target is not a skipped test.
+Each owning brief must implement its applicable observable cases with fixtures and
+injected clocks/process/storage adapters. Enrollment/grant/managed-usage rows belong
+to their later capability packets, not the initial attended gate; a missing physical target is not a skipped test.
 
 | Boundary | Required observable outcome |
 | --- | --- |
+| Recovery discovers internal controllers | Passive metadata allowed; no internal block opens, filesystem probes/mounts, writes, swap/resume or repair |
+| Recovery backing chain ambiguous or duplicate identity | No storage operation; local diagnostic; no first-USB fallback |
+| Stock recovery kernel/package mismatch | Refuse staged publication; no custom build fallback |
+| Candidate enables internal-storage access | Review/reject before arming; no agent-approved policy change |
+| Manual trust/configuration invalid or incomplete | Activation blocked; no verification bypass or fabricated enrollment |
+| Operator approval missing or for different bytes/attempt | No arming; build/proposal acceptance is insufficient |
 | Unknown/partial inventory | Import retains observations; plan identifies exact blockers; no build queued |
 | Inventory contains paths/commands/duplicate JSON keys | Rejected before dispatch or writes outside report/state roots |
 | Profile ambiguity or architecture mismatch | Explicit conflict/unsupported result; no fallback to a permissive config |
@@ -475,9 +532,9 @@ because a brief mentions its eventual physical outcome.
 ## C8 — Product workflow and delivery (P0–P8)
 
 The [product interface contract](product-interface.md) is normative for the planned
-release, service topology, CLI/session facade, supported baseline catalog, decision
-scheduling, recipe extensions, human observations, readiness, endpoint migration,
-capacity selection and backup completeness. It extends C0–C7 without replacing the
+delivery tiers, service topology, CLI/session facade, supported baseline catalog,
+recipe extensions, human observations and readiness. Decision scheduling, endpoint/
+capacity wizards and guided backup completeness are later extensions. It extends C0–C7 without replacing the
 frozen Experiment/Result envelopes or existing database authority. Implement its
 records through additive migrations and versioned schemas. Preview commands are
 acceptance targets, not evidence that an implementation exists.

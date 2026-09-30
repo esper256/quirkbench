@@ -1,5 +1,12 @@
 # P0 product contract fixture
 
+**2026-09-29 delivery clarification:** existing fixtures remain frozen and readable;
+this revision changes delivery dependencies, not their schemas or runtime dispatch.
+Only added interfaces needed for the attended journey need initial freezing.
+Pairing, managed scheduling, wizards and guided backup completeness are later work;
+manual authenticated setup and exact-candidate operator approval remain required.
+See [delivery tiers](product-roadmap.md#delivery-contract).
+
 This packet freezes planned argument forms in
 [`product_cli.py`](../src/quirkbench/product_cli.py), and four additive documents in
 [`product-contracts.v1.schema.json`](../schemas/product-contracts.v1.schema.json).

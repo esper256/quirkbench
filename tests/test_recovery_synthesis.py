@@ -12,7 +12,7 @@ from quirkbench.recovery_synthesis import run_recovery_initramfs_from_recipe
 from quirkbench.recovery_synthesis import run_recovery_runtime_stage
 from quirkbench.recovery_synthesis import prepare_recovery_image_stage
 from quirkbench.boot import BootError, install_recovery_runtime_base
-from quirkbench.contracts import canonical
+from quirkbench.contracts import canonical, digest
 from test_recovery_kernel_stage import FakeRunner as KernelRunner
 from test_recovery_initramfs_stage import DracutRunner
 from test_recovery_recipe import recipe_fixture
@@ -70,6 +70,339 @@ def test_joined_private_synthesis_returns_audited_image_inputs(tmp_path, monkeyp
     result["image_inputs"].validate()
     assert not output.exists()
     assert runner.phases[-2:] == ["initramfs-recovery", "audit-recovery-initramfs"]
+
+
+def test_cached_recovery_reuses_source_rootfs_and_kernel(tmp_path, monkeypatch):
+    from quirkbench.build_cache import BuildStageCache
+    from test_recovery_image_plan import image_rootfs
+
+    monkeypatch.setattr("quirkbench.build.recommended_jobs", lambda: 1)
+    monkeypatch.setattr("quirkbench.build_cache.RESERVE", 0)
+    catalog, recipe, store, _ = recipe_fixture(tmp_path)
+    cache = BuildStageCache(tmp_path / "cache")
+    first_runner = CombinedRunner(kernel=DracutRunner())
+    first_events = []
+    prepare_recovery_image_stage(
+        recipe, catalog, store, tmp_path / "first", tmp_path / "first.img",
+        runner=first_runner, limits=LIMITS, rootfs_installer=image_rootfs,
+        cache=cache, cache_event=lambda name, result, _elapsed: first_events.append((name, result)))
+    assert ("kernel", "miss") in first_events
+
+    second_runner = CombinedRunner(kernel=DracutRunner())
+    second_events = []
+    second_records = []
+    result = prepare_recovery_image_stage(
+        recipe, catalog, store, tmp_path / "second", tmp_path / "second.img",
+        runner=second_runner, limits=LIMITS, rootfs_installer=image_rootfs,
+        cache=cache, cache_event=lambda name, state, _elapsed: second_events.append((name, state)),
+        cache_record_event=second_records.append)
+    assert [(name, state) for name, state in second_events[:3]] == [
+        ("rootfs", "hit"), ("source", "hit"), ("kernel", "hit")]
+    assert second_events[3:] == [("runtime", "hit"), ("initramfs", "hit")]
+    assert second_runner.phases == ["audit-recovery-initramfs"]
+    assert [item["reason"] for item in result["cache_events"]] == ["exact_identity"] * 5
+    assert second_records == result["cache_events"]
+    assert all(item["duration_seconds"] >= 0 for item in result["cache_events"])
+    assert len((tmp_path / "second/cache-events.jsonl").read_text().splitlines()) == 5
+    result["image_inputs"].validate()
+
+
+def test_cached_recovery_accepts_fedora_usrmerge(tmp_path, monkeypatch):
+    from quirkbench.build_cache import BuildStageCache
+    from test_recovery_image_plan import image_rootfs
+
+    monkeypatch.setattr("quirkbench.build.recommended_jobs", lambda: 1)
+    monkeypatch.setattr("quirkbench.build_cache.RESERVE", 0)
+    catalog, recipe, store, _ = recipe_fixture(tmp_path)
+    cache = BuildStageCache(tmp_path / "cache")
+
+    def usrmerge_rootfs(catalog, lock, store, output):
+        image_rootfs(catalog, lock, store, output)
+        (output / "usr/lib").mkdir(parents=True)
+        (output / "lib").symlink_to("usr/lib")
+        return output
+
+    for name in ("first", "second"):
+        result = prepare_recovery_image_stage(
+            recipe, catalog, store, tmp_path / name, tmp_path / f"{name}.img",
+            runner=CombinedRunner(kernel=DracutRunner()), limits=LIMITS,
+            rootfs_installer=usrmerge_rootfs, cache=cache)
+        assert (tmp_path / name / "rootfs/usr/lib/modules/6.12.0-test").is_dir()
+        result["image_inputs"].validate()
+
+
+def test_cached_initramfs_rechecks_archive_audit(tmp_path, monkeypatch):
+    import json
+    from quirkbench.build_cache import BuildStageCache
+    from test_recovery_image_plan import image_rootfs
+
+    monkeypatch.setattr("quirkbench.build.recommended_jobs", lambda: 1)
+    monkeypatch.setattr("quirkbench.build_cache.RESERVE", 0)
+    catalog, recipe, store, _ = recipe_fixture(tmp_path)
+    cache = BuildStageCache(tmp_path / "cache")
+    prepare_recovery_image_stage(
+        recipe, catalog, store, tmp_path / "first", tmp_path / "first.img",
+        runner=CombinedRunner(kernel=DracutRunner()), limits=LIMITS,
+        rootfs_installer=image_rootfs, cache=cache)
+    entry = next(item for item in cache.list() if item["stage"] == "initramfs")
+    manifest = cache.root / entry["lineage"] / "initramfs" / entry["cache_id"] / "manifest.json"
+    record = json.loads(manifest.read_bytes())
+    record["metadata"]["record"]["archive_audit"] = {"forged": True}
+    manifest.write_bytes(canonical(record) + b"\n")
+    with pytest.raises(BuildError, match="content audit differs"):
+        prepare_recovery_image_stage(
+            recipe, catalog, store, tmp_path / "second", tmp_path / "second.img",
+            runner=CombinedRunner(kernel=DracutRunner()), limits=LIMITS,
+            rootfs_installer=image_rootfs, cache=cache)
+
+
+def test_derived_builder_change_invalidates_recovery_stages(tmp_path, monkeypatch):
+    from quirkbench.build_cache import BuildStageCache
+    from test_recovery_image_plan import image_rootfs
+
+    monkeypatch.setattr("quirkbench.build.recommended_jobs", lambda: 1)
+    monkeypatch.setattr("quirkbench.build_cache.RESERVE", 0)
+    catalog, recipe, store, _ = recipe_fixture(tmp_path)
+    cache = BuildStageCache(tmp_path / "cache")
+    prepare_recovery_image_stage(
+        recipe, catalog, store, tmp_path / "first", tmp_path / "first.img",
+        runner=CombinedRunner(kernel=DracutRunner()), limits=LIMITS,
+        rootfs_installer=image_rootfs, cache=cache,
+        builder_config_digest="sha256:" + "a" * 64)
+    events = []
+    changed = prepare_recovery_image_stage(
+        recipe, catalog, store, tmp_path / "second", tmp_path / "second.img",
+        runner=CombinedRunner(kernel=DracutRunner()), limits=LIMITS,
+        rootfs_installer=image_rootfs, cache=cache,
+        builder_config_digest="sha256:" + "b" * 64,
+        cache_event=lambda name, state, _elapsed: events.append((name, state)))
+    assert events[:3] == [("rootfs", "miss"), ("source", "miss"), ("kernel", "miss")]
+    assert all("builder_config" in item["reason"] for item in changed["cache_events"][:3])
+
+
+def test_kernel_cache_survives_later_runtime_failure(tmp_path, monkeypatch):
+    from quirkbench.build_cache import BuildStageCache
+    from test_recovery_image_plan import image_rootfs
+
+    monkeypatch.setattr("quirkbench.build.recommended_jobs", lambda: 1)
+    monkeypatch.setattr("quirkbench.build_cache.RESERVE", 0)
+    catalog, recipe, store, _ = recipe_fixture(tmp_path)
+    cache = BuildStageCache(tmp_path / "cache")
+
+    def fail_runtime(*_args):
+        raise BuildError("synthetic runtime failure")
+
+    with pytest.raises(BuildError, match="synthetic runtime failure"):
+        prepare_recovery_image_stage(
+            recipe, catalog, store, tmp_path / "failed", tmp_path / "failed.img",
+            runner=CombinedRunner(kernel=DracutRunner()), limits=LIMITS,
+            rootfs_installer=image_rootfs, runtime_installer=fail_runtime,
+            cache=cache)
+    events = []
+    prepare_recovery_image_stage(
+        recipe, catalog, store, tmp_path / "retried", tmp_path / "retried.img",
+        runner=CombinedRunner(kernel=DracutRunner()), limits=LIMITS,
+        rootfs_installer=image_rootfs, cache=cache,
+        cache_event=lambda name, state, _elapsed: events.append((name, state)))
+    assert events[:3] == [("rootfs", "hit"), ("source", "hit"), ("kernel", "hit")]
+
+
+def test_adopt_stopped_legacy_kernel_for_exact_reuse_only(tmp_path, monkeypatch):
+    from quirkbench.build import sha256_file
+    from quirkbench.build_cache import BuildStageCache
+    from quirkbench.build_pipeline import _tree_hash
+    from quirkbench.contracts import canonical
+    from quirkbench.recovery_incremental import adopt_completed_recovery_kernel_stage
+    from quirkbench.recovery_synthesis import run_recovery_base_stage
+    from test_recovery_image_plan import image_rootfs
+    from test_recovery_podman import builder_archive, IMAGE
+
+    monkeypatch.setattr("quirkbench.build.recommended_jobs", lambda: 1)
+    monkeypatch.setattr("quirkbench.build_cache.RESERVE", 0)
+    catalog, recipe, store, _ = recipe_fixture(tmp_path)
+    stage = tmp_path / "legacy-stage"
+    base = run_recovery_base_stage(
+        recipe, catalog, store, stage, runner=CombinedRunner(), limits=LIMITS,
+        rootfs_installer=image_rootfs)
+    module_link = stage / "rootfs/lib/modules/6.12.0-test/build"
+    module_link.symlink_to(stage / "kernel-obj")
+    (stage / "kernel-record.json").write_bytes(canonical(base["kernel_stage"]) + b"\n")
+    archive = tmp_path / "builder.oci.tar"
+    archive.write_bytes(builder_archive())
+    cache = BuildStageCache(tmp_path / "cache")
+    common = dict(cache=cache, builder_archive=archive,
+                  builder_archive_sha256=sha256_file(archive),
+                  builder_config_digest=IMAGE,
+                  producer_package=Path(__file__).resolve().parents[1] / "src/quirkbench",
+                  source_tree_sha256=_tree_hash(stage / "source", excluded_paths=frozenset()))
+    with pytest.raises(BuildError, match="stopped worker reconciliation"):
+        adopt_completed_recovery_kernel_stage(
+            recipe, catalog, store, stage, reconciled=False, **common)
+    adopted = adopt_completed_recovery_kernel_stage(
+        recipe, catalog, store, stage, reconciled=True, **common)
+    assert cache.list()[0]["cache_id"] == adopted
+    assert not module_link.exists() and not module_link.is_symlink()
+    events = []
+    runner = CombinedRunner(kernel=DracutRunner())
+    prepare_recovery_image_stage(
+        recipe, catalog, store, tmp_path / "retried", tmp_path / "retried.img",
+        runner=runner, limits=LIMITS, rootfs_installer=image_rootfs,
+        cache=cache, builder_config_digest=IMAGE,
+        cache_event=lambda name, state, _elapsed: events.append((name, state)))
+    assert events[:3] == [("rootfs", "miss"), ("source", "miss"), ("kernel", "hit")]
+    assert "compile-recovery" not in runner.phases
+
+
+def test_interrupted_recovery_workspace_requires_explicit_reconciled_resume(tmp_path, monkeypatch):
+    from quirkbench.build_cache import BuildStageCache
+    from test_recovery_image_plan import image_rootfs
+
+    monkeypatch.setattr("quirkbench.build.recommended_jobs", lambda: 1)
+    monkeypatch.setattr("quirkbench.build_cache.RESERVE", 0)
+    catalog, recipe, store, _ = recipe_fixture(tmp_path)
+    cache = BuildStageCache(tmp_path / "cache")
+
+    class Interrupted(DracutRunner):
+        def run(self, command, *, phase, log, timeout_s, env, limits, on_activity):
+            if phase == "compile-recovery":
+                objects = Path(command.argv[3].removeprefix("O="))
+                (objects / "retained.o").write_bytes(b"partial object")
+                raise BuildError("synthetic worker interruption")
+            return super().run(command, phase=phase, log=log,
+                               timeout_s=timeout_s, env=env, limits=limits,
+                               on_activity=on_activity)
+
+    with pytest.raises(BuildError, match="synthetic worker interruption"):
+        prepare_recovery_image_stage(
+            recipe, catalog, store, tmp_path / "interrupted", tmp_path / "interrupted.img",
+            runner=CombinedRunner(kernel=Interrupted()), limits=LIMITS,
+            rootfs_installer=image_rootfs, cache=cache)
+    with pytest.raises(BuildError, match="requires explicit worker reconciliation"):
+        prepare_recovery_image_stage(
+            recipe, catalog, store, tmp_path / "unreconciled", tmp_path / "unreconciled.img",
+            runner=CombinedRunner(kernel=DracutRunner()), limits=LIMITS,
+            rootfs_installer=image_rootfs, cache=cache)
+    runner = CombinedRunner(kernel=DracutRunner())
+    events = []
+    prepare_recovery_image_stage(
+        recipe, catalog, store, tmp_path / "resumed", tmp_path / "resumed.img",
+        runner=runner, limits=LIMITS, rootfs_installer=image_rootfs,
+        cache=cache, resume_reconciled=True,
+        cache_event=lambda name, state, _elapsed: events.append((name, state)))
+    assert ("kernel", "resumed") in events
+    assert runner.kernel.previous_object_seen == [True]
+
+
+def test_reconciled_preconfig_recovery_workspace_starts_fresh(tmp_path, monkeypatch):
+    import json
+    from quirkbench.build_cache import BuildStageCache
+    from test_recovery_image_plan import image_rootfs
+
+    monkeypatch.setattr("quirkbench.build.recommended_jobs", lambda: 1)
+    monkeypatch.setattr("quirkbench.build_cache.RESERVE", 0)
+    catalog, recipe, store, _ = recipe_fixture(tmp_path)
+    cache = BuildStageCache(tmp_path / "cache")
+
+    class InterruptedConfigure(DracutRunner):
+        def run(self, command, *, phase, log, timeout_s, env, limits, on_activity):
+            super().run(command, phase=phase, log=log, timeout_s=timeout_s,
+                        env=env, limits=limits, on_activity=on_activity)
+            if phase == "configure-recovery":
+                raise BuildError("configure interrupted")
+
+    with pytest.raises(BuildError, match="configure interrupted"):
+        prepare_recovery_image_stage(
+            recipe, catalog, store, tmp_path / "interrupted", tmp_path / "interrupted.img",
+            runner=CombinedRunner(kernel=InterruptedConfigure()), limits=LIMITS,
+            rootfs_installer=image_rootfs, cache=cache)
+    work = cache.root / recipe["recipe_id"] / "work"
+    assert json.loads((work / "intent.json").read_text())["phase"] == "seeded"
+    runner = CombinedRunner(kernel=DracutRunner())
+    prepare_recovery_image_stage(
+        recipe, catalog, store, tmp_path / "resumed", tmp_path / "resumed.img",
+        runner=runner, limits=LIMITS, rootfs_installer=image_rootfs,
+        cache=cache, resume_reconciled=True)
+    assert runner.kernel.previous_object_seen == [False]
+
+
+def test_reconciled_changed_recovery_inputs_discard_partial_objects(tmp_path, monkeypatch):
+    import json
+    from quirkbench.build_cache import BuildStageCache
+    from test_recovery_image_plan import image_rootfs
+
+    monkeypatch.setattr("quirkbench.build.recommended_jobs", lambda: 1)
+    monkeypatch.setattr("quirkbench.build_cache.RESERVE", 0)
+    catalog, recipe, reader, object_store = recipe_fixture(tmp_path)
+    cache = BuildStageCache(tmp_path / "cache")
+
+    class Interrupted(DracutRunner):
+        def run(self, command, *, phase, log, timeout_s, env, limits, on_activity):
+            if phase == "compile-recovery":
+                objects = Path(command.argv[3].removeprefix("O="))
+                (objects / "partial-only.o").write_bytes(b"discard me")
+                raise BuildError("synthetic worker interruption")
+            return super().run(command, phase=phase, log=log,
+                               timeout_s=timeout_s, env=env, limits=limits,
+                               on_activity=on_activity)
+
+    with pytest.raises(BuildError, match="synthetic worker interruption"):
+        prepare_recovery_image_stage(
+            recipe, catalog, reader, tmp_path / "interrupted", tmp_path / "interrupted.img",
+            runner=CombinedRunner(kernel=Interrupted()), limits=LIMITS,
+            rootfs_installer=image_rootfs, cache=cache)
+    entry = catalog["entries"][0]
+    entry["kernel_config_sha256"] = object_store.put(
+        reader.get(recipe["kernel_config_sha256"]) + b"CONFIG_NEW_REVIEWED_TEST=y\n").sha256
+    recipe["kernel_config_sha256"] = entry["kernel_config_sha256"]
+    recipe["baseline_digest"] = digest(canonical(entry))
+    lock = json.loads(reader.get(recipe["rootfs_lock_sha256"]))
+    lock["baseline_digest"] = recipe["baseline_digest"]
+    recipe["rootfs_lock_sha256"] = object_store.put(canonical(lock)).sha256
+    runner = CombinedRunner(kernel=DracutRunner())
+    prepare_recovery_image_stage(
+        recipe, catalog, reader, tmp_path / "changed", tmp_path / "changed.img",
+        runner=runner, limits=LIMITS, rootfs_installer=image_rootfs,
+        cache=cache, resume_reconciled=True)
+    assert runner.kernel.previous_object_seen == [False]
+
+
+def test_changed_reviewed_config_reuses_kbuild_objects(tmp_path, monkeypatch):
+    import json
+    from quirkbench.build_cache import BuildStageCache
+    from test_recovery_image_plan import image_rootfs
+
+    monkeypatch.setattr("quirkbench.build.recommended_jobs", lambda: 1)
+    monkeypatch.setattr("quirkbench.build_cache.RESERVE", 0)
+    catalog, recipe, reader, object_store = recipe_fixture(tmp_path)
+    cache = BuildStageCache(tmp_path / "cache")
+    first_runner = CombinedRunner(kernel=DracutRunner())
+    prepare_recovery_image_stage(
+        recipe, catalog, reader, tmp_path / "first", tmp_path / "first.img",
+        runner=first_runner, limits=LIMITS,
+        rootfs_installer=image_rootfs, cache=cache)
+    entry = catalog["entries"][0]
+    old_config = reader.get(recipe["kernel_config_sha256"])
+    entry["kernel_config_sha256"] = object_store.put(
+        old_config + b"CONFIG_INCREMENTAL_TEST=y\n").sha256
+    recipe["kernel_config_sha256"] = entry["kernel_config_sha256"]
+    recipe["baseline_digest"] = digest(canonical(entry))
+    lock = json.loads(reader.get(recipe["rootfs_lock_sha256"]))
+    lock["baseline_digest"] = recipe["baseline_digest"]
+    recipe["rootfs_lock_sha256"] = object_store.put(canonical(lock)).sha256
+    runner = CombinedRunner(kernel=DracutRunner())
+    events = []
+    result = prepare_recovery_image_stage(
+        recipe, catalog, reader, tmp_path / "second", tmp_path / "second.img",
+        runner=runner, limits=LIMITS, rootfs_installer=image_rootfs,
+        cache=cache, cache_event=lambda name, state, _elapsed: events.append((name, state)))
+    assert events[:3] == [("rootfs", "hit"), ("source", "hit"),
+                          ("kernel", "incremental")]
+    assert first_runner.kernel.compile_object_paths == runner.kernel.compile_object_paths
+    assert first_runner.kernel.previous_object_seen == [False]
+    assert runner.kernel.previous_object_seen == [True]
+    assert runner.phases[:4] == ["configure-recovery", "kernel-release",
+                                 "compile-recovery", "install-recovery-modules"]
+    assert result["image_inputs"].validate() is None
 
 
 def test_joined_synthesis_rejects_bad_output_before_creating_stage(tmp_path):

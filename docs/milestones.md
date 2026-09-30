@@ -10,16 +10,16 @@ software packets without treating them as image or hardware qualification.
 | --- | --- |
 | M1 — durable foundation | Achieved: contracts, controller state machine, simulation, evidence, pause/restart/retry tests and monitoring. Preserve these contracts. |
 | M2 — build and boot | Build/composition/image infrastructure exists. Generic recovery compatibility, NetworkManager setup integration and portable-media boot binding need completion and qualification against final image bytes (P1/P3). |
-| M3 — physical execution | HTTPS, exact-revision handoff, live evidence and reconciliation exist. Complete enrollment, target binding, durable operations and attended commissioning (P2–P4). |
-| M4 — adaptive operation | Watchdog integration and agent adapter primitives exist. Complete scoped activation authorization, actual hardware coverage and durable session orchestration (P5/P6). |
+| M3 — physical execution | HTTPS, exact-revision handoff, live evidence and reconciliation exist. Complete manual authenticated setup, target binding, durable operations and attended commissioning (P2–P4); automated enrollment follows later. |
+| M4 — adaptive operation | Watchdog integration and agent adapter primitives exist. Deliver attended external orchestration first; scoped unattended authorization, actual reset coverage and managed scheduling follow (P5/P6). |
 | M5 — investigations | Add bounded diagnostics and evidence-supported patch exports (P7). No fixed vendor, peripheral or list of bugs defines product completion. |
 
 P3a follows the selected [Fedora recovery synthesis pipeline](recovery-base.md);
 tool selection is settled. Implement locked inputs, runtime integration, publication
 and responsive upload workers as separate bounded packets.
 
-The next usable product path is generic media → recovery setup → secure pairing →
-inventory → exact baseline → attended investigation. A standalone collector is
+The next usable product path is stock-kernel media → manual authenticated recovery
+setup → inventory → exact baseline → explicitly approved attended investigation. A standalone collector is
 optional. Fixed recovery and evidence remain independent of candidate state.
 
 Milestone completion needs observable behavior, not merely a passing unit suite.
@@ -45,5 +45,5 @@ installable releases without a checkout, persistent controller services, support
 baseline selection and the public session facade. Complete an external-agent session
 before adding managed scheduling. Foundational recipe/human-observation records come
 before that journey; broad diagnostics and unattended qualification follow. Readiness,
-safe shutdown and backup completeness must report distinct facts, not a single green
-status. See the handoff for packet dependencies; no milestone is advanced by this plan.
+safe shutdown and backup contents/omissions must report distinct facts, not a single
+green status. Guided completeness, enrollment automation and wizards are later work. See the handoff for packet dependencies; no milestone is advanced by this plan.

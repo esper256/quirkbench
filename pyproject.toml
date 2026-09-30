@@ -14,6 +14,7 @@ test = ["pytest>=8,<10", "cryptography>=43", "jsonschema>=4"]
 
 [project.scripts]
 quirkbench = "quirkbench.cli:main"
+quirkbench-worker = "quirkbench.recovery_worker:main"
 
 [tool.setuptools]
 packages = ["quirkbench", "quirkbench.assets", "quirkbench.schemas", "quirkbench.examples", "quirkbench.guide"]

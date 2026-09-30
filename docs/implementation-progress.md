@@ -1,5 +1,14 @@
 # Implementation progress after the handoff
 
+**Current design, revised 2026-09-29:** the historical packet entries below describe
+the contracts and bytes used at the time. Stock-kernel recovery with boot-device-only
+storage policy supersedes shared recovery/candidate exclusions. V2 contracts and
+stock synthesis and fixed image coordination now exist; the software handoff below
+records validation and product-operation limits. Attended manual authenticated setup precedes later
+pairing, wizards, managed scheduling and unattended grants. Historical passing tests
+and build results do not qualify this revised design. See the
+[revision audit and remaining work](design-revision-20260929.md).
+
 This log records bounded software packets since source commit
 `dca51b42d14dbf331a75d5212e19839141b2a825`. The current checkout starts at
 `066f632e3f5303960cf8a01655c24fb891a78490` plus working-tree changes.
@@ -491,6 +500,43 @@ passed. No release qualification was run.
   needs live launcher/conmon/payload membership verification, durable launch
   and logs before a real rootfs stage. The probe does not
   qualify a real rootfs or image build.
+- A development-only bounded Podman starter for future ad hoc kernel builds
+  now creates the delegated user service and gives the container its own child
+  cgroup for `podman stats`, while the
+  delegated systemd user service retains the aggregate CPU, memory, swap,
+  task and stop boundary. It rejects missing delegation, unbounded services
+  and conflicting Podman resource flags. The Fedora 44 controller probe used
+  the retained local builder image with no network or host mount: launcher and
+  conmon were under the service `runtime` subgroup; payload was under its
+  `libpod-*` child; plain `podman stats` showed live CPU/memory with the 1 GiB
+  limit. Normal completion removed the probe container. Stopping a long-running
+  probe hit the unit stop timeout, killed its processes and left an exited
+  Podman record, removed with
+  `podman rm`; this needs explicit state cleanup before stage reuse. The
+  existing running kernel build and the P3a1 fixed recovery rootfs command
+  were not changed. See [the builder environment guide](../environments/README.md).
+- The later VMD retry was started from a historical
+  `--cgroups=disabled` script with `Delegate=no`, so the helper above was not
+  in its execution path and `podman stats` omits that live container. The
+  current compile remains in progress in its bounded service. The new
+  `start-bounded-podman-build.sh` command now owns both the service properties
+  and the fixed helper for future run records; AGENTS.md requires it for new
+  ad hoc kernel builds. A short offline probe launched through that exact
+  command appeared in plain `podman stats` with a 4 GiB denominator, and
+  systemd showed `Delegate=yes`, `DelegateSubgroup=runtime` and the 4 GiB
+  service cap. The offline probe used the retained local image
+  `sha256:6e51e11c610ebfb6560c231ced072827ade8eaea4a1e82ca0447e691021325db`
+  with `sleep 25`, `--network=none`, and no host mount. Its log and final
+  status are in
+  `.quirkbench/inputs/cgroup-starter-probe-20260929/worker.log` and
+  `worker.exit.status` (0); Podman removed the container on exit and the
+  completed transient unit was stopped. A second five-second offline probe
+  after the bound and status review is recorded in
+  `.quirkbench/inputs/cgroup-starter-probe-20260929-v2/worker.log` and
+  `worker.exit.status` (0); its container was also removed and its transient
+  unit stopped. The recorder now writes `running` before Podman starts, so a
+  killed or timed-out build retains an explicit incomplete status. It did not
+  compile a kernel or change the active retry.
 - A local-only P3a1 retention pass copied the 248 verified Fedora RPMs and ten
   associated candidate inputs into an isolated candidate CAS. It then verified
   all 258 stored objects by digest; the command, status and manifest hashes are
@@ -984,3 +1030,280 @@ baseline. P7b still needs production request issuance and session integration. A
 real target, external drive and operator-run flash/boot are required to evaluate
 hardware behavior. Existing
 VM results or these software tests cannot qualify new image bytes.
+
+## Incremental kernel build packet (2026-09-29)
+
+- At the operator's request, the original Fedora 44 first-boot pipeline and
+  kernel user services were stopped. Both became inactive; the old rootless
+  container exited. Its prepared source, rootfs and approximately 11 GiB
+  partial Kbuild tree were retained. `interrupted.json` records that the old
+  `pipeline.exit.status` is not a successful kernel result.
+- The retained source tree and resolved protected config were verified before
+  an explicit same-input retry. The first retry preflight exposed a mistaken
+  comparison of the Fedora base marker with the derived builder config ID; the
+  two identities are distinct and the check was corrected. A second bounded,
+  network-disabled rootless Podman service,
+  `quirkbench-fedora44-kernel-resume2-20260929.service`, reached module
+  installation. Its audit then rejected Fedora's reviewed `/lib -> usr/lib`
+  usrmerge link, which the module audit now handles exactly. That audit also
+  exposed compiled VMD support contrary to the protected profile. The reviewed
+  kernel fragment and final config now require `CONFIG_VMD=n`; the rejected
+  module tree remains in the private run directory as diagnostic evidence.
+- `BuildStageCache` now stores private, hash-verified intermediate snapshots,
+  takes a per-lineage lock, atomically replaces the prior completed generation,
+  keeps a 20 GiB free-space floor and provides `build-cache list` and explicit
+  `build-cache prune CACHE_ID`. Cache pruning cannot claim an active lineage.
+- Recovery synthesis can opt into separate rootfs, prepared source, kernel,
+  runtime and initramfs snapshots. Exact hits are verified; a changed reviewed
+  config restores the last audited Kbuild objects into a stable private path,
+  runs `olddefconfig` and repeats the protected config, module and output audits.
+  Later runtime failure leaves a completed kernel cache usable by a new stage.
+- The experiment `BuildPipeline` retains its exact output cache and can use a
+  stable private Kbuild workspace across config changes and source snapshots
+  carrying the same explicit immutable base archive. A changed toolchain starts
+  a fresh lineage. An explicit reconciled retry verifies the retained source,
+  exact cache identity and resolved config before using partial objects.
+  After verified worker stop, a preconfiguration tree or a tree from changed
+  pinned inputs is discarded; a prior completed snapshot can still seed the
+  next build. Recovery-only implementation edits do not invalidate experiment
+  Kbuild objects.
+  Audited kernel objects are snapshotted immediately after module installation,
+  so a later initramfs or userspace failure preserves compilation gains.
+- Focused check: `.venv/bin/python -m pytest -q
+  tests/test_recovery_synthesis.py tests/test_recovery_kernel_stage.py
+  tests/test_build_cache.py tests/test_build_pipeline.py tests/test_cli.py`
+  passed (59 tests). Python compilation and `git diff --check` passed.
+- A third bounded, network-disabled rootless Podman retry,
+  `quirkbench-fedora44-kernel-vmd-20260929.service`, is compiling the reviewed
+  VMD-disabled config with retained objects. Its result is recorded in
+  `.quirkbench/inputs/fedora44-kernel-build-20260929/retry-vmd.exit.status`;
+  a complete `kernel-record.json` exists only after all protection, module and
+  output audits pass. The service was active at 22:28 UTC with compiler output
+  still advancing; no success record existed at that observation.
+- The product recovery-image service is not yet wired to this optional cache
+  path. Stage cache events are durable in the private stage but are not yet
+  mirrored into controller operation events. The current retry is a retained
+  development run, not a product image or qualification.
+- The expanded focused software checks passed (135 tests across build cache,
+  experiment pipeline, recovery synthesis/audits, CLI and rootless worker
+  planning); `git diff --check` passed. This does not establish real Kbuild
+  reuse or product-image qualification while the protected retry is active.
+
+## Attended development build viewer (2026-09-29)
+
+- Bounded P2c-style presentation work using C2 progress and C8 service ownership:
+  `environments/view-build.sh` opens native Konsole through Distrobox's host bridge
+  and follows private stage logs, including newly created compiler logs up to four
+  directory levels. Closing the viewer stops only its readers. Worker execution,
+  authorization and cancellation boundaries are unchanged.
+- `start-bounded-podman-build.sh` dispatches the viewer before new attended builds;
+  absent desktop or failed viewer dispatch blocks launch. The viewer keeps numeric
+  completion status visible with Konsole's hold option; producer buffering and
+  successful dispatch without proof of window rendering remain limitations.
+  This development helper does not integrate the product operation UI.
+- Focused validation: `.venv/bin/python -m pytest -q tests/test_build_viewer.py`
+  passed (2 tests: nested logs/failed completion and missing desktop prevents
+  worker dispatch). Shell syntax and `git diff --check` passed. No build or
+  qualification was started, and no artifact bytes were changed.
+- Opened a viewer for the retained VMD-disabled build via
+  `bash environments/view-build.sh
+  /var/home/eric/dev/quirkbench/.quirkbench/inputs/fedora44-kernel-build-20260929
+  /var/home/eric/dev/quirkbench/.quirkbench/inputs/fedora44-kernel-build-20260929/retry-vmd.exit.status`.
+  Desktop unit `quirkbench-build-view-1790722932-3208641.service` was active/running;
+  its user journal records native Konsole dispatch. The compilation was neither
+  restarted nor modified.
+
+## Compiler job budgeting (2026-09-29)
+
+- Focused P3a1/build-adapter tuning within C1/C4; C2 worker ownership and
+  enforced CPU/RAM limits are unchanged. `kernel_job_budget` now supplies one
+  shared 2-GiB-per-job heuristic to `ResourceLimits.from_cgroup` and
+  `KernelBuild` admission. A 4-core/4-GiB worker selects two jobs instead of one;
+  CPU quotas, controller reserves and explicit serial requests still apply.
+  Cached pages in `memory.current` no longer halve the fixed worker capacity
+  again or unnecessarily prevent incremental job admission. Peak memory is
+  still bounded by the existing cgroup, not guaranteed by the heuristic.
+- Future ad hoc scripts must derive the bounded worker's limits and use
+  `jobs=limits.jobs`; historical retained scripts and the active single-job
+  retry were not edited or restarted. The environment guide documents this.
+- Focused validation: `.venv/bin/python -m pytest -q tests/test_build.py
+  tests/test_build_pipeline.py tests/test_recovery_kernel_stage.py
+  tests/test_recovery_synthesis.py` passed (67 tests); `git diff --check` passed.
+  Regression checks cover compile argv, explicit serial and excessive requests,
+  4/8-GiB budgets, CPU caps, cached-page occupancy and invalid CPU periods.
+  No kernel/image build or release qualification ran. No existing artifact
+  bytes changed; subsequent builds need their own retained input/evidence records.
+
+## Development build memory budget (2026-09-29)
+
+- Operator-authorized development build tuning: the bounded starter and its
+  Podman containment validator now permit 8 GiB, capped at half controller total
+  RAM. Four cores, zero swap, task limits and worker ownership remain unchanged.
+  With sufficient available memory, the shared 2-GiB-per-job policy selects four
+  compiler jobs. `KernelBuild` admission retains 2 GiB of available desktop
+  headroom rather than halving a reviewed worker capacity again.
+- Scope: development/kernel launcher and build admission only; the fixed
+  recovery-rootfs worker retains its separate existing 4-GiB service contract.
+  Historical launch scripts, active services and artifact bytes were not changed.
+- Focused validation: `.venv/bin/python -m pytest -q tests/test_build.py
+  tests/test_build_pipeline.py tests/test_recovery_kernel_stage.py
+  tests/test_recovery_synthesis.py tests/test_build_viewer.py` passed (73 tests).
+  Fake launch checks cover the 8-GiB maximum and smaller-controller half-memory
+  bound while retaining CPU/swap/stop properties. Admission tests cover four jobs
+  at 12 GiB available and reduction under low headroom. Shell syntax and
+  `git diff --check` passed. No real build or qualification was launched; speed
+  and peak memory at four jobs remain unmeasured.
+
+## P2d/P2b/P2c bounded software work during the protected kernel run (2026-09-29)
+
+- P2d archive/launcher subpacket (C8): `controller_archive.py` packages a wheel's
+  runtime code and installed assets into a relocatable controller archive, with
+  runnable `bin/quirkbench` and `bin/quirkbench-worker`. The development build
+  script builds its wheel in a temporary copied checkout. Packaging excludes
+  workspace/state bytes, refuses unsafe wheel members and existing outputs,
+  records wheel/runtime file hashes and explicitly labels the archive unsigned
+  and unqualified. Clean-home tests exercise setup/state selection, native
+  prerequisite reporting, worker help and relocation without a checkout or venv.
+  `make controller-archive OUTPUT=...` builds only software packaging.
+- P2b fixed rootfs worker subpacket (C2/C4): the installed worker verifies its
+  exact read-only live claim, loads immutable operation arguments from retained
+  CAS, stages private reviewed inputs and invokes only the existing restricted
+  Podman rootfs command. It drains merged stdout/stderr into an 8-MiB private log,
+  bounds execution and records private stage results with claim/input identity.
+  Numeric process success alone cannot complete the stage: the installed lock
+  and a final exact live claim must agree. It never publishes CAS references,
+  writes the controller database or completes the image operation. Direct-child
+  cleanup is not whole-unit reconciliation; uncertain cleanup stays interrupted.
+  Startup/staging failures rely on unit stderr, and ownership checks bracket
+  synchronous staging. The owned service deadline still bounds preparation.
+- Required higher-reasoning worker boundary review found and drove fixes for an
+  unbounded installed-lock read race, canonical lock serialization and final
+  cleanup timeout handling. Focused regressions cover those findings. Final
+  review found no remaining actionable code issues; no service or real Podman
+  worker was launched for review. Existing operation/stop/publication authority
+  remains with the controller. The planner permits only one additional private
+  diagnostics child, not arbitrary stage paths.
+- P2c viewer subpacket (C2/C8): `operation watch ID [--once] [--json]
+  [--interval SECONDS]` consumes existing operation facts with no lifecycle
+  ownership, scheduler or agent. It stops on success/failure/interruption and
+  preserves active claims/epochs. Missing state is rejected without creating a
+  database. Absent measured progress stays unavailable. Worker private results
+  and logs are not yet consumed as durable operation progress.
+- Validation: `.venv/bin/python -m pytest -q tests/test_recovery_worker.py
+  tests/test_recovery_podman.py tests/test_worker_claim.py
+  tests/test_worker_service.py tests/test_worker.py tests/test_operation_watch.py
+  tests/test_operations.py tests/test_cli.py tests/test_monitor.py
+  tests/test_controller_archive.py tests/test_installation.py
+  tests/test_package_resources.py` passed (131 tests, 8.92 seconds).
+  `git diff --check` passed. The result/command is retained in
+  `.quirkbench/controller-archives/p2d-20260929/software-check.txt`.
+- Concrete development artifact produced by `.venv/bin/python
+  environments/build-controller-archive.py --output
+  .quirkbench/controller-archives/p2d-20260929/controller.tar.gz`, exit 0.
+  SHA-256: `65167457ce7e2f9d575e70082d29e00028f976384b5efb62667641da60f56512`.
+  `.quirkbench/controller-archives/p2d-20260929/build-record.json` records its
+  originating wheel and exact included file identities. This is not a signed
+  release archive or a claim of controller/image compatibility qualification.
+- Remaining P2 dependencies: persistent coordinator/service installation,
+  production dispatch/result consumption and source-writer reservation. P2d
+  setup-check still truthfully reports background work not ready. P3b–f binding,
+  network/enrollment and P6 source/session integration remain separate packets.
+  See [development controller installation](controller-installation.md).
+  No active kernel stage, historical run script, user configuration, image,
+  release gate or physical target was modified/launched by these packets.
+  New runtime/source bytes need new input records before subsequent image stages;
+  historical qualification never transfers to them automatically.
+
+## Protected Fedora kernel retry completed (2026-09-29)
+
+- The retained `quirkbench-fedora44-kernel-vmd-20260929.service` retry completed
+  with exit status 0 at approximately 16:33 PDT, after starting at 14:56 PDT
+  (about 1 hour 37 minutes). Its recorded command used one compiler job and
+  the original 4-GiB/four-core service budget. It was not restarted with the
+  newer development defaults.
+- `.quirkbench/inputs/fedora44-kernel-build-20260929/retry-vmd.exit.status`
+  contains `0`; `kernel-record.json` records release `7.2.7`, final configuration,
+  module audit and kernel/vmlinux/Module.symvers/System.map output hashes.
+  The successful worker wrote this record only after module installation and
+  protection/output audits completed. The module audit reports 350 builtin
+  entries and 4,847 loadable modules, with the reviewed network drivers present.
+- The final configuration SHA-256 was independently checked against the record:
+  `415b50a935969fae740560ba8539ac0764a1d97295e604464519d85d22527085`.
+  VMD, NVMe and ATA are disabled and USB storage is built in. The kernel image
+  exists in `kernel-obj/arch/x86/boot/bzImage`; no image/initramfs was produced
+  by this kernel-only retry. Service observation found inactive/dead, success,
+  `ExecMainStatus=0`. Logs remain in `kernel-logs-vmd/` and the worker log.
+- This removes the protected-kernel stage blocker. Runtime/recipe identities
+  must be refreshed for subsequent staged source changes, followed by audited
+  initramfs generation and recovery-image assembly. Completion is not boot,
+  physical hardware or release qualification, and no such gate was invoked.
+
+## Attended-first design revision (2026-09-29)
+
+- Documentation only: distinct recovery boot-device policy and candidate exclusions;
+  stock Fedora recovery packages with existing assembly; manual authenticated
+  attended journey before automation. P0–P8 identifiers and wire records retained.
+- [Revision audit](design-revision-20260929.md) records every document disposition,
+  remaining versioned schema/implementation work and validation. Historical custom
+  kernel/software records above remain unchanged; no build or qualification rerun.
+- Documentation acceptance: 26 documents / 151 local file-and-heading links checked
+  without errors; `git diff --check` passed. Higher-reasoning storage review closed
+  after early-probing, initial activation ownership and trust/identity clarifications.
+  No code/schema changes, software tests, builds or physical qualification in this
+  documentation packet.
+
+
+## Stock recovery and attended loop software (2026-09-30)
+
+- Implemented distinct recovery policy, recipe/rootfs-lock/release v2 dispatch and
+  default v2 input generation, while preserving v1 readers, candidate policies,
+  public wire envelopes and the completed custom-kernel artifact.
+- Exact recorded binary acquisition plan, CAS RPM/key retention, signature/header/
+  installed-closure verification, stock kernel/modules/firmware staging, independent
+  generic dracut and storage audit, existing image/provenance/checksum integration,
+  and separate stock cache identities. No compiler in the stock branch.
+- Early boot-device guard, reviewed udev/dracut hooks and masks, bounded one-USB
+  initial support, boot-only userspace destination validation, read-only recovery,
+  RAM failure diagnostics and evidence independent of optional volumes.
+- Manual validated private generations with atomic activation, runtime/config locks,
+  no unresolved claim rotation, TLS/signing trust checks and nested-device refusal.
+- Recovery-only uploads/reconciliation and local exact-attempt approve/reject,
+  negotiated capability/authenticated status route, durable approval context and
+  pre-BOOT_PENDING fencing. HTTPS fake-adapter journey exercises candidate evidence
+  and recovery return without duplicate execution.
+- V2 fixed rootfs worker staging, transitive CAS reference retention across backup,
+  stopped-rootfs validation and current-owner fenced audit adoption. Rootfs adoption
+  remains incomplete image preparation; private rootfs backup/resume is not claimed.
+- Required higher-reasoning storage/private-state/approval and worker reviews found
+  concrete failure cases; focused regressions and fixes address their findings.
+  See [software handoff and product-operation limits](stock-recovery-attended.md).
+- No packages downloaded, kernel/image built, VM booted, external media modified,
+  hardware campaign or release qualification run by this implementation work.
+
+- Full-image integration completed in the same software packet: immutable recipe
+  admission, fixed stock image workload inside the existing pinned Podman worker,
+  optional recovery executor on `serve`'s existing lifecycle owner, responsive HTTPS,
+  independent current-owner validation/signing, signature hash binding and fenced
+  final CAS publication. Existing rootfs-only intents remain accepted and untouched.
+- Stop evidence is journaled in existing operation events, tied to exact unit/boot/
+  generation/input/stage identity, so collected transient units are not stopped twice.
+  Success atomically clears verified stopped ownership. Exact live-owner failure may
+  close an expired operation, including deadlines crossed during validation/signing.
+  Stale ownership cannot publish. Completed public image bundles are retained; private
+  build directories remain outside backup completeness claims.
+
+- Final focused software validation: recovery/staging/ownership/compatibility suites
+  **391 passed, 1 skipped** in 18.57 s; authenticated attended/runtime suites
+  **103 passed** in 19.06 s. The skipped opt-in real-GPG integration was not run;
+  signing/publication fixtures use injected GPG adapters. Temporary localhost HTTPS
+  and Unix notification sockets exercised the actual software transport. No real
+  kernel/image/VM/device/release operation was performed.
+- Durable command, source identity, result and log record:
+  `.quirkbench/validation/stock-attended-20260930/result.json`, `recovery-tests.log`
+  and `socket-tests.log`. Source hashes describe the modified checkout, not a new
+  committed or qualified release. Required storage/private-state/approval and full
+  worker/publication reviews closed with no remaining concrete blockers.
+- Documentation validation: 27 Markdown documents, 160 local file/heading links,
+  no errors; `git diff --check` passed. The software handoff distinguishes admitted
+  rootfs-only stages, complete signed image operations and still-unperformed product
+  commissioning/physical/release qualification. Historical records remain intact.

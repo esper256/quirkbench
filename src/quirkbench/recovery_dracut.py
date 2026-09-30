@@ -63,3 +63,16 @@ def validate_recovery_dracut_config(raw: bytes, profile: dict) -> dict:
         raise BuildError("recovery dracut adds and omits the same driver")
     return {"add_drivers": sorted(added), "omit_drivers": sorted(omitted),
             "hostonly": False, "hostonly_cmdline": False}
+
+STOCK_DRACUT_CONFIG = (b'hostonly="no"\nhostonly_cmdline="no"\n'
+                       b'add_drivers+=" xhci_hcd usb_storage sd_mod ext4 vfat "\n'
+                       b'add_dracutmodules+=" quirkbench-storage "\n'
+                       b'remove_items+=" /etc/shadow /etc/gshadow "\n')
+
+
+def validate_stock_dracut_config(raw: bytes) -> dict:
+    """One literal stock-package configuration; never evaluate supplied shell."""
+    if raw != STOCK_DRACUT_CONFIG:
+        raise BuildError("stock recovery dracut configuration differs from reviewed policy")
+    return {"hostonly": False, "hostonly_cmdline": False,
+            "add_drivers": ["xhci_hcd", "usb_storage", "sd_mod", "ext4", "vfat"]}

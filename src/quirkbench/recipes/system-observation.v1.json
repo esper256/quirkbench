@@ -1,1 +1,22 @@
-{"architectures":["x86_64"],"code_sha256":"018ad5bf3bcd8c3866cd1d53e014bd6b8b1debeadec64f822783811f54918e97","entrypoint":"quirkbench.runtime:system_observation","modes":["experiment","recovery"],"parameter_specs":{},"physical_observations":[],"recipe_id":"system-observation","required_capabilities":[],"required_privileges":["read_kernel_log"],"risk_class":"observation","runtime_limit_s":300,"schema_version":1,"version":1}
+{
+  "architectures": [
+    "x86_64"
+  ],
+  "code_sha256": "672597e38fd131f17cfd92cb7cf5fb5e87c4e4d4f16d02944c23e19169c3d7ad",
+  "entrypoint": "quirkbench.runtime:system_observation",
+  "modes": [
+    "experiment",
+    "recovery"
+  ],
+  "parameter_specs": {},
+  "physical_observations": [],
+  "recipe_id": "system-observation",
+  "required_capabilities": [],
+  "required_privileges": [
+    "read_kernel_log"
+  ],
+  "risk_class": "observation",
+  "runtime_limit_s": 300,
+  "schema_version": 1,
+  "version": 1
+}

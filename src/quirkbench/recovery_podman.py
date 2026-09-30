@@ -169,8 +169,8 @@ def _verify_retained_builder_archive(state_root: Path, value: str,
             os.close(directory_fd)
 
 
-def stage_rootfs_inputs(*, catalog_sha256: str, lock_sha256: str, cas_root: Path,
-                        stage: Path) -> Path:
+def stage_rootfs_inputs(*, catalog_sha256: str | None, lock_sha256: str, cas_root: Path,
+                        stage: Path, recipe_sha256: str | None = None) -> Path:
     """Copy only locked inputs into a new private stage; never relabel originals.
 
     The owning worker must create and fence ``stage`` before invoking this helper.
@@ -182,10 +182,12 @@ def stage_rootfs_inputs(*, catalog_sha256: str, lock_sha256: str, cas_root: Path
     cas_root = _canonical(cas_root, directory=True)
     _canonical(cas_root / 'objects', directory=True)
     store = CASReader(cas_root)
-    catalog_bytes = _metadata_object(cas_root, catalog_sha256, MAX_CATALOG_BYTES)
+    catalog_bytes = _metadata_object(cas_root, catalog_sha256, MAX_CATALOG_BYTES) if catalog_sha256 is not None else None
     lock_bytes = _metadata_object(cas_root, lock_sha256, MAX_DOCUMENT)
-    catalog = load_catalog(catalog_bytes)
+    catalog = load_catalog(catalog_bytes) if catalog_bytes is not None else None
     lock = validate_lock(_json(lock_bytes, 'rootfs lock'))
+    if (lock['schema_version']==2) != (catalog_sha256 is None):
+        raise BuildError('stock worker input version differs from catalog contract')
     entry, packages, _ = preflight(catalog, lock, store)
     inputs = stage / 'inputs'
     inputs.mkdir(mode=0o700)
@@ -196,20 +198,37 @@ def stage_rootfs_inputs(*, catalog_sha256: str, lock_sha256: str, cas_root: Path
         raise BuildError('Quirkbench package source contains a symlink')
     shutil.copytree(package, code / 'quirkbench',
                     ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
-    (inputs / 'catalog.json').write_bytes(catalog_bytes)
+    if catalog_bytes is not None: (inputs / 'catalog.json').write_bytes(catalog_bytes)
     (inputs / 'rootfs-lock.json').write_bytes(lock_bytes)
     objects = inputs / 'cas' / 'objects'
     objects.mkdir(parents=True, mode=0o700)
-    atomic_write(objects / catalog_sha256, catalog_bytes)
-    atomic_write(objects / lock_sha256, lock_bytes)
-    if (sha256_file(objects / catalog_sha256) != catalog_sha256
-            or sha256_file(objects / lock_sha256) != lock_sha256):
-        raise BuildError('staged recovery metadata changed')
-    digests = {entry[name] for name in INPUT_DIGEST_FIELDS}
-    digests.add(lock['recovery_fragment_sha256'])
+    metadata={lock_sha256:lock_bytes}
+    if catalog_bytes is not None: metadata[catalog_sha256]=catalog_bytes
+    for value,raw in metadata.items():
+        atomic_write(objects/value,raw)
+        if sha256_file(objects/value)!=value: raise BuildError('staged recovery metadata changed')
+    if lock['schema_version']==2:
+        digests={lock[name] for name in ('rpm_snapshot_sha256','target_rpm_lock_sha256','rpm_key_sha256','storage_policy_sha256')}
+    else:
+        digests = {entry[name] for name in INPUT_DIGEST_FIELDS}
+        digests.add(lock['recovery_fragment_sha256'])
     digests.update(package['sha256'] for package in packages)
-    digests.difference_update((catalog_sha256, lock_sha256))
-    remaining = MAX_CLOSURE_BYTES - len(catalog_bytes) - len(lock_bytes)
+    if recipe_sha256 is not None:
+        from .recovery_recipe import load_recipe
+        from .recovery_stock import preflight_recipe
+        recipe=load_recipe(_metadata_object(cas_root,recipe_sha256,MAX_DOCUMENT))
+        if recipe['schema_version']!=2 or recipe['rootfs_lock_sha256']!=lock_sha256:
+            raise BuildError('full image recipe differs from staged stock rootfs lock')
+        preflight_recipe(recipe,store)
+        digests.add(recipe_sha256)
+        digests.update(recipe[name] for name in recipe if name.endswith('_sha256'))
+        from .package_resources import target_assets_dir
+        assets=target_assets_dir()
+        if any(path.is_symlink() for path in assets.rglob('*')):
+            raise BuildError('recovery runtime assets contain symlinks')
+        shutil.copytree(assets,code/'quirkbench/assets',dirs_exist_ok=True)
+    digests.difference_update(metadata)
+    remaining = MAX_CLOSURE_BYTES - sum(map(len,metadata.values()))
     for value in sorted(digests):
         remaining -= _copy_cas_object(cas_root, value, objects / value, remaining)
     output = stage / 'output'
@@ -262,7 +281,6 @@ def rootfs_command(*, image_id: str, claim: dict, state_root: Path, stage: Path,
     inputs = _canonical(stage / 'inputs', directory=True)
     code = _canonical(inputs / 'code', directory=True)
     _canonical(code / 'quirkbench', directory=True)
-    catalog = _canonical(inputs / 'catalog.json', directory=False)
     lock = _canonical(inputs / 'rootfs-lock.json', directory=False)
     intent = _json(_metadata_object(Path(state_root) / 'artifacts', verified.input_digest,
                                     MAX_DOCUMENT), 'rootfs operation intent')
@@ -270,8 +288,10 @@ def rootfs_command(*, image_id: str, claim: dict, state_root: Path, stage: Path,
         arguments = recovery_rootfs_arguments(intent)
     except ContractError as exc:
         raise BuildError('rootfs builder and staged inputs differ from immutable operation intent') from exc
+    stock=arguments.get('schema_version')==2
+    catalog=None if stock else _canonical(inputs/'catalog.json',directory=False)
     if (image_id != arguments['builder_config_digest']
-            or sha256_file(catalog) != arguments['catalog_sha256']
+            or (not stock and sha256_file(catalog) != arguments['catalog_sha256'])
             or sha256_file(lock) != arguments['rootfs_lock_sha256']):
         raise BuildError('rootfs builder and staged inputs differ from immutable operation intent')
     _verify_retained_builder_archive(Path(state_root), arguments['builder_archive_sha256'],
@@ -279,25 +299,30 @@ def rootfs_command(*, image_id: str, claim: dict, state_root: Path, stage: Path,
     cas = _canonical(inputs / 'cas', directory=True)
     _canonical(cas / 'objects', directory=True)
     output = _canonical(stage / 'output', directory=True)
-    if any(path not in (inputs, output) for path in stage.iterdir()):
+    diagnostics = stage / 'diagnostics'
+    if diagnostics.exists() or diagnostics.is_symlink():
+        _canonical(diagnostics, directory=True)
+        if diagnostics.stat().st_uid != os.getuid() or diagnostics.stat().st_mode & 0o077:
+            raise BuildError('worker diagnostics must be private')
+    if any(path not in (inputs, output, diagnostics) for path in stage.iterdir()):
         raise BuildError('recovery stage contains unexpected paths')
     if (output.stat().st_uid != os.getuid() or output.stat().st_mode & 0o077
             or (output / output_name).exists() or (output / output_name).is_symlink()):
         raise BuildError('rootfs output must be new under a private worker directory')
     volumes = ((code, '/workspace/code', 'ro,Z'),
-               (catalog, '/workspace/catalog.json', 'ro,Z'),
                (lock, '/workspace/rootfs-lock.json', 'ro,Z'),
                (cas, '/workspace/cas', 'ro,Z'),
                (output, '/workspace/output', 'rw,Z'))
+    if catalog is not None: volumes=volumes+((catalog,'/workspace/catalog.json','ro,Z'),)
     mounts = tuple(arg for host, target, mode in volumes
                    for arg in ('--volume', f'{host}:{target}:{mode}'))
+    payload=('python3','-m','quirkbench.recovery_image_worker',arguments['recipe_sha256'],'/workspace/cas','/workspace/output') if 'recipe_sha256' in arguments else ('python3','-m','quirkbench.recovery_rootfs','-' if stock else '/workspace/catalog.json','/workspace/rootfs-lock.json','/workspace/cas',f'/workspace/output/{output_name}')
     return ('env', '-u', 'CONTAINER_HOST', '-u', 'CONTAINER_CONNECTION',
             '-u', 'DOCKER_HOST', '-u', 'CONTAINERS_CONF',
             'podman', '--remote=false', 'run', '--rm', '--pull=never',
             '--network=none', '--pid=private', '--ipc=private', '--uts=private',
             '--cgroups=disabled', '--user=0',
             '--security-opt=no-new-privileges',
-            '--env=PYTHONPATH=/workspace/code', *mounts, image_id,
-            'python3', '-m', 'quirkbench.recovery_rootfs',
-            '/workspace/catalog.json', '/workspace/rootfs-lock.json',
-            '/workspace/cas', f'/workspace/output/{output_name}')
+            '--env=PYTHONPATH=/workspace/code',
+            *(("--env=QUIRKBENCH_BUILDER_CONFIG_DIGEST=" + arguments['builder_config_digest'],) if stock else ()),
+            *mounts, image_id, *payload)

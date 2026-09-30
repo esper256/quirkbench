@@ -1,5 +1,22 @@
 # Monitoring is part of the execution contract
 
+The initial attended journey needs visible builds and recovery/experiment status
+without a waiting agent. Manual authenticated setup may satisfy connection readiness;
+a pairing wizard or managed session is not required. Report recovery boot-device
+confinement, candidate eligibility and operator approval separately. Later enrollment,
+unattended grants and backup completeness remain separate capabilities. See the
+[delivery tiers](product-roadmap.md#delivery-contract).
+
+For a pre-boot operation, use `quirkbench --state /absolute/controller-state
+operation watch ID`. It refreshes a TTY or emits timestamped snapshots to a pipe;
+`--once` reads one snapshot and `--json` emits the existing operation response
+envelope as one JSON record per sample. `--interval` accepts 0.5–60 seconds
+(default 2). It stops on success, failure or interruption; Ctrl+C ends only the
+viewer. Watching never invokes an agent, acquires lifecycle ownership or dispatches
+work. Persisted stages/deadlines/failures are shown; absent measured progress is
+explicitly unavailable. Worker private diagnostics are not yet imported into
+operation progress, so this viewer does not invent compilation percentages.
+
 Run `quirkbench --state /absolute/controller-state watch CAMPAIGN`. A TTY refreshes the same view; redirected output is a timestamped sequence of snapshots. `--once` prints one snapshot, and `--json` provides machine-readable snapshots. The watcher reads the controller directly and spends no agent tokens. `campaign status` remains a concise administrative JSON view. `Controller.events(campaign, after=cursor)` retrieves durable progress events in order.
 
 Each activity reports phase, state, human-readable reason, optional measured completed/total/unit counters, expected report interval, stall threshold, and deadline. IDs and sequences make duplicates harmless. The controller assigns receipt times; replaying the same sequence never refreshes its age. A changed sequence with the same phase/message/count/state proves only that the reporting loop is alive. The immutable deadline cannot slide forward on each heartbeat.
@@ -41,7 +58,7 @@ storage and identity errors stop with a preserved human-intervention reason.
 
 ## Recovery setup visibility
 
-Before pairing, the target must provide local status; a controller monitor cannot
+Before manual setup or later pairing, the target must provide local status; a controller monitor cannot
 report a target it has never contacted. P3 adds explicit phases for storage readiness,
 network configuration/link/address, controller reachability, trust confirmation,
 enrollment, inventory upload and baseline waiting. Distinguish operator input from

@@ -13,10 +13,10 @@ import time
 from typing import Callable, Protocol
 import uuid
 
-from .contracts import CapabilityReport, Experiment, Outcome, Progress, Result, canonical, digest, identifier
+from .contracts import CapabilityReport, Experiment, Outcome, Progress, Result, canonical, digest, identifier, sha256
 
 
-from .deployment import BootControl, DeploymentBackend, DeploymentManifest
+from .deployment import BootControl, DeploymentBackend, DeploymentManifest, PreparedDeployment
 
 
 @dataclass(frozen=True)
@@ -119,6 +119,8 @@ class TargetAgent:
         supervisor=None,
         library_store=None,
         finish_upload_s: float = 30,
+        recovery_only: bool = False,
+        verify_storage=None,
 
     ):
         if report.device_id != client.device_id:
@@ -127,13 +129,19 @@ class TargetAgent:
             raise ValueError("boot capability unavailable until boot cycle is implemented")
         if finish_upload_s <= 0 or finish_upload_s > 120:
             raise ValueError("finish upload budget must be in (0,120]")
+        if type(recovery_only) is not bool or (recovery_only and report.mode != "recovery"):
+            raise ValueError("recovery-only mode requires a recovery report")
+        self.recovery_only = recovery_only
         self.library_store = library_store
         self.deployment_backend = deployment_backend
         self.supervisor = supervisor
         self.finish_upload_s = finish_upload_s
         self.client = client
         self.report = report
+        self.verify_storage = verify_storage or (lambda: True)
+        self.verify_storage()
         self.state_dir = Path(state_dir)
+        self._check_storage()
         self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.state_dir, 0o700)
         self.journal_path = self.state_dir / "journal.json"
@@ -150,7 +158,17 @@ class TargetAgent:
         if self._journal.get("device_id") != report.device_id:
             raise ValueError("journal belongs to another device")
 
+    def _check_storage(self):
+        self.verify_storage()
+        device=self.state_dir.parent.stat().st_dev
+        for path in (self.state_dir, self.state_dir/'blobs', self.state_dir/'journal.json', self.state_dir/'agent.lock'):
+            if path.exists() and path.stat().st_dev!=device:
+                raise ValueError('target evidence path is on a different storage device')
+            if path.resolve()!=path or path.is_symlink():
+                raise ValueError('target evidence path traverses a symlink')
+
     def _load(self) -> dict:
+        self._check_storage()
         if not self.journal_path.exists():
             value = {"schema_version": 1, "device_id": self.report.device_id, "pending": None, "claim_request_id": None}
             _atomic(self.journal_path, canonical(value))
@@ -162,6 +180,7 @@ class TargetAgent:
         return value
 
     def _save(self) -> None:
+        self._check_storage()
         _atomic(self.journal_path, canonical(self._journal))
 
     def _resolve_recipe(self, experiment):
@@ -202,6 +221,7 @@ class TargetAgent:
         if not isinstance(raw, bytes) or len(raw) > 128 * 1024 * 1024:
             raise ValueError("evidence stream must be bytes of at most 128 MiB")
         checksum = digest(raw)
+        self._check_storage()
         _atomic(self.blob_dir / checksum, raw)
         pending["evidence"].append({
             "stream": stream, "sequence": len(pending["evidence"]),
@@ -218,6 +238,19 @@ class TargetAgent:
         ))
 
     def _drain(self, pending: dict, *, finish=True, deadline=None) -> None:
+        identifier(pending['attempt_id']); identifier(pending['boot_id'])
+        records=pending.get('evidence')
+        if not isinstance(records,list) or len(records)>8192:
+            raise ValueError('invalid recognized evidence journal')
+        for index,record in enumerate(records):
+            if not isinstance(record,dict) or set(record)!={'stream','sequence','sha256','size','uploaded_offset','evidence_acked'}:
+                raise ValueError('invalid evidence record fields')
+            sha256(record['sha256']); identifier(record['stream'])
+            if (type(record['sequence']) is not int or record['sequence']!=index
+                    or type(record['size']) is not int or record['size']<0
+                    or type(record['uploaded_offset']) is not int or not 0<=record['uploaded_offset']<=record['size']
+                    or type(record['evidence_acked']) is not bool):
+                raise ValueError('invalid evidence record identity or acknowledgement')
         attempt_id = pending["attempt_id"]
         token = pending["token"]
         boot_id = pending["boot_id"]
@@ -232,7 +265,13 @@ class TargetAgent:
             check_budget()
             if not finish and record["evidence_acked"]:
                 continue
-            raw = (self.blob_dir / record["sha256"]).read_bytes()
+            self._check_storage()
+            blob=self.blob_dir/record['sha256']
+            if blob.exists() and blob.stat().st_dev!=self.state_dir.parent.stat().st_dev:
+                raise ValueError('recognized evidence blob is on a different storage device')
+            if blob.is_symlink() or blob.resolve()!=blob or not blob.is_file() or blob.stat().st_size!=record['size']:
+                raise ValueError('recognized evidence must be a direct sealed blob')
+            raw = blob.read_bytes()
             if digest(raw) != record["sha256"] or len(raw) != record["size"]:
                 raise ValueError("spooled evidence corrupted")
             upload_id = f"{attempt_id}.{record['sequence']}"
@@ -404,21 +443,49 @@ class TargetAgent:
     def _physical_step(self, pending):
         experiment = Experiment.from_dict(pending["experiment"])
         if self.report.mode == "recovery":
-            if pending["stage"] in {"claimed", "preparing"} and pending["boot_id"] == self.report.boot_id:
+            if pending.get("operator_rejected"):
+                if not pending.get("result"):
+                    self._record_output(pending, RecipeOutput(Outcome.NEEDS_HUMAN,
+                        'Operator rejected this exact candidate; no kernel was booted.'))
+                self._drain(pending)
+                self._set_pending(None)
+                return "completed"
+            if pending["stage"] in {"claimed", "preparing", "awaiting_approval"} and pending["boot_id"] == self.report.boot_id:
                 if self.supervisor:
                     self.supervisor.begin("prepare-deployment", 1800)
                 raw = self.client.artifact(experiment.artifacts["deployment"])
                 if digest(raw) != experiment.artifacts["deployment"]:
                     raise ValueError("deployment artifact digest mismatch")
                 manifest = DeploymentManifest.from_dict(json.loads(raw))
-                pending["stage"] = "preparing"
-                self._save()
-                # Adapter preparation is restartable. Only recovery calls it.
-                prepared = self.deployment_backend.prepare(manifest, pending["attempt_id"])
-                self._progress(pending, "prepare", "Exact deployment verified and ready for one-shot boot.", state="COMPLETE")
-                pending["revision"] = prepared.revision
-                pending["deployment_id"] = prepared.deployment_id
-                self._save()
+                if pending["stage"] == "awaiting_approval":
+                    prepared = self.deployment_backend.inspect(pending["attempt_id"])
+                    if (prepared is None or prepared.manifest_digest != manifest.sha256
+                            or prepared.revision != pending.get("revision")
+                            or prepared.deployment_id != pending.get("deployment_id")):
+                        raise ValueError("prepared deployment changed while awaiting approval")
+                else:
+                    pending["stage"] = "preparing"
+                    self._save()
+                    # Preparation is restartable; waiting uses the verified durable deployment.
+                    prepared = self.deployment_backend.prepare(manifest, pending["attempt_id"])
+                    self._progress(pending, "prepare", "Exact deployment verified; awaiting operator authorization.", state="COMPLETE")
+                    pending["revision"] = prepared.revision
+                    pending["deployment_id"] = prepared.deployment_id
+                    pending["stage"] = "awaiting_approval"
+                    self._save()
+                if 'operator-approval.v1' in self.report.capabilities or 'operator-approval.v1' in experiment.required_capabilities:
+                    decision = self.client.attempt_approval(pending["attempt_id"], pending["token"], pending["boot_id"])
+                    if decision.get('state') == 'rejected':
+                        pending['operator_rejected'] = True
+                        self._save()
+                        self._record_output(pending, RecipeOutput(Outcome.NEEDS_HUMAN,
+                            'Operator rejected this exact candidate; no kernel was booted.'))
+                        self._drain(pending)
+                        self._set_pending(None)
+                        return 'completed'
+                    if decision.get('state') != 'approved':
+                        self.client.heartbeat(pending["attempt_id"], pending["token"], pending["boot_id"])
+                        return 'awaiting_operator_approval'
                 ack = self.client.handoff(pending["attempt_id"], pending["token"], pending["boot_id"], prepared.revision)
                 if ack.get("state") != "BOOT_PENDING":
                     raise ValueError("invalid handoff acknowledgement")
@@ -471,6 +538,7 @@ class TargetAgent:
 
     def step(self) -> str:
         """Advance one attempt under an exclusive local journal lock."""
+        self._check_storage()
         with self.lock_path.open("a+b") as lock:
             os.fchmod(lock.fileno(), 0o600)
             try:
@@ -521,6 +589,19 @@ class TargetAgent:
                     pending["boot_id"] = remote["boot"]
                     self._save()
                     break
+        if self.recovery_only:
+            if pending:
+                if pending.get("operator_rejected"):
+                    return self._physical_step(pending)
+                self._drain(pending, finish=bool(pending.get("result")))
+                if pending.get("physical") and pending.get("stage") in {"claimed", "preparing", "awaiting_approval"} and not pending.get("result"):
+                    return "recovery_only_waiting"
+                if pending.get("physical"):
+                    return self._physical_step(pending)
+                if pending.get("result") and not pending.get("outbox"):
+                    self._set_pending(None)
+                    return "completed"
+            return "recovery_only_waiting"
         if pending and pending.get("physical"):
             return self._physical_step(pending)
         if self.report.mode == "experiment":

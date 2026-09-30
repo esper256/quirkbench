@@ -52,6 +52,20 @@ def test_staged_final_config_and_module_inventory(tmp_path):
     assert audit(config, rootfs, profile)["module_files_digest"] != record["module_files_digest"]
 
 
+def test_fedora_usrmerge_module_tree_is_audited(tmp_path):
+    config, rootfs, module_dir, profile = stage(tmp_path)
+    legacy = rootfs / "lib"
+    canonical = rootfs / "usr/lib"
+    canonical.parent.mkdir()
+    legacy.rename(canonical)
+    legacy.symlink_to("usr/lib")
+    assert audit(config, rootfs, profile)["kernel_release"] == "6.12.0-test"
+    legacy.unlink()
+    legacy.symlink_to("/usr/lib")
+    with pytest.raises(BuildError, match="unsafe recovery /lib link"):
+        audit(config, rootfs, profile)
+
+
 def test_missing_network_driver_and_broken_dependency_rejected(tmp_path):
     config, rootfs, module_dir, profile = stage(tmp_path)
     (module_dir / "modules.builtin").write_text("")
@@ -108,6 +122,13 @@ def test_final_config_protection_failure_rejected(tmp_path):
     config, rootfs, _, profile = stage(tmp_path)
     config.write_text(config.read_text().replace("# CONFIG_ATA is not set", "CONFIG_ATA=y"))
     with pytest.raises(BuildError, match="protected recovery kernel config mismatch"):
+        audit(config, rootfs, profile)
+
+
+def test_vmd_cannot_expose_internal_storage(tmp_path):
+    config, rootfs, _, profile = stage(tmp_path)
+    config.write_text(config.read_text().replace("# CONFIG_VMD is not set", "CONFIG_VMD=m"))
+    with pytest.raises(BuildError, match="CONFIG_VMD"):
         audit(config, rootfs, profile)
 
 

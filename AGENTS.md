@@ -11,12 +11,18 @@ Preserve agent quota. Read [the testing policy](docs/testing-policy.md) before
 choosing validation. This policy applies to delegated work as well.
 
 Follow [the authoritative forward plan](docs/product-roadmap.md), briefs P1–P8.
-Inventory/provisioning/session commands in that plan are proposed, not implemented.
+Roadmap inventory/provisioning/session wizard commands remain proposed unless
+explicitly recorded as implemented. `target-inventory TARGET_ID --json` reads the
+authenticated recovery report and planning blockers; it queues no work.
 Use a bounded brief and focused tests; request higher-reasoning review for storage,
 watchdog authorization or durable execution boundary changes. No MCP service in v1. Recovery synthesis is settled in
-[the recovery decision](docs/recovery-base.md): DNF5 installroot, Fedora-configured
-protected kernel, dracut and existing image assembly. Do not reopen KIWI/Lorax selection
-or introduce a second builder during P3a implementation.
+[the recovery decision](docs/recovery-base.md): DNF5 installroot, stock Fedora
+kernel/module packages, dracut and existing image assembly. Recovery has boot-device-only
+storage access; experimental kernels retain reviewed internal-controller exclusions.
+Follow [the storage policy](docs/architecture.md#storage-protection-policy). Do not
+require a custom recovery compile. Upstream live-image reuse needs a bounded proposal
+showing simpler integration under the same contract; do not introduce another builder
+incidentally. Existing schemas require a versioned migration, not silent relaxation.
 
 Use the [implementation handoff](docs/implementation-handoff.md) to select one
 subtask and its [contract sections](docs/implementation-contracts.md). These settle
@@ -48,6 +54,14 @@ or schema is not existing passing implementation evidence.
   can resume without repeating expensive runs. Reuse matching evidence; label
   changed artifacts unqualified until the release gate, rather than implying old
   qualification applies to new bytes.
+- New ad hoc controller kernel builds in rootless Podman must use
+  [the bounded Podman starter](environments/README.md#observable-bounded-kernel-builds),
+  which creates a fresh delegated systemd user service. Verify the live container appears
+  in plain `podman stats` and that launcher, conmon and payload remain below that
+  service before a long compile. Historical run scripts using
+  `--cgroups=disabled` are evidence of those runs, not templates for a restart;
+  preserve them and create a new recorded command. The fixed recovery rootfs
+  worker has its own claim and execution contract.
 - After a release-gate failure, use focused reproductions and software regressions
   to develop the fix. Rerun only the affected release checks when the candidate is
   stable; rerun the complete gate only if a dependency invalidates that evidence.
@@ -56,8 +70,10 @@ These rules change test scheduling, not acceptance standards. Never hide a faili
 gate with a skip or mark an unrun qualification complete.
 
 The [product interface contract](docs/product-interface.md) is normative C8. Implement
-the complete external-agent journey before managed scheduling; managed remains the
-finished UX default. Controller user services own rootless workers. Do not infer
+the attended external-agent journey with manual authenticated setup and explicit
+exact-candidate operator approval first; managed remains the later configured UX
+default. Pairing/lifecycle automation, advanced wizards, guided backup completeness
+and unattended watchdog grants are later packets, not initial prerequisites. Controller user services own rootless workers. Do not infer
 source capture, safe shutdown, unattended eligibility or backup completeness from a
 single accepted/paused/ready state. P0 fixtures and foundational recipe/observation
 records precede the full journey; see packet dependencies rather than numeric order.

@@ -38,6 +38,9 @@ REQUIRED_UNITS = {"quirkbench-console.service", "quirkbench-recovery.service",
 
 
 def validate_recipe(value: dict) -> dict:
+    if isinstance(value, dict) and type(value.get("schema_version")) is int and value["schema_version"] == 2:
+        from .recovery_stock import validate_recipe as stock_recipe
+        return stock_recipe(value)
     if not isinstance(value, dict) or set(value) != FIELDS:
         raise BuildError("invalid recovery recipe fields")
     if type(value["schema_version"]) is not int or value["schema_version"] != 1:
@@ -102,6 +105,9 @@ def _unit_allowlist(raw: bytes) -> list[str]:
 def preflight_recipe(recipe: dict, catalog: dict, store) -> dict:
     """Resolve exact catalog/lock/CAS closure without installing or executing."""
     validate_recipe(recipe)
+    if recipe["schema_version"] == 2:
+        from .recovery_stock import preflight_recipe as stock_preflight
+        return stock_preflight(recipe, store)
     validate_catalog(catalog)
     matches = [entry for entry in catalog["entries"]
                if entry["baseline_id"] == recipe["baseline_id"]]

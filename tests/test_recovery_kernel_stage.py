@@ -24,6 +24,8 @@ class FakeRunner:
                  reported_release="6.12.0-test"):
         self.phases = []
         self.environments = []
+        self.compile_object_paths = []
+        self.previous_object_seen = []
         self.bad_config = bad_config
         self.missing_module = missing_module
         self.change_during_compile = change_during_compile
@@ -36,17 +38,24 @@ class FakeRunner:
         self.environments.append(env)
         log.write_text(phase + "\n")
         stage = log.parent.parent
-        config = stage / "kernel-obj/.config"
+        objects = Path(command.argv[3].removeprefix("O="))
+        config = objects / ".config"
         if phase == "configure-recovery":
             if self.fail_configure:
                 raise BuildError("synthetic olddefconfig failure")
-            config.write_text(config.read_text() + "# resolved by synthetic olddefconfig\n"
-                              + ("CONFIG_ATA=y\n" if self.bad_config else ""))
+            previous = config.read_text()
+            if "# resolved by synthetic olddefconfig\n" not in previous:
+                config.write_text(previous + "# resolved by synthetic olddefconfig\n"
+                                  + ("CONFIG_ATA=y\n" if self.bad_config else ""))
         elif phase == "kernel-release":
             log.write_text(self.reported_release + "\n")
         elif phase == "compile-recovery":
+            self.compile_object_paths.append(objects)
+            self.previous_object_seen.append((objects / "retained.o").exists())
+            if not (objects / "retained.o").exists():
+                (objects / "retained.o").write_bytes(b"previously compiled")
             for relative in ("arch/x86/boot/bzImage", "vmlinux", "Module.symvers", "System.map"):
-                output = stage / "kernel-obj" / relative
+                output = objects / relative
                 output.parent.mkdir(parents=True, exist_ok=True)
                 output.write_text(relative)
             if self.change_during_compile:
@@ -168,4 +177,64 @@ def test_mismatched_resource_limits_or_timestamp_do_not_start_stage(tmp_path):
     assert not build.build_dir.exists()
     with pytest.raises(BuildError, match="SOURCE_DATE_EPOCH"):
         run(build, profile, logs, runner, source_date_epoch=-1)
+    assert runner.phases == []
+
+
+def test_interrupted_compile_reuses_verified_object_tree(tmp_path, monkeypatch):
+    from quirkbench.build import sha256_file
+    from quirkbench.build_pipeline import _tree_hash
+
+    monkeypatch.setattr("quirkbench.build.recommended_jobs", lambda: 1)
+    build, profile, logs = fixture(tmp_path)
+    interrupted = FakeRunner()
+
+    class StopAfterConfigure(FakeRunner):
+        def run(self, command, *, phase, log, timeout_s, env, limits, on_activity):
+            if phase == "compile-recovery":
+                (build.build_dir / "retained.o").write_bytes(b"partial")
+                raise BuildError("synthetic interruption")
+            super().run(command, phase=phase, log=log, timeout_s=timeout_s,
+                        env=env, limits=limits, on_activity=on_activity)
+
+    with pytest.raises(BuildError, match="synthetic interruption"):
+        run(build, profile, logs, StopAfterConfigure())
+    resolved = sha256_file(build.build_dir / ".config")
+    source = _tree_hash(build.source, excluded_paths=frozenset())
+    record = run_recovery_kernel_stage(
+        build, base_config=BASE, fragment=FRAGMENT,
+        staged_config_sha256=EXPECTED, profile=profile, runner=interrupted,
+        limits=ResourceLimits(1, 4 * 1024**3, 1), source_date_epoch=1_700_000_000,
+        log_dir=tmp_path / "resume-logs", resume_resolved_config_sha256=resolved,
+        expected_source_tree_sha256=source)
+    assert record["kernel_release"] == "6.12.0-test"
+    assert (build.build_dir / "retained.o").read_bytes() == b"partial"
+    assert interrupted.phases == ["configure-recovery", "kernel-release",
+                                  "compile-recovery", "install-recovery-modules"]
+
+
+def test_resume_rejects_changed_config_before_make(tmp_path, monkeypatch):
+    from quirkbench.build import sha256_file
+    from quirkbench.build_pipeline import _tree_hash
+
+    monkeypatch.setattr("quirkbench.build.recommended_jobs", lambda: 1)
+    build, profile, logs = fixture(tmp_path)
+    class StopAfterConfigure(FakeRunner):
+        def run(self, command, *, phase, log, timeout_s, env, limits, on_activity):
+            if phase == "compile-recovery":
+                raise BuildError("interrupted")
+            super().run(command, phase=phase, log=log, timeout_s=timeout_s,
+                        env=env, limits=limits, on_activity=on_activity)
+    with pytest.raises(BuildError, match="interrupted"):
+        run(build, profile, logs, StopAfterConfigure())
+    resolved = sha256_file(build.build_dir / ".config")
+    source = _tree_hash(build.source, excluded_paths=frozenset())
+    (build.build_dir / ".config").write_text("unsafe\n")
+    runner = FakeRunner()
+    with pytest.raises(BuildError, match="inputs changed"):
+        run_recovery_kernel_stage(
+            build, base_config=BASE, fragment=FRAGMENT,
+            staged_config_sha256=EXPECTED, profile=profile, runner=runner,
+            limits=ResourceLimits(1, 4 * 1024**3, 1), source_date_epoch=1_700_000_000,
+            log_dir=tmp_path / "resume-logs", resume_resolved_config_sha256=resolved,
+            expected_source_tree_sha256=source)
     assert runner.phases == []

@@ -138,3 +138,58 @@ def test_recovery_console_unit_owns_tty_without_network_or_login_dependency(tmp_
     candidate_units = candidate / 'usr/etc/systemd/system'
     assert not (candidate_units / 'quirkbench-console.service').exists()
     assert not (candidate_units / 'getty@tty1.service').exists()
+
+
+def test_manual_setup_requires_verified_recovery_and_reports_rejection(tmp_path):
+    record=tmp_path/'boot.json';output=StringIO();calls=[]
+    console.run_console(boot_record=record,input_stream=StringIO('4\n'),output_stream=output,
+        run_manual_setup=lambda:calls.append('activate'))
+    assert not calls and 'Manual setup is blocked' in output.getvalue()
+    boot_record(record)
+    console.run_console(boot_record=record,input_stream=StringIO('4\n'),output_stream=output,
+        run_manual_setup=lambda:calls.append('activate') or CompletedProcess([],2))
+    assert calls==['activate'] and 'previous usable configuration retained' in output.getvalue()
+
+
+def test_staged_setup_uses_fixed_bundle_and_restarts_owner_after_failure():
+    import pytest
+    from quirkbench.runtime import CONTROL
+    calls=[]
+    def runner(argv,**kwargs):
+        calls.append(argv)
+        if '-m' in argv:
+            assert argv[-1]==str(CONTROL/'setup') and argv[-2]=='quirkbench.provisioning'
+            raise OSError('interrupted activation fixture')
+        return CompletedProcess(argv,0)
+    with pytest.raises(OSError,match='interrupted activation'):
+        console.activate_staged_setup(run=runner)
+    assert calls[0]==['systemctl','stop','quirkbench-supervisor.service']
+    assert calls[-1]==['systemctl','start','quirkbench-supervisor.service']
+    calls.clear()
+    def blocked(argv,**kwargs):
+        calls.append(argv);return CompletedProcess(argv,1)
+    with pytest.raises(RuntimeError,match='could not stop'):
+        console.activate_staged_setup(run=blocked)
+    assert len(calls)==1
+
+
+def test_staged_setup_restarts_after_uncertain_stop_without_activation():
+    import pytest
+    import subprocess
+    for failure in (KeyboardInterrupt(),subprocess.TimeoutExpired('systemctl',45)):
+        calls=[]
+        def runner(argv,**kwargs):
+            calls.append(argv)
+            if argv[1]=='stop':raise failure
+            return CompletedProcess(argv,0)
+        with pytest.raises(type(failure)):
+            console.activate_staged_setup(run=runner)
+        assert calls==[['systemctl','stop','quirkbench-supervisor.service'],
+                       ['systemctl','start','quirkbench-supervisor.service']]
+
+
+def test_manual_binding_uuid_is_available_offline_before_commissioning(tmp_path):
+    output=StringIO();identity='12345678-1234-1234-1234-123456789abc'
+    console.run_console(boot_record=tmp_path/'missing',input_stream=StringIO('2\n'),
+        output_stream=output,system_uuid_reader=lambda:identity)
+    assert 'Target system UUID for manual binding: '+identity in output.getvalue()

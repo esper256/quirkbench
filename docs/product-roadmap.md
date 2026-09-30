@@ -7,50 +7,61 @@ Use [controller, target and builder](terminology.md) consistently.
 
 ## Delivery contract
 
-The [product interface contract](product-interface.md) binds the preview manual to
-implementation: release packaging, stable controller services, public CLI, baseline
-catalog, source handoff, human observations and honest readiness/backup status.
-Deliver the external-agent workflow first; managed operation remains the finished
-product default over the same API. These are planned features, not completed gates.
+The [product interface contract](product-interface.md) separates initial attended
+requirements from later automation. Existing commands and schemas retain their
+meaning; proposed interfaces are not implementation claims.
+
+**First delivery: owner-controlled, attended lab.** Use fixed recovery, manual
+network/controller configuration with explicitly provisioned authenticated trust
+and device credentials, bounded inventory, a reviewed candidate baseline, immutable
+source inputs, observable resource-bounded builds, explicit operator approval of
+each exact candidate attempt, evidence upload and return to recovery. Keep one
+durable execution owner, restart reconciliation and explicit pause/resume. A person
+must be available to handle unsupported hangs; no unattended reset claim is made.
+
+**Later capabilities:** pairing/credential lifecycle automation (P3d/e), endpoint and
+advanced capacity wizards (P3f/P3a5), guided whole-session backup reporting (P2e),
+managed decision scheduling (P6c), and unattended watchdog grants/qualification (P5).
+These do not gate the attended journey. Managed remains the eventual configured UX
+default, after the external-agent workflow is usable. Basic backups report actual
+contents/omissions and do not imply full resumability.
 
 ## Product flow
 
-1. Build or obtain a generic recovery `.img` for a supported platform, verify its
-   checksum and flash it with a standard writer such as Etcher. No installed-OS
-   collector, target credentials or controller address is required to build it.
-2. Boot that external drive on the target using owner-controlled boot selection.
-   Recovery verifies protection, shows capacity and geometry choices, then journals
-   the confirmed plan and commissions only the positively identified external storage. Secure Boot must already be disabled; no firmware changes.
-3. A local recovery setup screen offers Ethernet or Wi-Fi configuration, controller
-   address/port and pairing. NetworkManager owns networking; use its existing TUI
-   rather than implementing wireless configuration. Only controller reachability
-   is required, not public internet access from the target.
-4. The operator verifies the controller trust fingerprint through an independent
-   controller display and enters a short-lived enrollment code. Recovery persists
-   device-scoped credentials, network settings and a target binding in private
-   control storage on the evidence partition. Pairing does not start a campaign.
-5. Recovery sends a bounded hardware inventory. The controller selects a reviewed
-   protection/hardware profile and a supported versioned baseline catalog entry.
-   Missing support blocks the affected capability with an actionable explanation.
-6. Start a session with a problem statement and managed or external agent driver.
-   Its initial operation builds the exact signed baseline and runs an attended round
-   trip: preparation, one-shot candidate boot, observation, durable upload and recovery
-   return. A successful lab check does not establish reproduction of the reported issue.
-7. Later attempts transfer OSTree objects. Every attempt returns through fixed
-   recovery; successful candidates cannot chain updates or promote themselves.
+1. Build or obtain fixed recovery `.img` media for a supported platform. Verify
+   provenance/checksum and applicable signatures, then flash with a standard writer.
+   Factory media has no credentials, target inventory or experimental deployment.
+2. Boot the owner-selected external drive. Resolve its physical identity and expected
+   roles under the [storage policy](architecture.md#storage-protection-policy).
+   Explicitly confirm the device and journaled commissioning geometry before writes.
+   Secure Boot must already be disabled; do not change firmware automatically.
+3. Use local NetworkManager/nmtui and manual controller configuration. Explicitly
+   install validated controller trust, repository verification keys and device-scoped
+   credentials using the existing configuration mechanisms. Keep secrets private;
+   never disable TLS or signature checks. Pairing automation comes later.
+4. Collect bounded passive recovery inventory and select a reviewed experimental
+   profile/baseline. Establish target/media binding and early wrong-target checks
+   before credentials activate or a candidate is armed. Unknown support blocks the
+   affected capability rather than relaxing protection.
+5. An external agent proposes pinned source inputs and a bounded recipe. The
+   controller builds/composes an exact signed candidate in observable workers. The
+   operator reviews its identity and storage-sensitive changes, then explicitly
+   approves that attempt before one-shot boot. Submission/build success is not approval.
+6. Observe the attended run, retain/upload attributed evidence, and return through
+   fixed recovery. Reconcile uncertainty before another attempt; approved candidates
+   cannot chain updates or promote themselves into recovery.
 
-A drive moved to another target returns to setup instead of resuming the previous
-investigation. Matching identity permits reconnecting but does not bypass campaign
-pause, restart reconciliation or experiment authorization. Rebinding is explicit,
-invalidates old boot authorization and preserves evidence with its original target.
-A mandatory pre-kernel identity gate protects even a drive moved while armed.
+A moved drive returns to setup; explicit rebinding preserves old evidence attribution
+and invalidates old authorizations. Manual setup must satisfy C4 binding, privacy and
+verification rules without depending on the later automated enrollment exchange.
 
 ## Recovery implementation choice
 
 The [recovery image decision](recovery-base.md) selects a minimal Fedora appliance,
-built using locked DNF5 installroot inputs, a protected Fedora-configured kernel,
-dracut and the existing GRUB/GPT image adapter. No KIWI/Lorax tool-selection task
-remains. P3a implements the documented synthesis pipeline and release manifest.
+built using locked DNF5 installroot inputs, stock Fedora kernel/module packages,
+dracut and the existing GRUB/GPT image adapter. No recovery kernel compile is
+required. Upstream image reuse may be proposed when simpler under the same contract;
+the current assembly remains default and no second builder is introduced here. P3a implements the documented synthesis pipeline and release manifest.
 Recovery has a read-only ext4 root, bounded RAM runtime, NetworkManager/nmtui and
 SELinux explicitly disabled only in recovery. It ships no desktop, installer or
 automatic updater. Refresh the base approximately annually while respecting Fedora
@@ -66,11 +77,12 @@ that every computer boots. The current build infrastructure does not yet supply
 or qualify that full compatibility set. Unknown platforms get a precise unsupported
 result; new architectures belong in adapters, not scattered vendor branches.
 
-Keep internal-controller exclusion for the initial protected profile, positive
-external identity and destination allowlists. Broad network/peripheral support is
-not permission to enable internal storage controllers, automount, resume, firmware
-writes or os-prober. If required USB/network support conflicts with protection,
-stop for a reviewed profile change. Inspect actual config, modules and initramfs.
+Follow the [storage policy](architecture.md#storage-protection-policy): fixed recovery
+may enumerate internal controllers but confines block/filesystem operations to its
+identified boot device. Experimental profiles retain internal-controller exclusions,
+actual config/module/initramfs checks and independent storage-sensitive review.
+Required internal-storage drivers block experiments; broad recovery compatibility
+does not relax experiment policy. Neither mode permits installed-OS or firmware writes.
 
 Collect hardware details in recovery using the same bounded collector that may
 optionally run on an installed Linux OS. The optional report helps compare the
@@ -86,7 +98,8 @@ are explicit maintenance/rebuilds, separate from experiments.
 
 Generic factory images contain no deployment authorization, controller trust pin,
 network passwords or device secrets. Public signed distribution checksums identify
-release bytes; controller trust is acquired interactively during enrollment.
+release bytes; controller trust is provisioned explicitly during initial manual
+setup, and through verified interactive pairing in the later enrollment workflow.
 Media filesystem/GPT identities identify the boot disk, not a physical target or
 an enrollment. A cloned factory image must receive a fresh enrollment/media-instance
 identity at setup; enrolled drives must not be cloned as additional devices.
@@ -119,8 +132,10 @@ setup records logout/lingering behavior. State and credentials live outside disp
 containers at stable configured paths independent of the invoking working directory. Rootless Fedora builds never
 install experimental packages/modules on the controller OS.
 
-Deliver setup/installation and supported baseline selection without requiring a
-source checkout or manually assembled build manifests. Distinguish recovery boot,
+Deliver supported baseline selection and documented manual authenticated setup first.
+A supported packaged release should not require a source checkout or manually
+assembled experimental build manifests; automated installation/setup can follow the
+attended development path without inventing readiness. Distinguish recovery boot,
 enrollment, experiment eligibility and unattended qualification.
 
 Use shell commands with versioned JSON and typed application services. No MCP or
@@ -165,23 +180,27 @@ Offline recovery waits without reboot loops. Monitoring requires no AI invocatio
 
 | Brief | Deliverable | Gate |
 | --- | --- | --- |
-| P0 | Frozen product CLI, source handoff and observation/recipe contracts | Schema/help fixtures, additive compatibility, authority review |
+| P0 | First-journey CLI/source/observation contracts; retain existing fixtures | Schema/help fixtures, additive compatibility, authority review |
 | P1 | Shared bounded inventory and deterministic supported baseline catalog | Multi-platform fixtures, privacy/limits, unsupported/protection conflicts |
 | P2 | Stable setup/service topology, release installation, JSON API and durable operations | Request replay, restart fencing, pause, managed worker survival |
-| P3 | Generic recovery compatibility, local setup, network persistence, secure pairing and target binding | Unconfigured boot, interrupted enrollment, moved media, wrong trust, private-state isolation |
+| P3 | Stock-kernel recovery, manual authenticated setup and binding; later pairing/wizards | Boot-device restrictions, wrong trust, moved media, private-state isolation; later enrollment interruption |
 | P4 | Attended recovery-to-baseline commissioning workflow | Actual runtime assembly with fake privileged adapters, then operator-run device round trip |
-| P5 | Qualified watchdog and scoped candidate activation authorization | Exact identity/grant/revocation tests, then physical reset coverage |
-| P6 | Complete external investigation, then managed decision scheduling and one concrete adapter | Source snapshots, proposal/outbox replay, usage, auth failures, pause/resume |
+| P5 | Later unattended qualification and scoped candidate activation authorization | Exact identity/grant/revocation tests, then physical reset coverage |
+| P6 | Attended external investigation; later managed scheduling and adapter | Source snapshots, proposal/outbox replay, usage, auth failures, pause/resume |
 | P7 | Bounded diagnostic recipes and patch exports | Explicit stimuli, baseline/patched/revert identities, regression evidence and uncertainty |
 | P8 | Final major-version release qualification | Stable release bytes, infrastructure preservation, fault coverage and declared endurance objective |
 
-Implementation order is P0 contracts; P1 supported baselines and P2 installation/
-persistent services; P3/P4 portable setup and attended baseline; P6 external journey;
-then P6 managed scheduling over that proven workflow. Foundational P7 recipe/observation
-records are needed by P4/P6; broader diagnostics follow. P5 qualification is required
-before unattended operation, not before the attended external journey. P3 includes
-pre-commission capacity choices and endpoint migration. P8 packaging acceptance is
-prepared in P2; expensive final release qualification remains last. Higher-reasoning review
+Implementation order is the needed P0 fixtures; P1 supported baselines and P2 durable
+observable execution; P3 stock-kernel recovery/manual setup/binding; P4 attended
+baseline; P6 external proposals and operator-approved investigation. Implement the
+minimum source/recipe/observation interfaces for this path before optional UX.
+Then add P3 automation, P2 completeness tooling and P6 managed scheduling as bounded
+follow-on work. Foundational P7 recipe/observation records are needed by P4/P6;
+broader diagnostics follow. P5 qualification is required before unattended operation,
+not before the attended external journey. P3 initially uses explicit device confirmation
+and current journaled geometry; advanced capacity choices and endpoint migration
+wizards are later packets. P8 packaging acceptance is prepared in P2; expensive final
+release qualification remains last. Higher-reasoning review
 is required for storage protection, enrollment/boot binding, worker fencing and
 watchdog policy. Bounded implementations use focused tests and the handoff briefs.
 

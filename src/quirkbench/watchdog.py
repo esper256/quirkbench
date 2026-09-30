@@ -409,7 +409,15 @@ def failure_main() -> int:
     mode = "experiment" if candidates[0].endswith("=candidate") else "recovery"
     if marker.get("boot", {}).get("quirkbench.mode") != candidates[0].split("=", 1)[1]:
         raise ValueError("verified boot marker differs from running mode")
-    request_recovery("/var/lib/quirkbench/evidence/control", "Supervisor failed; execution requires reconciliation.", mode=mode)
+    # Never write through an unmounted/replaced evidence path after runtime failure.
+    from .runtime import boot_context, CONTROL
+    try:
+        _,_,verify=boot_context()
+        verify()
+        destination=CONTROL
+    except Exception:
+        destination=Path('/run/quirkbench-storage-failure')
+    request_recovery(destination, "Supervisor failed; execution requires reconciliation.", mode=mode)
     return 0
 
 

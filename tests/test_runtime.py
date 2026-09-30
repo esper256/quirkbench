@@ -60,6 +60,7 @@ def test_boot_context_revalidates_external_identity_before_return(tmp_path, monk
     path.write_text(json.dumps({'config': CONFIG.to_dict(), 'boot': boot}))
     monkeypatch.setattr(runtime, 'parse_cmdline', lambda *a: boot.copy())
     calls = []
+    monkeypatch.setattr(runtime, 'verify_evidence_destination', lambda layout: True)
     monkeypatch.setattr(runtime, 'verify_boot_identity', lambda *a, **k: calls.append(k))
     config, parsed, verify = runtime.boot_context(path)
     assert config == CONFIG and parsed == boot and len(calls) == 1
@@ -78,6 +79,7 @@ def test_boot_context_preserves_specific_capacity_block_and_rejects_forged_eligi
     path = tmp_path/'boot.json'
     path.write_text(json.dumps({'config': CONFIG.to_dict(), 'boot': boot}))
     monkeypatch.setattr(runtime, 'parse_cmdline', lambda *a: {'quirkbench.mode': 'recovery'})
+    monkeypatch.setattr(runtime, 'verify_evidence_destination', lambda layout: True)
     monkeypatch.setattr(runtime, 'verify_boot_identity', lambda *a, **k: True)
     _, parsed, _ = runtime.boot_context(path)
     assert parsed['quirkbench.capacity'] == capacity
@@ -348,3 +350,64 @@ def test_moved_candidate_returns_to_recovery_without_execution(tmp_path, monkeyp
     provision(context.control, target_binding={'schema_version':1, 'system_uuid':UUIDS[1]})
     assert runtime.main(['--once']) == 1
     assert context.steps == [] and len(context.resets) == 1
+
+
+def test_evidence_destination_requires_mounted_p6_and_rejects_replacement(tmp_path,monkeypatch):
+    evidence=tmp_path/'evidence'; evidence.mkdir(); control=evidence/'control'; control.mkdir()
+    node=tmp_path/'p6'; node.write_bytes(b'fake block')
+    layout=SimpleNamespace(partitions=[None]*5+[SimpleNamespace(path=node)])
+    original=runtime.os.stat
+    def stat(path,*args,**kwargs):
+        if Path(path)==node: return SimpleNamespace(st_rdev=original(evidence).st_dev)
+        return original(path,*args,**kwargs)
+    monkeypatch.setattr(runtime.os,'stat',stat)
+    monkeypatch.setattr(runtime.os.path,'ismount',lambda path: path==evidence)
+    runtime.verify_evidence_destination(layout,control)
+    monkeypatch.setattr(runtime.os.path,'ismount',lambda path:False)
+    with pytest.raises(ContractError,match='mounted boot evidence'):
+        runtime.verify_evidence_destination(layout,control)
+
+
+def test_agent_refuses_mutation_after_storage_authority_disappears(tmp_path):
+    from quirkbench.target import TargetAgent
+    from quirkbench.contracts import CapabilityReport
+    live=[True]
+    def verify():
+        if not live[0]: raise ContractError('evidence disconnected')
+    report=CapabilityReport('target','boot',[],mode='recovery')
+    client=SimpleNamespace(device_id='target')
+    target=TargetAgent(client,tmp_path/'target',report,recovery_only=True,verify_storage=verify)
+    before=(tmp_path/'target/journal.json').read_bytes()
+    live[0]=False
+    with pytest.raises(ContractError): target._save()
+    with pytest.raises(ContractError): target.step()
+    assert (tmp_path/'target/journal.json').read_bytes()==before
+
+
+@pytest.mark.parametrize('relative',['agent','agent/blobs'])
+def test_agent_rejects_nested_storage_mount(tmp_path,monkeypatch,relative):
+    import os
+    from quirkbench.target import TargetAgent
+    from quirkbench.contracts import CapabilityReport
+    control=tmp_path/'control'; control.mkdir()
+    state=control/'agent'; state.mkdir(); (state/'blobs').mkdir()
+    original=os.stat
+    redirected=control/relative
+    def stat(path,*args,**kwargs):
+        result=original(path,*args,**kwargs)
+        if Path(path)==redirected:
+            fields=list(result); fields[2]+=1
+            return os.stat_result(fields)
+        return result
+    monkeypatch.setattr(os,'stat',stat)
+    with pytest.raises(ValueError,match='different storage device'):
+        TargetAgent(SimpleNamespace(device_id='target'),state,
+            CapabilityReport('target','boot',[],mode='recovery'),verify_storage=lambda:True)
+
+
+def test_candidate_recovery_request_uses_ram_after_evidence_loss(monkeypatch):
+    writes=[]
+    def unavailable(): raise ContractError('evidence disappeared')
+    monkeypatch.setattr(runtime,'request_recovery',lambda destination,*a,**k:writes.append(destination))
+    runtime.UsbBootControl(CONFIG,'experiment',verify_storage=unavailable).recover()
+    assert writes==[Path('/run/quirkbench-storage-failure')]

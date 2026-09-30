@@ -52,6 +52,7 @@ FINAL_CONFIG = {
     "CONFIG_NVME_RDMA": "n", "CONFIG_NVME_FC": "n",
     "CONFIG_NVME_TCP": "n", "CONFIG_NVME_TARGET_LOOP": "n",
     "CONFIG_ATA": "n",
+    "CONFIG_VMD": "n",
     "CONFIG_MMC": "n", "CONFIG_VIRTIO_BLK": "n",
 }
 
@@ -183,6 +184,27 @@ def _installed_modules(module_dir: Path) -> dict[str, str]:
     return found
 
 
+def recovery_modules_directory(rootfs: Path, *, require_exists: bool = True) -> Path:
+    """Locate modules through Fedora's exact, in-tree usrmerge layout."""
+    legacy = rootfs / "lib"
+    if legacy.is_symlink():
+        if (os.readlink(legacy) != "usr/lib"
+                or (rootfs / "usr").is_symlink()
+                or not (rootfs / "usr").is_dir()
+                or (rootfs / "usr/lib").is_symlink()
+                or not (rootfs / "usr/lib").is_dir()):
+            raise BuildError("unsafe recovery /lib link")
+        directory = rootfs / "usr/lib/modules"
+    else:
+        if not legacy.is_dir() and (require_exists or legacy.exists()):
+            raise BuildError("missing recovery /lib directory")
+        directory = legacy / "modules"
+    if (directory.is_symlink() or (require_exists and not directory.is_dir())
+            or (directory.exists() and not directory.is_dir())):
+        raise BuildError(f"missing or linked module directory: {directory}")
+    return directory
+
+
 def audit_recovery_modules(config: Path, rootfs: Path, kernel_release: str,
                            profile: dict) -> dict:
     """Return a compact audit record, or reject a protection/coverage gap.
@@ -195,10 +217,9 @@ def audit_recovery_modules(config: Path, rootfs: Path, kernel_release: str,
         raise BuildError("invalid kernel release")
     if not rootfs.is_absolute() or rootfs.is_symlink() or not rootfs.is_dir():
         raise BuildError("rootfs must be an absolute real directory")
-    module_dir = rootfs / "lib" / "modules" / kernel_release
-    for path in (rootfs / "lib", rootfs / "lib" / "modules", module_dir):
-        if path.is_symlink() or not path.is_dir():
-            raise BuildError(f"missing or linked module directory: {path}")
+    module_dir = recovery_modules_directory(rootfs) / kernel_release
+    if module_dir.is_symlink() or not module_dir.is_dir():
+        raise BuildError(f"missing or linked module directory: {module_dir}")
     loadable = _index(module_dir / "modules.dep", dependencies=True)
     builtin = _index(module_dir / "modules.builtin", dependencies=False)
     installed = _installed_modules(module_dir)

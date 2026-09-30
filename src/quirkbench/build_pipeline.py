@@ -7,6 +7,7 @@ input fields live in Experiment.provenance without changing the v1 schema.
 
 from __future__ import annotations
 
+import ast
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import fcntl
@@ -37,6 +38,9 @@ from .baseline_catalog import validate_entry
 from .recovery_module_audit import audit_recovery_modules, validate_recovery_final_config
 from .recovery_dracut import MAX_CONFIG_BYTES as MAX_RECOVERY_DRACUT_CONFIG_BYTES, validate_recovery_dracut_config
 from .recovery_initramfs_audit import audit_recovery_initramfs_tree
+from .recovery_fragment import merge_recovery_config
+from .build_cache import BuildStageCache, _copy_file
+from .store import atomic_write
 
 
 GIB = 1024 ** 3
@@ -45,6 +49,24 @@ PIPELINE_VERSION = 1
 LOG_LIMIT = 16 * 1024 * 1024
 BUILD_LOCK_TIMEOUT = 60.0
 EXCLUDED_CREDENTIAL_FILES = {"etc/shadow", "etc/shadow-", "etc/gshadow", "etc/gshadow-"}
+
+
+def _experiment_kbuild_implementation(source_path: Path | None = None) -> str:
+    """Exclude recovery-only helpers from experiment object compatibility."""
+    tree = ast.parse((Path(__file__) if source_path is None else source_path).read_text())
+    names = {"_tree_hash", "_sync_incremental_source", "_extract_archive",
+             "_build_env_for_stage", "BuildInputs", "BuildPipeline",
+             "ResourceLimits", "BoundedRunner"}
+    selected = {node.name: ast.dump(node, include_attributes=False)
+                for node in tree.body
+                if isinstance(node, (ast.FunctionDef, ast.ClassDef))
+                and node.name in names}
+    if set(selected) != names:
+        raise BuildError("experiment Kbuild implementation definitions are missing")
+    return hashlib.sha256(canonical({
+        "definitions": selected, "pipeline_version": PIPELINE_VERSION,
+        "build_helper": sha256_file(Path(build_module.__file__)),
+    })).hexdigest()
 
 
 def _file_identity(path: Path, expected: str) -> None:
@@ -75,6 +97,53 @@ def _tree_hash(root: Path, *, excluded_paths: frozenset[str] = frozenset(EXCLUDE
             raise BuildError(f"target sysroot contains a special file: {entry}")
         digest.update(len(item).to_bytes(8, "big") + mode + item)
     return digest.hexdigest()
+
+
+def _sync_incremental_source(source: Path, destination: Path) -> None:
+    """Update only changed source files at Kbuild's stable absolute path."""
+    if (not source.is_dir() or source.is_symlink()
+            or not destination.is_dir() or destination.is_symlink()):
+        raise BuildError("incremental source trees are unavailable")
+    previous = {path.relative_to(destination): path for path in destination.rglob("*")}
+    current = {path.relative_to(source): path for path in source.rglob("*")}
+    for relative in sorted(previous.keys() - current.keys(), key=lambda item: len(item.parts), reverse=True):
+        path = previous[relative]
+        if path.is_dir() and not path.is_symlink():
+            path.rmdir()
+        else:
+            path.unlink()
+    for relative in sorted(current, key=lambda item: (len(item.parts), str(item))):
+        original = current[relative]
+        target = destination / relative
+        if original.is_symlink():
+            link = original.readlink()
+            if target.is_symlink() and target.readlink() == link:
+                continue
+            if target.exists() or target.is_symlink():
+                if target.is_dir() and not target.is_symlink():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+            target.symlink_to(link)
+        elif original.is_dir():
+            if target.exists() and not target.is_dir():
+                target.unlink()
+            target.mkdir(exist_ok=True)
+            target.chmod(stat.S_IMODE(original.stat().st_mode))
+        elif original.is_file():
+            if target.is_file() and not target.is_symlink() and sha256_file(target) == sha256_file(original):
+                target.chmod(stat.S_IMODE(original.stat().st_mode))
+                continue
+            if target.exists() or target.is_symlink():
+                if target.is_dir() and not target.is_symlink():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+            _copy_file(str(original), str(target))
+        else:
+            raise BuildError("incremental source contains a special file")
+    if _tree_hash(source, excluded_paths=frozenset()) != _tree_hash(destination, excluded_paths=frozenset()):
+        raise BuildError("incremental source update differs from pinned snapshot")
 
 
 def _reject_credentials(root: Path) -> None:
@@ -109,6 +178,8 @@ class BuildInputs:
     source_date_epoch: int
     dracut_config: Path
     dracut_config_sha256: str
+    kernel_source_lineage_sha256: str | None = None
+    kernel_base_source_tar: Path | None = None
 
     def validate(self) -> None:
         for path, digest in (
@@ -122,6 +193,11 @@ class BuildInputs:
         ):
             _file_identity(path, digest)
         sha256(self.target_tree_sha256)
+        if (self.kernel_source_lineage_sha256 is None) != (self.kernel_base_source_tar is None):
+            raise BuildError("experiment source lineage requires a retained base archive")
+        if self.kernel_source_lineage_sha256 is not None:
+            sha256(self.kernel_source_lineage_sha256)
+            _file_identity(self.kernel_base_source_tar, self.kernel_source_lineage_sha256)
         if not re.fullmatch(r"sha256:[0-9a-f]{64}", self.base_image_digest):
             raise BuildError("base image must have an immutable sha256 digest")
         if type(self.source_date_epoch) is not int or self.source_date_epoch < 0:
@@ -135,7 +211,7 @@ class BuildInputs:
             raise BuildError("marked Fedora target sysroot required")
 
     def identity(self) -> dict[str, str | int]:
-        return {
+        identity = {
             "pipeline_version": PIPELINE_VERSION,
             "kernel_source_sha256": self.kernel_source_sha256,
             "kernel_config_sha256": self.kernel_config_sha256,
@@ -150,14 +226,21 @@ class BuildInputs:
             "pipeline_code_sha256": sha256_file(Path(__file__)),
             "build_helper_sha256": sha256_file(Path(build_module.__file__)),
         }
+        if self.kernel_source_lineage_sha256 is not None:
+            identity["kernel_source_lineage_sha256"] = self.kernel_source_lineage_sha256
+        return identity
 
     @classmethod
     def from_mapping(cls, raw: dict) -> "BuildInputs":
-        if set(raw) != set(cls.__dataclass_fields__):
+        optional = {"kernel_source_lineage_sha256", "kernel_base_source_tar"}
+        required = set(cls.__dataclass_fields__) - optional
+        if set(raw) not in (required, required | optional):
             raise BuildError("build provenance must contain exactly the BuildInputs fields")
         path_fields = {name for name in cls.__dataclass_fields__ if name.endswith(("_tar", "_lock"))}
         path_fields.update({"kernel_config", "target_sysroot", "dracut_config"})
-        fields = {name: Path(value) if name in path_fields else value for name, value in raw.items()}
+        path_fields.add("kernel_base_source_tar")
+        fields = {name: Path(value) if name in path_fields and value is not None else value
+                  for name, value in raw.items()}
         return cls(**fields)
 
 
@@ -166,7 +249,8 @@ def capture_build_inputs_manifest(output: Path, *, kernel_source_tar: Path,
                                   target_sysroot: Path, build_rpm_lock: Path,
                                   target_rpm_lock: Path, toolchain_lock: Path,
                                   base_image_digest: str, source_date_epoch: int,
-                                  dracut_config: Path) -> BuildInputs:
+                                  dracut_config: Path,
+                                  kernel_base_source_tar: Path | None = None) -> BuildInputs:
     """Hash actual inputs and atomically write a replay manifest for the CLI.
 
     This captures identity; `BuildPipeline.build` verifies the live container
@@ -185,10 +269,13 @@ def capture_build_inputs_manifest(output: Path, *, kernel_source_tar: Path,
         toolchain_lock, sha256_file(toolchain_lock),
         base_image_digest, source_date_epoch,
         dracut_config, sha256_file(dracut_config),
+        sha256_file(kernel_base_source_tar) if kernel_base_source_tar is not None else None,
+        kernel_base_source_tar,
     )
     inputs.validate()
     raw = {name: str(value) if isinstance(value, Path) else value
-           for name, value in asdict(inputs).items()}
+           for name, value in asdict(inputs).items()
+           if name not in {"kernel_source_lineage_sha256", "kernel_base_source_tar"} or value is not None}
     output.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".pending-build-inputs-", dir=output.parent)
     try:
@@ -238,12 +325,14 @@ class ResourceLimits:
         except (OSError, ValueError, StopIteration) as exc:
             raise BuildError("enforced cgroup CPU and memory limits required") from exc
         controller_cpus = os.cpu_count() or 0
+        if cpu_quota < 1 or cpu_period < 1:
+            raise BuildError("positive enforced cgroup CPU limits required")
         if controller_cpus < 1 or memory > mem_total // 2 or cpu_quota > max(1, controller_cpus // 2) * cpu_period:
             raise BuildError("container cgroup exceeds half of controller CPU or RAM")
         if memory < 4 * GIB:
             raise BuildError("container memory limit below 4 GiB; defer build")
         cpus = max(1, cpu_quota // cpu_period)
-        jobs = max(1, min(cpus, memory // (4 * GIB)))
+        jobs = build_module.kernel_job_budget(cpus, memory)
         return cls(cpus, memory, jobs)
 
 
@@ -263,7 +352,12 @@ class BoundedRunner:
             timeout_s: int, env: dict[str, str], limits: ResourceLimits,
             on_activity: Callable[[str, int, int], None]) -> None:
         _require_container()
-        if phase == "audit-recovery-initramfs":
+        if phase == "initramfs-stock-recovery":
+            _validate_command(command)
+            base=self.workspace/'rootfs/usr/lib/dracut'
+            if env.get('dracutbasedir')!=str(base) or base.is_symlink() or not base.is_dir():
+                raise BuildError('stock dracut requires its explicit private sysroot module base')
+        elif phase == "audit-recovery-initramfs":
             _validate_recovery_initramfs_unpack(command, self.workspace)
         elif phase in {"query-recovery-srpm", "check-recovery-rpm-macros",
                        "unpack-recovery-srpm", "prepare-recovery-source",
@@ -493,7 +587,11 @@ def run_recovery_kernel_stage(build: KernelBuild, *, base_config: bytes,
                               fragment: bytes, staged_config_sha256: str,
                               profile: dict, runner: CommandRunner,
                               limits: ResourceLimits, source_date_epoch: int,
-                              log_dir: Path) -> dict:
+                              log_dir: Path,
+                              resume_resolved_config_sha256: str | None = None,
+                              reuse_prior_config_sha256: str | None = None,
+                              expected_source_tree_sha256: str | None = None,
+                              stable_work_root: Path | None = None) -> dict:
     """Use the existing bounded command adapter for one staged kernel build.
 
     The caller must provide a source tree extracted from the reviewed Fedora
@@ -501,11 +599,21 @@ def run_recovery_kernel_stage(build: KernelBuild, *, base_config: bytes,
     This stage does not publish an image or inspect the initramfs.
     """
     _safe_build_path(log_dir)
-    stage = build.build_dir.parent
+    stage = log_dir.parent
+    if stable_work_root is None:
+        work_root = stage
+    else:
+        work_root = Path(stable_work_root)
+        _safe_build_path(work_root)
+        if (not work_root.is_dir() or work_root.is_symlink()
+                or work_root.resolve() != work_root
+                or work_root.stat().st_uid != os.getuid()
+                or work_root.stat().st_mode & 0o077):
+            raise BuildError("stable recovery Kbuild workspace must be private")
     if (not stage.is_dir() or log_dir.parent != stage
-            or build.source.parent != stage or build.sysroot.parent != stage
-            or build.output_dir.parent != stage):
-        raise BuildError("recovery kernel paths must share one staging directory")
+            or build.source.parent != work_root or build.build_dir.parent != work_root
+            or build.sysroot.parent != stage or build.output_dir.parent != stage):
+        raise BuildError("recovery kernel paths differ from their staged workspace")
     if (type(limits.jobs) is not int or limits.jobs < 1
             or type(limits.cpus) is not int or limits.cpus < 1
             or type(limits.memory_bytes) is not int or limits.memory_bytes < 4 * GIB
@@ -514,8 +622,37 @@ def run_recovery_kernel_stage(build: KernelBuild, *, base_config: bytes,
     validate_profile(profile)
     if log_dir.exists() or log_dir.is_symlink():
         raise BuildError("recovery kernel log directory must be new")
-    env = _build_env_for_stage(stage, source_date_epoch)
-    config = build.stage_recovery_config(base_config, fragment, staged_config_sha256)
+    if hashlib.sha256(merge_recovery_config(base_config, fragment)).hexdigest() != staged_config_sha256:
+        raise BuildError("recovery kernel inputs differ from staged config")
+    env = _build_env_for_stage(work_root, source_date_epoch)
+    if resume_resolved_config_sha256 is not None and reuse_prior_config_sha256 is not None:
+        raise BuildError("kernel stage cannot resume and change config together")
+    if resume_resolved_config_sha256 is None and reuse_prior_config_sha256 is None:
+        if expected_source_tree_sha256 is not None:
+            raise BuildError("source identity applies only to an explicit kernel resume")
+        config = build.stage_recovery_config(base_config, fragment, staged_config_sha256)
+    else:
+        if expected_source_tree_sha256 is None:
+            raise BuildError("kernel resume requires an exact prepared source identity")
+        prior_config = resume_resolved_config_sha256 or reuse_prior_config_sha256
+        sha256(prior_config)
+        sha256(expected_source_tree_sha256)
+        if (not build.build_dir.is_dir() or build.build_dir.is_symlink()
+                or not build.output_dir.is_dir() or build.output_dir.is_symlink()):
+            raise BuildError("kernel resume requires retained private build trees")
+        config = build.build_dir / ".config"
+        if (config.is_symlink() or not config.is_file()
+                or sha256_file(config) != prior_config
+                or _tree_hash(build.source, excluded_paths=frozenset()) != expected_source_tree_sha256):
+            raise BuildError("kernel resume inputs changed")
+        if reuse_prior_config_sha256 is not None:
+            with config.open("wb") as handle:
+                handle.write(merge_recovery_config(base_config, fragment))
+                handle.flush()
+                os.fsync(handle.fileno())
+        module_root = build.sysroot / "lib/modules"
+        if module_root.exists() and any(module_root.iterdir()):
+            raise BuildError("kernel resume requires a fresh module installation root")
     log_dir.mkdir(parents=True)
 
     def execute(command: Command, phase: str, timeout_s: int) -> None:
@@ -524,8 +661,16 @@ def run_recovery_kernel_stage(build: KernelBuild, *, base_config: bytes,
                    timeout_s=timeout_s, env=env, limits=limits,
                    on_activity=lambda _phase, _bytes, _objects: None)
 
-    execute(build.recovery_configure_plan(staged_config_sha256)[0],
-            "configure-recovery", 1800)
+    if resume_resolved_config_sha256 is None and reuse_prior_config_sha256 is None:
+        configure = build.recovery_configure_plan(staged_config_sha256)[0]
+    else:
+        configure = Command(("make", "-C", str(build.source),
+                             f"O={build.build_dir}", "ARCH=x86_64", "olddefconfig"),
+                            build.source)
+    execute(configure, "configure-recovery", 1800)
+    if (resume_resolved_config_sha256 is not None
+            and sha256_file(config) != resume_resolved_config_sha256):
+        raise BuildError("kernel resume resolved config changed")
     final_config = validate_recovery_final_config(config, profile)
     execute(build.kernel_release_plan()[0], "kernel-release", 30)
     release_log = log_dir / "kernel-release.log"
@@ -563,6 +708,9 @@ def run_recovery_kernel_stage(build: KernelBuild, *, base_config: bytes,
         if path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
             raise BuildError(f"recovery kernel output missing: {name}")
         output_hashes[name] = sha256_file(path)
+    if (expected_source_tree_sha256 is not None
+            and _tree_hash(build.source, excluded_paths=frozenset()) != expected_source_tree_sha256):
+        raise BuildError("prepared source changed during kernel resume")
     return {"schema_version": 1, "staged_config_sha256": staged_config_sha256,
             "source_date_epoch": source_date_epoch,
             "final_config": final_config, "kernel_release": release,
@@ -790,7 +938,9 @@ class BuildPipeline:
     def __init__(self, workspace: Path, controller_state: Path,
                  repository: ArtifactRepository, *, runner: CommandRunner | None = None,
                  activity: Callable[[str, str], None] | None = None,
-                 controller=None, campaign_id: str | None = None):
+                 controller=None, campaign_id: str | None = None,
+                 incremental_cache: BuildStageCache | None = None,
+                 resume_reconciled: bool = False):
         _safe_build_path(workspace)
         _safe_build_path(controller_state)
         self.workspace = workspace
@@ -800,6 +950,8 @@ class BuildPipeline:
         self.activity = activity or (lambda phase, message: None)
         self.controller = controller
         self.campaign_id = campaign_id
+        self.incremental_cache = incremental_cache
+        self.resume_reconciled = resume_reconciled
         self._current_activity = None
         (workspace / "build-cache").mkdir(parents=True, exist_ok=True)
         controller_state.mkdir(parents=True, exist_ok=True)
@@ -852,7 +1004,25 @@ class BuildPipeline:
         self._report(phase, f"completed; {latest_bytes} output bytes, {latest_objects} object mentions")
 
     def _build_env(self, stage: Path, inputs: BuildInputs) -> dict[str, str]:
-        return _build_env_for_stage(stage, inputs.source_date_epoch)
+        env = _build_env_for_stage(stage, inputs.source_date_epoch)
+        if self.incremental_cache is not None:
+            work = self._incremental_work(inputs)
+            for name in ("KCFLAGS", "CFLAGS", "CXXFLAGS"):
+                env[name] += f" -ffile-prefix-map={work}=/usr/src/quirkbench"
+        return env
+
+    def _incremental_lineage(self, inputs: BuildInputs) -> str:
+        base = inputs.kernel_source_lineage_sha256 or inputs.kernel_source_sha256
+        identity = {"base_source": base, "builder": inputs.base_image_digest,
+                    "toolchain": inputs.toolchain_lock_sha256,
+                    "build_rpms": inputs.build_rpm_lock_sha256,
+                    "epoch": inputs.source_date_epoch,
+                    "implementation": _experiment_kbuild_implementation()}
+        return "experiment-" + hashlib.sha256(canonical(identity)).hexdigest()[:53]
+
+    def _incremental_work(self, inputs: BuildInputs) -> Path:
+        assert self.incremental_cache is not None
+        return self.incremental_cache.root / self._incremental_lineage(inputs) / "work"
 
     def build(self, inputs: BuildInputs) -> dict[str, Artifact]:
         if self.controller is not None and self.campaign_id is not None:
@@ -928,7 +1098,11 @@ class BuildPipeline:
                 raise BuildError("20 GiB build free-space reserve reached")
             stage = Path(tempfile.mkdtemp(prefix=".pending-", dir=cache))
             try:
-                self._build_stage(stage, inputs, limits, key, identity)
+                if self.incremental_cache is None:
+                    self._build_stage(stage, inputs, limits, key, identity)
+                else:
+                    with self.incremental_cache.lock(self._incremental_lineage(inputs)):
+                        self._build_stage(stage, inputs, limits, key, identity)
                 _make_immutable(stage)
                 _sync_tree(stage)
                 os.replace(stage, final)
@@ -950,10 +1124,120 @@ class BuildPipeline:
                      limits: ResourceLimits, key: str,
                      identity: dict[str, str | int]) -> dict[str, Path]:
         self._report("extract", "verifying and extracting pinned sources")
-        source = _extract_archive(inputs.kernel_source_tar, stage / "kernel-source")
+        extracted_source = _extract_archive(inputs.kernel_source_tar, stage / "kernel-source")
         userspace = _extract_archive(inputs.userspace_source_tar, stage / "userspace-source")
         object_dir, output_dir = stage / "kernel-obj", stage / "artifacts"
-        object_dir.mkdir()
+        source = extracted_source
+        restored_objects = False
+        resumed_objects = False
+        incremental_identity = None
+        work = None
+        if self.incremental_cache is None:
+            object_dir.mkdir()
+        else:
+            lineage = self._incremental_lineage(inputs)
+            work = self._incremental_work(inputs)
+            incremental_identity = {
+                "source": inputs.kernel_source_sha256,
+                "base_source": inputs.kernel_source_lineage_sha256 or inputs.kernel_source_sha256,
+                "builder": inputs.base_image_digest,
+                "toolchain": inputs.toolchain_lock_sha256,
+                "build_rpms": inputs.build_rpm_lock_sha256,
+                "epoch": inputs.source_date_epoch,
+                "config": inputs.kernel_config_sha256,
+                "implementation": _experiment_kbuild_implementation(),
+            }
+            if work.exists() or work.is_symlink():
+                if not self.resume_reconciled:
+                    raise BuildError("uncertain experiment Kbuild workspace requires explicit worker reconciliation")
+                if (work.is_symlink() or not work.is_dir()
+                        or work.stat().st_uid != os.getuid()
+                        or work.stat().st_mode & 0o077):
+                    raise BuildError("interrupted experiment workspace is not private")
+                intent_path = work / "intent.json"
+                if (intent_path.is_symlink() or not intent_path.is_file()
+                        or intent_path.stat().st_size > 64 * 1024):
+                    raise BuildError("interrupted experiment workspace lacks verified intent")
+                try:
+                    raw = intent_path.read_bytes()
+                    intent = json.loads(raw)
+                except (ValueError, UnicodeError) as exc:
+                    raise BuildError("interrupted experiment workspace intent is invalid") from exc
+                if (not isinstance(intent, dict) or raw != canonical(intent) + b"\n"
+                        or set(intent) != {"schema_version", "identity", "source_tree_sha256",
+                                               "resolved_config_sha256", "phase"}
+                        or intent["schema_version"] != 1
+                        or intent["phase"] not in {"seeded", "resolved"}
+                        or not isinstance(intent["source_tree_sha256"], str)
+                        or not re.fullmatch(r"[0-9a-f]{64}", intent["source_tree_sha256"])):
+                    raise BuildError("interrupted experiment workspace intent is invalid")
+                if (intent["identity"] != incremental_identity
+                        or _tree_hash(extracted_source, excluded_paths=frozenset())
+                           != intent["source_tree_sha256"]):
+                    shutil.rmtree(work)
+                elif (_tree_hash(work / "source", excluded_paths=frozenset())
+                      != intent["source_tree_sha256"]):
+                    raise BuildError("interrupted experiment Kbuild inputs changed")
+                elif intent["phase"] == "seeded":
+                    if intent["resolved_config_sha256"] is not None:
+                        raise BuildError("interrupted experiment workspace phase is invalid")
+                    shutil.rmtree(work)
+                else:
+                    resolved = intent["resolved_config_sha256"]
+                    resolved_path = work / "objects/.config"
+                    if (not isinstance(resolved, str)
+                            or not re.fullmatch(r"[0-9a-f]{64}", resolved)
+                            or resolved_path.is_symlink() or not resolved_path.is_file()
+                            or sha256_file(resolved_path) != resolved):
+                        raise BuildError("interrupted experiment Kbuild inputs changed")
+                    resumed_objects = True
+                    restored_objects = True
+                    self._report("kernel-cache", "verified reconciled partial Kbuild workspace")
+            if not work.exists():
+                work.mkdir(mode=0o700)
+            prior = self.incremental_cache.peek_latest(lineage, "experiment-kbuild")
+            compatible = (not resumed_objects and prior is not None
+                          and all(prior["identity"].get(name) == value
+                                  for name, value in incremental_identity.items()
+                                  if name not in {"config", "source"}))
+            if compatible:
+                restored = self.incremental_cache.load_latest(
+                    lineage, "experiment-kbuild",
+                    {"source": work / "source", "objects": work / "objects"})
+                if (_tree_hash(work / "source", excluded_paths=frozenset())
+                        != restored["metadata"].get("source_tree_sha256")):
+                    raise BuildError("experiment source cache differs from pinned input")
+                structural = ("Makefile", "Kbuild", "arch/x86/Makefile")
+                same_structure = all(
+                    ((work / "source" / name).is_file()
+                     and (extracted_source / name).is_file()
+                     and sha256_file(work / "source" / name) == sha256_file(extracted_source / name))
+                    if name == "Makefile" or (work / "source" / name).exists()
+                    or (extracted_source / name).exists() else True
+                    for name in structural)
+                if same_structure:
+                    if restored["identity"]["source"] != inputs.kernel_source_sha256:
+                        _sync_incremental_source(extracted_source, work / "source")
+                    restored_objects = True
+                    self._report("kernel-cache", "verified Kbuild objects restored")
+                else:
+                    shutil.rmtree(work / "source")
+                    shutil.rmtree(work / "objects")
+                    compatible = False
+            elif not resumed_objects:
+                compatible = False
+            if not compatible and not resumed_objects:
+                shutil.copytree(extracted_source, work / "source", symlinks=True,
+                                copy_function=_copy_file)
+                (work / "objects").mkdir()
+                self._report("kernel-cache", "fresh Kbuild object tree required")
+            source, object_dir = work / "source", work / "objects"
+            if not resumed_objects:
+                atomic_write(work / "intent.json", canonical({
+                    "schema_version": 1, "identity": incremental_identity,
+                    "source_tree_sha256": _tree_hash(source, excluded_paths=frozenset()),
+                    "resolved_config_sha256": None, "phase": "seeded",
+                }) + b"\n")
         output_dir.mkdir()
         sysroot = stage / "sysroot"
         self._report("copy-sysroot", "copying pinned Fedora target; completion denominator unknown")
@@ -973,13 +1257,22 @@ class BuildPipeline:
         if (sha256_file(inputs.kernel_source_tar) != inputs.kernel_source_sha256
                 or sha256_file(inputs.userspace_source_tar) != inputs.userspace_source_sha256):
             raise BuildError("source archive changed during extraction")
-        shutil.copyfile(inputs.kernel_config, object_dir / ".config")
-        if sha256_file(object_dir / ".config") != inputs.kernel_config_sha256:
-            raise BuildError("kernel config changed while staging")
+        if not resumed_objects and not (restored_objects and incremental_identity is not None
+                and prior["identity"]["config"] == inputs.kernel_config_sha256):
+            shutil.copyfile(inputs.kernel_config, object_dir / ".config")
+            if sha256_file(object_dir / ".config") != inputs.kernel_config_sha256:
+                raise BuildError("kernel config changed while staging")
         build = KernelBuild(source, object_dir, sysroot, output_dir, jobs=limits.jobs)
         self._run(Command(("make", "-C", str(source), f"O={object_dir}", "ARCH=x86_64", "olddefconfig"), source),
                   stage, "configure", inputs, limits, 1800)
         validate_kernel_config(object_dir / ".config")
+        if work is not None:
+            atomic_write(work / "intent.json", canonical({
+                "schema_version": 1, "identity": incremental_identity,
+                "source_tree_sha256": _tree_hash(source, excluded_paths=frozenset()),
+                "resolved_config_sha256": sha256_file(object_dir / ".config"),
+                "phase": "resolved",
+            }) + b"\n")
         compile_commands = build.compile_plan()
         self._run(compile_commands[0], stage, "compile-kernel", inputs, limits, 8 * 3600)
         self._run(compile_commands[1], stage, "install-modules", inputs, limits, 1800)
@@ -989,6 +1282,28 @@ class BuildPipeline:
         release = release_log.strip()
         if not re.fullmatch(r"[A-Za-z0-9._+-]+", release):
             raise BuildError("invalid kernel release from source tree")
+        module_tree = sysroot / "lib/modules" / release
+        if not module_tree.is_dir():
+            raise BuildError("kernel modules missing from target sysroot")
+        kernel_outputs = build.artifacts(release)
+        for role in ("kernel", "vmlinux", "module_symvers", "system_map"):
+            path = kernel_outputs[role]
+            if path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
+                raise BuildError(f"required kernel output missing or empty: {role}")
+        self._verify_symbols(kernel_outputs, module_tree, release)
+        if work is not None:
+            assert incremental_identity is not None
+            if (sha256_file(inputs.kernel_source_tar) != inputs.kernel_source_sha256
+                    or _tree_hash(source, excluded_paths=frozenset())
+                    != _tree_hash(extracted_source, excluded_paths=frozenset())):
+                raise BuildError("incremental experiment source changed")
+            inputs.validate()
+            self._verify_environment(inputs)
+            self.incremental_cache.publish(
+                self._incremental_lineage(inputs), "experiment-kbuild",
+                incremental_identity, {"source": source, "objects": object_dir},
+                {"source_tree_sha256": _tree_hash(source, excluded_paths=frozenset())})
+            self._report("kernel-cache", "audited Kbuild objects retained before later build stages")
         dracut_confdir = stage / "dracut-conf.d"
         dracut_confdir.mkdir()
         self._run(build.initramfs_plan(release, dracut_config=inputs.dracut_config,
@@ -999,22 +1314,35 @@ class BuildPipeline:
         user_common = ("make", "-C", str(userspace), f"DESTDIR={userspace_dest}", "PREFIX=/usr")
         self._run(Command((*user_common, "all"), userspace), stage, "compile-userspace", inputs, limits, 3600)
         self._run(Command((*user_common, "install"), userspace), stage, "install-userspace", inputs, limits, 1800)
-        module_tree = sysroot / "lib/modules" / release
-        if not module_tree.is_dir():
-            raise BuildError("kernel modules missing from target sysroot")
         _tar_directory(module_tree, output_dir / "modules.tar.xz", inputs.source_date_epoch)
         _tar_directory(userspace_dest, output_dir / "userspace.tar.xz", inputs.source_date_epoch)
-        artifacts = {**build.artifacts(release), "modules": output_dir / "modules.tar.xz",
+        if work is not None:
+            if (sha256_file(inputs.kernel_source_tar) != inputs.kernel_source_sha256
+                    or _tree_hash(source, excluded_paths=frozenset())
+                    != _tree_hash(extracted_source, excluded_paths=frozenset())):
+                raise BuildError("incremental experiment source changed")
+            shutil.copytree(object_dir, stage / "kernel-obj", symlinks=True,
+                            copy_function=_copy_file)
+            snapshot_build = KernelBuild(source, stage / "kernel-obj", sysroot,
+                                         output_dir, jobs=limits.jobs)
+            kernel_artifacts = snapshot_build.artifacts(release)
+        else:
+            kernel_artifacts = build.artifacts(release)
+        artifacts = {**kernel_artifacts, "modules": output_dir / "modules.tar.xz",
                      "userspace": output_dir / "userspace.tar.xz"}
         # Sources and dependency locks are retained evidence, not disposable build cache.
-        for role, source in {
+        for role, evidence_source in {
             "kernel_source": inputs.kernel_source_tar, "userspace_source": inputs.userspace_source_tar,
             "build_rpm_lock": inputs.build_rpm_lock, "target_rpm_lock": inputs.target_rpm_lock,
             "toolchain_lock": inputs.toolchain_lock, "dracut_config": inputs.dracut_config,
         }.items():
             destination = output_dir / role
-            copy_checked(str(source), str(destination))
+            copy_checked(str(evidence_source), str(destination))
             artifacts[role] = destination
+        if inputs.kernel_base_source_tar is not None:
+            destination = output_dir / "kernel_base_source"
+            copy_checked(str(inputs.kernel_base_source_tar), str(destination))
+            artifacts["kernel_base_source"] = destination
         for role, path in artifacts.items():
             if not path.is_file() or path.stat().st_size == 0:
                 raise BuildError(f"required build output missing or empty: {role}")
@@ -1023,12 +1351,14 @@ class BuildPipeline:
         self._verify_environment(inputs)
         if inputs.identity() != identity:
             raise BuildError("build implementation changed during execution")
+        if work is not None:
+            shutil.rmtree(work)
         shutil.rmtree(sysroot)
         record = {"schema": 1, "cache_key": key,
                   "base_image_digest": inputs.base_image_digest,
                   "inputs": {"source_archive": {"sha256": inputs.kernel_source_sha256},
                              "userspace_source_archive": {"sha256": inputs.userspace_source_sha256},
-                             "config": {"sha256": sha256_file(object_dir / ".config")}},
+                             "config": {"sha256": sha256_file((stage / "kernel-obj") / ".config")}},
                   "requested_identity": identity,
                   "kernel_release": release,
                   "outputs": {name: {"path": str(path.relative_to(stage)), "sha256": sha256_file(path),

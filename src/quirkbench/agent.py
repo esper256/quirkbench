@@ -85,7 +85,7 @@ def run_decision(controller, campaign_id, adapter, decision_id=None):
         controller.record_decision(campaign_id, decision, tokens, decision_id)
         if 'experiment' in decision:
             from .contracts import Experiment
-            controller.submit(campaign_id, Experiment.from_dict(decision['experiment']))
+            controller.submit_attended(campaign_id, Experiment.from_dict(decision['experiment']))
         return decision
     except Exception:
         controller.pause(campaign_id, 'agent decision failed; inspect authentication or adapter')

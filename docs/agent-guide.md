@@ -1,5 +1,13 @@
 # Quirkbench agent guide
 
+**Attended-first design, 2026-09-29:** manual authenticated setup precedes the
+external-agent journey. Each candidate attempt requires explicit operator approval
+bound to exact immutable inputs; accepting a proposal or finishing a build is not
+boot authorization. Follow the [storage policy](architecture.md#storage-protection-policy):
+recovery is fixed trusted code, while candidate controller exclusions and independent
+storage-sensitive review remain mandatory. Agent text cannot expand that policy.
+Managed scheduling and unattended watchdog grants are later capabilities.
+
 > **Interface preview:** this guide specifies the intended agent workflow and CLI.
 > The session/context/proposal interfaces below are not implemented end to end.
 > It accompanies the product-preview README; it does not supersede the existing
@@ -167,3 +175,15 @@ Human observations use `session observations SESSION_ID --json` and
 Use the returned response schema and exact request/attempt/step identity. Missing or
 late physical observations are not a passing test. Never manufacture an observation
 or extend a physical experiment deadline while waiting for a person.
+
+## Recovery hardware input
+
+Recovery-only boots automatically report bounded passive hardware inventory after
+manual authenticated setup. Read it with `quirkbench target-inventory TARGET_ID
+--json`; the response contains validated immutable observations, their boot/media
+context and reviewed baseline planning blockers. Use actual reported hardware to
+prepare the first candidate; do not compile an observation-only kernel just to learn
+device IDs. Partial, historical or unavailable reports remain explicit blockers.
+Recovery driver names and sampled CPU features are observations, not build commands
+or proof that every CPU supports a feature. Candidate dependency/protection checks
+and exact operator approval still apply. See [the implementation handoff](stock-recovery-attended.md#automatic-first-boot-hardware-report).

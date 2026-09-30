@@ -9,6 +9,55 @@ from quirkbench.build import (
 )
 
 
+@pytest.mark.parametrize('memory_gib,quota,jobs', [(4, '400000 100000', 2),
+                                                  (8, '400000 100000', 4),
+                                                  (4, '100000 100000', 1)])
+def test_job_selection_uses_worker_capacity_and_cpu_quota(monkeypatch, tmp_path,
+                                                        memory_gib, quota, jobs):
+    import quirkbench.build as module
+
+    readings = {
+        '/proc/meminfo': 'MemAvailable: 25165824 kB\n',
+        '/sys/fs/cgroup/memory.max': str(memory_gib * 1024**3),
+        '/sys/fs/cgroup/memory.current': str(memory_gib * 1024**3 - 1024),
+        '/sys/fs/cgroup/cpu.max': quota,
+    }
+    original = Path.read_text
+    monkeypatch.setattr(Path, 'read_text', lambda path, *a, **kw:
+                        readings[str(path)] if str(path) in readings else original(path, *a, **kw))
+    monkeypatch.setattr(module.os, 'cpu_count', lambda: 16)
+    assert module.recommended_jobs() == jobs
+    build = KernelBuild(*(tmp_path / name for name in ('source', 'obj', 'root', 'out')))
+    assert f'-j{jobs}' in build.compile_plan()[0].argv
+    assert KernelBuild(build.source, build.build_dir, build.sysroot,
+                       build.output_dir, jobs=1).effective_jobs == 1
+    with pytest.raises(BuildError, match='exceeds resource limit'):
+        KernelBuild(build.source, build.build_dir, build.sysroot,
+                    build.output_dir, jobs=jobs + 1).compile_plan()
+
+
+def test_job_budget_rejects_insufficient_memory():
+    from quirkbench.build import kernel_job_budget
+    with pytest.raises(BuildError, match='defer kernel build'):
+        kernel_job_budget(4, 1024**3)
+
+
+@pytest.mark.parametrize('available_gib,jobs', [(12, 4), (6, 2)])
+def test_bounded_worker_reserves_desktop_headroom_without_double_halving(monkeypatch,
+                                                                     available_gib, jobs):
+    import quirkbench.build as module
+    readings = {
+        '/proc/meminfo': f'MemTotal: 33554432 kB\nMemAvailable: {available_gib * 1024**2} kB\n',
+        '/sys/fs/cgroup/memory.max': str(8 * 1024**3),
+        '/sys/fs/cgroup/cpu.max': '400000 100000',
+    }
+    original = Path.read_text
+    monkeypatch.setattr(Path, 'read_text', lambda path, *a, **kw:
+                        readings[str(path)] if str(path) in readings else original(path, *a, **kw))
+    monkeypatch.setattr(module.os, 'cpu_count', lambda: 16)
+    assert module.recommended_jobs() == jobs
+
+
 def _write_config(path: Path, overrides: dict[str, str] | None = None) -> None:
     values = dict(REQUIRED_CONFIG)
     values.update(overrides or {})

@@ -1,5 +1,12 @@
 # Fedora 44 kernel input candidate — 2026-09-28
 
+**Historical record; superseded design on 2026-09-29.** Commands, custom-kernel
+inputs, digests and observations below remain evidence of their runs. Their recovery
+exclusion/build requirements do not govern future default recovery. The
+[revised recovery decision](recovery-base.md) uses stock packages and boot-device-only
+storage operations. The completed custom kernel is retained, not discarded or
+relabelled as qualified. See the [revision audit](design-revision-20260929.md).
+
 This is an acquisition record, not an installed supported baseline or a
 qualified image. The installed catalog remains empty. The candidate is for
 the generic x86-64 UEFI external-USB recovery profile.

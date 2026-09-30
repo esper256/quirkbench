@@ -17,6 +17,12 @@ endif
 test:
 	$(PYTHON) -m pytest $(TESTS)
 
+# Software-only development distribution; never runs image or hardware gates.
+.PHONY: controller-archive
+controller-archive:
+	@test -n "$(OUTPUT)" || { echo "OUTPUT must name a new controller archive" >&2; exit 2; }
+	$(PYTHON) environments/build-controller-archive.py --output "$(OUTPUT)"
+
 # Real UEFI boot cycle: recovery, candidate, missing/load failure and panic fallback.
 acceptance-qemu:
 	@test -n "$(IMAGE)" -a -n "$(OVMF_CODE)" -a -n "$(OVMF_VARS)" -a -n "$(WORK_DIR)" || { echo "IMAGE, OVMF_CODE, OVMF_VARS and empty WORK_DIR are required" >&2; exit 2; }

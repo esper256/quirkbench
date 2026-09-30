@@ -139,11 +139,271 @@ def test_pinned_inputs_and_exact_cache_reuse(tmp_path: Path, monkeypatch) -> Non
         pipeline.build(inputs)
 
 
+def test_experiment_config_retry_reuses_stable_kbuild_tree(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from quirkbench.build_cache import BuildStageCache
+
+    inputs = _inputs(tmp_path)
+    workspace, state = tmp_path / "work", tmp_path / "controller"
+    workspace.mkdir()
+    store = ArtifactStore(tmp_path / "store", reserve_bytes=0)
+    cache = BuildStageCache(state / "intermediate-cache")
+
+    class IncrementalRunner(FakeRunner):
+        def __init__(self):
+            super().__init__()
+            self.previous_object_seen = []
+
+        def run(self, command, *, phase, log, timeout_s, env, limits, on_activity):
+            if phase != "compile-kernel":
+                return super().run(command, phase=phase, log=log,
+                                   timeout_s=timeout_s, env=env, limits=limits,
+                                   on_activity=on_activity)
+            self.phases.append(phase)
+            log.parent.mkdir(exist_ok=True)
+            log.write_text(phase)
+            objects = Path(command.argv[3][2:])
+            self.previous_object_seen.append((objects / "retained.o").exists())
+            (objects / "retained.o").write_bytes(b"compiled once")
+            for relative in ("arch/x86/boot/bzImage", "vmlinux", "Module.symvers", "System.map"):
+                output = objects / relative
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text(relative)
+
+    runner = IncrementalRunner()
+    pipeline = BuildPipeline(workspace, state, store, runner=runner,
+                             incremental_cache=cache)
+    monkeypatch.setattr(pipeline, "_verify_environment", lambda value: None)
+    monkeypatch.setattr(pipeline, "_verify_symbols", lambda *args: None)
+    monkeypatch.setattr(ResourceLimits, "from_cgroup",
+                        classmethod(lambda cls: ResourceLimits(1, 4 * 1024**3, 1)))
+    monkeypatch.setattr("quirkbench.build.recommended_jobs", lambda: 1)
+    monkeypatch.setattr("quirkbench.build_cache.RESERVE", 0)
+    monkeypatch.setattr("quirkbench.build_pipeline.shutil.disk_usage",
+                        lambda path: SimpleNamespace(free=100 * 1024**3))
+    original_check_output = subprocess.check_output
+
+    def check_output(argv, **kwargs):
+        if argv[0] == "make":
+            return "6.12.60-quirkbench\n"
+        return original_check_output(argv, **kwargs)
+
+    monkeypatch.setattr("quirkbench.build_pipeline.subprocess.check_output", check_output)
+    pipeline.build(inputs)
+    assert runner.previous_object_seen == [False]
+    changed = tmp_path / "changed.config"
+    changed.write_bytes(inputs.kernel_config.read_bytes() + b"CONFIG_RETRY_TEST=y\n")
+    second = replace(inputs, kernel_config=changed,
+                     kernel_config_sha256=sha256_file(changed))
+    pipeline.build(second)
+    assert runner.previous_object_seen == [False, True]
+    patched_source = tmp_path / "patched-kernel.tar.xz"
+    _tar(patched_source, "linux", {
+        "Makefile": b"kernelrelease:\n\t@echo 6.12.60-quirkbench\n",
+        "driver.c": b"/* reviewed source snapshot edit */\n",
+    })
+    third = replace(second, kernel_source_tar=patched_source,
+                    kernel_source_sha256=sha256_file(patched_source),
+                    kernel_source_lineage_sha256=inputs.kernel_source_sha256,
+                    kernel_base_source_tar=inputs.kernel_source_tar)
+    pipeline.build(third)
+    assert runner.previous_object_seen == [False, True, True]
+    assert len(cache.list()) == 1
+    changed_toolchain = tmp_path / "changed-toolchain.json"
+    changed_toolchain.write_text(
+        '{"gcc":"gcc 2","ld":"ld 1","make":"make 1","dracut":"dracut 1"}\n')
+    fourth = replace(third, toolchain_lock=changed_toolchain,
+                     toolchain_lock_sha256=sha256_file(changed_toolchain))
+    pipeline.build(fourth)
+    assert runner.previous_object_seen == [False, True, True, False]
+
+
+def test_experiment_partial_kbuild_requires_reconciliation_and_matching_inputs(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from quirkbench.build_cache import BuildStageCache
+
+    inputs = _inputs(tmp_path)
+    workspace, state = tmp_path / "work", tmp_path / "controller"
+    workspace.mkdir()
+    store = ArtifactStore(tmp_path / "store", reserve_bytes=0)
+    cache = BuildStageCache(state / "intermediate-cache")
+
+    class InterruptedRunner(FakeRunner):
+        fail = True
+        fail_later = False
+        mark_partial = False
+        retained = False
+        partial_seen = False
+
+        def run(self, command, **kwargs):
+            phase = kwargs["phase"]
+            if phase == "compile-kernel":
+                self.phases.append(phase)
+                kwargs["log"].parent.mkdir(exist_ok=True)
+                kwargs["log"].write_text(phase)
+                objects = Path(command.argv[3][2:])
+                self.retained = (objects / "retained.o").exists()
+                self.partial_seen = (objects / "partial-only.o").exists()
+                (objects / "retained.o").write_bytes(b"partial object")
+                if self.fail and self.mark_partial:
+                    (objects / "partial-only.o").write_bytes(b"discard me")
+                for relative in ("arch/x86/boot/bzImage", "vmlinux", "Module.symvers", "System.map"):
+                    output = objects / relative
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    output.write_text(relative)
+                if self.fail:
+                    raise BuildError("interrupted compiler")
+                return
+            super().run(command, **kwargs)
+            if phase == "initramfs" and self.fail_later:
+                raise BuildError("later image stage failed")
+
+    runner = InterruptedRunner()
+
+    def pipeline(*, reconciled=False):
+        result = BuildPipeline(workspace, state, store, runner=runner,
+                               incremental_cache=cache,
+                               resume_reconciled=reconciled)
+        monkeypatch.setattr(result, "_verify_environment", lambda value: None)
+        monkeypatch.setattr(result, "_verify_symbols", lambda *args: None)
+        return result
+
+    monkeypatch.setattr(ResourceLimits, "from_cgroup",
+                        classmethod(lambda cls: ResourceLimits(1, 4 * 1024**3, 1)))
+    monkeypatch.setattr("quirkbench.build.recommended_jobs", lambda: 1)
+    monkeypatch.setattr("quirkbench.build_cache.RESERVE", 0)
+    monkeypatch.setattr("quirkbench.build_pipeline.shutil.disk_usage",
+                        lambda path: SimpleNamespace(free=100 * 1024**3))
+    original_check_output = subprocess.check_output
+    monkeypatch.setattr("quirkbench.build_pipeline.subprocess.check_output",
+                        lambda argv, **kw: "6.12.60-quirkbench\n" if argv[0] == "make"
+                        else original_check_output(argv, **kw))
+    with pytest.raises(BuildError, match="interrupted compiler"):
+        pipeline().build(inputs)
+    with pytest.raises(BuildError, match="requires explicit worker reconciliation"):
+        pipeline().build(inputs)
+    changed = tmp_path / "changed.config"
+    changed.write_bytes(inputs.kernel_config.read_bytes() + b"CONFIG_RETRY_TEST=y\n")
+    mismatched = replace(inputs, kernel_config=changed,
+                         kernel_config_sha256=sha256_file(changed))
+    runner.fail = False
+    pipeline(reconciled=True).build(inputs)
+    assert runner.retained is True
+    assert not pipeline()._incremental_work(inputs).exists()
+    runner.fail = True
+    runner.mark_partial = True
+    with pytest.raises(BuildError, match="interrupted compiler"):
+        pipeline().build(mismatched)
+    newer = tmp_path / "newer.config"
+    newer.write_bytes(inputs.kernel_config.read_bytes() + b"CONFIG_NEWER_TEST=y\n")
+    newer_inputs = replace(inputs, kernel_config=newer,
+                           kernel_config_sha256=sha256_file(newer))
+    runner.fail = False
+    pipeline(reconciled=True).build(newer_inputs)
+    assert runner.partial_seen is False
+    runner.fail_later = True
+    with pytest.raises(BuildError, match="later image stage failed"):
+        pipeline().build(mismatched)
+    lineage = pipeline()._incremental_lineage(mismatched)
+    retained = cache.peek_latest(lineage, "experiment-kbuild")
+    assert retained["identity"]["config"] == mismatched.kernel_config_sha256
+    runner.fail_later = False
+    pipeline(reconciled=True).build(mismatched)
+    assert runner.retained is True
+
+
+def test_reconciled_preconfig_experiment_workspace_starts_fresh(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from quirkbench.build_cache import BuildStageCache
+
+    inputs = _inputs(tmp_path)
+    workspace, state = tmp_path / "work", tmp_path / "controller"
+    workspace.mkdir()
+    cache = BuildStageCache(state / "intermediate-cache")
+
+    class InterruptedConfigure(FakeRunner):
+        fail = True
+
+        def run(self, command, **kwargs):
+            phase = kwargs["phase"]
+            if phase == "configure" and self.fail:
+                raise BuildError("configure interrupted")
+            if phase == "compile-kernel":
+                self.phases.append(phase)
+                kwargs["log"].parent.mkdir(exist_ok=True)
+                kwargs["log"].write_text(phase)
+                objects = Path(command.argv[3][2:])
+                for relative in ("arch/x86/boot/bzImage", "vmlinux", "Module.symvers", "System.map"):
+                    output = objects / relative
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    output.write_text(relative)
+                return
+            super().run(command, **kwargs)
+
+    runner = InterruptedConfigure()
+
+    def pipeline(reconciled=False):
+        result = BuildPipeline(workspace, state,
+                               ArtifactStore(tmp_path / "store", reserve_bytes=0),
+                               runner=runner, incremental_cache=cache,
+                               resume_reconciled=reconciled)
+        monkeypatch.setattr(result, "_verify_environment", lambda value: None)
+        monkeypatch.setattr(result, "_verify_symbols", lambda *args: None)
+        return result
+
+    monkeypatch.setattr(ResourceLimits, "from_cgroup",
+                        classmethod(lambda cls: ResourceLimits(1, 4 * 1024**3, 1)))
+    monkeypatch.setattr("quirkbench.build.recommended_jobs", lambda: 1)
+    monkeypatch.setattr("quirkbench.build_cache.RESERVE", 0)
+    monkeypatch.setattr("quirkbench.build_pipeline.shutil.disk_usage",
+                        lambda path: SimpleNamespace(free=100 * 1024**3))
+    original_check_output = subprocess.check_output
+    monkeypatch.setattr("quirkbench.build_pipeline.subprocess.check_output",
+                        lambda argv, **kw: "6.12.60-quirkbench\n" if argv[0] == "make"
+                        else original_check_output(argv, **kw))
+    with pytest.raises(BuildError, match="configure interrupted"):
+        pipeline().build(inputs)
+    work = pipeline()._incremental_work(inputs)
+    assert json.loads((work / "intent.json").read_text())["phase"] == "seeded"
+    runner.fail = False
+    pipeline(reconciled=True).build(inputs)
+    assert not work.exists()
+
+
+def test_experiment_object_key_ignores_recovery_only_function(tmp_path):
+    from quirkbench import build_pipeline
+    from quirkbench.build_pipeline import _experiment_kbuild_implementation
+
+    source = Path(build_pipeline.__file__).read_text()
+    copied = tmp_path / "build_pipeline.py"
+    copied.write_text(source)
+    baseline = _experiment_kbuild_implementation(copied)
+    copied.write_text(source.replace("def run_recovery_source_stage(",
+                                     "def run_recovery_source_stage_revised(", 1))
+    assert _experiment_kbuild_implementation(copied) == baseline
+    copied.write_text(source.replace("    def _build_stage(self, stage:",
+                                     "    def _build_stage_revised(self, stage:", 1))
+    assert _experiment_kbuild_implementation(copied) != baseline
+
+
 def test_digest_change_fails_before_build(tmp_path: Path) -> None:
     inputs = _inputs(tmp_path)
     inputs.kernel_config.write_text("changed\n")
     with pytest.raises(BuildError, match="digest mismatch"):
         inputs.validate()
+
+
+def test_source_delta_requires_retained_matching_base_archive(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    inputs = _inputs(tmp_path)
+    with pytest.raises(BuildError, match="requires a retained base archive"):
+        replace(inputs, kernel_source_lineage_sha256=inputs.kernel_source_sha256).validate()
+    with pytest.raises(BuildError, match="digest mismatch"):
+        replace(inputs, kernel_source_lineage_sha256="0" * 64,
+                kernel_base_source_tar=inputs.kernel_source_tar).validate()
 
 
 def test_runtime_manifest_captures_and_reloads_exact_inputs(tmp_path: Path) -> None:
@@ -317,7 +577,15 @@ def test_resource_limits_require_enforced_half_controller_cgroup(tmp_path: Path,
     monkeypatch.setattr(Path, "read_text", read_text)
     monkeypatch.setattr("quirkbench.build_pipeline.os.cpu_count", lambda: 16)
     limits = ResourceLimits.from_cgroup(tmp_path)
-    assert limits.cpus == 4 and limits.memory_bytes == 4 * 1024**3 and limits.jobs == 1
+    assert limits.cpus == 4 and limits.memory_bytes == 4 * 1024**3 and limits.jobs == 2
+    (tmp_path / "memory.max").write_text(str(8 * 1024**3))
+    assert ResourceLimits.from_cgroup(tmp_path).jobs == 4
+    (tmp_path / "cpu.max").write_text("100000 100000\n")
+    assert ResourceLimits.from_cgroup(tmp_path).jobs == 1
+    (tmp_path / "cpu.max").write_text("400000 0\n")
+    with pytest.raises(BuildError, match="positive enforced"):
+        ResourceLimits.from_cgroup(tmp_path)
+    (tmp_path / "cpu.max").write_text("400000 100000\n")
     (tmp_path / "memory.max").write_text("max\n")
     with pytest.raises(BuildError, match="enforced cgroup"):
         ResourceLimits.from_cgroup(tmp_path)

@@ -29,12 +29,16 @@ RootfsInstaller = Callable[[dict, dict, object, Path], Path]
 
 def run_recovery_base_stage(recipe: dict, catalog: dict, store, stage: Path, *,
                             runner: CommandRunner, limits: ResourceLimits,
-                            rootfs_installer: RootfsInstaller = _install) -> dict:
+                            rootfs_installer: RootfsInstaller = _install, cache=None) -> dict:
     """Stage an exact rootfs and kernel from one preflighted recovery recipe.
 
     The staging path must be new. Failures leave it private with phase logs;
     no incomplete result is published or treated as a usable image.
     """
+    if recipe.get("schema_version") == 2:
+        from .recovery_stock_pipeline import run_base
+        return run_base(recipe, store, Path(stage), runner=runner, limits=limits,
+                        rootfs_installer=rootfs_installer, cache=cache)
     checked = preflight_recipe(recipe, catalog, store)
     stage = Path(stage)
     _safe_build_path(stage)
@@ -125,6 +129,12 @@ def run_recovery_runtime_stage(recipe: dict, catalog: dict, store, stage: Path,
         if preexisting_units - set(checked["unit_allowlist"]):
             raise BuildError("unreviewed recovery unit already present in rootfs")
     runtime_installer(rootfs, assets_dir)
+    if recipe.get("schema_version") == 2:
+        from .store import atomic_write
+        atomic_write(rootfs / "usr/lib/quirkbench/recovery-storage-policy.json",
+                     canonical(checked["profile"]))
+        from .recovery_storage import install_guard
+        install_guard(rootfs)
     audit_installed_runtime(rootfs, manifest)
     _check_recovery_unit_links(rootfs)
     if (rootfs / "etc/quirkbench/boot.json").exists() or (rootfs / "etc/quirkbench/boot.json").is_symlink():
@@ -145,6 +155,12 @@ def run_recovery_initramfs_from_recipe(recipe: dict, catalog: dict, store,
                                        runner: CommandRunner,
                                        limits: ResourceLimits) -> dict:
     """Audit both preceding stages and build a private, recipe-bound initramfs."""
+    if recipe.get("schema_version") == 2:
+        from .recovery_stock_pipeline import run_initramfs
+        initramfs = run_initramfs(recipe, store, Path(stage), base_record, runtime_record,
+                                 runner=runner, limits=limits)
+        return {**base_record, "runtime_revision_sha256": recipe["runtime_revision_sha256"],
+                "initramfs_stage": initramfs}
     checked = preflight_recipe(recipe, catalog, store)
     stage = Path(stage)
     _safe_build_path(stage)
@@ -217,9 +233,30 @@ def prepare_recovery_image_stage(recipe: dict, catalog: dict, store, stage: Path
                                  output: Path, *, runner: CommandRunner,
                                  limits: ResourceLimits,
                                  rootfs_installer: RootfsInstaller = _install,
-                                 runtime_installer: Callable[[Path, Path | None], None] = install_recovery_runtime_base) -> dict:
+                                 runtime_installer: Callable[[Path, Path | None], None] = install_recovery_runtime_base,
+                                 cache=None,
+                                 cache_event: Callable[[str, str, float], None] | None = None,
+                                 cache_record_event: Callable[[dict], None] | None = None,
+                                 builder_config_digest: str | None = None,
+                                 resume_reconciled: bool = False) -> dict:
     """Join locked private stages and return audited image inputs without assembly."""
     from .recovery_image_plan import prepare_recovery_image_inputs
+
+    if cache is not None and recipe.get("schema_version") != 2:
+        from .build_cache import BuildStageCache
+        from .recovery_incremental import prepare_cached_recovery_image_stage
+        if not isinstance(cache, BuildStageCache):
+            raise BuildError("recovery cache must be a private BuildStageCache")
+        return prepare_cached_recovery_image_stage(
+            recipe, catalog, store, stage, output, cache=cache, runner=runner,
+            limits=limits, rootfs_installer=rootfs_installer,
+            runtime_installer=runtime_installer, event=cache_event,
+            record_event=cache_record_event,
+            builder_config_digest=builder_config_digest,
+            resume_reconciled=resume_reconciled)
+
+    if resume_reconciled:
+        raise BuildError("explicit recovery workspace resume requires the intermediate cache")
 
     preflight_recipe(recipe, catalog, store)
     stage, output = Path(stage), Path(output)
@@ -230,7 +267,8 @@ def prepare_recovery_image_stage(recipe: dict, catalog: dict, store, stage: Path
             or output.parent.is_symlink()):
         raise BuildError("recovery image output must be a new regular-file path outside the private stage")
     base = run_recovery_base_stage(recipe, catalog, store, stage, runner=runner,
-                                   limits=limits, rootfs_installer=rootfs_installer)
+                                   limits=limits, rootfs_installer=rootfs_installer,
+                                   cache=cache if recipe.get("schema_version") == 2 else None)
     runtime = run_recovery_runtime_stage(recipe, catalog, store, stage, base,
                                          runtime_installer=runtime_installer)
     initramfs = run_recovery_initramfs_from_recipe(
@@ -285,7 +323,7 @@ def sign_and_publish_recovery_image(assembled: dict, signing_home: Path,
         Path(trusted_public_key), fingerprint,
         run=verification_run or subprocess.run)
     return {"image": str(output), "manifest": str(Path(str(output) + ".json")),
-            "candidate": candidate, "verified_checksums": verified}
+            "candidate": candidate, "verified_checksums": verified, "signature_sha256": digest(signature)}
 
 
 def assemble_signed_recovery_image(recipe: dict, catalog: dict, store,

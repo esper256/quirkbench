@@ -54,7 +54,8 @@ actual drivers and capabilities; do not treat a profile name as qualification.
 
 Protection and reset decisions are made per target. Some targets may lack a usable
 watchdog, require a different boot backend or have a storage topology incompatible
-with the initial driver-exclusion policy. Report unsupported capabilities and block
+with the candidate driver-exclusion policy or recovery boot-device policy. See the
+[storage policy](architecture.md#storage-protection-policy). Report unsupported capabilities and block
 the affected operation until reviewed support exists. A generic tool must be able
 to describe these limitations rather than pretend one mechanism works everywhere.
 

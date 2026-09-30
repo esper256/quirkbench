@@ -69,6 +69,13 @@ CREATE TABLE observation_responses(request TEXT PRIMARY KEY REFERENCES observati
 CREATE TABLE observation_response_commands(id TEXT PRIMARY KEY, request TEXT NOT NULL REFERENCES observation_requests(id), document TEXT NOT NULL);
 """]
 
+from .operator_approval import OperatorApprovals, MIGRATION as APPROVAL_MIGRATION
+MIGRATIONS.append(APPROVAL_MIGRATION)
+MIGRATIONS.append("""
+CREATE TABLE hardware_inventories(seq INTEGER PRIMARY KEY, device TEXT NOT NULL REFERENCES devices(id), boot TEXT NOT NULL, digest TEXT NOT NULL, context TEXT NOT NULL, received REAL NOT NULL, UNIQUE(device,boot,digest));
+CREATE INDEX hardware_inventories_device ON hardware_inventories(device,seq);
+""")
+
 def uid():
     return uuid.uuid4().hex
 
@@ -238,6 +245,106 @@ class _LifecycleOwner:
             raise
         return claimed
 
+    def _stop_worker_once(self, claim, services, *, allow_previous_boot=False):
+        """Persist exact verified stop evidence in the existing operation journal."""
+        controller=self.controller
+        fields=('worker_unit','worker_boot_id','worker_generation','stage_dir','input_digest')
+        proof={key:claim[key] for key in fields}
+        with controller.transaction() as db:
+            records=db.execute("SELECT document FROM operation_events WHERE operation=? AND kind='worker_stopped' ORDER BY id DESC",(claim['id'],)).fetchall()
+            for record in records:
+                stored=json.loads(record[0])
+                if (all(stored.get(key)==value for key,value in proof.items())
+                        and stored.get('stop_kind') in (('stopped','previous_boot') if allow_previous_boot else ('stopped',))):
+                    return stored
+        kind=services.stop_and_verify(claim['worker_unit'],claim['worker_boot_id'])
+        if kind not in (('stopped','previous_boot') if allow_previous_boot else ('stopped',)):
+            raise Conflict('worker whole-unit shutdown is unverified')
+        proof['stop_kind']=kind
+        with controller.transaction() as db:
+            row=db.execute('SELECT * FROM operations WHERE id=?',(claim['id'],)).fetchone()
+            epoch=db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
+            if (self.closed or controller._lifecycle_owner is not self or epoch!=self.epoch
+                    or row is None or any(row[key]!=claim[key] for key in fields)):
+                raise Conflict('worker identity changed during reconciliation before stop evidence publication')
+            db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
+                (claim['id'],controller.clock(),'worker_stopped',canonical(proof).decode()))
+        return proof
+
+    def consume_recovery_rootfs(self, operation_id, *, services, query=None):
+        """Stop the staged worker, validate output, then publish its audit under fencing.
+
+        This publishes a verified rootfs stage, never an image_prepare success.
+        The same coordinator owns subsequent assembly/publication.
+        """
+        if self.closed or self.controller._lifecycle_owner is not self:
+            raise Conflict('controller lifecycle ownership ended')
+        from .recovery_worker import validate_staged_rootfs
+        with self.controller.transaction() as db:
+            row=db.execute('SELECT * FROM operations WHERE id=?',(identifier(operation_id),)).fetchone()
+            epoch=db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
+            if (row is None or row['kind']!='image_prepare' or row['state']!='RUNNING'
+                    or row['worker_epoch']!=self.epoch or epoch!=self.epoch or row['worker_unit'] is None
+                    or self.controller.clock()>=row['deadline']):
+                raise Conflict('current recovery worker ownership required')
+            claim=dict(row)
+        self._stop_worker_once(claim,services)
+        summary=validate_staged_rootfs(self.controller,claim,query=query)
+        artifact=self.controller.store.put(canonical(summary))
+        published=self.controller._publish_operation(operation_id,self.epoch,claim['worker_generation'],
+                                                     output_refs=(artifact.sha256,),expected_claim=claim)
+        return {'operation':published,'rootfs':str(Path(claim['stage_dir'])/'output/rootfs'),
+                'audit_sha256':artifact.sha256,'operation_complete':False}
+
+    def consume_recovery_image(self, operation_id, *, services, signing_home,
+                               trusted_public_key, fingerprint, query=None,
+                               signing_run=None, verification_run=None):
+        """Validate a stopped full stock worker, sign locally and publish fenced CAS."""
+        if self.closed or self.controller._lifecycle_owner is not self:
+            raise Conflict('controller lifecycle ownership ended')
+        from .recovery_worker import validate_staged_rootfs
+        from .recovery_image_worker import validate_completed_image
+        from .recovery_synthesis import sign_and_publish_recovery_image
+        from .recovery_rootfs import _json
+        controller=self.controller
+        with controller.transaction() as db:
+            row=db.execute('SELECT * FROM operations WHERE id=?',(identifier(operation_id),)).fetchone()
+            epoch=db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
+            if (row is None or row['kind']!='image_prepare' or row['state']!='RUNNING'
+                    or epoch!=self.epoch or row['worker_epoch']!=self.epoch
+                    or row['worker_unit'] is None or controller.clock()>=row['deadline']):
+                raise Conflict('current recovery image worker ownership required')
+            claim=dict(row)
+        arguments=recovery_rootfs_arguments(_json(controller.store.get(claim['input_digest']),'image intent'))
+        if 'recipe_sha256' not in arguments: raise ContractError('rootfs-only operation cannot publish an image')
+        self._stop_worker_once(claim,services)
+        audit=validate_staged_rootfs(controller,claim,query=query)
+        assembled=validate_completed_image(Path(claim['stage_dir'])/'output',arguments,controller.root/'artifacts')
+        if self.closed or controller._lifecycle_owner is not self:
+            raise Conflict('controller lifecycle ownership ended before signing')
+        signed=sign_and_publish_recovery_image(assembled,Path(signing_home),Path(trusted_public_key),fingerprint,
+            signing_run=signing_run,verification_run=verification_run)
+        image=Path(signed['image'])
+        refs=[controller.store.put(canonical(audit)).sha256]
+        candidate=signed['candidate']
+        expected={'':candidate['image_sha256'],'.json':candidate['image_manifest_sha256'],
+                  '.sha256':digest((candidate['image_sha256']+'  '+image.name+'\n').encode()),
+                  '.release-candidate.json':digest(canonical(candidate)),
+                  '.checksums.json':digest(canonical(signed['verified_checksums'])+b'\n'),
+                  '.checksums.json.sig':signed['signature_sha256']}
+        for suffix in ('','.json','.sha256','.release-candidate.json','.checksums.json','.checksums.json.sig'):
+            path=Path(str(image)+suffix)
+            if path.resolve()!=path or not path.is_file(): raise ContractError('signed image output is missing or linked')
+            retained=controller.store.put_file(path).sha256
+            if suffix in expected and retained!=expected[suffix]:
+                raise ContractError('signed image bytes changed before CAS publication')
+            refs.append(retained)
+        published=controller._publish_operation(operation_id,self.epoch,claim['worker_generation'],
+            output_refs=refs,state='SUCCEEDED',result={'public_artifacts':refs,'private_deliverable':None},
+            expected_claim=claim,clear_stopped_worker=True)
+        return {'operation':published,'image_sha256':refs[1],
+                'qualification_status':signed['candidate']['qualification_status']}
+
     def reconcile_units(self, services):
         """Clear ownership only after a full service/cgroup stop is established."""
         if self.closed or self.controller._lifecycle_owner is not self:
@@ -247,13 +354,13 @@ class _LifecycleOwner:
             if current != self.epoch:
                 raise Conflict('controller lifecycle epoch changed')
             rows = [dict(row) for row in db.execute(
-                "SELECT id,state,worker_unit,worker_boot_id,worker_generation FROM operations WHERE worker_unit IS NOT NULL ORDER BY id")]
+                "SELECT * FROM operations WHERE worker_unit IS NOT NULL ORDER BY id")]
         cleared = []
         for saved in rows:
             if saved['state'] not in ('INTERRUPTED', 'SUCCEEDED', 'FAILED'):
                 raise Conflict('active worker must finish or be interrupted before reconciliation')
             # Never hold SQLite open while a manager stop or cgroup check waits.
-            proof = services.stop_and_verify(saved['worker_unit'], saved['worker_boot_id'])
+            proof = self._stop_worker_once(saved,services,allow_previous_boot=True)['stop_kind']
             if proof not in ('stopped', 'previous_boot'):
                 raise Conflict('worker stop proof is unavailable')
             with self.controller.transaction() as db:
@@ -273,7 +380,7 @@ class _LifecycleOwner:
                 cleared.append(saved['id'])
         return cleared
 
-class Controller:
+class Controller(OperatorApprovals):
     def __init__(self, root, clock=time.time, reserve_bytes=20 * 1024**3, deployment_repository=None,
                  boot_id_reader=controller_boot_id):
         self.root = Path(root)
@@ -437,6 +544,26 @@ class Controller:
             input_refs=input_refs, source_refs=source_refs, local_paths=local_paths)
         for value in intent['input_refs'] + intent['source_refs']:
             self.store.verify(value)
+        retained_inputs=set(intent['input_refs'])
+        if (kind=='image_prepare' and isinstance(arguments,dict)
+                and arguments.get('schema_version')==2 and 'rootfs_lock_sha256' in arguments):
+            fixed=recovery_rootfs_arguments(intent)
+            from .recovery_stock import preflight_lock,validate_lock
+            from .recovery_rootfs import _json
+            lock=validate_lock(_json(self.store.get(fixed['rootfs_lock_sha256']),'stock rootfs lock'))
+            _,packages,_=preflight_lock(lock,self.store)
+            retained_inputs.update(lock[key] for key in lock if key.endswith('_sha256'))
+            retained_inputs.update(package['sha256'] for package in packages)
+            if 'recipe_sha256' in fixed:
+                from .recovery_recipe import load_recipe
+                from .recovery_stock import preflight_recipe
+                recipe=load_recipe(self.store.get(fixed['recipe_sha256']))
+                if (recipe['schema_version']!=2 or recipe['rootfs_lock_sha256']!=fixed['rootfs_lock_sha256']
+                        or recipe['builder_image_digest']!=fixed['builder_config_digest']):
+                    raise ContractError('recovery image recipe differs from immutable worker inputs')
+                preflight_recipe(recipe,self.store)
+                retained_inputs.update(recipe[key] for key in recipe if key.endswith('_sha256'))
+            for value in retained_inputs: self.store.verify(value)
         stored = self.store.put(raw)
         with self.transaction() as db:
             if db.execute('SELECT 1 FROM observation_response_commands WHERE id=?', (request_id,)).fetchone():
@@ -445,6 +572,9 @@ class Controller:
             if previous:
                 if previous['request_digest'] != request_digest:
                     raise Conflict('request ID already has different immutable operation intent')
+                for value in retained_inputs:
+                    db.execute('INSERT OR IGNORE INTO refs(owner,digest) VALUES(?,?)',(previous['id'],value))
+                    db.execute('INSERT OR IGNORE INTO operation_refs(operation,role,digest) VALUES(?,"input",?)',(previous['id'],value))
                 return self._operation_status(db, previous['id'])
             if campaign_id is not None:
                 campaign = self._campaign(db, campaign_id)
@@ -457,13 +587,25 @@ class Controller:
             queued_epoch = db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
             db.execute('INSERT INTO operations(id,request_id,request_digest,input_digest,kind,campaign,device,state,created,updated,queued_epoch) VALUES(?,?,?,?,?,?,?,\'QUEUED\',?,?,?)',
                        (operation_id, request_id, request_digest, stored.sha256, kind, campaign_id, device_id, now, now, queued_epoch))
-            for role, values in (('input', [stored.sha256] + intent['input_refs']), ('source', intent['source_refs'])):
+            for role, values in (('input', [stored.sha256] + sorted(retained_inputs)), ('source', intent['source_refs'])):
                 for value in set(values):
                     db.execute('INSERT OR IGNORE INTO refs(owner,digest) VALUES(?,?)', (operation_id, value))
                     db.execute('INSERT INTO operation_refs(operation,role,digest) VALUES(?,?,?)', (operation_id, role, value))
             db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
                        (operation_id, now, 'accepted', canonical({'state': 'QUEUED'}).decode()))
             return self._operation_status(db, operation_id)
+
+    def admit_recovery_image(self, request_id, recipe_sha256, builder_archive_sha256):
+        """Admit the complete stock image with immutable recipe, using existing intent."""
+        from .recovery_recipe import load_recipe
+        recipe=load_recipe(self.store.get(sha256(recipe_sha256)))
+        if recipe['schema_version']!=2: raise ContractError('new recovery image admission requires v2')
+        arguments={'schema_version':2,'recipe_sha256':recipe_sha256,
+                   'rootfs_lock_sha256':recipe['rootfs_lock_sha256'],
+                   'builder_config_digest':recipe['builder_image_digest'],
+                   'builder_archive_sha256':sha256(builder_archive_sha256)}
+        return self.admit_operation(request_id,'image_prepare',arguments,
+            input_refs=[recipe_sha256,recipe['rootfs_lock_sha256'],builder_archive_sha256])
 
     def _operation_status(self, db, operation_id):
         row = db.execute('SELECT * FROM operations WHERE id=?', (identifier(operation_id),)).fetchone()
@@ -604,8 +746,10 @@ class Controller:
                 os.close(fd)
 
     def _publish_operation(self, operation_id, worker_epoch, worker_generation, *,
-                           output_refs=(), state=None, result=None, error=None):
+                           output_refs=(), state=None, result=None, error=None, expected_claim=None, clear_stopped_worker=False):
         """P2b worker hook: fence and reference publication share one transaction."""
+        if clear_stopped_worker and (expected_claim is None or state not in ('SUCCEEDED','FAILED')):
+            raise ContractError('clearing a worker requires exact stopped terminal publication')
         if state not in (None, 'SUCCEEDED', 'FAILED'):
             raise ContractError('invalid publication state')
         if (state == 'SUCCEEDED' and error is not None) or (state == 'FAILED' and result is not None):
@@ -648,6 +792,19 @@ class Controller:
             if (row['state'] != 'RUNNING' or row['worker_epoch'] != worker_epoch
                     or row['worker_generation'] != worker_generation or current_epoch != worker_epoch):
                 raise Conflict('stale or inactive operation worker')
+            if expected_claim is not None:
+                owner=self._lifecycle_owner
+                if owner is None or owner.closed or owner.epoch!=worker_epoch:
+                    raise Conflict('controller lifecycle ownership ended before adoption')
+                fields=('worker_epoch','worker_generation','worker_unit','worker_boot_id','stage','stage_dir','input_digest','deadline')
+                if (any(row[key]!=expected_claim[key] for key in fields) or (state!='FAILED' and self.clock()>=row['deadline'])):
+                    raise Conflict('recovery worker claim changed before adoption')
+            if clear_stopped_worker:
+                proof={key:row[key] for key in ('worker_unit','worker_boot_id','worker_generation','stage_dir','input_digest')}
+                proof['stop_kind']='stopped'
+                records=db.execute("SELECT document FROM operation_events WHERE operation=? AND kind='worker_stopped'",(operation_id,)).fetchall()
+                if not any(json.loads(record[0])==proof for record in records):
+                    raise Conflict('exact durable worker-stop evidence required before clearing ownership')
             if state == 'SUCCEEDED':
                 retained = {item[0] for item in db.execute(
                     "SELECT digest FROM operation_refs WHERE operation=? AND role='output'", (operation_id,))}
@@ -662,12 +819,22 @@ class Controller:
                 column = 'result_digest' if state == 'SUCCEEDED' else 'error_digest'
                 db.execute(f'UPDATE operations SET state=?,{column}=?,updated=? WHERE id=?',
                            (state, terminal.sha256, now, operation_id))
+                if clear_stopped_worker:
+                    db.execute('UPDATE operations SET worker_unit=NULL,worker_boot_id=NULL WHERE id=?',(operation_id,))
             db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
                        (operation_id, now, 'finished' if state else 'output',
                         canonical({'state': state or 'RUNNING', 'outputs': outputs}).decode()))
             return self._operation_status(db, operation_id)
 
     def register(self, report: CapabilityReport):
+        from .inventory import validate_inventory, InventoryLimits
+        hardware = report.inventory.get('hardware_inventory')
+        artifact = None
+        if hardware is not None:
+            validate_inventory(hardware, limits=InventoryLimits(report_bytes=512*1024))
+            if (report.mode != 'recovery' or hardware['platform']['collection_environment'] != 'recovery'
+                    or hardware['platform']['architecture'] != report.inventory.get('architecture')):
+                raise ContractError('hardware inventory must describe the registering recovery platform')
         with self.transaction() as db:
             prior = db.execute('SELECT * FROM devices WHERE id=?', (report.device_id,)).fetchone()
             generation = prior['generation'] if prior else 1
@@ -680,7 +847,61 @@ class Controller:
                 self._uncertain(db, "a.device=? AND (a.state!='BOOT_PENDING' OR ?!='experiment')", (report.device_id, report.mode), 'target boot changed; execution uncertain')
             db.execute('INSERT INTO devices(id,boot,generation,report,last_contact) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET boot=excluded.boot,generation=excluded.generation,report=excluded.report,last_contact=excluded.last_contact', (report.device_id, report.boot_id, generation, canonical(asdict(report)).decode(), self.clock()))
             db.execute('INSERT OR IGNORE INTO boot_history VALUES(?,?)', (report.device_id, report.boot_id))
-            return {'device_id': report.device_id, 'generation': generation}
+            if hardware is not None:
+                # CAS bytes are durable before the association and ACK commit.
+                # Old boots cannot insert evidence after supersession validation.
+                artifact = self.store.put(canonical(hardware))
+                context = {key: report.inventory.get(key) for key in
+                           ('target_binding', 'media_instance_id', 'kernel_release')}
+                db.execute('INSERT OR IGNORE INTO hardware_inventories(device,boot,digest,context,received) VALUES(?,?,?,?,?)',
+                           (report.device_id, report.boot_id, artifact.sha256, canonical(context).decode(), self.clock()))
+                db.execute('INSERT OR IGNORE INTO refs(owner,digest) VALUES(?,?)',
+                           ('hardware-inventory:' + report.device_id, artifact.sha256))
+            return {'device_id': report.device_id, 'generation': generation,
+                    **({'hardware_inventory_digest': artifact.sha256} if artifact else {})}
+
+    def target_inventory(self, device_id, *, controller_architecture=None):
+        """Read latest recovery observations and a pinned baseline plan; queue nothing."""
+        from .inventory import load_inventory
+        from .hardware_plan import plan_hardware
+        from .baseline_catalog import installed_catalog, select_baseline
+        with self.transaction() as db:
+            device = db.execute('SELECT * FROM devices WHERE id=?', (identifier(device_id),)).fetchone()
+            if device is None:
+                raise ContractError('unknown target')
+            row = db.execute('SELECT * FROM hardware_inventories WHERE device=? ORDER BY seq DESC LIMIT 1', (device_id,)).fetchone()
+            current = json.loads(device['report'])
+            supplied = current.get('inventory', {}).get('hardware_inventory')
+            if current['mode'] == 'recovery' and supplied is not None:
+                current_row = db.execute('SELECT * FROM hardware_inventories WHERE device=? AND boot=? AND digest=?',
+                    (device_id, device['boot'], digest(canonical(supplied)))).fetchone()
+                if current_row is not None:
+                    row = current_row
+            if row is None:
+                return {'device_id': device_id, 'inventory': None, 'plan': None,
+                        'ready_for_candidate_preparation': False,
+                        'blocking_reasons': ['recovery_inventory_unavailable']}
+            raw = self.store.get(row['digest'])
+            inventory = load_inventory(raw)
+            context = json.loads(row['context'])
+            fresh = (device['boot'] == row['boot'] and current['mode'] == 'recovery'
+                     and 'hardware_inventory' in current.get('inventory', {})
+                     and digest(canonical(current['inventory']['hardware_inventory'])) == row['digest']
+                     and all(current.get('inventory', {}).get(key) == context.get(key)
+                             for key in ('target_binding', 'media_instance_id')))
+            plan = select_baseline(plan_hardware(raw, controller_architecture=controller_architecture),
+                                   installed_catalog(), self.store)
+            blockers = list(plan['blocking_reasons'])
+            if not fresh:
+                blockers.append('recovery_inventory_not_current')
+            if not context.get('target_binding') or not context.get('media_instance_id'):
+                blockers.append('target_media_binding_unavailable')
+            return {'device_id': device_id, 'boot_id': row['boot'],
+                    'inventory_digest': row['digest'], 'received_at': row['received'],
+                    'current_recovery': fresh, 'context': context, 'inventory': inventory,
+                    'plan': plan, 'blocking_reasons': sorted(set(blockers)),
+                    'ready_for_candidate_preparation': not blockers,
+                    'execution_authorized': False}
 
     def create_campaign(self, campaign_id, device_id):
         identifier(campaign_id)
@@ -694,6 +915,13 @@ class Controller:
             if not db.execute('SELECT id FROM devices WHERE id=?', (device_id,)).fetchone():
                 raise ContractError('register the device first')
             db.execute("INSERT INTO campaigns(id,device,state) VALUES(?,?,'PAUSED')", (campaign_id, device_id))
+
+    def submit_attended(self, campaign_id, experiment: Experiment):
+        """Current external-agent entry point; legacy submit remains replay-compatible."""
+        from .operator_approval import CAPABILITY
+        if 'deployment' in experiment.artifacts and CAPABILITY not in experiment.required_capabilities:
+            raise ContractError('physical proposals must require operator-approval.v1')
+        return self.submit(campaign_id, experiment)
 
     def submit(self, campaign_id, experiment: Experiment):
         spec = canonical(experiment.to_dict()).decode()
@@ -819,6 +1047,11 @@ class Controller:
                 attempt_id = uid()
                 deadline = self.clock() + spec['timeout_s'] + (1800 if 'deployment' in spec['artifacts'] else 120)
                 db.execute("INSERT INTO attempts(id,job,device,boot,generation,token,lease_until,deadline,state,result,resolution,created) VALUES(?,?,?,?,?,?,?,?,'CLAIMED',NULL,NULL,?)", (attempt_id, job['id'], device_id, boot_id, device['generation'], secrets.token_urlsafe(32), min(self.clock() + 60, deadline), deadline, self.clock()))
+                from .operator_approval import required
+                if 'deployment' in spec['artifacts'] and required(spec, report):
+                    inventory={key:report.get('inventory',{}).get(key) for key in ('media_instance_id','target_binding')}
+                    db.execute('UPDATE attempts SET approval_required=1,approval_inventory=? WHERE id=?',
+                               (canonical(inventory).decode(), attempt_id))
                 db.execute("UPDATE jobs SET state='ACTIVE' WHERE id=?", (job['id'],))
             db.execute('INSERT INTO claims VALUES(?,?,?,?)', (device_id, boot_id, request_id, attempt_id))
             return self._claim_reply(db, self._attempt(db, attempt_id)) if attempt_id else None
@@ -849,6 +1082,7 @@ class Controller:
                     or device['boot'] != boot_id or device['generation'] != row['generation']
                     or row['lease_until'] <= self.clock()):
                     raise Conflict('handoff already consumed or differs')
+                self._require_operator_approval(db, row)
                 return {'attempt_id': attempt_id, 'state': 'BOOT_PENDING', 'revision': revision}
             self._live(db, attempt_id, token, boot_id)
             device = db.execute('SELECT report FROM devices WHERE id=?', (row['device'],)).fetchone()
@@ -858,6 +1092,7 @@ class Controller:
             manifest = self._deployment_manifest(spec['artifacts'].get('deployment'))
             if manifest.revision != revision:
                 raise Conflict('revision differs from authorized experiment')
+            self._require_operator_approval(db, row)
             db.execute("UPDATE attempts SET state='BOOT_PENDING',handoff_revision=?,handoff_origin=?,lease_until=? WHERE id=?", (revision, boot_id, min(self.clock()+300, row['deadline']), attempt_id))
             return {'attempt_id': attempt_id, 'state': 'BOOT_PENDING', 'revision': revision}
 
@@ -958,7 +1193,10 @@ class Controller:
                 if row['result'] != document:
                     raise Conflict('completed result is immutable')
                 return {'acknowledged': True, 'attempt_id': result.attempt_id, 'state': 'COMPLETE'}
-            if row['state'] not in ('RUNNING', 'UNCERTAIN') or row['resolution'] or row['boot'] != boot_id:
+            rejected_before_handoff = (row['state'] == 'CLAIMED' and row['handoff_revision'] is None
+                and result.outcome == 'NEEDS_HUMAN' and row['boot'] == boot_id
+                and self._approval_status(db, row)['state'] == 'rejected')
+            if (row['state'] not in ('RUNNING', 'UNCERTAIN') and not rejected_before_handoff) or row['resolution'] or row['boot'] != boot_id:
                 raise Conflict('attempt is not eligible for completion')
             recorded = {item[0] for item in db.execute('SELECT digest FROM evidence WHERE attempt=?', (result.attempt_id,))}
             if not set(result.evidence) <= recorded:

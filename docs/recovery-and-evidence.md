@@ -1,5 +1,12 @@
 # Bare-metal experiments, recovery, and diagnostic coverage
 
+**Delivery/protection revision, 2026-09-29:** the first journey is attended with a
+manual-reset path. Fixed recovery uses stock Fedora packages and boot-device-only
+storage operations; candidate kernels retain exclusions. See the authoritative
+[storage policy](architecture.md#storage-protection-policy). Unattended qualification
+and grants remain later capabilities. The experimental no-kexec policy below is
+unchanged; stock recovery kernel features do not authorize crash-kernel loading.
+
 Quirkbench experiments boot the candidate Linux kernel directly on the physical
 target computer through its firmware and USB GRUB. QEMU tests Quirkbench's infrastructure:
 image assembly, kernel/initramfs smoke boot, one-shot consumption, recovery
@@ -72,7 +79,7 @@ automatic recovery and a useful trace from every arbitrarily early hard hang.
 
 ## Current implementation versus planned capability
 
-The current kernel protection policy explicitly disables KEXEC and KEXEC_FILE,
+The current experimental kernel protection policy explicitly disables KEXEC and KEXEC_FILE,
 so **kdump is not implemented or available in the current image**. Enabling it
 requires a reviewed policy revision, tests for the capture kernel's identical
 internal-storage/firmware exclusions, verified capture artifacts, and physical

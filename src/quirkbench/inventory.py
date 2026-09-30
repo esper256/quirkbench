@@ -20,6 +20,7 @@ from typing import Any, Callable
 from .contracts import ContractError, canonical, digest
 
 COLLECTOR_REVISION = "passive-sysfs-v1"
+EXTENDED_REVISION = "passive-sysfs-v2"
 LIMITS_VERSION = 1
 SOURCES = {"sysfs", "procfs"}
 STATUSES = {"observed", "absent", "permission_denied", "tool_missing", "timed_out", "truncated"}
@@ -28,6 +29,16 @@ PROPERTY_GROUPS = {
     "usb": ("idVendor", "idProduct", "bDeviceClass", "bDeviceSubClass", "bDeviceProtocol"),
     "net": ("type", "operstate"),
 }
+EXTENDED_GROUPS = {
+    **{group: props + (("modalias", "driver") if group in ("pci", "usb") else ())
+       for group, props in PROPERTY_GROUPS.items()},
+    "acpi": ("hid", "modalias", "driver"),
+    "i2c": ("name", "modalias", "driver"),
+    "hid": ("modalias", "driver"),
+}
+DMI_PROPERTIES = ("sys_vendor", "product_name", "product_version", "board_vendor",
+                  "board_name", "bios_vendor", "bios_version", "bios_date")
+CPU_PROPERTIES = ("vendor_id", "cpu family", "model", "model name", "stepping")
 PROPERTY_MAX_CHARS = 256
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9:._-]{0,127}\Z")
 HEX = re.compile(r"(?:0x)?[0-9A-Fa-f]{1,8}\Z")
@@ -76,7 +87,7 @@ class InventoryCollector:
     """Only enumerates fixed sysfs classes and a single procfs memory property."""
 
     def __init__(self, *, sys_root: Path = Path("/sys"), proc_root: Path = Path("/proc"),
-                 environment: str = "recovery", architecture: str | None = None,
+                 environment: str = "recovery", architecture: str | None = None, extended: bool = False,
                  limits: InventoryLimits | None = None, monotonic: Callable[[], float] = time.monotonic,
                  utcnow: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
         if environment not in ("recovery", "installed_os"):
@@ -84,6 +95,7 @@ class InventoryCollector:
         self.sys_root = Path(sys_root)
         self.proc_root = Path(proc_root)
         self.environment = environment
+        self.extended = extended
         self.architecture = architecture if architecture is not None else platform.machine()
         if not isinstance(self.architecture, str) or not self.architecture or len(self.architecture) > 64:
             raise InventoryError("invalid architecture")
@@ -113,7 +125,7 @@ class InventoryCollector:
             return "truncated", None
         return "observed", raw
 
-    def _read_property(self, path: Path, root: Path) -> tuple[str, str | None]:
+    def _read_property(self, path: Path, root: Path, *, empty_is_absent=False) -> tuple[str, str | None]:
         status, raw = self._read_bytes(path, root)
         if status != "observed":
             return status, None
@@ -121,6 +133,8 @@ class InventoryCollector:
             value = raw.decode("ascii").strip()
         except UnicodeDecodeError:
             return "truncated", None
+        if not value and empty_is_absent:
+            return "absent", None
         if not value or len(value) > PROPERTY_MAX_CHARS or "\n" in value or "\r" in value:
             return "truncated", None
         return "observed", value
@@ -140,6 +154,20 @@ class InventoryCollector:
         if len(parts) != 3 or parts[2] != "kB" or not parts[1].isdigit():
             return "truncated", None
         return "observed", int(parts[1])
+
+    def _read_driver(self, base: Path) -> tuple[str, str | None]:
+        path = base / "driver"
+        if not path.exists() and not path.is_symlink():
+            return "absent", None
+        if not _within(path, self.sys_root):
+            return "permission_denied", None
+        try:
+            resolved = path.resolve(strict=True)
+            if resolved.parent.name != "drivers" or not NAME.fullmatch(resolved.name):
+                return "permission_denied", None
+            return "observed", resolved.name
+        except OSError:
+            return "absent", None
 
     def collect(self) -> dict:
         started = self.monotonic()
@@ -177,9 +205,10 @@ class InventoryCollector:
             item_count += 1
             return True
 
-        for group, directory in (("pci", self.sys_root / "bus/pci/devices"),
-                                 ("usb", self.sys_root / "bus/usb/devices"),
-                                 ("net", self.sys_root / "class/net")):
+        groups = EXTENDED_GROUPS if self.extended else PROPERTY_GROUPS
+        for group in groups:
+            directory = (self.sys_root / "class/net" if group == "net"
+                         else self.sys_root / "bus" / group / "devices")
             try:
                 names, over = _entry_names(directory, self.sys_root, self.limits.items + 1)
             except PermissionError:
@@ -193,8 +222,10 @@ class InventoryCollector:
                     if not add(f"{group}.{name}.enumeration", "sysfs", "permission_denied", None):
                         break
                     continue
-                for prop in PROPERTY_GROUPS[group]:
-                    status, value = self._read_property(base / prop, self.sys_root)
+                for prop in groups[group]:
+                    status, value = (self._read_driver(base) if prop == "driver"
+                                     else self._read_property(base / prop, self.sys_root,
+                                                              empty_is_absent=self.extended and prop in ("modalias", "hid")))
                     if status == "observed" and not _valid_property(group, prop, value):
                         status, value = "truncated", None
                     if not add(f"{group}.{name}.{prop}", "sysfs", status, value):
@@ -213,11 +244,47 @@ class InventoryCollector:
             status, value = self._read_memory()
             add("memory.total_kib", "procfs", status, value)
 
+        def stopped():
+            if self.monotonic() - started >= self.limits.total_seconds and "collection_deadline" not in reasons:
+                reasons.append("collection_deadline")
+            return any(reason in reasons for reason in ("collection_deadline", "item_limit", "report_limit"))
+
+        if self.extended and not stopped():
+            for prop in DMI_PROPERTIES:
+                if stopped():
+                    add("dmi." + prop, "sysfs", "timed_out", None)
+                    break
+                status, value = self._read_property(self.sys_root / "class/dmi/id" / prop, self.sys_root)
+                if not add("dmi." + prop, "sysfs", status, value):
+                    break
+            if stopped():
+                status, raw = "timed_out", None
+            else:
+                status, raw = self._read_bytes(self.proc_root / "cpuinfo", self.proc_root)
+            first_cpu = {}
+            if raw is not None:
+                try:
+                    stanza = raw.decode("ascii").split("\n\n", 1)[0]
+                    first_cpu = {k.strip(): v.strip() for line in stanza.splitlines()
+                                 if ":" in line for k, v in [line.split(":", 1)]}
+                except UnicodeDecodeError:
+                    status = "truncated"
+            for prop in CPU_PROPERTIES:
+                value = first_cpu.get(prop)
+                observed = status if status != "observed" else ("observed" if value else "absent")
+                if value is not None and (not value or len(value) > PROPERTY_MAX_CHARS):
+                    observed, value = "truncated", None
+                if not add("cpu." + prop.replace(" ", "_"), "procfs", observed, value):
+                    break
+            for feature in sorted(set(first_cpu.get("flags", "").split())):
+                if NAME.fullmatch(feature) and not add("cpu.feature." + feature, "procfs", "observed", 1):
+                    break
+
         efi = self.sys_root / "firmware/efi"
         firmware = "uefi" if _within(efi, self.sys_root) and efi.is_dir() else "unknown"
         report = {
-            "schema_version": 1,
-            "collector_revision": COLLECTOR_REVISION,
+            "schema_version": 2 if self.extended else 1,
+            "collector_revision": EXTENDED_REVISION if self.extended else COLLECTOR_REVISION,
             "collected_at": stamp,
             "platform": {"architecture": self.architecture, "boot_method": firmware,
                          "collection_environment": self.environment},
@@ -235,6 +302,12 @@ class InventoryCollector:
 def _valid_property(group: str, prop: str, value: Any) -> bool:
     if not isinstance(value, str):
         return False
+    if prop in ("modalias", "hid"):
+        return re.fullmatch(r"[A-Za-z0-9_:.*+\-]{1,256}", value) is not None
+    if prop == "driver":
+        return NAME.fullmatch(value) is not None
+    if prop == "name":
+        return value.isascii() and value.isprintable() and len(value) <= PROPERTY_MAX_CHARS
     if group in ("pci", "usb"):
         return HEX.fullmatch(value) is not None
     if prop == "type":
@@ -242,18 +315,23 @@ def _valid_property(group: str, prop: str, value: Any) -> bool:
     return value in NET_STATES
 
 
-def _valid_key_value(key: str, source: str, status: str, data: Any) -> bool:
+def _valid_key_value(key: str, source: str, status: str, data: Any, *, extended=False) -> bool:
+    groups = EXTENDED_GROUPS if extended else PROPERTY_GROUPS
+    if extended and (key in {"dmi." + p for p in DMI_PROPERTIES} or key in {"cpu." + p.replace(" ", "_") for p in CPU_PROPERTIES}):
+        return source == ("sysfs" if key.startswith("dmi.") else "procfs") and (status != "observed" or isinstance(data, str) and data.isascii() and data.isprintable())
+    if extended and key.startswith("cpu.feature."):
+        return source == "procfs" and NAME.fullmatch(key[len("cpu.feature."):]) is not None and status == "observed" and type(data) is int and data == 1
     if key == "memory.total_kib":
         return source == "procfs" and (status != "observed" or type(data) is int and data > 0)
     if key == "dmi.chassis_type":
         return source == "sysfs" and (status != "observed" or isinstance(data, str) and data.isdigit() and 1 <= int(data) <= 36)
     group, separator, rest = key.partition(".")
-    if not separator or group not in PROPERTY_GROUPS:
+    if not separator or group not in groups:
         return False
     name, separator, prop = rest.rpartition(".")
     if rest == "enumeration" or prop == "enumeration" and NAME.fullmatch(name):
         return source == "sysfs" and status == "permission_denied"
-    if not separator or not NAME.fullmatch(name) or prop not in PROPERTY_GROUPS[group]:
+    if not separator or not NAME.fullmatch(name) or prop not in groups[group]:
         return False
     return source == "sysfs" and (status != "observed" or _valid_property(group, prop, data))
 
@@ -262,9 +340,9 @@ def validate_inventory(value: Any, *, limits: InventoryLimits | None = None) -> 
     limits = limits or InventoryLimits()
     if not isinstance(value, dict) or set(value) != {"schema_version", "collector_revision", "collected_at", "platform", "observations", "summary"}:
         raise InventoryError("invalid inventory fields")
-    if type(value["schema_version"]) is not int or value["schema_version"] != 1:
+    if type(value["schema_version"]) is not int or value["schema_version"] not in (1, 2):
         raise InventoryError("unsupported inventory version")
-    if value["collector_revision"] != COLLECTOR_REVISION:
+    if value["collector_revision"] != (EXTENDED_REVISION if value["schema_version"] == 2 else COLLECTOR_REVISION):
         raise InventoryError("unsupported collector revision")
     try:
         datetime.strptime(value["collected_at"], "%Y-%m-%dT%H:%M:%SZ")
@@ -292,7 +370,7 @@ def validate_inventory(value: Any, *, limits: InventoryLimits | None = None) -> 
             raise InventoryError("partial observation must have null value")
         if status == "observed" and (type(data) not in (str, int) or isinstance(data, str) and (not data or len(data) > PROPERTY_MAX_CHARS)):
             raise InventoryError("invalid observed value")
-        if not _valid_key_value(key, source, status, data):
+        if not _valid_key_value(key, source, status, data, extended=value["schema_version"] == 2):
             raise InventoryError("observation is outside the property allowlist")
     summary = value["summary"]
     if not isinstance(summary, dict) or set(summary) != {"state", "limits_version", "observation_count", "partial_reasons"}:
@@ -345,9 +423,10 @@ def store_inventory(store: Any, raw: bytes):
 def main(argv: list[str] | None = None, *, collector_factory=InventoryCollector) -> int:
     command = argparse.ArgumentParser(prog="python -m quirkbench.inventory")
     command.add_argument("--environment", choices=("recovery", "installed_os"), default="recovery")
+    command.add_argument("--extended", action="store_true", help="collect v2 driver, CPU and platform observations")
     args = command.parse_args(argv)
     try:
-        report = collector_factory(environment=args.environment).collect()
+        report = collector_factory(environment=args.environment, **({"extended": True} if args.extended else {})).collect()
         sys.stdout.buffer.write(canonical(report) + b"\n")
         return 0 if report["summary"]["state"] == "complete" else 2
     except (InventoryError, OSError) as exc:

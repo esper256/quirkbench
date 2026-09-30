@@ -1,5 +1,13 @@
 # Product interface contract
 
+**Initial delivery, revised 2026-09-29:** an attended external-agent investigation in
+an owner-controlled lab, using manual authenticated setup and exact operator-approved
+attempts. The roadmap's delivery tiers govern dependencies. Sections describing
+pairing automation, managed decisions, endpoint/advanced capacity wizards and guided
+backup completeness specify later capabilities. They do not gate the first journey.
+Use the [storage policy](architecture.md#storage-protection-policy) for distinct
+recovery and experimental protections; no runtime/schema change is claimed here.
+
 This is the planned C8 extension to the [implementation contracts](implementation-contracts.md).
 It makes the [preview manual](../README.md) implementable; features below remain
 pending until their handoff gates pass. Existing C0–C7 safety and durability rules
@@ -43,14 +51,16 @@ worker fencing and bounded cleanup; a second CLI cannot become another scheduler
 
 ## Public CLI and sessions
 
-Freeze these command families before implementation. Session records map to existing
+Freeze only command forms needed by the initial attended journey before their
+implementation. Retain already frozen fixtures; the full table also lists later
+interfaces and is not a requirement to implement or refreeze everything first. Session records map to existing
 campaigns; do not add a parallel execution database. JSON uses the C2 versioned envelope,
 stable error codes and bounded cursor queries. Mutations use request IDs; retrying the
 same request returns the same durable intent, and changed content conflicts.
 
 | Commands | Contract |
 | --- | --- |
-| `setup`, `pair`, `targets`, `target qualify TARGET` | Idempotent setup; short-lived pairing; readiness query; separately authorized physical qualification. |
+| `setup`, `pair`, `targets`, `target qualify TARGET` | Initial manual authenticated setup/readiness; later setup/pairing wizard and separately authorized qualification. |
 | `session start --device TARGET [--problem FILE] [--driver external]` | Persist scope/driver/workspace selection; the session owns its initial attended baseline operation. Final default is managed when configured, otherwise offer external mode. |
 | `session context/recipes/proposal-schema SESSION --json` | Bounded context, installed eligible recipes and exact proposal schema. |
 | `session propose SESSION --file FILE --request-id ID` | Accept a proposal and return an operation ID; source validation/freezing and execution happen later under C3. |
@@ -60,7 +70,7 @@ same request returns the same durable intent, and changed content conflicts.
 | `operation status ID --json`, `session status/watch SESSION` | Same progress facts in machine and human views; watching launches no agent. |
 | `session pause/resume SESSION`, `session export SESSION --output PATH` | Existing pause/reconciliation fences; export is a public investigation bundle. |
 | `session observations SESSION --json`, `session respond SESSION --request ID --file FILE --request-id ID` | Query and durably answer typed human requests; monitor is a client of this same API. |
-| `backup --output PATH`, `restore` | Guided completeness checking and paused restore; retain existing positional backup syntax as an alias where present. |
+| `backup --output PATH`, `restore` | Initial retained backup behavior with explicit contents/omissions and paused restore; later guided completeness. Retain existing positional syntax. |
 
 Specify exact argument/schema/help fixtures in P0; unsupported commands must not
 pretend to work. Keep frozen wire names such as `device_id` and `--device`.
@@ -138,6 +148,12 @@ editors require explicit quiescence/checkpointing; pause does not terminate them
 
 ## Endpoint changes and media capacity
 
+**Later wizards.** Initially document explicit paused endpoint maintenance with
+existing validated configuration and current fixed journaled geometry. Local full
+boot-device confirmation and capacity refusal remain mandatory before mutation;
+advanced sizing UX and automatic migration orchestration do not gate attended use.
+The following describes the later operator-guided tooling.
+
 Endpoint migration is an operator-guided controller/target setup transaction. A changed
 IP may require a new certificate SAN, even when the CA is retained. Validate endpoint
 reachability and trust before activating an atomic private configuration generation;
@@ -156,6 +172,12 @@ to a target with different RAM; insufficient capacity blocks affected operations
 automatically repartitions enrolled media. Later resizing is not a v1 repair shortcut.
 
 ## Backup completeness
+
+**Later guided capability.** Initial backups list their contents and limitations,
+including omitted private credentials, uncaptured source edits and possibly
+unuploaded target evidence. Keep existing consistent database/CAS/OSTree retention
+and restore validation; do not weaken an implemented backup check. Report unknown
+coverage as unknown. The comprehensive workflow below is deferred.
 
 A guided backup first checkpoints/quiesces approved source writers or reports the
 workspace capture incomplete. Preserve unfinished edits, operation inputs, database,

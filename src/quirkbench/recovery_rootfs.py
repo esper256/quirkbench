@@ -39,6 +39,9 @@ def _json(raw: bytes, name: str):
 
 
 def validate_lock(value):
+    if isinstance(value, dict) and type(value.get("schema_version")) is int and value["schema_version"] == 2:
+        from .recovery_stock import validate_lock as stock_lock
+        return stock_lock(value)
     if not isinstance(value, dict) or set(value) != LOCK_FIELDS:
         raise BuildError('invalid rootfs lock fields')
     if type(value['schema_version']) is not int or value['schema_version'] != 1:
@@ -106,6 +109,9 @@ def _rpm_row(name, nevra):
 def preflight(catalog, lock, store):
     """Return exact selected entry, package closure and target RPM query output."""
     validate_lock(lock)
+    if lock["schema_version"] == 2:
+        from .recovery_stock import preflight_lock
+        return preflight_lock(lock, store)
     entries = [entry for entry in catalog['entries'] if entry['baseline_id'] == lock['baseline_id']]
     if len(entries) != 1:
         raise BuildError('rootfs lock baseline not present in catalog')
@@ -138,10 +144,10 @@ def _run(argv, timeout_s, *, log=None):
     try:
         if log is not None:
             with log.open('xb') as stream:
-                subprocess.run(argv, check=True, stdout=stream,
+                subprocess.run(argv, check=True, env={**os.environ, "LC_ALL": "C"}, stdout=stream,
                                stderr=subprocess.STDOUT, timeout=timeout_s)
             return ''
-        result = subprocess.run(argv, check=True, stdout=subprocess.PIPE,
+        result = subprocess.run(argv, check=True, env={**os.environ, "LC_ALL": "C"}, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, timeout=timeout_s)
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise BuildError(f'locked rootfs command failed: {argv[0]}') from exc
@@ -200,12 +206,51 @@ def inspect_local_rpm_closure(entry: dict, directory: Path, *, runner=_run) -> t
     return snapshot, target_lock
 
 
+
+def verify_stock_rpm_signatures(lock, store, package_paths, stage, runner=_run):
+    """Verify all RPMs against only the explicitly pinned key in a private RPM DB."""
+    key = stage / 'rpm-signing-key.asc'
+    key.write_bytes(store.path(lock['rpm_key_sha256']).read_bytes())
+    if sha256_file(key) != lock['rpm_key_sha256']:
+        raise BuildError('RPM signing key changed during staging')
+    home = stage / 'gpg-home'
+    home.mkdir(mode=0o700)
+    rows = runner(['gpg', '--batch', '--homedir', str(home), '--with-colons',
+                   '--import-options', 'show-only', '--dry-run', '--import', str(key)], 30)
+    primary = []
+    expect = False
+    for line in rows.splitlines():
+        parts = line.split(':')
+        if parts[0] == 'pub':
+            expect = True
+        elif expect and parts[0] == 'fpr' and len(parts) > 9:
+            primary.append(parts[9]); expect = False
+    if primary != [lock['rpm_key_fingerprint']]:
+        raise BuildError('RPM signing key fingerprint differs from pinned trust')
+    database = stage / 'signature-rpmdb'
+    database.mkdir(mode=0o700)
+    runner(['rpm', '--dbpath', str(database), '--initdb'], 30)
+    runner(['rpmkeys', '--dbpath', str(database), '--import', str(key)], 30)
+    for path in package_paths:
+        output = runner(['rpmkeys', '--dbpath', str(database), '--checksig', str(path)], 60)
+        # Inspect the verification status, not the filename: CAS hashes can
+        # legitimately contain the hexadecimal substring 'bad'.
+        rows = output.strip().splitlines()
+        if len(rows) != 1 or rows[0].rsplit(': ', 1)[-1] != 'digests signatures OK':
+            raise BuildError('RPM signature is unavailable or invalid')
+
+
 def _install(catalog, lock, store, output, *, runner=_run, marker=Path('/etc/quirkbench-container'),
              base_marker=Path('/etc/quirkbench-base-digest'), euid=None):
     entry, packages, target_lock = preflight(catalog, lock, store)
     if marker.read_text().strip() != 'quirkbench-fedora-rootless-build-v1':
         raise BuildError('rootfs installation requires the dedicated Fedora builder')
-    if base_marker.read_text().strip() != entry['builder_image_digest']:
+    if lock['schema_version'] == 2:
+        # Stock v2 pins the complete builder OCI configuration. The fixed worker
+        # verifies the retained archive and supplies its exact launch identity.
+        if os.environ.get('QUIRKBENCH_BUILDER_CONFIG_DIGEST') != entry['builder_image_digest']:
+            raise BuildError('stock builder configuration differs from locked inputs')
+    elif base_marker.read_text().strip() != entry['builder_image_digest']:
         raise BuildError('builder image digest differs from reviewed baseline')
     if (os.geteuid() if euid is None else euid) != 0:
         raise BuildError('rootfs installation requires UID 0 inside rootless builder')
@@ -226,6 +271,8 @@ def _install(catalog, lock, store, output, *, runner=_run, marker=Path('/etc/qui
         if sha256_file(destination) != package['sha256']:
             raise BuildError('RPM bytes changed while staging')
         paths.append(str(destination))
+    if lock['schema_version'] == 2:
+        verify_stock_rpm_signatures(lock, store, paths, stage, runner)
     query = ['rpm', '-qp', '--qf', '%{NAME}\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\t%{ARCH}\n', *paths]
     observed = ''.join(sorted(runner(query, 300).splitlines(keepends=True)))
     expected_packages = ''.join(sorted(_rpm_row(item['name'], item['nevra']) + '\n' for item in packages))
@@ -264,8 +311,8 @@ def main(argv=None):
         return 2
     try:
         catalog_path, lock_path, cas_root, output = map(Path, args)
-        catalog = load_catalog(catalog_path.read_bytes())
         lock = validate_lock(_json(lock_path.read_bytes(), 'rootfs lock'))
+        catalog = load_catalog(catalog_path.read_bytes()) if lock["schema_version"] == 1 else None
         _install(catalog, lock, CASReader(cas_root), output)
     except (BuildError, ValueError, OSError) as exc:
         print(f'locked rootfs unavailable: {exc}', file=sys.stderr)

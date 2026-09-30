@@ -64,7 +64,8 @@ another experiment.
 ## Protection, identity and trust
 
 Keep USB ancestry, positive boot-media identity, same-disk partition verification,
-early target binding, internal-storage exclusion and privileged destination allowlists.
+early target binding, recovery boot-device confinement, candidate controller exclusions
+and privileged destination allowlists under the [storage policy](architecture.md#storage-protection-policy).
 Gadget support does not permit internal discovery or firmware writes.
 
 Keep physical target binding, enrolled media instance, immutable factory release and

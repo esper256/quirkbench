@@ -3,13 +3,16 @@
 The production deployment backend is minimal Fedora composed with rpm-ostree and published through a traditional signed OSTree repository. The old four-file kernel/initramfs bundle is retired. Historical artifacts remain available, but old images require rebuilding; there is no in-place image conversion.
 
 The [product plan](product-roadmap.md) makes generic recovery media the entry point:
-local network setup and pairing precede recovery inventory and baseline composition.
+manual authenticated network/controller setup precedes recovery inventory and baseline composition.
 The setup/enrollment interfaces are planned; the lower-level commands below exist.
 No target inventory or device credentials are prerequisites for a factory image.
 
 Recovery follows the [selected synthesis pipeline](recovery-base.md): locked DNF5
-installroot, protected Fedora-configured kernel, dracut, and the existing GRUB/GPT
-assembler. P3a implements recipe-driven orchestration; KIWI/Lorax evaluation is closed.
+installroot, pinned stock Fedora kernel/module packages, dracut, and the existing
+GRUB/GPT assembler. P3a requires versioned recipe/profile successors; existing
+custom-kernel schemas/code remain legacy pending migration. No recovery compile is
+required by the revised design. Upstream image reuse needs a bounded simplification
+proposal under the same policy, not an incidental second builder.
 SELinux disablement is recovery-only and must be explicit in its boot arguments and
 release provenance. Existing artifacts are not retroactively changed or qualified.
 
@@ -79,7 +82,8 @@ The `image` command accepts a separate JSON input. For a VM qualification image,
 }
 ```
 
-All paths are placeholders. The output's parent must exist and the output must be new. Stage the Fedora recovery root with `PYTHONPATH=src target-assets/build-rootfs.sh CATALOG_JSON ROOTFS_LOCK_JSON CAS_ROOT ABSOLUTE_OUTPUT_DIRECTORY` as UID 0 inside the dedicated rootless builder. The lock and CAS must contain the reviewed baseline, an exact RPM snapshot with retained package bytes, a target RPM lock, and the recovery fragment; the builder refuses unavailable inputs and does not consult repository configuration from the host. This stages userspace only; kernel, modules, firmware and initramfs integration still require their corresponding recorded provenance. Set partition sizes to fit the actual recovery and deployment contents. The small initial image is distinct from the full external-device capacity budget; commissioning creates the complete layout before real campaigns. Recovery must include `parted` (`partprobe`), `gdisk`, `e2fsprogs` and `util-linux`. Save the JSON as `/workspace/inputs/image.json`, then run:
+All paths are placeholders. The following staging command describes the current
+legacy implementation, not the revised stock-kernel recipe contract. The output's parent must exist and the output must be new. Stage the Fedora recovery root with `PYTHONPATH=src target-assets/build-rootfs.sh CATALOG_JSON ROOTFS_LOCK_JSON CAS_ROOT ABSOLUTE_OUTPUT_DIRECTORY` as UID 0 inside the dedicated rootless builder. The lock and CAS must contain the reviewed baseline, an exact RPM snapshot with retained package bytes, a target RPM lock, and the recovery fragment; the builder refuses unavailable inputs and does not consult repository configuration from the host. This stages userspace only; kernel, modules, firmware and initramfs integration still require their corresponding recorded provenance. Set partition sizes to fit the actual recovery and deployment contents. The small initial image is distinct from the full external-device capacity budget; commissioning creates the complete layout before real campaigns. Recovery must include `parted` (`partprobe`), `gdisk`, `e2fsprogs` and `util-linux`. Save the JSON as `/workspace/inputs/image.json`, then run:
 
 ```sh
 PYTHONPATH=src python3 -m quirkbench image /workspace/inputs/image.json
@@ -89,7 +93,14 @@ The command produces the regular-file disk image, a `.sha256` checksum and an ad
 
 ## Protection and qualification
 
-The initial supported profile keeps internal-controller support excluded from recovery and candidate kernels, verifies source/configuration provenance, and allowlists USB destinations before privileged writes. Disable internal discovery, automount, swap/resume and firmware writes. Recovery and OSTree candidate roots require different boot verification; executable deployment storage must not be mounted with a blanket `noexec`, while evidence remains restricted. A replacement storage-protection mechanism needs reviewed equivalent tests.
+Follow the [storage policy](architecture.md#storage-protection-policy). Recovery uses
+stock packages and permits passive internal-controller enumeration, while all block/
+filesystem operations are confined to expected roles on its identified boot device
+from initramfs onward. Candidate profiles retain internal-controller exclusions and
+final config/module/initramfs verification. Raw writes, swap/resume, filesystem repair
+and firmware updates are covered, not just mounts. Require exact-candidate operator
+approval before arming. Executable candidate storage cannot use blanket `noexec`;
+evidence remains restricted. This is accident prevention, not arbitrary-kernel containment.
 
 The current no-kexec policy does not support kdump. Review that policy and independently qualify the fixed capture kernel before enabling crash capture. Secure Boot is assumed disabled and must be verified. Owner-controlled USB boot selection and manual recovery of unsupported complete hangs remain explicit boundaries.
 

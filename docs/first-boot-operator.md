@@ -1,5 +1,11 @@
 # First attended recovery boot
 
+This procedure records observations of the delivered artifact. The revised
+[storage policy](architecture.md#storage-protection-policy) permits stock recovery
+controller enumeration while restricting storage operations to the boot device;
+old custom-kernel artifacts keep their historical identity. Automated pairing is
+not a prerequisite for later attended manual authenticated setup.
+
 This procedure is for the signed, **unqualified** x86-64 UEFI factory image.
 The first boot checks recovery and the external-drive commissioning plan. It
 does not pair a controller, deploy a baseline, run a kernel experiment or
@@ -29,8 +35,9 @@ The target's actual RAM and disk geometry determine the final eligibility.
    image.
 2. Keep the test offline. Observe `QUIRKBENCH_GRUB recovery`, then the
    `Quirkbench target recovery` console on the display or serial console.
-3. Confirm the recovery status and that the protected internal storage has
-   not been mounted or changed. The expected factory state reports recovery
+3. Confirm recovery status and inspect its reported boot-device identity and
+   storage policy. Internal filesystems must not be mounted or used for swap,
+   repair or writes; console status alone cannot prove their bytes unchanged. The expected factory state reports recovery
    identity/evidence as pending until capacity setup is completed.
 4. Choose menu item 3 to inspect the read-only commissioning plan. Confirm
    the selected disk is the booted external USB and compare the **entire disk
@@ -43,3 +50,17 @@ The target's actual RAM and disk geometry determine the final eligibility.
 Commissioning writes only after that local GUID confirmation. A successful
 first boot and commissioning remain device-specific observations; the image
 and software release stay unqualified until their separate gates.
+
+## Hardware report before the first experiment
+
+After commissioning, manual network setup and authenticated private configuration,
+stage the private bundle under `control/setup` on the confirmed evidence partition
+while attached to the controller, then boot recovery and use console menu item 4
+to activate it. The supervisor starts in its default recovery-only mode. It automatically sends
+bounded passive hardware observations to the controller; there is no preliminary
+experiment kernel to compile. Read `quirkbench target-inventory TARGET_ID --json`
+on the controller to inspect the report, boot/media context and preparation blockers.
+Collection failure or partial observations remain visible while retained evidence
+uploads continue. See [the current software handoff](stock-recovery-attended.md#automatic-first-boot-hardware-report)
+for the observed properties, trust setup and limits. Do not enable candidate boots
+merely to obtain inventory.

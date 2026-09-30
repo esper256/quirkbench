@@ -20,6 +20,8 @@ def parser():
     commands.add_parser('setup-state', help='select private controller state; service setup is still pending')
     commands.add_parser('setup-check', help='inspect user service availability without changing host settings')
     commands.add_parser('demo', help='run the fake build/target/agent durability demonstration')
+    inventory = commands.add_parser('target-inventory', help='read reported recovery hardware and candidate planning blockers; queues nothing')
+    inventory.add_argument('device_id'); inventory.add_argument('--json', action='store_true')
     device = commands.add_parser('register'); device.add_argument('report', type=Path)
     campaign = commands.add_parser('campaign')
     actions = campaign.add_subparsers(dest='action', required=True)
@@ -33,6 +35,10 @@ def parser():
     operation_actions = operation.add_subparsers(dest='action', required=True)
     operation_status = operation_actions.add_parser('status', help='read one operation without invoking recovery or scheduling')
     operation_status.add_argument('operation_id'); operation_status.add_argument('--json', action='store_true')
+    operation_watch = operation_actions.add_parser('watch', help='watch persisted operation facts without an agent or scheduler')
+    operation_watch.add_argument('operation_id'); operation_watch.add_argument('--json', action='store_true')
+    operation_watch.add_argument('--once', action='store_true')
+    operation_watch.add_argument('--interval', type=float, default=2)
     operation_events = operation_actions.add_parser('events', help='page durable operation events')
     operation_events.add_argument('operation_id'); operation_events.add_argument('--after', type=int, default=0)
     operation_events.add_argument('--limit', type=int, default=100); operation_events.add_argument('--json', action='store_true')
@@ -41,6 +47,13 @@ def parser():
     operation_output.add_argument('--offset', type=int, required=True)
     operation_output.add_argument('--length', type=int, required=True)
     operation_output.add_argument('--json', action='store_true')
+    build_cache = commands.add_parser('build-cache', help='inspect or prune private intermediate build snapshots')
+    build_cache_actions = build_cache.add_subparsers(dest='action', required=True)
+    build_cache_list = build_cache_actions.add_parser('list')
+    build_cache_list.add_argument('--json', action='store_true')
+    build_cache_prune = build_cache_actions.add_parser('prune')
+    build_cache_prune.add_argument('cache_id')
+    build_cache_prune.add_argument('--json', action='store_true')
     session = commands.add_parser('session', help='durable investigation observation records')
     session_actions = session.add_subparsers(dest='action', required=True)
     observations = session_actions.add_parser('observations', help='list typed human requests and answers')
@@ -51,6 +64,29 @@ def parser():
     respond = session_actions.add_parser('respond', help='durably answer a human request')
     respond.add_argument('session_id'); respond.add_argument('--request', required=True)
     respond.add_argument('--file', type=Path, required=True); respond.add_argument('--request-id', required=True)
+    recovery = commands.add_parser('recovery-inputs', help='exact stock package acquisition plan and v2 retained inputs')
+    recovery_actions = recovery.add_subparsers(dest='action', required=True)
+    acquire = recovery_actions.add_parser('acquire-plan', help='print exact DNF5 command; does not download')
+    acquire.add_argument('directory',type=Path)
+    lock = recovery_actions.add_parser('lock', help='verify and retain downloaded binary RPM closure')
+    lock.add_argument('directory',type=Path); lock.add_argument('--public-key',type=Path,required=True)
+    lock.add_argument('--builder-image-digest',required=True); lock.add_argument('--diagnostics',type=Path,required=True)
+    recipe = recovery_actions.add_parser('recipe', help='generate default stock RecoveryRecipe v2')
+    recipe.add_argument('--lock',required=True); recipe.add_argument('--builder-image-digest',required=True)
+    recipe.add_argument('--id',default='stock-recovery-fedora44'); recipe.add_argument('--epoch',type=int,required=True)
+    recipe.add_argument('--root-mib',type=int,default=2048); recipe.add_argument('--factory-size-mib',type=int,default=4096)
+    recipe.add_argument('--experiment-mib',type=int,default=32768); recipe.add_argument('--library-mib',type=int,default=32768)
+    recipe.add_argument('--log-budget-mib',type=int,default=4096)
+    recovery_image=commands.add_parser('recovery-image',help='admit a complete stock image for the fixed recovery coordinator')
+    recovery_image.add_argument('--recipe',required=True); recovery_image.add_argument('--builder-archive',required=True)
+    recovery_image.add_argument('--request-id',required=True)
+    attempt = commands.add_parser('attempt', help='local operator authorization for an exact physical attempt')
+    attempt_actions = attempt.add_subparsers(dest='action', required=True)
+    inspect = attempt_actions.add_parser('status'); inspect.add_argument('attempt_id')
+    for name in ('approve', 'reject'):
+        decision = attempt_actions.add_parser(name)
+        decision.add_argument('attempt_id')
+        decision.add_argument('--request-id', required=True, help='durable unique decision ID for replay')
     backup = commands.add_parser('backup'); backup.add_argument('destination', type=Path)
     restore = commands.add_parser('restore'); restore.add_argument('backup', type=Path)
     resolve = commands.add_parser('resolve'); resolve.add_argument('attempt_id'); resolve.add_argument('disposition', choices=['retry','abandon']); resolve.add_argument('--note', required=True)
@@ -64,6 +100,10 @@ def parser():
     qualify = commands.add_parser('qualify-image',help='run ten real UEFI recovery, candidate, load-failure, panic and fallback trials'); qualify.add_argument('image',type=Path); qualify.add_argument('--manifest',type=Path,required=True); qualify.add_argument('--ovmf-code',type=Path,required=True); qualify.add_argument('--ovmf-vars',type=Path,required=True); qualify.add_argument('--work',type=Path,required=True); qualify.add_argument('--timeout',type=int,default=180)
     compose = commands.add_parser('compose',help='compose and sign a complete experimental Fedora OSTree revision'); compose.add_argument('manifest',type=Path); compose.add_argument('--workspace',type=Path,required=True); compose.add_argument('--publish-repo',type=Path,required=True); compose.add_argument('--campaign')
     repo = commands.add_parser('serve-repository',help='serve read-only OSTree content with mutual TLS'); repo.add_argument('--host',default='127.0.0.1',help='controller repository service bind address'); repo.add_argument('--port',type=int,default=8444); repo.add_argument('--allow-lan',action='store_true'); repo.add_argument('--cert',required=True); repo.add_argument('--key',required=True); repo.add_argument('--client-ca',required=True)
+    serve.add_argument('--recovery-worker',type=Path,help='installed fixed worker; enables recovery-image operations only')
+    serve.add_argument('--recovery-signing-home',type=Path)
+    serve.add_argument('--recovery-public-key',type=Path)
+    serve.add_argument('--recovery-fingerprint')
     maintenance = commands.add_parser('library-maintenance', help='fence scheduling for explicit recovery library maintenance'); maintenance.add_argument('action', choices=['begin','finish']); maintenance.add_argument('device_id'); maintenance.add_argument('--selection')
     commands.add_parser('target-service', help='run the verified USB target supervisor; never run on the controller')
     commands.add_parser('doctor', help='report optional build and VM prerequisites')
@@ -83,6 +123,34 @@ def main(argv=None):
         from .controller_setup import inspect_user_manager
         print(json.dumps(inspect_user_manager(), sort_keys=True))
         return 0
+    if args.command == 'build-cache':
+        from .build import BuildError
+        from .build_cache import BuildStageCache
+        try:
+            root = discover_state_root(args.state).resolve() / 'intermediate-cache'
+            if args.action == 'list' and not root.exists():
+                items = []
+            else:
+                cache = BuildStageCache(root)
+                if args.action == 'list':
+                    items = cache.list()
+                else:
+                    removed = cache.prune(args.cache_id)
+                    if not removed:
+                        raise BuildError('build cache ID does not exist')
+                    items = [{'cache_id': args.cache_id, 'pruned': True}]
+            if args.json:
+                print(json.dumps({'schema_version': 1, 'items': items}, sort_keys=True))
+            else:
+                for item in items:
+                    if item.get('pruned'):
+                        print(f"Pruned {item['cache_id']}")
+                    else:
+                        print(f"{item['cache_id']} {item['lineage']} {item['stage']}")
+            return 0
+        except (BuildError, OSError, ValueError) as exc:
+            print(f'build cache unavailable: {exc}', file=sys.stderr)
+            return 3
     if args.command == 'session':
         from .contracts import Conflict, ContractError
         from .operations import operation_response
@@ -132,7 +200,20 @@ def main(argv=None):
             args.state = discover_state_root(args.state)
             if args.reserve_gib < 0:
                 raise ContractError('reserve must be nonnegative')
+            if args.action == 'watch':
+                import math
+                if not math.isfinite(args.interval) or not 0.5 <= args.interval <= 60:
+                    raise ContractError('operation watch interval must be 0.5..60 seconds')
+                if not (args.state / 'controller.sqlite').is_file():
+                    raise ContractError('operation watch requires existing controller state')
             controller = Controller(args.state.resolve(), reserve_bytes=int(args.reserve_gib*1024**3))
+            if args.action == 'watch':
+                from .operation_watch import watch_operation
+                try:
+                    return watch_operation(controller, args.operation_id, once=args.once,
+                                           json_output=args.json, interval=args.interval)
+                except KeyboardInterrupt:
+                    return 130
             if args.action == 'status':
                 answer = controller.operation_status(args.operation_id)
             elif args.action == 'events':
@@ -231,8 +312,9 @@ def main(argv=None):
             answer = demo(args.state)
         elif args.command == 'build':
             from .build_pipeline import BuildPipeline, load_build_inputs_manifest
+            from .build_cache import BuildStageCache
             controller=Controller(args.state.resolve(),**controller_options)
-            pipeline=BuildPipeline(args.workspace.resolve(),args.state.resolve(),controller.store,controller=controller if args.campaign else None,campaign_id=args.campaign,activity=lambda phase,message:print(f'{phase}: {message}',file=sys.stderr,flush=True))
+            pipeline=BuildPipeline(args.workspace.resolve(),args.state.resolve(),controller.store,controller=controller if args.campaign else None,campaign_id=args.campaign,activity=lambda phase,message:print(f'{phase}: {message}',file=sys.stderr,flush=True),incremental_cache=BuildStageCache(args.state.resolve()/'intermediate-cache'))
             answer={name:asdict(artifact) for name,artifact in pipeline.build(load_build_inputs_manifest(args.manifest)).items()}
         elif args.command == 'image':
             from .image import ImageInputs, create_image
@@ -279,13 +361,15 @@ def main(argv=None):
             controller = Controller(args.state, **controller_options)
             if args.command == 'library-maintenance':
                 answer = controller.library_maintenance(args.device_id, args.selection, finish=args.action == 'finish')
+            elif args.command == 'target-inventory':
+                answer = controller.target_inventory(args.device_id)
             elif args.command == 'register':
                 answer = controller.register(CapabilityReport.from_dict(json.loads(args.report.read_bytes())))
             elif args.command == 'campaign':
                 if args.action == 'create':
                     controller.create_campaign(args.id, args.device)
                 elif args.action == 'submit':
-                    controller.submit(args.id, Experiment.from_dict(json.loads(args.experiment.read_bytes())))
+                    controller.submit_attended(args.id, Experiment.from_dict(json.loads(args.experiment.read_bytes())))
                 elif args.action == 'budget':
                     controller.configure_budget(args.id, args.seconds, args.tokens)
                 elif args.action in ('resume', 'pause'):
@@ -314,6 +398,26 @@ def main(argv=None):
                     time.sleep(args.interval)
             elif args.command == 'artifact':
                 answer = asdict(controller.store.put(args.file.read_bytes()))
+            elif args.command == 'recovery-inputs':
+                from .recovery_inputs import acquisition_command,retain_packages,generate_recipe
+                if args.action=='acquire-plan':
+                    answer={'argv':acquisition_command(args.directory.resolve()),'executed':False}
+                elif args.action=='lock':
+                    lock=retain_packages(args.directory.resolve(),args.public_key.resolve(),controller.store,
+                        args.diagnostics.resolve(),builder_image_digest=args.builder_image_digest)
+                    answer={'lock':lock,'sha256':controller.store.put(canonical(lock)).sha256}
+                else:
+                    layout={name:getattr(args,name) for name in ('root_mib','factory_size_mib','experiment_mib','library_mib','log_budget_mib')}
+                    recipe=generate_recipe(args.lock,controller.store,recipe_id=args.id,
+                        builder_image_digest=args.builder_image_digest,source_date_epoch=args.epoch,layout=layout)
+                    answer={'recipe':recipe,'sha256':controller.store.put(canonical(recipe)).sha256}
+            elif args.command == 'recovery-image':
+                answer=controller.admit_recovery_image(args.request_id,args.recipe,args.builder_archive)
+            elif args.command == 'attempt':
+                if args.action=='status': answer=controller.operator_attempt_status(args.attempt_id)
+                else:
+                    answer = controller.decide_attempt(args.attempt_id,
+                        'approved' if args.action == 'approve' else 'rejected', request_id=args.request_id)
             elif args.command == 'backup':
                 answer = {'backup': controller.backup(args.destination)}
             elif args.command == 'resolve':
@@ -327,20 +431,53 @@ def main(argv=None):
             elif args.command == 'serve':
                 from .transport import make_server
                 tokens = json.loads(args.tokens_file.read_bytes())
-                with controller.lifecycle():
+                with controller.lifecycle() as owner:
+                    coordinator=None
+                    if args.recovery_worker is not None:
+                        if any(value is None for value in (args.recovery_signing_home,args.recovery_public_key,args.recovery_fingerprint)):
+                            raise ValueError('recovery coordinator requires explicit signing trust and worker configuration')
+                        from .worker_service import SystemdUserWorkerServices
+                        from .recovery_coordinator import RecoveryImageCoordinator
+                        services=SystemdUserWorkerServices(worker_program=args.recovery_worker.resolve())
+                        owner.reconcile_units(services)
+                        coordinator=RecoveryImageCoordinator(owner,services,signing_home=args.recovery_signing_home,
+                            trusted_public_key=args.recovery_public_key,fingerprint=args.recovery_fingerprint)
                     server = make_server(controller, host=args.host, port=args.port, certfile=args.cert, keyfile=args.key, device_tokens=tokens, allow_lan=args.allow_lan)
                     try:
-                        server.serve_forever()
+                        if coordinator is None:
+                            server.serve_forever()
+                        else:
+                            import threading
+                            thread=threading.Thread(target=server.serve_forever,daemon=True); thread.start()
+                            try:
+                                while True:
+                                    result=coordinator.tick()
+                                    if result is not None: print('RECOVERY_IMAGE '+json.dumps(result,sort_keys=True),flush=True)
+                                    time.sleep(2)
+                            finally:
+                                server.shutdown(); thread.join(5)
                     finally:
                         server.server_close()
                 answer = {'stopped': True}
             else:
                 raise ValueError('unknown command')
+        if args.command == 'target-inventory' and args.json:
+            from .operations import operation_response
+            answer = operation_response(data=answer)
         print(json.dumps(answer, indent=2, sort_keys=True))
         return 0
     except KeyboardInterrupt:
         return 130
     except Exception as exc:
+        if args.command == 'target-inventory':
+            from .operations import operation_response
+            from .contracts import ContractError, Conflict
+            code, status = ('CONFLICT', 3) if isinstance(exc, Conflict) else (('INVALID_INPUT', 2) if isinstance(exc, (ValueError, ContractError)) else ('INFRASTRUCTURE', 5))
+            if args.json:
+                print(json.dumps(operation_response(error={'code': code, 'message': 'Inventory query failed; no work queued.', 'retryable': status == 5})))
+            else:
+                print('Inventory query failed; no work queued.', file=sys.stderr)
+            return status
         # Avoid accidentally echoing provider credentials or subprocess output.
         print(f'{type(exc).__name__}: {exc}' if isinstance(exc, (ValueError, FileNotFoundError)) or type(exc).__name__ in ('BuildError','ImageError','QemuError','BootError','CommissionError') else f'{type(exc).__name__}: operation failed; progress retained', file=sys.stderr)
         return 1

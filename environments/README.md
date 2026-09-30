@@ -1,5 +1,13 @@
 # Fedora build environment replay
 
+**Recovery design revision, 2026-09-29:** stock Fedora kernel/module/firmware packages
+with DNF5/dracut and existing image assembly replace mandatory recovery kernel builds.
+Development kernel-build instructions below apply to experiments or explicitly
+requested custom builds, not an automatic recovery prerequisite. Existing recovery
+worker/recipe code retains legacy contracts pending a versioned migration. Follow
+[storage protection](../docs/architecture.md#storage-protection-policy) and
+[attended delivery tiers](../docs/product-roadmap.md#delivery-contract).
+
 The Containerfile requires a digest-pinned
 `registry.fedoraproject.org/fedora@sha256:...` base reference and checks its
 `/etc/os-release` against the `FEDORA_RELEASE` build argument. For the retained
@@ -21,6 +29,111 @@ candidate work. The pipeline checks that those caps are no more than half the
 controller resources and refuses to build if the cgroup limits are missing.
 Adjust the caps downward on smaller hosts. Its controller-wide file lock permits
 one build at a time.
+
+### Observable bounded kernel builds
+
+For future ad hoc kernel builds launched as rootless Podman containers, use
+`start-bounded-podman-build.sh` instead of invoking `systemd-run` and
+`podman run` separately. It starts a **new** systemd user service with cgroup v2,
+`Delegate=cpu memory pids`, `DelegateSubgroup=runtime`,
+`KillMode=control-group`, and the usual CPU, memory, zero-swap and task caps.
+`DelegateSubgroup` requires systemd 254 or newer. For example, the service
+properties for a controller with at least 8 CPUs and 16 GiB of reported
+`MemTotal` are (smaller controllers get at most half their online CPU and
+reported memory):
+
+```text
+Delegate=cpu memory pids
+DelegateSubgroup=runtime
+KillMode=control-group
+CPUQuota=400%
+MemoryMax=8589934592
+MemorySwapMax=0
+TasksMax=4096
+```
+
+Choose a fresh private stage, a unique unit/container name and an exact locked
+image. Pass the existing restricted build arguments to the launcher. For example:
+
+```sh
+environments/start-bounded-podman-build.sh \
+  quirkbench-kernel-build-NEW_RUN_ID.service "$STAGE" build.log build.exit.status \
+  --rm --pull=never --network=none --pid=private --ipc=private --uts=private \
+  --user=0 --security-opt=no-new-privileges \
+  --name quirkbench-kernel-build-NEW_RUN_ID \
+  --volume "$STAGE:/work:Z" "$IMAGE_ID" python3 /work/kernel.py
+```
+
+Set `STAGE` to the new canonical mode-0700 stage and `IMAGE_ID` to the pinned
+local builder image, and replace `NEW_RUN_ID` for each build. The launcher
+returns after dispatch; the stage's new `.log` and `.status` files contain the
+worker output and eventual exit code. The status starts as `running`; if the
+service is stopped or times out before Podman returns, it remains `running`.
+Inspect `systemctl --user show UNIT -p Result -p ExecMainStatus` and the log
+before treating that build as interrupted. Do not pass cgroup, CPU, memory or task
+override flags, detached runs, restart policies or container replacement. Choose
+only reviewed mounts, the locked image and required
+network/device restrictions; this launcher enforces the cgroup boundary, not
+the build's input or device policy. After recording the exit status, stop the
+transient unit to clear `--remain-after-exit`.
+
+The attended starter first opens a native Konsole window using
+`view-build.sh`. Inside Distrobox it invokes the desktop through
+`distrobox-host-exec`; no Konsole installation in the development container is
+needed. The shared stage and this checkout must be readable at the same absolute
+paths on the desktop. The viewer follows existing and newly created `.log` files
+under the stage (up to four directory levels), including nested compiler logs,
+and displays the numeric exit
+status when recorded. Output appears as the producer flushes it; this is log
+activity, not a completion percentage. The window stays open after completion.
+Closing it stops only its log readers and leaves the worker running. No AI polls
+the build. Missing desktop/Konsole or viewer dispatch failure prevents a new build
+from starting; successful dispatch alone cannot prove the window was rendered.
+To reopen a viewer for an existing run, use:
+
+```sh
+bash environments/view-build.sh "$STAGE" "$STAGE/build.exit.status"
+```
+
+This is the development starter's desktop view, not yet a product operation UI.
+
+For future kernel scripts, derive `limits = ResourceLimits.from_cgroup()` inside
+the bounded worker and pass `jobs=limits.jobs` to `KernelBuild` and the same
+limits to its runner. Automatic job planning budgets 2 GiB per compiler job,
+capped by the CPU quota: a 4-core/4-GiB worker selects two jobs and the default
+4-core/8-GiB development worker selects four. The starter caps memory at 8 GiB
+or half the controller's reported total, whichever is smaller. Admission also
+reserves 2 GiB of currently available controller memory for desktop use, so low
+headroom can reject a requested job count. This heuristic does not guarantee peak compiler or
+linker memory consumption; cgroups enforce the actual bounds. Controller resource
+reserves still apply, and explicit `jobs=1` stays serial. Do not copy historical
+retry scripts' one-job setting into new launches or edit a running run's inputs.
+
+The service calls `environments/run-bounded-podman.sh` with the supplied locked
+image, mounts and command arguments. The helper verifies its
+service cgroup and limits (including the controller's half-resource bound),
+enables CPU/memory/task accounting below that unit,
+then starts rootless Podman with a child cgroup under the exact service. Its
+child limits match the service limits so `podman stats` shows a useful memory
+denominator. A missing delegation or limit fails before Podman starts. Keep
+the service's `RuntimeMaxSec` and a unique private stage/log/exit-status record
+for each build; do not reuse a running build's stage or unit. The service
+remains the aggregate limit and shutdown boundary, while `podman stats` reports
+the container payload. This helper is for development/kernel builds; recovery
+rootfs workers still use their separate fixed command and fenced claim.
+
+On the Fedora 44 controller, a short offline probe with the retained local
+builder image verified the launcher and conmon in the service's `runtime`
+subgroup, the payload in a sibling `libpod-*` child under that same service,
+plain `podman stats` reporting CPU and memory, and the child and parent memory
+limits at 1 GiB. Stopping an active probe terminated those processes after
+the unit's stop timeout, marked the unit failed, and interrupted Podman's
+`--rm` cleanup. It left an exited container record that required
+`podman rm`. The starter's separate 4 GiB offline probe completed with exit
+status 0 and removed its container; a five-second rerun also verified the
+revised status recorder. Keep unique container names and inspect the stopped unit and
+Podman state before reusing a build stage. No kernel or image build was run in
+this probe.
 
 An offline Fedora 44 SRPM `%prep` diagnostic found that the earlier local
 builder image lacks `%py3_shebang_fix`. The Containerfile now explicitly

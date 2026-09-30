@@ -76,11 +76,22 @@ def _resolve_inside(root: Path, relative: str) -> Path:
 
 def audit_recovery_initramfs_tree(root: Path, release: str, profile: dict) -> dict:
     """Check the extracted boot path and absence of protected/host-only content."""
-    validate_profile(profile)
+    stock = profile.get("profile_id") == "stock-x86_64-uefi-usb-v1"
+    if stock:
+        from .recovery_stock import validate_policy
+        validate_policy(profile)
+    else:
+        validate_profile(profile)
     if not isinstance(release, str) or not RELEASE.fullmatch(release):
         raise BuildError("invalid recovery initramfs kernel release")
     if not root.is_absolute() or root.is_symlink() or not root.is_dir():
         raise BuildError("initramfs audit requires a real absolute directory")
+    if stock:
+        from .recovery_storage import audit_guard, StoragePolicyError
+        try:
+            audit_guard(root)
+        except StoragePolicyError as exc:
+            raise BuildError(str(exc)) from exc
     init = _resolve_inside(root, "init")
     init_mode = init.lstat().st_mode
     if (not stat.S_ISREG(init_mode) or init.stat().st_size == 0
@@ -118,7 +129,9 @@ def audit_recovery_initramfs_tree(root: Path, release: str, profile: dict) -> di
             or any(not MODULE_NAME.fullmatch(line) for line in lines)
             or not REQUIRED_DRACUT_MODULES <= set(lines)):
         raise BuildError("initramfs lacks required generic root mount modules")
-    prohibited = set(profile["protection"]["excluded_internal_controller_drivers"])
+    if stock and 'quirkbench-storage' not in lines:
+        raise BuildError('stock initramfs lacks boot-device storage guard module')
+    prohibited = set() if stock else set(profile["protection"]["excluded_internal_controller_drivers"])
     present_modules: set[str] = set()
     enabled_writers: set[str] = set()
     installed_generators: set[str] = set()
@@ -189,6 +202,7 @@ def audit_recovery_initramfs_tree(root: Path, release: str, profile: dict) -> di
                 raise BuildError("invalid initramfs embedded command line") from exc
             if HOST_ROOT_SETTING.search(content):
                 raise BuildError("initramfs contains a host-specific root setting")
-    return {"schema_version": 1, "kernel_release": release,
+    return {**({"storage_policy": audit_guard(root)} if stock else {}),
+            "schema_version": 1, "kernel_release": release,
             "dracut_modules": sorted(lines), "embedded_kernel_modules": len(present_modules),
             "entry_count": entry_count}
