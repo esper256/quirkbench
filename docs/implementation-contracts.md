@@ -1,11 +1,13 @@
 # Implementation contracts for the remaining briefs
 
-**Delivery tiers, 2026-09-29:** C0–C8 remain contract identifiers. The initial owner-controlled
-lab journey is attended, manually configured and authenticated; exact experiment
-approval is explicit. Automated enrollment/lifecycle (C4), unattended grants (C6),
-managed decisions, wizards and guided backup completeness (C8) are later capabilities,
-not prerequisites. Existing wire schemas and implemented validation remain unchanged.
-The [architecture storage policy](architecture.md#storage-protection-policy) governs
+**Delivery revision, 2026-10-01:** C0–C8 remain contract identifiers. The first
+general release follows fresh controller setup and authenticated pairing with an
+attended external-agent investigation through patch export. Exact experiment approval
+remains explicit. Managed decisions and unattended grants are optional later modes.
+The [implementation map](installation-to-patch.md) replaces the earlier delivery
+ordering; existing manual configuration remains supported. Existing wire schemas
+and implemented validation remain unchanged. The
+[architecture storage policy](architecture.md#storage-protection-policy) governs
 recovery separately from candidate restrictions.
 
 This document makes the [roadmap](product-roadmap.md) executable as bounded tasks.
@@ -344,10 +346,10 @@ target. Neither agent suggestions nor build logs may modify protection policy.
 
 ## C4 — Recovery setup, enrollment and target binding (P3)
 
-### Initial manual setup; later enrollment automation
+### Guided enrollment and manual compatibility
 
-For the initial attended journey, use existing local administrative configuration
-and target runtime configuration with explicitly provisioned controller CA/endpoint,
+The M2 fresh-user journey implements the exchange and activation below. Preserve
+existing local administrative/target configuration with explicitly provisioned CA/endpoint,
 device-scoped authentication, repository trust and a valid target/media binding.
 Verify values before activating private state; no HTTP, automatic trust acceptance
 or TLS/signature bypass. Keep credentials outside factory images, builds, logs and
@@ -355,10 +357,10 @@ public exports. Existing activation/binding checks remain required. Show missing
 configuration as blocked, not enrolled. The operator approves the exact candidate
 and attempt before arming; proposals/build completion cannot supply this authority.
 
-The automated pairing exchange, credential lifecycle and retargeting orchestration
-below are later P3d/e contracts. Manual setup does not claim to implement them.
-Safe activation of complete private state and wrong-target boot checks are initial
-requirements; wizard availability and automated enrollment are not.
+The pairing exchange, credential lifecycle and retargeting orchestration below
+are P3d/e requirements for M2. Manual setup does not claim to implement them.
+Safe activation of complete private state and wrong-target boot checks apply to
+both paths. Enrollment alone cannot queue experiments or authorize a boot.
 
 Factory image construction has no dependency on inventory, controller endpoints,
 private credentials or a baseline deployment. Distinguish image digest, GPT/partition
@@ -543,8 +545,9 @@ pre-userspace hangs remain a manual-recovery limit in v1.
 ## C7 — Required failure matrix and release evidence
 
 Each owning brief must implement its applicable observable cases with fixtures and
-injected clocks/process/storage adapters. Enrollment/grant/managed-usage rows belong
-to their later capability packets, not the initial attended gate; a missing physical target is not a skipped test.
+injected clocks/process/storage adapters. Enrollment rows belong to M2; grant and
+managed-usage rows belong to their optional M7 packets. A missing physical target
+is not a skipped test or evidence of qualification.
 
 | Boundary | Required observable outcome |
 | --- | --- |
@@ -580,9 +583,10 @@ because a brief mentions its eventual physical outcome.
 ## C8 — Product workflow and delivery (P0–P8)
 
 The [product interface contract](product-interface.md) is normative for the planned
-delivery tiers, service topology, CLI/session facade, supported baseline catalog,
-recipe extensions, human observations and readiness. Decision scheduling, endpoint/
-capacity wizards and guided backup completeness are later extensions. It extends C0–C7 without replacing the
+delivery order, service topology, investigation facade, supported baseline catalog,
+recipe extensions, human observations and readiness. Guided setup/pairing gates M2;
+backup completeness gates M5. Managed decisions and unattended grants are optional
+M7 modes. It extends C0–C7 without replacing the
 frozen Experiment/Result envelopes or existing database authority. Implement its
 records through additive migrations and versioned schemas. Preview commands are
 acceptance targets, not evidence that an implementation exists.

@@ -89,7 +89,7 @@ storage and identity errors stop with a preserved human-intervention reason.
 
 ## Recovery setup visibility
 
-Before manual setup or later pairing, the target must provide local status; a controller monitor cannot
+Before configuration or pairing, the target must provide local status; a controller monitor cannot
 report a target it has never contacted. P3 adds explicit phases for storage readiness,
 network configuration/link/address, controller reachability, trust confirmation,
 enrollment, inventory upload and baseline waiting. Distinguish operator input from

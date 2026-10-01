@@ -119,7 +119,7 @@ unconfigured systemd-resolved stub. D-Bus and the local console must work offlin
 Start a local setup/status TUI automatically on the physical console, with no installed-OS
 account or password required. It invokes nmtui rather than implementing connection
 editing. Explicit local maintenance may open a privileged shell; remote root login
-is not provided. Status is visible before manual configuration or later pairing automation. Networking needs LAN access to
+is not provided. Status is visible before configuration or pairing. Networking needs LAN access to
 the controller, not public internet. Clock plausibility is checked before TLS; allow
 operator-supplied system time or a configured reachable time source, never a certificate
 verification bypass or an implicit firmware-clock write.

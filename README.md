@@ -10,7 +10,7 @@
 > For the software you can run today, see [controller installation](docs/controller-installation.md)
 > and the [current agent guide](docs/agent-guide.md#current-implemented-commands).
 > This manual is the destination; the [implementation roadmap](docs/product-roadmap.md)
-> will be revised separately to reach it.
+> and [command checklist](docs/installation-to-patch.md) track the work to reach it.
 
 Quirkbench gives a coding agent a persistent lab for investigating a Linux computer.
 The agent reads source, forms hypotheses and writes changes. Quirkbench builds those

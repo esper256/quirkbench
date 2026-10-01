@@ -1,9 +1,10 @@
 # Development controller archive
 
-The revised first delivery uses manual authenticated controller/target setup;
-a full setup/pairing wizard is later work. The provisional archive and worker below
-remain partial implementation, not evidence of a complete attended journey. See
-[delivery tiers](product-roadmap.md#delivery-contract) and the
+The current development installation uses manual authenticated controller/target
+setup. The planned general release requires guided setup/pairing under the
+[fresh-user implementation map](installation-to-patch.md). The provisional archive
+and worker below remain partial implementation, not evidence of that complete journey. See
+[delivery order](product-roadmap.md#delivery-contract) and the
 [storage policy](architecture.md#storage-protection-policy).
 
 The controller can now be packaged as an unsigned development archive, with

@@ -14,7 +14,8 @@ Completed and software-verified; see the
 **2026-09-30 implementation:** [Upload retention and durable build/composition handoffs](upload-and-background-jobs-handoff-2026-09-30.md).
 `build` and `compose` now acknowledge jobs immediately; explicit `--wait` reads their
 final outputs. Real service/build/boot containment remains unqualified.
-The next kernel tailoring packet is the [hardware-specific experiment kernel design](targeted-experiment-kernels.md), proposed metadata/config generation only.
+The [hardware-specific experiment kernel design](targeted-experiment-kernels.md)
+is a proposed M3 input. The next delivery packet is M1a in the handoff.
 
 This is the authoritative forward plan. Use the [implementation contracts](implementation-contracts.md)
 and [bounded handoff tasks](implementation-handoff.md) for implementation. Planned
@@ -23,53 +24,52 @@ Use [controller, target and builder](terminology.md) consistently.
 
 ## Delivery contract
 
-The [product interface contract](product-interface.md) separates initial attended
-requirements from later automation. Existing commands and schemas retain their
-meaning; proposed interfaces are not implementation claims.
+**Revised 2026-10-01:** deliver the [README manual](../README.md) from fresh
+installation to an attended, evidence-backed patch export. The
+[implementation map and checklist](installation-to-patch.md) records the starting
+point, owners and acceptance evidence. [C8](product-interface.md) defines the revised
+public interface; C0–C7 safety/ownership rules remain binding. This supersedes the
+2026-09-29 manual-setup-first ordering. Existing manual setup remains supported,
+but cannot substitute for the fresh-user release journey.
 
-**First delivery: owner-controlled, attended lab.** Use fixed recovery, manual
-network/controller configuration with explicitly provisioned authenticated trust
-and device credentials, bounded inventory, a reviewed candidate baseline, immutable
-source inputs, observable resource-bounded builds, explicit operator approval of
-each exact candidate attempt, evidence upload and return to recovery. Keep one
-durable execution owner, restart reconciliation and explicit pause/resume. A person
-must be available to handle unsupported hangs; no unattended reset claim is made.
+**First general release:** guided controller setup, verified recovery acquisition,
+authenticated pairing, supported baseline/source preparation, an external-agent
+investigation with exact-candidate operator approval, scientific comparisons,
+patch export and ordinary pause/resume/shutdown/backup use. Deliver fresh-user
+setup before completing the investigation loop. A person remains available for
+unsupported hangs; no unattended reset claim is made.
 
-**Later capabilities:** pairing/credential lifecycle automation (P3d/e), endpoint and
-advanced capacity wizards (P3f/P3a5), guided whole-session backup reporting (P2e),
-managed decision scheduling (P6c), and unattended watchdog grants/qualification (P5).
-These do not gate the attended journey. External-agent operation is the primary journey. Managed invocation is an optional,
-explicitly selected capability after the external-agent workflow is usable. Basic backups report actual
-contents/omissions and do not imply full resumability.
+**Optional later modes:** managed invocation (P6c) is explicitly configured, never
+the default. Unattended authorization/qualification (P5) is a separate capability;
+managed AI does not grant physical execution authority. No future unseen patch is
+covered by an earlier candidate approval.
 
 ## Product flow
 
-1. Build or obtain fixed recovery `.img` media for a supported platform. Verify
-   provenance/checksum and applicable signatures, then flash with a standard writer.
-   Factory media has no credentials, target inventory or experimental deployment.
-2. Boot the owner-selected external drive. Resolve its physical identity and expected
-   roles under the [storage policy](architecture.md#storage-protection-policy).
-   Explicitly confirm the device and journaled commissioning geometry before writes.
-   Secure Boot must already be disabled; do not change firmware automatically.
-3. Use local NetworkManager/nmtui and manual controller configuration. Explicitly
-   install validated controller trust, repository verification keys and device-scoped
-   credentials using the existing configuration mechanisms. Keep secrets private;
-   never disable TLS or signature checks. Pairing automation comes later.
-4. Collect bounded passive recovery inventory and select a reviewed experimental
-   profile/baseline. Establish target/media binding and early wrong-target checks
-   before credentials activate or a candidate is armed. Unknown support blocks the
-   affected capability rather than relaxing protection.
-5. An external agent proposes pinned source inputs and a bounded recipe. The
-   controller builds/composes an exact signed candidate in observable workers. The
-   operator reviews its identity and storage-sensitive changes, then explicitly
-   approves that attempt before one-shot boot. Submission/build success is not approval.
-6. Observe the attended run, retain/upload attributed evidence, and return through
-   fixed recovery. Reconcile uncertainty before another attempt; approved candidates
-   cannot chain updates or promote themselves into recovery.
+1. Install a verified compatible controller release. Complete resumable setup of
+   private persistent state, resources, trust and native systemd user services.
+   The controller starts with zero enrolled targets; no fabricated device identity.
+2. Download verified fixed recovery for the supported platform and use a standard
+   image writer. Factory media contains no credentials, inventory or candidate.
+   Boot and explicitly confirm the external drive/capacity before journaled writes.
+   Secure Boot must already be disabled; Quirkbench does not change firmware settings.
+3. Configure target networking and pair through C4 fingerprint verification and
+   expiring code exchange. Activate complete private settings atomically. Show
+   connection, enrollment, experiment eligibility and attended limits separately.
+4. Start an investigation, describe the problem and limits, select an immutable
+   supported baseline and prepare a separate editable source workspace. Review
+   and approve its first baseline attempt; a lab round trip is not reproduction.
+5. Give the generated brief to an external coding agent. It submits immutable
+   source/proposals; the controller builds/composes in bounded durable workers.
+   Review each exact candidate attempt and supply requested physical observations.
+6. Reconcile results through recovery; compare baseline/patched/regression/revert
+   evidence, retaining uncertainty. Pause/resume and safely shut down through the
+   same application services. Export patches against the recorded source base and
+   attributable evidence, or an explicitly inconclusive report.
 
-A moved drive returns to setup; explicit rebinding preserves old evidence attribution
-and invalidates old authorizations. Manual setup must satisfy C4 binding, privacy and
-verification rules without depending on the later automated enrollment exchange.
+A moved drive returns to setup; explicit reassignment preserves old attribution
+and invalidates old authorizations. Retain installed-OS/internal-disk protection,
+authentication and the existing fixed-recovery/experimental separation throughout.
 
 ## Recovery implementation choice
 
@@ -114,8 +114,8 @@ are explicit maintenance/rebuilds, separate from experiments.
 
 Generic factory images contain no deployment authorization, controller trust pin,
 network passwords or device secrets. Public signed distribution checksums identify
-release bytes; controller trust is provisioned explicitly during initial manual
-setup, and through verified interactive pairing in the later enrollment workflow.
+release bytes; controller trust is provisioned through verified interactive pairing
+in M2. Existing manual provisioning remains subject to the same trust requirements.
 Media filesystem/GPT identities identify the boot disk, not a physical target or
 an enrollment. A cloned factory image must receive a fresh enrollment/media-instance
 identity at setup; enrolled drives must not be cloned as additional devices.
@@ -148,19 +148,18 @@ setup records logout/lingering behavior. State and credentials live outside disp
 containers at stable configured paths independent of the invoking working directory. Rootless Fedora builds never
 install experimental packages/modules on the controller OS.
 
-Deliver supported baseline selection and documented manual authenticated setup first.
-A supported packaged release should not require a source checkout or manually
-assembled experimental build manifests; automated installation/setup can follow the
-attended development path without inventing readiness. Distinguish recovery boot,
+Deliver fresh controller setup and authenticated pairing before the complete
+investigation loop. A supported release requires neither a source checkout to run
+Quirkbench nor manually assembled experimental build manifests. Distinguish recovery boot,
 enrollment, experiment eligibility and unattended qualification.
 
 Use shell commands with versioned JSON and typed application services. No MCP or
-remote administration server is required in v1. A deterministic session runner
-invokes a configured coding-agent command only at decision boundaries. It owns
-build/compose/dispatch, preserves interrupted source edits, records hypotheses and
-rejected approaches, and feeds compact evidence deltas to the next decision.
-Unknown usage, expired authentication, exhausted storage and persistent failures
-pause durably rather than retrying indefinitely. Session duration is unrestricted;
+remote administration server is required in v1. Investigation application services
+own build/compose/dispatch in both modes, preserve interrupted source edits and
+record hypotheses, rejected approaches and evidence deltas. Only the optional
+managed driver invokes a configured coding-agent command at decision boundaries.
+Unknown managed usage, expired authentication, exhausted storage and persistent
+failures pause durably rather than retrying indefinitely. Session duration is unrestricted;
 operator budgets and experiment deadlines control resource use.
 
 Proposal acceptance returns a durable operation ID before background preparation.
@@ -199,26 +198,35 @@ Offline recovery waits without reboot loops. Monitoring requires no AI invocatio
 | P0 | First-journey CLI/source/observation contracts; retain existing fixtures | Schema/help fixtures, additive compatibility, authority review |
 | P1 | Shared bounded inventory and deterministic supported baseline catalog | Multi-platform fixtures, privacy/limits, unsupported/protection conflicts |
 | P2 | Stable setup/service topology, release installation, JSON API and durable operations | Request replay, restart fencing, pause, managed worker survival |
-| P3 | Stock-kernel recovery, manual authenticated setup and binding; later pairing/wizards | Boot-device restrictions, wrong trust, moved media, private-state isolation; later enrollment interruption |
+| P3 | Stock-kernel recovery, guided pairing/lifecycle and binding; preserve manual compatibility | Boot-device restrictions, wrong trust, moved media, private-state isolation and enrollment interruption |
 | P4 | Attended recovery-to-baseline commissioning workflow | Actual runtime assembly with fake privileged adapters, then operator-run device round trip |
 | P5 | Later unattended qualification and scoped candidate activation authorization | Exact identity/grant/revocation tests, then physical reset coverage |
 | P6 | Attended external investigation; later managed scheduling and adapter | Source snapshots, proposal/outbox replay, usage, auth failures, pause/resume |
 | P7 | Bounded diagnostic recipes and patch exports | Explicit stimuli, baseline/patched/revert identities, regression evidence and uncertainty |
 | P8 | Final major-version release qualification | Stable release bytes, infrastructure preservation, fault coverage and declared endurance objective |
 
-Implementation order is the needed P0 fixtures; P1 supported baselines and P2 durable
-observable execution; P3 stock-kernel recovery/manual setup/binding; P4 attended
-baseline; P6 external proposals and operator-approved investigation. Implement the
-minimum source/recipe/observation interfaces for this path before optional UX.
-Then add P3 automation, P2 completeness tooling and P6 managed scheduling as bounded
-follow-on work. Foundational P7 recipe/observation records are needed by P4/P6;
-broader diagnostics follow. P5 qualification is required before unattended operation,
-not before the attended external journey. P3 initially uses explicit device confirmation
-and current journaled geometry; advanced capacity choices and endpoint migration
-wizards are later packets. P8 packaging acceptance is prepared in P2; expensive final
-release qualification remains last. Higher-reasoning review
-is required for storage protection, enrollment/boot binding, worker fencing and
-watchdog policy. Bounded implementations use focused tests and the handoff briefs.
+Delivery follows these user outcomes; P numbers remain implementation ownership,
+not numeric scheduling order. See the [checklist](installation-to-patch.md#manual-implementation-checklist)
+for every command/screen, current evidence and closure criteria.
+
+| Order | Outcome | Packet mapping |
+| --- | --- | --- |
+| M1 | Fresh controller installation and resumable setup | P0, P2a–d |
+| M2 | Verified recovery, local setup, authenticated target pairing and lifecycle | P3a–f, P1a/b |
+| M3 | Investigation/source workspace and approved baseline round trip | P1c, P4, source P6a, needed P7a/b |
+| M4 | Complete external-agent experiment loop | P6a/b, P7a/b |
+| M5 | Patch/report export and ordinary monitor/shutdown/backup/storage use | P7, P6b, P2c/e |
+| M6 | Attended general release | P8, after separately authorized final qualification |
+| M7 | Optional managed invocation; independently optional unattended operation | P6c; P5 |
+
+Prepare only each packet's necessary P0 fixtures; retain existing frozen schemas.
+Reuse implemented capacity choices, recipes and observation records instead of
+rebuilding them or treating them as absent. Enrollment and guided setup now gate the
+fresh-user journey. P5 still does not gate attended operation. Hardware-specific
+kernel tailoring is a bounded M3 implementation input, not a prerequisite to starting
+M1. Higher-reasoning reviews apply before enabling storage, trust/binding, source
+ownership, durable dispatch, shutdown or watchdog changes. Routine packets use
+focused software tests; actual device commissioning is an explicit product operation.
 
 ## Release and non-goals
 

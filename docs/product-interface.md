@@ -1,10 +1,13 @@
 # Product interface contract
 
-**Initial delivery, revised 2026-09-29:** an attended external-agent investigation in
-an owner-controlled lab, using manual authenticated setup and exact operator-approved
-attempts. The roadmap's delivery tiers govern dependencies. Sections describing
-pairing automation, managed decisions, endpoint/advanced capacity wizards and guided
-backup completeness specify later capabilities. They do not gate the first journey.
+**Delivery revision, 2026-10-01:** implement the README's fresh-user installation,
+guided authenticated setup/pairing and attended external-agent investigation through
+patch export. Fresh controller setup comes first; managed invocation and unattended
+target operation are separate optional follow-ons. The
+[implementation map](installation-to-patch.md) records current gaps and acceptance.
+Manual authenticated setup remains a supported development/compatibility path, but
+does not satisfy the general-release user journey. This supersedes the 2026-09-29
+delivery ordering while preserving exact operator-approved attempts.
 Use the [storage policy](architecture.md#storage-protection-policy) for distinct
 recovery and experimental protections; no runtime/schema change is claimed here.
 
@@ -70,29 +73,100 @@ records remain, with expired payloads unavailable. See [current settings and cov
 
 ## Public CLI and sessions
 
-Freeze only command forms needed by the initial attended journey before their
-implementation. Retain already frozen fixtures; the full table also lists later
-interfaces and is not a requirement to implement or refreeze everything first. Session records map to existing
-campaigns; do not add a parallel execution database. JSON uses the C2 versioned envelope,
-stable error codes and bounded cursor queries. Mutations use request IDs; retrying the
-same request returns the same durable intent, and changed content conflicts.
+**Investigation** is the public organizing concept: problem, target, source workspace,
+limits, decisions and accumulated evidence. Its durable identity maps to an existing
+campaign and any existing session observation identity in the same database. A chosen
+human name resolves to that stable identity; renaming must not rewrite attribution.
+Do not reinterpret historical free-standing session strings as complete investigations.
+Keep one controller owner and one attempt state machine.
+
+Human CLI, machine JSON, setup wizard and monitor call the same typed application
+services for validation, mutation and readiness. Presentation clients do not acquire
+worker ownership or introduce independent scheduling/authorization logic. External
+mode executes submitted lab work durably but never invokes an agent automatically.
+
+The following forms replace the earlier planned `session start/context/propose`
+presentation. They are desired interfaces, not executable-command claims. Preserve
+existing campaign commands, implemented `session` observations, `--device`, `--host`,
+positional backup/restore, explicit `--state` and current target HTTPS-client flags.
+New `target` subcommands must coexist with that flags-only client syntax, with
+unambiguous dispatch and compatibility fixtures. Preserve the old specification
+parser/fixtures as v1; add a new contract revision before implementing the new facade.
+
+JSON retains C2 versioned envelopes, stable errors and bounded cursor queries.
+Machine mutations supply explicit request IDs. Human commands may generate IDs,
+but must persist the intent/ID before dispatch and expose them for status/retry;
+repeated input after a lost reply resumes the pending intent or requires explicit
+new-intent selection. Same ID/content returns the same durable result; changed content
+conflicts. A friendly wizard must not turn a lost acknowledgment into another attempt.
 
 | Commands | Contract |
 | --- | --- |
-| `setup`, `pair`, `targets`, `target qualify TARGET` | Initial manual authenticated setup/readiness; later setup/pairing wizard and separately authorized qualification. |
-| `session start --device TARGET [--problem FILE] [--driver external]` | Persist scope/driver/workspace selection; the session owns its initial attended baseline operation. Default is external; managed invocation requires explicit selection. |
-| `session context/recipes/proposal-schema SESSION --json` | Bounded context, installed eligible recipes and exact proposal schema. |
-| `session propose SESSION --file FILE --request-id ID` | Accept a proposal and return an operation ID; source validation/freezing and execution happen later under C3. |
-| `session capture-source SESSION --request-id ID` | Explicit quiescent dirty-source handoff; returns a durable capture operation, not a claim of an immediately complete snapshot. |
-| `experiment list --session SESSION --json`, `attempt show ATTEMPT --json` | Preserve the distinction between experiment specification and physical attempt. |
+| `setup`, `status` | Resumable controller setup and read-only readiness, including an empty target registry; no fabricated enrollment. |
+| `recovery download`, `target add NAME`, `target show TARGET` | Verify compatible released image; C4 interactive enrollment; separate recovery/enrollment/experiment readiness. |
+| `investigation start NAME --target TARGET [--problem FILE]` | Persist scope/limits/workspace and supported baseline selection; default external/attended. Preparation never grants boot approval. |
+| `investigation brief INVESTIGATION` | Installed guide, workspace, durable context references and ready-to-copy external-agent prompt. |
+| `investigation context/recipes/proposal-schema INVESTIGATION --json` | Bounded context, eligible installed recipes and exact supported proposal schema. |
+| `investigation propose INVESTIGATION --file FILE --request-id ID` | Accept proposal durably; source validation/freezing and dispatch use C3. |
+| `investigation capture-source INVESTIGATION --request-id ID` | Explicit exclusive-writer handoff; return capture operation, not immediate snapshot completion. |
+| `experiment list --investigation INVESTIGATION --json`, `experiment review EXPERIMENT`, `attempt show ATTEMPT --json` | Keep experiment and physical attempt distinct; review exact source/candidate/recipe/risks. Retain current `attempt status`. |
+| `attempt approve ATTEMPT` | Human facade supplies durable retry identity; keep existing explicit `--request-id` form and exact approval semantics. |
 | `evidence read DIGEST --offset N --length N` | Authorized bounded reads, never private configuration. |
-| `operation status ID --json`, `session status/watch SESSION` | Same progress facts in machine and human views; watching launches no agent. |
-| `session pause/resume SESSION`, `session export SESSION --output PATH` | Existing pause/reconciliation fences; export is a public investigation bundle. |
-| `session observations SESSION --json`, `session respond SESSION --request ID --file FILE --request-id ID` | Query and durably answer typed human requests; monitor is a client of this same API. |
-| `backup --output PATH`, `restore` | Initial retained backup behavior with explicit contents/omissions and paused restore; later guided completeness. Retain existing positional syntax. |
+| `operation status ID --json`, `investigation status INVESTIGATION`, `monitor [INVESTIGATION]` | Shared facts and actionable waits; retain current monitor flags. Watching launches no agent. |
+| `investigation pause/resume INVESTIGATION`, `target poweroff TARGET` | Reuse pause/reconciliation; coordinated shutdown with local recovery equivalent and explicit uncertainty. |
+| `investigation observations INVESTIGATION --json`, `investigation respond INVESTIGATION` | Interactive response uses same durable typed API; machine form takes `--request ID --file FILE --request-id ID`. |
+| `investigation report INVESTIGATION`, `investigation export INVESTIGATION --output PATH` | Evidence-linked patch or inconclusive report; public bundle, not a backup. |
+| `backup --output PATH`, `restore`, `storage` | Guided completeness, paused restoration and retention services; preserve existing positional/maintenance interfaces. |
+| `agent configure`, `investigation driver INVESTIGATION --managed` | M7 optional configured invocation, paused/reconciled writer handoff; never default or implicit. |
+| `target qualify TARGET` | M7 separately authorized qualification; bounded unattended authority remains C6, not a consequence of pairing or managed mode. |
 
-Specify exact argument/schema/help fixtures in P0; unsupported commands must not
-pretend to work. Keep frozen wire names such as `device_id` and `--device`.
+Specify exact argument/schema/help fixtures per owning P0 packet; unsupported
+commands must not pretend to work. Keep frozen wire names such as `device_id`,
+`session_id` and existing `--device` options. No bulk database vocabulary migration.
+
+## New records and compatibility
+
+Use C0 strict validation and explicit versioned readers. Existing schemas, including
+Experiment/Result, retain their meanings; this prose does not relax a validator.
+Each packet freezes its mechanical schema and failure fixtures before adapters.
+
+| Record boundary | Required identity/semantics | Migration rule |
+| --- | --- | --- |
+| Signed release set | Exact controller, recovery, builder and baseline/catalog digests; platform/API compatibility, publisher trust and qualification evidence | New/successor distribution record; existing private `unqualified` recovery statements never become qualified by relabeling; development archives remain readable |
+| Setup progress | Selected state/runtime, completed configuration steps, operation/request identity, prerequisites and separate readiness facts | New versioned journal; resume and reconcile existing configuration without merging another state root |
+| Enrollment | C4 expiring request/key binding, durable credential issuance, private generation and revocation | New strict exchange records; retain validated manual generations and existing target protocol readers |
+| Investigation | Stable identity/name mapping, campaign/session references, problem digest, workspace/base, limits, driver and execution owner | Additive database migration and explicit reader for legacy session/observation records; no invented historical workspace or source coverage |
+| Source workspace/capture | Repository origin and actual Git object ID, distribution source/patch provenance, immutable captured content/config identities, capture completeness | Keep Git commit OIDs distinct from artifact SHA-256; existing proposal-v1 `base_revision` digest is not silently redefined as a Git OID |
+| Report/export | Bundle version, base/final source identities, patch series, attributed experiment/attempt/evidence references and limitations | New manifest/readers; missing retained bytes explicit; no secrets or new execution authority |
+
+Any new recipe physical-observation support requires a successor schema and
+compatibility reader: existing versions rejecting nonempty physical observations
+must not silently begin accepting them. Keep optional unknown values unknown.
+
+## Editable sources and patch results
+
+Baseline selection consumes a distributable immutable catalog and pinned repository,
+package, trust and source identities. Existing controller caches cannot be a hidden
+installation prerequisite. A missing pinned input blocks with its identity; never
+silently substitute an available newer kernel or inherit host repository configuration.
+
+Prepare a separate editable kernel Git workspace using an actual recorded base.
+For distribution sources retain the source-package and distribution-patch provenance
+and enough reconstruction information to explain the upstream relationship. Existing
+user source is an explicit pinned revision or approved dirty capture, copied into
+the investigation workspace without modifying the original. C3 streaming capture,
+exclusive writers, modes/deletions and immutable build inputs remain mandatory.
+
+Reports distinguish lab commissioning from reproducing the problem and compare
+baseline, patched, regression and practical revert attempts with exposure counts,
+confounders and missing observations. Export the README layout: `README.md`,
+`report.md`, `patches/`, `reproduce/`, `experiments/`, `evidence/`. Produce patches in
+`git format-patch` form against the recorded base, preserving author metadata;
+do not fabricate authorship or sign-offs. Record exact reconstruction/application
+instructions. If final cleanup changes tested content, require another approved
+validation or label the exported patch unvalidated. Retain required sources, symbols
+and evidence through existing dependency/pin services; expired bytes remain missing,
+never reconstructed evidence. A useful inconclusive report is a supported outcome.
 
 ## Supported baseline catalog
 
@@ -164,14 +238,17 @@ Safe shutdown requires no active attempt/writer, reconciled target state, all pr
 evidence durable locally, and orderly sync/unmount/poweroff. Pending controller upload
 may remain, but must be visible and cannot be represented as acknowledged. External
 editors require explicit quiescence/checkpointing; pause does not terminate them.
+An acknowledged shutdown request is not confirmation of physical poweroff. Loss of
+contact stays unknown; when software cannot observe final power state, ask the operator
+to confirm locally before disconnecting media. Offline recovery offers the same safe
+local shutdown sequence without requiring a controller acknowledgment of uploads.
 
 ## Endpoint changes and media capacity
 
-**Later wizards.** Initially document explicit paused endpoint maintenance with
-existing validated configuration and current fixed journaled geometry. Local full
-boot-device confirmation and capacity refusal remain mandatory before mutation;
-advanced sizing UX and automatic migration orchestration do not gate attended use.
-The following describes the later operator-guided tooling.
+**M2 guided setup and maintenance.** Reuse implemented capacity choices and journaled
+geometry; do not reimplement them or remove them as premature features. Integrate
+the fresh-user screens and explicit paused endpoint maintenance. Local full
+boot-device confirmation and capacity refusal remain mandatory before mutation.
 
 Endpoint migration is an operator-guided controller/target setup transaction. A changed
 IP may require a new certificate SAN, even when the CA is retained. Validate endpoint
@@ -192,11 +269,12 @@ automatically repartitions enrolled media. Later resizing is not a v1 repair sho
 
 ## Backup completeness
 
-**Later guided capability.** Initial backups list their contents and limitations,
+**M5 guided capability.** Existing backups list their contents and limitations,
 including omitted private credentials, uncaptured source edits and possibly
 unuploaded target evidence. Keep existing consistent database/CAS/OSTree retention
 and restore validation; do not weaken an implemented backup check. Report unknown
-coverage as unknown. The comprehensive workflow below is deferred.
+coverage as unknown. The comprehensive workflow below gates the main manual's
+backup/restore promise, not M1 controller setup.
 
 A guided backup first checkpoints/quiesces approved source writers or reports the
 workspace capture incomplete. Preserve unfinished edits, operation inputs, database,

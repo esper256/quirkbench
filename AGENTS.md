@@ -14,8 +14,9 @@ for vocabulary changes. Never equate generic design with universal tested suppor
 Preserve agent quota. Read [the testing policy](docs/testing-policy.md) before
 choosing validation. This policy applies to delegated work as well.
 
-Follow [the authoritative forward plan](docs/product-roadmap.md), briefs P1–P8.
-Roadmap inventory/provisioning/session wizard commands remain proposed unless
+Follow [the authoritative forward plan](docs/product-roadmap.md), M1–M7 outcomes
+and bounded P0–P8 packets. Use the [manual implementation checklist](docs/installation-to-patch.md)
+and next handoff packet. Roadmap investigation/setup commands remain proposed unless
 explicitly recorded as implemented. `target-inventory TARGET_ID --json` reads the
 authenticated recovery report and planning blockers; it queues no work.
 Use a bounded brief and focused tests; request higher-reasoning review for storage,
@@ -73,13 +74,16 @@ or schema is not existing passing implementation evidence.
 These rules change test scheduling, not acceptance standards. Never hide a failing
 gate with a skip or mark an unrun qualification complete.
 
-The [product interface contract](docs/product-interface.md) is normative C8. Implement
-the attended external-agent journey with manual authenticated setup and explicit
-exact-candidate operator approval first; managed invocation is a later optional, explicitly selected feature. Pairing/lifecycle automation, advanced wizards, guided backup completeness
-and unattended watchdog grants are later packets, not initial prerequisites. Controller user services own rootless workers. Do not infer
-source capture, safe shutdown, unattended eligibility or backup completeness from a
-single accepted/paused/ready state. P0 fixtures and foundational recipe/observation
-records precede the full journey; see packet dependencies rather than numeric order.
+The [product interface contract](docs/product-interface.md) is normative C8. Follow
+the revised fresh-user-first delivery: controller installation/setup, authenticated
+target pairing, then the attended external-agent investigation through patch export.
+Retain manual authenticated setup as a compatibility/development path. Exact-candidate
+operator approval remains mandatory. Managed invocation is optional and explicitly
+selected after the attended journey; unattended watchdog grants are separate. Guided
+setup/pairing gates M2 and backup completeness gates M5. Controller user services own
+rootless workers. Do not infer source capture, safe shutdown, unattended eligibility
+or backup completeness from one accepted/paused/ready state. P0 fixtures and needed
+recipe/observation/source foundations precede integration; follow packet dependencies.
 
 Local state maintenance (2026-09-30): new state and product/build staging must live
 outside Git checkouts. Use configured home state and the manual `quirkbench monitor`;
