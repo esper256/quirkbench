@@ -64,3 +64,54 @@ gates. Preserve successful evidence and failed-run diagnostics. Diagnose with
 focused checks, then repeat only invalidated gates on a stable candidate. Clearly
 distinguish historical qualification, current software tests and pending release
 qualification. Quota savings never justify silently reusing mismatched evidence.
+
+## Fast development loop
+
+Pick the smallest changed behavior and its failure cases, implement them, then run
+the owning tests. After those pass, add adjacent compatibility tests only where the
+change crosses that boundary. Do not rerun an unchanged passing selection at the end
+of every turn or run the full suite merely to complete a packet. Full software CI
+still runs on push/PR; required CI failures must be resolved before claiming readiness.
+Do not run the same matrix locally and in CI by habit.
+
+Collect timing information during a needed run with `--durations=10`; do not start
+a benchmark campaign before development. Aim for a repeatable edit/check selection
+under 30 seconds and a focused packet check under two minutes. These are engineering
+targets, not measured current timings, deadlines, skip rules or reduced acceptance.
+If a necessary test exceeds them, keep its coverage and use its timing to decide
+whether setup reuse or an injected boundary would help. Report actual elapsed time
+alongside the normal result; no separate performance-reporting system is needed.
+
+Test domain logic with real validation, SQLite transactions, temporary files and
+small source repositories. Inject clocks, network failures, service managers and
+expensive build/boot operations at their existing adapter boundaries. Expiry and
+retry tests should advance a fake clock rather than sleep for production deadlines.
+Keep bounded real subprocess tests when they verify termination, pipes or descendant
+ownership; a sleeping child killed by a short deadline is not a long-running build.
+Do not mock away the transaction or reconciliation behavior under test.
+
+Build one small joined flow incrementally as the services land: setup → enrollment
+→ investigation → proposal → approval → evidence → export. Exercise real application
+services and versioned records with injected external effects. Reuse its fixtures;
+do not construct a separate simulator, fake scheduler or generic testing framework.
+Small signed archives and miniature Git histories can test distribution and source
+semantics without publishing a release, fetching a kernel or rebuilding recovery.
+They do not qualify real image bytes or full-size resource behavior.
+
+Use the configured test interpreter and existing dependencies. For tests exercising
+state/build path guards, choose a disposable test base outside Git checkouts and
+forbidden system paths, with the same access semantics the test requires. Account
+cache paths worked in the recorded boundary audit; `/tmp` and `/var/tmp` did not in
+that local environment. This is a fixture-location issue, not a universal requirement
+on users' paths. Never weaken production guards to accommodate a test directory.
+If using pytest `--basetemp`, select a dedicated disposable child directory: pytest
+deletes it. Never point it at a cache root, product state, another run or credentials.
+Do not share that directory across concurrent runs.
+
+Diagnose tool availability, fixture paths and sandbox restrictions once and retain
+the working command in the packet handoff. Do not reinstall environments or move
+between native/container execution after every failure without evidence it is needed.
+Archive construction tests are appropriate when packaging changes; native activation,
+service migration and production-state mutation are not routine test prerequisites.
+Do not add parallel pytest workers until timings justify them and state/port/temp
+isolation has been checked. Parallelism is not a substitute for smaller selections.

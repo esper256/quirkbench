@@ -41,6 +41,10 @@ old fixtures and call that feature completion.
 
 M numbers identify user outcomes; P numbers remain bounded implementation packets.
 Neither numbering replaces C contract identifiers. Select one packet per task.
+The order below is integration/delivery order, not a requirement to wait for each
+milestone's physical evidence before implementing later software. Use the
+[development scheduling rules](implementation-handoff.md#development-scheduling-and-review)
+to distinguish actual code dependencies from release dependencies.
 
 | Milestone | Outcome and dependencies | Owning packets/contracts |
 | --- | --- | --- |
@@ -68,6 +72,11 @@ to inspect evidence, not assertions that a suite was run in this documentation t
 Close a row only with implementation files, exact focused check/results, remaining
 limitations and artifact qualification status. New acceptance scenarios below are
 requirements to implement, not existing passing tests.
+Record software status and qualification separately within the status cell, for
+example `software complete; physical commissioning pending`. That permits dependent
+software work while keeping the user-facing claim open. A pending release signature,
+image build or physical check does not invalidate a passing software result and does
+not authorize those operations automatically.
 
 | Manual command or promise | Status and current evidence | Owner | Acceptance evidence required to close |
 | --- | --- | --- | --- |
