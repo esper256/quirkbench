@@ -13,9 +13,6 @@ for vocabulary changes. Never equate generic design with universal tested suppor
 
 Preserve agent quota. Read [the testing policy](docs/testing-policy.md) before
 choosing validation. This policy applies to delegated work as well.
-Use the [development scheduling rules](docs/implementation-handoff.md#development-scheduling-and-review):
-one bounded implementation slice, its focused checks and a compact handoff. Physical
-qualification and release publication are not dependencies for unrelated software work.
 
 Follow [the authoritative forward plan](docs/product-roadmap.md), M1–M7 outcomes
 and bounded P0–P8 packets. Use the [manual implementation checklist](docs/installation-to-patch.md)

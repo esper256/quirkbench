@@ -1,10 +1,5 @@
 # Implementation handoff
 
-**Start here:** select the [next M1a slice](#next-packet--m1a-resumable-controller-setup-contract),
-read its named source/contracts and use the [fast development loop](testing-policy.md#fast-development-loop).
-The large packet table is a reference, not a reading or implementation checklist for
-one turn. Completed historical work does not need another audit before each slice.
-
 **General-purpose correction:** [Boundary audit and implementation packets](general-purpose-boundary.md).
 Installation identities describe software bytes; controller environments and supported
 platforms are explicit selections. External agents are the primary workflow. The
@@ -111,69 +106,31 @@ specification-only `product_cli.py`. Reuse stable install/state identity and cur
 setup response fields. Keep the current native installation running unchanged during
 software development.
 
-Implement M1a as three sequential slices, each ending in usable code and its focused
-checks. Freeze only the records/arguments consumed by that slice, alongside its
-implementation; do not make a schema-only milestone for the whole future product.
+1. Freeze the additive setup-progress record and new `setup`/`status` argument,
+   error and JSON contracts. Specify selected runtime/state, request identity,
+   completed steps, prerequisites and independent readiness facts. Keep legacy
+   parser fixtures and implemented `setup-state`/`setup-check` behavior.
+2. Implement shared setup/readiness services with injected service/filesystem/network
+   adapters and a durable resumable journal. Persist intent before side effects;
+   reconcile actual configuration after interrupted acknowledgments. Read-only status
+   must not initialize state or create a scheduler. Preserve existing fields and
+   CLI/configured/live service identity reporting.
+3. Connect the human facade to those services. Missing prerequisites identify actual
+   native tools; container visibility is separate. Record state/resources, connection
+   and logout choices without implicit package, firewall or lingering changes. Do not
+   report completion when later M1 release/builder/service integration is missing.
+4. Use focused clean-home/fake-service tests for interrupted setup/resume, same/different
+   request replay, conflicting state/runtime, no-Distrobox operation, active-work
+   refusal and read-only status. Extend existing setup/install suites as appropriate;
+   no image, real service migration, package download or release qualification.
 
-| Slice | Change and boundary | Focused validation |
-| --- | --- | --- |
-| M1a.1 — read-only status | Add the `status` facade over existing setup/readiness services; retain CLI/configured/live identities and existing fields. No new setup journal, worker owner or initialization from queries. | Extend `tests/test_controller_setup.py` and relevant `tests/test_cli.py` cases for unconfigured state, mismatched revisions, missing native tools/container visibility and read-only behavior. |
-| M1a.2 — resumable setup service | Add only the required versioned setup-progress record and shared application service: selected runtime/state, intent/request identity, step reconciliation and independent readiness. Inject external effects. Review the new durable boundary before enabling mutations. | Extend setup/installation suites for interrupted acknowledgment/resume, request replay/conflict, incompatible selected state, active-work refusal and crash recovery. Use real temporary state and fake service management. |
-| M1a.3 — human setup facade | Connect `setup` prompts and noninteractive inputs to that service; record resources/connection/logout choices. Retain `setup-state`/`setup-check` compatibility and explicit host-change instructions. Never claim readiness while later M1 integration is missing. | Extend focused CLI/setup cases for prompt retry, cancellation, missing dependencies, no-Distrobox operation, shared validation and stable resume identity. |
-
-These are software packets: no recovery image, native service migration, package
-download or release qualification. Reuse `test_installation.py` fixtures and current
-service adapters instead of rebuilding a new harness. Run archive tests when archive
-behavior changes, not for every prompt/status edit.
-
-Follow M1a with a bounded zero-target service/bootstrap packet, then signed
-release/installer/builder integration. Settle the zero-target/credential-store interface
-before constructing pairing against it; implement the restricted C4 exchange in M2.
-Current `transport.make_server()` requires device tokens and loads a static mapping;
-do not work around fresh setup with fake targets or anonymous target routes. Review
-the trust change before enabling it. Tiny signed release fixtures and injected
-repositories unblock distribution code; choosing publishing infrastructure or waiting
-for qualified release artifacts must not block ordinary facade work. M1 is complete
-only when its full checklist criteria pass.
-
-## Development scheduling and review
-
-Milestones describe the delivered journey. Only concrete code/record dependencies
-block the next implementation slice. Fresh setup remains the primary priority, but
-an authorized long operation, unavailable target or pending release artifact need not
-hold up independent source/export/UI work against settled interfaces. Do not declare
-the whole milestone complete merely because its software portion passes.
-
-| Potential delay | Scheduling rule |
-| --- | --- |
-| Rebuilding images or waiting for a target to test a wizard | Use injected system/network/boot boundaries and real application records; retain physical acceptance for explicit commissioning/release. |
-| Treating M1–M7 as one serial chain of qualified releases | Track software completion separately from physical/release evidence; integrate in order without blocking independent implementation. |
-| Discovering mismatched interfaces late | Join a small real-service flow as each slice lands; freeze the immediate consumer's record/adapter interface. Do not postpone all integration until M6 or design every future schema first. |
-| A large setup task mixes presentation, credentials and ownership | Use M1a.1–3; separate zero-target trust changes and distribution integration. Each slice has its own focused failure cases. |
-| Repeated expensive reviews for ordinary UI edits | Review new/changed invariants at the owning boundary; retain the review reference and scope. Unchanged reviewed invariants do not require another high-reasoning review just because another facade calls them. |
-| Every task updates several large planning documents | Update the owning checklist row and one compact handoff. Edit normative contracts only when their decisions change; link to evidence instead of duplicating logs/counts across docs. |
-| Waiting for downloads, signing publication or a real kernel build | Test semantics with small local immutable/signed fixtures and miniature source trees. Retain missing production inputs as blockers to the actual operation; never substitute inputs or imply qualification. |
-
-For required higher-reasoning review, provide a concrete diff, the affected invariant,
-crash/replay cases, focused results and remaining limits. Review before enabling the
-boundary; for a materially new design, settle its authority model before broad
-implementation. After corrections, review the affected changes rather than restarting
-an unrelated architecture audit. Reopen review when ownership, storage, trust, schema
-meaning or authorization assumptions change. A review is not routine permission for
-every edit, and switching to a cheaper implementation model does not remove it.
-
-Keep the per-slice handoff short:
-
-- Outcome, affected checklist row and implementation files.
-- Exact focused command, result/elapsed time and any known environment correction.
-- Review reference/scope when required; changed artifact identity when applicable.
-- Remaining software blockers separately from commissioning/release evidence.
-- Next ready slice and the few files/contracts it needs.
-
-Do not add exhaustive reading, time accounting, performance dashboards or task
-orchestration infrastructure to satisfy this process. Use ordinary tools and the
-existing durable run records. Follow the testing policy's no-polling rule; do useful
-independent work or return with a durable pending status when a necessary run is long.
+Review new durable setup boundaries at higher reasoning before enabling them. Follow
+M1a with a bounded zero-target service/enrollment-bootstrap packet, then signed
+release/installer/builder integration. Current `transport.make_server()` requires
+device tokens and loads a static mapping; do not work around fresh setup with fake
+targets or anonymous target routes. Enrollment needs a restricted C4 exchange and
+durable credential/revocation lookup. Review that trust boundary before enabling it.
+M1 is complete only when the checklist's complete fresh controller criteria pass.
 
 ## Contract-alignment completion record — 2026-10-01
 
