@@ -1,11 +1,11 @@
 # Implementation contracts for the remaining briefs
 
-**Delivery revision, 2026-10-01:** C0–C8 remain contract identifiers. The first
+C0–C8 are the contract identifiers. The first
 general release follows fresh controller setup and authenticated pairing with an
 attended external-agent investigation through patch export. Exact experiment approval
 remains explicit. Managed decisions and unattended grants are optional later modes.
-The [implementation map](installation-to-patch.md) replaces the earlier delivery
-ordering; existing manual configuration remains supported. Existing wire schemas
+The [implementation map](installation-to-patch.md) tracks delivery; existing manual
+configuration remains supported. Existing wire schemas
 and implemented validation remain unchanged. The
 [architecture storage policy](architecture.md#storage-protection-policy) governs
 recovery separately from candidate restrictions.
@@ -90,7 +90,7 @@ retains its original property allowlist. Registration preserves the actual boot/
 context and references canonical validated bytes in existing CAS. Missing or partial
 collection must not block retained attempt evidence upload. `target-inventory`
 returns observations and candidate planning blockers without creating attempts,
-queueing builds or granting execution authority. See the [current handoff](stock-recovery-attended.md#automatic-first-boot-hardware-report).
+queueing builds or granting execution authority. See the [current handoff](recovery-operations.md#automatic-first-boot-hardware-report).
 
 Store the exact validated inventory bytes as immutable evidence. A separately
 computed hardware fingerprint excludes timestamp and observation ordering; it is
@@ -128,7 +128,7 @@ independent. Inventory cannot authorize any weaker storage policy.
 Existing HardwarePlan/profile and RecoveryRecipe v1 validators retain their original
 exclusion/custom-kernel provenance meaning. P1b/P3a1 now provide recovery recipe,
 rootfs-lock and release v2 with distinct package/policy references; candidate
-exclusion references are unchanged. See the [software handoff](stock-recovery-attended.md). Retain old readers and artifact identities; do not use a policy digest
+exclusion references are unchanged. See the [software handoff](recovery-operations.md). Retain old readers and artifact identities; do not use a policy digest
 to imply that an actual build or boot has passed protection checks.
 
 ## C2 — Local operations, ownership and restart (P2)
@@ -256,7 +256,7 @@ compilation. Cache hints are read-only; writable work/proposals are private. Onl
 the current owner validates stopped output, signs composition and publishes shared
 repository/result references. Repository pins precede the short fenced reference
 transaction. Explicit resume is a durable request reconciled by that owner with a
-fresh generation. See [the implementation handoffs](upload-and-background-jobs-handoff-2026-09-30.md)
+fresh generation. See [build and boot](build-and-boot.md)
 and [manual installation](controller-installation.md#durable-build-and-composition-service).
 
 Failed disposable staging defaults to seven days. Optional cache admission/eviction

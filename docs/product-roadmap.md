@@ -1,22 +1,5 @@
 # Quirkbench product roadmap
 
-**General-purpose correction:** [Boundary audit and implementation packets](general-purpose-boundary.md).
-Installation identities describe software bytes; controller environments and supported
-platforms are explicit selections. External agents are the primary workflow.
-
-Boundary follow-up: finish profile-driven adapter selection and move remaining
-architecture command details into the reviewed backend. Derive recovery recipe
-identities from the selected lock; current setup instructions must not depend on
-an investigation handoff. Preserve frozen v1 schemas and the sole supported backend.
-Completed and software-verified; see the
-[follow-up evidence](general-purpose-boundary.md#follow-up-audit-and-completion--2026-10-01).
-
-**2026-09-30 implementation:** [Upload retention and durable build/composition handoffs](upload-and-background-jobs-handoff-2026-09-30.md).
-`build` and `compose` now acknowledge jobs immediately; explicit `--wait` reads their
-final outputs. Real service/build/boot containment remains unqualified.
-The [hardware-specific experiment kernel design](targeted-experiment-kernels.md)
-is a proposed M3 input. The next delivery packet is M1a in the handoff.
-
 This is the authoritative forward plan. Use the [implementation contracts](implementation-contracts.md)
 and [bounded handoff tasks](implementation-handoff.md) for implementation. Planned
 interfaces below are not claims that setup or session orchestration already exists.
@@ -24,12 +7,11 @@ Use [controller, target and builder](terminology.md) consistently.
 
 ## Delivery contract
 
-**Revised 2026-10-01:** deliver the [README manual](../README.md) from fresh
+Deliver the [README manual](../README.md) from fresh
 installation to an attended, evidence-backed patch export. The
 [implementation map and checklist](installation-to-patch.md) records the starting
 point, owners and acceptance evidence. [C8](product-interface.md) defines the revised
-public interface; C0–C7 safety/ownership rules remain binding. This supersedes the
-2026-09-29 manual-setup-first ordering. Existing manual setup remains supported,
+public interface; C0–C7 safety/ownership rules remain binding. Existing manual setup remains supported,
 but cannot substitute for the fresh-user release journey.
 
 **First general release:** guided controller setup, verified recovery acquisition,
@@ -242,11 +224,5 @@ updates, automatic repeat after uncertain execution or unattended operation with
 appropriate qualification. Keep hardware outcomes inconclusive when observations
 cannot establish causality. Do not publish patches or alter the installed OS implicitly.
 
-## Deferred external hardware
-
-Post-v1 Pi USB gadget media support is reserved in the
-[external-hardware design](external-hardware.md) and X1–X5 handoff packets. It is
-unimplemented and unqualified, outside the P0–P8 dependency chain. Continue the
-direct-drive recovery/OSTree path; no gadget framework, hardware purchase or extra
-release qualification is required for v1. Future presentation must preserve target
-protection, evidence durability and experiment authority.
+Direct USB storage is the supported media path. USB gadget accessories are outside
+this implementation plan.

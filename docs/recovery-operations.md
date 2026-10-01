@@ -1,35 +1,20 @@
-# Stock recovery and attended execution — implementation handoff
+# Recovery operations
 
-> **Local artifact reset, 2026-09-30:** the user authorized permanent deletion of
-> the checkout-local `.quirkbench` tree, including delivered images, signing keys,
-> retained inputs and local validation/qualification logs. Historical identities
-> and results below remain records of those runs; their bytes are no longer
-> available. No replacement image or new qualification is supplied by the reset.
-> See [current local state](local-state-maintenance.md).
-
-
-Updated 2026-09-30. This records software implementation and its limits, not image,
-boot, storage-preservation or release qualification. The authoritative
-[storage policy](architecture.md#storage-protection-policy) allows passive kernel
-enumeration and partition-table reads; recovery userspace operations remain confined
-to the identified external boot device. Candidate controller exclusions are separate.
-
-Use [controller installation](controller-installation.md) for current native setup
-and [acquisition specifications](recovery-acquisition.md) to select exact inputs.
-Investigation handoffs and deleted artifact results below are historical evidence;
-they are not setup prerequisites or qualification for replacement bytes.
+Current low-level stock-recovery commands and manual target setup. The guided
+user journey remains planned; see the [implementation checklist](installation-to-patch.md).
+Software support does not establish image or hardware qualification. Use
+[controller installation](controller-installation.md) and explicit
+[acquisition specifications](recovery-acquisition.md) before admitting work.
 
 ## Recovery inputs and preparation
 
 New recovery input generation uses `RecoveryRecipe` v2, rootfs-lock v2 and
 release-candidate v2. The installed `stock-x86_64-uefi-usb-v1` policy has a separate
-identity from candidate profiles. Old v1 records still dispatch to the original
-custom-kernel path; neither their exclusion identifiers nor their provenance fields
-are reinterpreted. The completed custom recovery kernel remains historical evidence.
+identity from candidate profiles. Existing v1 records retain their original
+custom-kernel interpretation.
 
-The historical binary candidate retains the recorded Fedora 44 userspace RPM closure
-and stock `7.2.7-200.fc44.x86_64` kernel packages. New acquisition selects an immutable
-specification with repository and trust identities and requests exact NEVRAs.
+New acquisition selects an immutable specification with repository and trust
+identities and requests exact NEVRAs.
 Preparation refuses missing packages, changed recorded bytes, invalid
 signatures, inconsistent module releases and an unexpected key fingerprint. It
 cannot select a newer moving kernel as a fallback. RPM inspection, GPG and DNF5
@@ -57,7 +42,7 @@ Raw input and recipe histories are counted separately; successful signature stag
 does not consume an extra slot. The other commands inspect actual retained inputs.
 Replace placeholders with recorded
 identities. Download/image production are separate explicitly requested product
-operations. Unavailability of the exact recorded Fedora candidate blocks preparation.
+operations. Unavailability of the selected immutable candidate blocks preparation.
 No source catalog, SRPM, candidate source archive, exclusion fragment or candidate
 build record is a recovery prerequisite.
 
@@ -115,7 +100,7 @@ validates the complete generation, uses private immutable files, fsync/atomic
 activation, preserves the previous generation and shares the runtime/journal locks.
 Pending work or an unresolved claim request blocks activation. It cannot silently
 retarget already bound media. TLS trust and usable public signing material are
-validated before activation. Enrollment automation remains deferred.
+validated before activation. Guided enrollment is not yet implemented; it is planned in M2.
 
 Runtime revalidates mounted p6 and actual journal/spool/private destination devices
 before mutation. A removed evidence mount or a nested mount redirecting control data
@@ -212,14 +197,7 @@ the existing lifecycle owner and user services while HTTPS stays responsive; it 
 not schedule agent decisions or cancel rootfs-only work. Restart leaves interrupted
 operations for explicit reconciliation/resume, rather than automatically rebuilding.
 Use `operation status/watch/events/output` for durable executive progress and the
-recorded private stage log for compile/tool stdout. No process was started here.
-Existing operation views/logs and native Konsole visibility need no waiting AI agent.
-
-Next product operations are exact signed-package acquisition,
-image production and an explicitly requested attended external-device check. Real
-preservation, boot compatibility and reset coverage remain separately recorded
-physical/release evidence. Managed scheduling, enrollment lifecycle automation,
-advanced wizards, comprehensive backup reporting and unattended grants stay deferred.
+recorded private stage log for compile/tool stdout. Use the manual monitor and recorded logs; do not launch popup viewers or waiting agents.
 
 ## Automatic first-boot hardware report
 
@@ -260,18 +238,3 @@ grants no execution approval. Later experiment creation consumes these observati
 alongside pinned sources, reviewed profiles, operator goals and dependency resolution;
 modalias/driver strings are descriptive data, never shell commands or approval to
 relax experimental storage exclusions.
-
-Before first-device use, update the controller while stopped and reconcile active
-or uncertain work before its inventory-association database migration. Image
-production must capture the new runtime revision and installed recipe-code digest;
-old images do not acquire this behavior from controller changes alone.
-
-
-## Current product operation
-
-The [first-device inventory handoff](recovery-inventory-first-device.md) supersedes
-this handoff's earlier statement that package acquisition and image production have
-not started. Exact signed stock packages have been retained and verified; an
-explicit image product operation uses the fixed worker with native Konsole logs.
-Its durable result determines artifact availability. This does not supersede the
-absence of physical boot or release qualification evidence.

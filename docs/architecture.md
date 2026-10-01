@@ -10,8 +10,8 @@ Hardware discovery selects versioned platform profiles and adapters, including
 explicit architecture/boot constraints. Unsupported profiles remain unsupported;
 generic architecture does not imply unqualified universal hardware support.
 
-The target boots fixed generic recovery media before discovery. Initial attended setup
-configures networking and manually provisions authenticated controller trust; recovery collects the
+The target boots fixed generic recovery media before discovery. Current manual setup
+configures networking and provisions authenticated controller trust; recovery collects the
 hardware inventory used to plan the experimental baseline. The installed-OS
 collector is optional. Private network/credential/binding generations live in
 independent evidence/control storage; factory images contain none. Early boot and
@@ -78,18 +78,9 @@ A signed OSTree repository is served through authenticated HTTPS. Device credent
 | Boot control | Arm one prepared deployment, reboot and report recovery state. |
 | Quirkbench core | Attempts, authorization, evidence, progress, reconciliation and checkpoints. |
 
-`DeploymentManifest.provenance.build_evidence` is a versioned closure with `schema_version: 1` and an `artifacts` mapping of role to CAS digest. Controller submission and checkpoint retention require build provenance, matching `vmlinux`, `system_map`, `config`, `modules`, and kernel/userspace source archives; the build provenance must bind those hashes and kernel release. The controller retains these blobs with the manifest. Composition publication pins an owner `deployment:<manifest-digest>` before any experiment is submitted, so a freshly composed result is included in backup. Such pinned builds remain retained until an explicit future cleanup operation releases them. Ordinary `artifact_sha256` payload identities do not implicitly become references. Missing evidence causes new submissions or backup completion to fail, while existing campaign history remains readable.
+`DeploymentManifest.provenance.build_evidence` is a versioned closure with `schema_version: 1` and an `artifacts` mapping of role to CAS digest. Controller submission and checkpoint retention require build provenance, matching `vmlinux`, `system_map`, `config`, `modules`, and kernel/userspace source archives; the build provenance must bind those hashes and kernel release. The controller retains these blobs with the manifest. Composition publication pins an owner `deployment:<manifest-digest>` before any experiment is submitted, so a freshly composed result is included in backup. Retention releases those references only when configured counts and live/pinned dependencies permit cleanup. Ordinary `artifact_sha256` payload identities do not implicitly become references. Missing evidence causes new submissions or backup completion to fail, while existing campaign history remains readable.
 
 Backend commands and filesystem paths stay behind adapters. A fake backend exercises shared behavior; the old four-file bundle is not a second supported deployment backend. Unsupported or legacy kernel-only execution must fail explicitly. Build artifacts may remain readable even when they cannot be deployed by the current adapter.
-
-## Deferred media presentation
-
-Direct USB storage is the sole v1 media implementation. The deferred
-[external-hardware design](external-hardware.md) reserves a Pi USB gadget media
-adapter below deployment: the target still runs recovery and OSTree, while the
-accessory presents backing storage. Keep media ownership and accessory identity
-separate from `DeploymentBackend`, `BootControl` and target execution authority.
-This extension is unimplemented and unqualified; no v1 interface changes are needed.
 
 ## Boot and protection boundary
 
@@ -104,7 +95,7 @@ a wholly read-only root. Secure Boot must be verified disabled.
 
 ## Storage protection policy
 
-**Normative policy, revised 2026-09-29.** Internal storage and the installed OS are
+**Normative policy.** Internal storage and the installed OS are
 outside investigations. The principal variable risk is the experimental kernel
 and recipe proposed by an agent. Recovery is fixed, trusted code maintained and
 verified separately; it never executes agent recipes or adopts candidate changes.
@@ -186,8 +177,7 @@ workers; sessions reference campaigns. Deliver external-agent proposals first, t
 managed decision queue over the same source-capture and dispatch API. Proposal receipt
 is distinct from immutable-source readiness. Recipe extensions and human observations
 are versioned records, not arbitrary target commands. Recovery remains suspend-disabled;
-only eligible candidate recipes may exercise reviewed sleep modes. The first delivery
-is attended with manual authenticated setup and operator-approved attempts. Pairing
-automation, managed scheduling, unattended grants and guided backup completeness are
-later capabilities. Initial backups state contents and omissions without claiming
-whole-session completeness. See the roadmap for delivery tiers.
+only eligible candidate recipes may exercise reviewed sleep modes. The planned general release
+starts with guided setup/pairing and attended operator-approved attempts. Guided backup
+completeness belongs to M5; managed scheduling and unattended grants are optional M7
+capabilities. Current manual setup and backup commands retain their stated limits.

@@ -1,34 +1,20 @@
-# Fedora build environment replay
+# Fedora build environment
 
-Native controller user services and rootless Podman are the current execution
-environment. Distrobox is an optional development shell; it is not required by
-installation, planning, experiment scheduling or evidence collection.
-
-**Current commands (2026-09-30):** `build` and `compose` submit durable jobs to the
-[manually configured controller user service](../docs/controller-installation.md#durable-build-and-composition-service).
-They return job IDs by default; `--wait` explicitly reads final outputs. The service
-launches the pinned builder through the existing bounded delegated Podman helper.
-Input manifests remain the contracts described below; old synchronous workspace
-invocations below are historical adapter guidance, not current CLI launch commands.
-Do not download/build an image merely to check software edits.
-
-**Recovery design revision, 2026-09-29:** stock Fedora kernel/module/firmware packages
-with DNF5/dracut and existing image assembly replace mandatory recovery kernel builds.
-Development kernel-build instructions below apply to experiments or explicitly
-requested custom builds, not an automatic recovery prerequisite. Recovery v2
-worker/recipe code implements that stock-package path; old v1 records retain their
-original custom-kernel meaning. Follow
-[storage protection](../docs/architecture.md#storage-protection-policy) and
-[attended delivery tiers](../docs/product-roadmap.md#delivery-contract).
+Native controller user services and rootless Podman own product execution. Distrobox
+is an optional development shell. `build` and `compose` submit durable jobs through
+[controller service setup](../docs/controller-installation.md#durable-build-and-composition-service)
+and return operation IDs; `--wait` reads their results. No image build is required
+for ordinary software edits. Recovery uses stock packages; kernel compile guidance
+below applies to experimental kernels and explicitly requested custom builds.
 
 The Containerfile requires a digest-pinned
 `registry.fedoraproject.org/fedora@sha256:...` base reference and checks its
-`/etc/os-release` against the `FEDORA_RELEASE` build argument. For the retained
-Fedora 44 candidate, build on the controller host with:
+`/etc/os-release` against the `FEDORA_RELEASE` build argument. Select `FEDORA_RELEASE` and `BASE_IMAGE` from the reviewed immutable inputs,
+then build only when that product operation is requested:
 
 ```sh
-podman build --pull=never --build-arg=FEDORA_RELEASE=44 \
-  --build-arg=BASE_IMAGE=registry.fedoraproject.org/fedora@sha256:fb31d002de20bfa7742b8c9b0d0ff723bb9fa2534fd43ecac0101a35f703fef0 \
+podman build --pull=never --build-arg="FEDORA_RELEASE=$FEDORA_RELEASE" \
+  --build-arg="BASE_IMAGE=$BASE_IMAGE" \
   -f environments/Containerfile -t localhost/quirkbench-build:local environments
 ```
 
@@ -37,15 +23,14 @@ toolchain locks are captured and reviewed. `assemble.ini` describes a rootless
 Distrobox development profile with a private home and 4 CPU / 4 GiB cgroup caps.
 Its current Distrobox-generated command uses `--privileged` and binds the host
 `/dev`; it must not run the recovery rootfs, image or other storage-sensitive
-stages. No named Quirkbench Distrobox was created during the Fedora 44 input
-candidate work. The pipeline checks that those caps are no more than half the
+stages. The pipeline checks that those caps are no more than half the
 controller resources and refuses to build if the cgroup limits are missing.
 Adjust the caps downward on smaller hosts. Its controller-wide file lock permits
 one build at a time.
 
 ### Observable bounded kernel builds
 
-For future ad hoc kernel builds launched as rootless Podman containers, use
+For ad hoc kernel builds launched as rootless Podman containers, use
 `start-bounded-podman-build.sh` instead of invoking `systemd-run` and
 `podman run` separately. It starts a **new** systemd user service with cgroup v2,
 `Delegate=cpu memory pids`, `DelegateSubgroup=runtime`,
@@ -122,7 +107,6 @@ New `build`/`compose` staging defaults to a fresh selected-state `workspaces/` d
 explicit workspaces must also be managed beneath that state. Composition repositories
 belong in state `repositories/`. New `image` exports and qualification staging require
 fresh managed paths and are retained by count. Software-test fixtures remain temporary.
-Do not reconstruct historical `m2`, `v1-layout` or checkout-local build trees.
 Housekeeping runs with mutating commands and owner startup/completion; no cron/timer.
 
 Stock RPM acquisition starts with `recovery-inputs acquire-plan` against a fresh
@@ -144,8 +128,7 @@ or half the controller's reported total, whichever is smaller. Admission also
 reserves 2 GiB of currently available controller memory for desktop use, so low
 headroom can reject a requested job count. This heuristic does not guarantee peak compiler or
 linker memory consumption; cgroups enforce the actual bounds. Controller resource
-reserves still apply, and explicit `jobs=1` stays serial. Do not copy historical
-retry scripts' one-job setting into new launches or edit a running run's inputs.
+reserves still apply, and explicit `jobs=1` stays serial. Do not edit a running run's inputs.
 
 The service calls `environments/run-bounded-podman.sh` with the supplied locked
 image, mounts and command arguments. The helper verifies its
@@ -160,25 +143,13 @@ remains the aggregate limit and shutdown boundary, while `podman stats` reports
 the container payload. This helper is for development/kernel builds; recovery
 rootfs workers still use their separate fixed command and fenced claim.
 
-On the Fedora 44 controller, a short offline probe with the retained local
-builder image verified the launcher and conmon in the service's `runtime`
-subgroup, the payload in a sibling `libpod-*` child under that same service,
-plain `podman stats` reporting CPU and memory, and the child and parent memory
-limits at 1 GiB. Stopping an active probe terminated those processes after
-the unit's stop timeout, marked the unit failed, and interrupted Podman's
-`--rm` cleanup. It left an exited container record that required
-`podman rm`. The starter's separate 4 GiB offline probe completed with exit
-status 0 and removed its container; a five-second rerun also verified the
-revised status recorder. Keep unique container names and inspect the stopped unit and
-Podman state before reusing a build stage. No kernel or image build was run in
-this probe.
+Keep unique container names and inspect stopped units and container state before
+reusing any staging. A stopped process can leave an exited container record; handle
+its cleanup separately from proving whole-unit termination.
 
-An offline Fedora 44 SRPM `%prep` diagnostic found that the earlier local
-builder image lacks `%py3_shebang_fix`. The Containerfile now explicitly
-includes `python3-rpm-macros`, `kernel-rpm-macros` and
-`python3-jsonschema` for Fedora's source/config preparation. Rebuild and
-recapture the builder identity and installed locks before treating that new
-recipe as available; the earlier image and OCI archive have older bytes.
+The builder includes Fedora source-preparation macros and JSON Schema validation.
+Changing its Containerfile requires recapturing the builder identity and package locks;
+a previously retained image does not acquire new packages automatically.
 
 ### Restricted recovery rootfs worker
 
@@ -204,9 +175,8 @@ The controller user-service adapter now requests `CPUQuota=400%`,
 resulting cgroup files before accepting a launch. Rootfs dispatch still needs
 durable logs and input/exit identities, plus proof that launcher, conmon and
 payload stay in that cgroup through fenced termination. The command plan does
-not execute a product operation. The installed catalog is still empty, so
-this is not a ready-to-run recovery build. Distrobox is an optional development
-environment used in some historical runs.
+not execute a product operation. Stock v2 recovery uses its retained recipe/lock instead of a candidate catalog.
+Admit only complete selected inputs; Distrobox is not a worker prerequisite.
 
 After the initial container and Fedora target rootfs are populated, run
 `quirkbench.build.capture_package_lock`, `capture_target_package_lock`, and
@@ -367,12 +337,10 @@ without retaining RPM files. This deliberately trades download speed for a
 complete replay snapshot. The downloaded RPMs are archived in retained CAS
 evidence before the cache becomes disposable.
 
-## Planned product service integration
+## Service ownership
 
-The current assemble environment is a builder prototype, not the persistent controller
-service. Its temporary home and `init=false` do not establish logout/reboot continuity.
-The [product contract](../docs/product-interface.md#persistent-services-and-state)
-requires controller systemd user services to own rootless workers, with stable private
-credential/configuration homes and durable workspaces outside disposable containers.
-The user installer/setup packet supplies that integration; never put agent credentials
-in the prototype temporary build home or imply this file alone provides the service.
+Controller systemd user services own durable rootless workers; see
+[installation](../docs/controller-installation.md#durable-build-and-composition-service).
+The optional assemble development environment has no execution ownership role.
+Its temporary home is not a place for persistent state, signing keys or agent
+credentials. The guided installer/setup wizard remains planned in M1.

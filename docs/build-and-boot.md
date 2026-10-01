@@ -1,34 +1,16 @@
 # OSTree build and boot workflow
 
-> **Local artifact reset, 2026-09-30:** the user authorized permanent deletion of
-> the checkout-local `.quirkbench` tree, including delivered images, signing keys,
-> retained inputs and local validation/qualification logs. Historical identities
-> and results below remain records of those runs; their bytes are no longer
-> available. No replacement image or new qualification is supplied by the reset.
-> See [current local state](local-state-maintenance.md).
+The deployment backend is minimal Fedora composed with rpm-ostree and published
+through a signed OSTree repository. Current development use requires the
+[manual controller service setup](controller-installation.md) and
+[manual target provisioning](recovery-operations.md#storage-and-setup).
+The [product roadmap](product-roadmap.md) tracks the guided journey still to build.
 
-
-The production deployment backend is minimal Fedora composed with rpm-ostree and published through a traditional signed OSTree repository. The old four-file kernel/initramfs bundle is retired. Historical artifacts remain available, but old images require rebuilding; there is no in-place image conversion.
-
-The [product plan](product-roadmap.md) makes generic recovery media the entry point:
-manual authenticated network/controller setup precedes recovery inventory and baseline composition.
-The setup/enrollment interfaces are planned; the lower-level commands below exist.
-No target inventory or device credentials are prerequisites for a factory image.
-
-Recovery follows the [selected synthesis pipeline](recovery-base.md): locked DNF5
-installroot, pinned stock Fedora kernel/module packages, dracut, and the existing
-GRUB/GPT assembler. Stock recovery uses version 2 recipe/lock records and its own
-storage policy; custom-kernel version 1 records retain their legacy meaning.
-No recovery compile is required. Upstream image reuse needs a bounded simplification
-proposal under the same policy, not an incidental second builder.
-SELinux disablement is recovery-only and must be explicit in its boot arguments and
-release provenance. Existing artifacts are not retroactively changed or qualified.
-
-Use the current
-[recovery handoff](stock-recovery-attended.md) rather than interpreting the legacy
-schemas as stock provenance. [Controller installation](controller-installation.md)
-and [acquisition specifications](recovery-acquisition.md) describe current setup and
-input selection independently of investigation histories.
+Fixed recovery uses locked stock Fedora packages, DNF5 installroot, dracut and the
+existing GRUB/GPT assembler. No recovery kernel compile is required. See
+[recovery operations](recovery-operations.md) for current image production and
+[recovery design](recovery-base.md) for its contract. Recovery and experimental
+kernels have distinct [storage policies](architecture.md#storage-protection-policy).
 
 ## Build and compose on the controller
 
@@ -77,8 +59,21 @@ pause behavior. Explicit interrupted-job resume uses `operation resume JOB_ID
 --request-id NEW_REQUEST_ID`; verified retained inputs avoid source recapture once
 capture has completed.
 
-See [the implementation handoffs](upload-and-background-jobs-handoff-2026-09-30.md)
-for software checks and unqualified product/release behavior.
+Software support does not establish real service containment or boot qualification.
+
+### Worker validation and publication
+
+Workers receive captured inputs, private outputs and read-only cache hints; writable
+Kbuild state and cache proposals remain private. Only the current controller owner
+adopts inputs and approves reusable outputs after whole-unit shutdown. Missing cache
+space skips optional cache publication, never required evidence retention.
+
+Composition workers stage unsigned output without signing secrets or writable shared
+repositories. The owner validates input/runtime identity, OSTree closure, kernel,
+configuration, initramfs and modules before signing and publishing. Repository pins
+precede the short fenced database commit. Failed signing/publication cannot report
+success; a lost commit may leave a conservative pin, and post-commit cleanup failure
+preserves the committed result. See [ownership contracts](implementation-contracts.md#c2--local-operations-ownership-and-restart-p2).
 
 ## Publish and prepare exact revisions
 
@@ -96,34 +91,15 @@ The final image has fixed EFI/recovery, one-shot state, experiments, library and
 
 Recovery remains independent of candidate deployments. OSTree generates candidate boot entries without regenerating the system bootloader; Quirkbench validates and translates the entry into the fixed USB boot control. GRUB clears, saves and verifies one-shot state before candidate handoff. If that fails it selects recovery. Candidate content never replaces fixed recovery or the bootloader. Do not invoke `grub-reboot` against the controller installation or use `efibootmgr`.
 
-The `image` command accepts a separate JSON input. For a VM qualification image, use actual recovery outputs and the prepared data tree returned by [the deployment fixture](../acceptance/README.md):
+Use `recovery-image` with a retained v2 recipe and builder archive for stock media;
+see [image admission and publication](recovery-operations.md#durable-workers-and-image-publication).
+`recovery-images --json` lists retained publications and their actual availability.
+No image is delivered merely because rootfs preparation completed.
 
-```json
-{
-  "output": "/workspace/output/quirkbench-qualification.img",
-  "recovery_kernel": "/workspace/recovery/vmlinuz",
-  "recovery_initramfs": "/workspace/recovery/initramfs.img",
-  "recovery_config": "/workspace/recovery/config",
-  "recovery_provenance": "/workspace/recovery/provenance.json",
-  "rootfs_dir": "/workspace/recovery/rootfs",
-  "prepared_data_tree": "/workspace/deployment-fixture/data",
-  "size_mib": 6144,
-  "root_mib": 2048,
-  "experiment_mib": 32768,
-  "library_mib": 32768,
-  "log_budget_mib": 4096,
-  "smoke": true
-}
-```
-
-All paths are placeholders. The following staging command describes the current
-legacy implementation, not the revised stock-kernel recipe contract. The output's parent must exist and the output must be new. Stage the Fedora recovery root with `PYTHONPATH=src target-assets/build-rootfs.sh CATALOG_JSON ROOTFS_LOCK_JSON CAS_ROOT ABSOLUTE_OUTPUT_DIRECTORY` as UID 0 inside the dedicated rootless builder. The lock and CAS must contain the reviewed baseline, an exact RPM snapshot with retained package bytes, a target RPM lock, and the recovery fragment; the builder refuses unavailable inputs and does not consult repository configuration from the host. This stages userspace only; kernel, modules, firmware and initramfs integration still require their corresponding recorded provenance. Set partition sizes to fit the actual recovery and deployment contents. The small initial image is distinct from the full external-device capacity budget; commissioning creates the complete layout before real campaigns. Recovery must include `parted` (`partprobe`), `gdisk`, `e2fsprogs` and `util-linux`. Save the JSON as `/workspace/inputs/image.json`, then run:
-
-```sh
-PYTHONPATH=src python3 -m quirkbench image /workspace/inputs/image.json
-```
-
-The command produces the regular-file disk image, a `.sha256` checksum and an adjacent image manifest. Qualification uses `quirkbench qualify-image --help` or `make acceptance-qemu`; [the acceptance guide](../acceptance/README.md) lists its required inputs. `smoke: true` enables VM trial behavior and is not a commissioned hardware image. User-facing media must use `smoke: false`. Release images need the separate release gates; attended commissioning happens after flashing with Etcher.
+Low-level `image` and `qualify-image` tools remain available to developers; their
+argument help and [acceptance fixtures](../acceptance/README.md) describe fixture
+inputs. Smoke images are not commissioned hardware images. Physical writing uses a
+standard image writer on the operator-selected external drive.
 
 ## Protection and qualification
 
@@ -138,7 +114,7 @@ evidence remains restricted. This is accident prevention, not arbitrary-kernel c
 
 The current no-kexec policy does not support kdump. Review that policy and independently qualify the fixed capture kernel before enabling crash capture. Secure Boot is assumed disabled and must be verified. Owner-controlled USB boot selection and manual recovery of unsupported complete hangs remain explicit boundaries.
 
-QEMU proves infrastructure behavior, not target fixes. The revised M2 gate requires a clean-container compose, preserved state after container recreation, one revision changing kernel and userspace with matching modules, interrupted update fault cases, recovery/candidate/subsequent-recovery/failed-candidate boots, and unchanged sentinel disks, fixed recovery and settled persistent firmware settings. Record controller package and boot configuration inventories before and after. A process exit, timeout or immutable OVMF template hash alone is not successful boot qualification.
+QEMU proves infrastructure behavior, not target fixes. Final release qualification requires a clean-container compose, preserved state after container recreation, one revision changing kernel and userspace with matching modules, interrupted update fault cases, recovery/candidate/subsequent-recovery/failed-candidate boots, and unchanged sentinel disks, fixed recovery and settled persistent firmware settings. Record controller package and boot configuration inventories before and after. A process exit, timeout or immutable OVMF template hash alone is not successful boot qualification.
 
 The hardware gate separately verifies actual storage protection, reset, diagnostic capture and evidence upload before unattended campaigns. See [recovery coverage](recovery-and-evidence.md). Software tests cannot substitute for physical qualification.
 
@@ -150,14 +126,7 @@ The hardware gate separately verifies actual storage protection, reset, diagnost
 - [GRUB environment block requirements](https://www.gnu.org/software/grub/manual/grub/html_node/Environment-block.html)
 
 
-Recovery and candidate package recipes now use NetworkManager, its TUI/Wi-Fi packages
-and Fedora firmware packages. The runtime mounts connection state in RAM before
-starting NetworkManager and masks networkd. This supplies packaging for setup; it
-does not yet persist selected profiles or qualify a broad recovery driver set.
-Rebuild staged rootfs/package locks and image bytes after this change; do not reuse
-a completed networkd-only rootfs and call it a supported recovery image.
-
-The fixed GRUB image includes `smbios` and binds one-shot selection to the system
-UUID before candidate loading. See [GRUB SMBIOS](https://www.gnu.org/software/grub/manual/grub/html_node/smbios.html).
-QEMU fixtures assign their own UUID; software branch tests do not qualify firmware
-formatting or bootloader execution. These changes require fresh release evidence.
+Recovery uses NetworkManager with selected private connection state copied into RAM.
+GRUB checks the expected SMBIOS system UUID before loading a candidate. Changes to
+packaging or boot code require evidence for the resulting image bytes; software
+branch tests do not qualify physical firmware or bootloader behavior.

@@ -1,13 +1,11 @@
 # Watchdog qualification
 
-**Delivery clarification, 2026-09-29:** unattended grants and physical reset coverage
-are later capabilities, not prerequisites for the first attended journey. An available
-operator/manual-reset path does not authorize unqualified watchdog activation. Keep
-existing exact-profile checks whenever activation is requested. Recovery now has a
-stock-kernel/boot-device-only design; the validator described below still implements
-legacy exclusions pending a versioned adaptation. See the
-[storage policy](architecture.md#storage-protection-policy). No physical coverage is
-established by this documentation revision.
+Unattended grants and physical reset coverage are optional planned capabilities,
+not prerequisites for attended investigations. An available operator/manual-reset
+path does not authorize unqualified watchdog activation. Preserve exact-profile
+checks. The current validator's recovery exclusions still need a versioned adaptation
+to stock recovery's boot-device-only [storage policy](architecture.md#storage-protection-policy).
+This is an implementation limitation, not permission to relax its validator.
 
 Quirkbench uses systemd as the only userspace hardware watchdog owner. The
 supervisor sends `sd_notify` service heartbeats; it never opens `/dev/watchdog`.

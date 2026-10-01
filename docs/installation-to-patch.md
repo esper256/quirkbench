@@ -1,20 +1,16 @@
 # Deliver Quirkbench’s installation-to-patch user journey
 
-**Contract alignment, 2026-10-01.** This is the implementation map for the
+This is the implementation map for the
 [aspirational manual](../README.md). The first general release must support a new
 user from installation through an attended investigation and patch export, without
 handwritten configuration, build manifests or knowledge of a previous investigation.
 Deliver fresh-user setup first. External coding agents are the primary journey;
 managed invocation and unattended target operation are separate optional milestones.
 
-This document records plan sections 1 (goal and starting point) and 2 (product
-contract). It also maps the remaining milestones so implementation can proceed in
-bounded packets. It does not implement their commands or qualify any artifacts.
-[C8](product-interface.md) defines interface semantics,
-[C0–C7](implementation-contracts.md) retain safety and execution authority, the
-[roadmap](product-roadmap.md) sets delivery order, and the
-[handoff](implementation-handoff.md) defines packet scope. This revision supersedes
-the 2026-09-29 manual-setup-first delivery order, not its safety requirements.
+This checklist maps the desired commands to implementation status and acceptance.
+[C8](product-interface.md) defines interface semantics, [C0–C7](implementation-contracts.md)
+define safety and execution authority, the [roadmap](product-roadmap.md) sets delivery
+order, and the [handoff](implementation-handoff.md) defines bounded packets.
 
 ## Starting point
 
@@ -109,9 +105,8 @@ qualification remains the explicitly authorized final major-version gate. Change
 bytes retain their unqualified status until corresponding checks are performed.
 
 Obtain the required higher-reasoning review before enabling new storage, enrollment,
-source ownership, durable dispatch, shutdown or watchdog boundaries. This documentation
-revision grants no new runtime authority. Preserve old records, schema readers,
-low-level commands and historical paths; do not recreate discarded artifacts.
+source ownership, durable dispatch, shutdown or watchdog boundaries. Preserve old records, schema readers,
+low-level commands and existing provenance. Missing artifacts remain unavailable.
 
 The attended release is complete when a new user can follow the main README from
 installation to an evidence-linked patch package or clearly inconclusive report

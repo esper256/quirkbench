@@ -1,21 +1,15 @@
-# Quirkbench v1 debug image and execution
+# Debug image and execution
 
-**Revised design, 2026-09-29:** use the
-[storage policy](architecture.md#storage-protection-policy): recovery confines storage
-operations to its physical boot device; experimental kernels retain controller
-exclusions. First delivery is attended with manual authenticated setup and explicit
-candidate approval. Existing image/code/schema descriptions below are not evidence
-that stock-kernel recovery or the full attended journey is implemented.
+Recovery confines storage operations to its physical boot device; experimental
+kernels retain internal-controller exclusions. See the authoritative
+[storage policy](architecture.md#storage-protection-policy). The
+[roadmap](product-roadmap.md) tracks guided setup and the attended external-agent
+journey; [recovery operations](recovery-operations.md) describes current manual use.
 
 The recovery OS is fixed, independent of the experimental OSTree repository, and
 always the default boot. Each physical attempt gets an isolated OSTree deployment
 with fresh `/etc` and `/var`. A successful experiment uploads its results and
 returns through recovery; it cannot prepare or authorize the next experiment.
-
-The [product plan](product-roadmap.md) adds generic recovery compatibility, local
-network setup, manual authenticated controller configuration and recovery inventory. Setup must work without an
-experimental deployment. Current low-level build/runtime code is not yet that
-complete user experience; existing images require rebuilding for changed boot code.
 
 ## Recovery build policy
 
@@ -23,8 +17,8 @@ The [recovery decision](recovery-base.md) specifies the synthesis pipeline: Fedo
 RPMs installed with locked DNF5 inputs, stock Fedora kernel/module packages,
 dracut and the existing image adapter. Recovery runs without SELinux enforcement
 (`selinux=0`), desktop, installer or automatic updates. It uses read-only ext4 plus
-bounded RAM runtime state and NetworkManager/nmtui. These are P3a implementation
-requirements, not claims that the current prototype includes the complete recipe.
+bounded RAM runtime state and NetworkManager/nmtui. Stock synthesis is implemented; actual image and hardware qualification must be
+recorded for the selected bytes.
 
 ## Layout revision 2
 
@@ -66,23 +60,12 @@ prerequisites. A retry uses the same plan. Moving media to a higher-RAM target r
 capacity eligibility and never triggers automatic repartitioning. See the
 [product contract](product-interface.md#endpoint-changes-and-media-capacity).
 Sizing is chosen at commissioning; later layout changes require rebuilding media.
-Version 1 prototype images require rebuilding, not in-place conversion. Historical
-controller data and qualification files remain readable and are not removed.
+Version 1 prototype images require rebuilding, not in-place conversion. Existing controller records retain their original interpretation.
 
 Recovery mounts evidence before optional filesystems. An unavailable experiment or
 library filesystem blocks new work but does not prevent recovery evidence upload.
 All partitions share one physical USB failure domain, so continuous controller
 uploads remain necessary.
-
-## Deferred gadget media
-
-The GPT layout is intended to support a future single-LUN USB gadget medium; direct
-USB storage remains the sole v1 implementation. See the deferred
-[backing-storage ownership contract](external-hardware.md#backing-storage-capacity-and-ownership).
-Target recovery retains commissioning and filesystem writes. Backing capacity must
-be provisioned before export and fixed while attached; the Pi cannot modify the
-image concurrently or reset it between boots. Gadget durability and boot behavior
-need separate qualification, not a storage-protection bypass.
 
 ## Live evidence and physical handoff
 
@@ -140,13 +123,13 @@ The current low-level configuration reader supports manual development fixtures.
 Activation now also requires `target_binding` with schema_version 1 and a valid
 `system_uuid` matching the running target. Old unbound files remain readable but
 cannot silently activate credentials or experiments. This guard is not a complete
-enrollment system. Explicit manual configuration is the initial attended setup path,
+enrollment system. Manual configuration is the current development setup path,
 with existing trust, authentication, binding and signature validation preserved.
 
-**Initial path (P3):** local Ethernet/Wi-Fi setup and explicitly provisioned controller
+**Current manual path:** local Ethernet/Wi-Fi setup and explicitly provisioned controller
 trust/device credentials use validated private configuration. Complete state must
 activate safely; no verification bypass or credentials in public artifacts.
-**Later automation (P3d/e):** pairing publishes private generations atomically.
+**Planned M2 pairing (P3d/e):** will publish private generations atomically.
 NetworkManager is the sole network manager. Saved profiles belong to control state
 and are copied into RAM for each boot only after binding checks. No AI credentials
 or controller private signing keys enter media. Generic factory images have no
@@ -203,7 +186,7 @@ Monitoring includes boot mode/stage, exact attempt/revision, watchdog observatio
 last heartbeat/advancement, phase deadline, evidence byte counts and per-partition
 capacity. Long healthy work, waiting for the controller, expired deadlines and
 human intervention remain distinct. Audio alerts are optional; visible status is
-primary because audio is itself an investigation target.
+primary because optional notification peripherals may be unavailable.
 
 ## Acceptance boundary
 

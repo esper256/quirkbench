@@ -1,11 +1,10 @@
 # Bare-metal experiments, recovery, and diagnostic coverage
 
-**Delivery/protection revision, 2026-09-29:** the first journey is attended with a
-manual-reset path. Fixed recovery uses stock Fedora packages and boot-device-only
-storage operations; candidate kernels retain exclusions. See the authoritative
-[storage policy](architecture.md#storage-protection-policy). Unattended qualification
-and grants remain later capabilities. The experimental no-kexec policy below is
-unchanged; stock recovery kernel features do not authorize crash-kernel loading.
+The product journey starts attended, with an available manual-reset path. Fixed
+recovery uses stock Fedora packages and boot-device-only storage operations;
+experimental kernels retain exclusions. Follow the [storage policy](architecture.md#storage-protection-policy).
+Unattended qualification/grants remain optional planned capabilities. The no-kexec
+policy excludes crash-kernel loading even if stock recovery includes related code.
 
 Quirkbench experiments boot the candidate Linux kernel directly on the physical
 target computer through its firmware and USB GRUB. QEMU tests Quirkbench's infrastructure:
@@ -93,9 +92,9 @@ state. A monitor must show the last observed stage, its age, deadline, available
 recovery/capture mechanisms, and whether recovery was actually observed. A timeout
 is evidence of missing progress, not proof that a reboot or crash occurred.
 
-M2 owns the boot-selection fixture; M3 owns durable upload/reconciliation; M4's
-first hardware gate owns reset and diagnostic coverage. This gate must precede
-unattended hardware campaigns, rather than being inferred from them.
+P4/P6 implement attended execution and evidence reconciliation. M6 owns the final
+attended release gate; optional P5/M7 owns unattended authorization and physical reset
+coverage. Applicable qualification must precede unattended campaigns.
 New kernel policy or relevant driver changes invalidate affected qualifications.
 
 ## OSTree supplies deployment, not crash recovery
@@ -103,15 +102,6 @@ New kernel policy or relevant driver changes invalidate affected qualifications.
 V1 uses Silverblue's OSTree/rpm-ostree technology with minimal Fedora userspace. Each exact commit describes coherent kernel, modules, initramfs and userspace, reducing custom deployment and interrupted-update handling. Quirkbench retains an independent recovery image and explicitly arms each candidate for one boot. OSTree rollback alone does not reset a hung CPU or preserve diagnostics.
 
 Traditional OSTree repository transport is the v1 choice; bootc and the full Silverblue desktop are deferred. The installed operating system and its bootloader remain outside Quirkbench. Neither OSTree nor a change of deployment adapter relaxes the internal-disk or firmware protections.
-
-## Deferred accessories
-
-The [external-hardware design](external-hardware.md) adds optional media presentation
-and observation, not another recovery authority. A Pi gadget does not inherently
-reset a hung target or capture early console output. Accessory logs, target liveness,
-recovery registration and controller acknowledgement remain separate facts. Media
-support and each diagnostic channel need their own coverage evidence; no accessory
-capability is currently implemented or qualified.
 
 ## Primary references
 

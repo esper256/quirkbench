@@ -1,11 +1,8 @@
-# Monitoring is part of the execution contract
+# Monitoring
 
-The initial attended journey needs visible builds and recovery/experiment status
-without a waiting agent. Manual authenticated setup may satisfy connection readiness;
-a pairing wizard or managed session is not required. Report recovery boot-device
-confinement, candidate eligibility and operator approval separately. Later enrollment,
-unattended grants and backup completeness remain separate capabilities. See the
-[delivery tiers](product-roadmap.md#delivery-contract).
+Current monitoring shows build and recovery/experiment state without invoking an
+agent. Connection, candidate eligibility and operator approval are separate facts.
+Guided setup and investigation views remain planned in the [roadmap](product-roadmap.md).
 
 Run `quirkbench setup-state` once, then open `quirkbench monitor` manually in an
 existing terminal. State defaults to `$XDG_STATE_HOME/quirkbench`, or
@@ -66,7 +63,7 @@ Target contact is tracked separately from attempt authorization. A response to r
 
 Uploads display controller-durable bytes. Campaign bars count finalized jobs, including inconclusive/failed/explicitly abandoned jobs; they do not mean the underlying issue is fixed. Build and agent adapters use `monitor.Activity`; the build runner reports output activity and object counters where available. Agent waiting reports do not pretend to measure provider tokens as they are generated.
 
-An independent monitor cannot prove that a disconnected machine is alive. Its purpose is to separate known advancement, recent liveness, planned waits and missing information. Absolute sample timestamps reveal a stalled watcher; last-report ages and deadlines reveal stopped producers. M4 must qualify these signals under actual network outages, suspend and crashes.
+An independent monitor cannot prove that a disconnected machine is alive. Its purpose is to separate known advancement, recent liveness, planned waits and missing information. Absolute sample timestamps reveal a stalled watcher; last-report ages and deadlines reveal stopped producers. Final release checks must qualify these signals under actual network outages, suspend and crashes.
 
 OSTree composition, publication, object transfer and deployment preparation use these same progress semantics. Show measured transferred bytes/objects where the tool exposes them, then deployment preparation and boot handoff as separate bounded phases. A reporting subprocess with no measured advance must not conceal a stuck composition or deploy. Last known commit and attempt identity accompany boot-stage reports; no synthetic percentage or network timeout implies successful boot or a kernel crash.
 
@@ -113,4 +110,4 @@ retention. Unidentified legacy uploads are visible in `maintenance prune --dry-r
 subject to active/unresolved-attempt checks and configured grace. Terminal uploads,
 attempt completion and confirmed recovery return request idle-owner housekeeping.
 No monitor cleanup, timer or additional service is involved. See
-[the upload/build handoff](upload-and-background-jobs-handoff-2026-09-30.md).
+[upload retention](local-state-maintenance.md#upload-retention).

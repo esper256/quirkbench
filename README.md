@@ -579,7 +579,8 @@ hardware recovery checks.
 
 ## Developing Quirkbench
 
-This README defines the desired user experience. The
+This README defines the desired user experience. Use the
+[documentation index](docs/README.md) to find current operating guides. The
 [roadmap](docs/product-roadmap.md), [implementation handoff](docs/implementation-handoff.md)
 and [contracts](docs/implementation-contracts.md) describe implementation work and
 its current limits. Changes to the future CLI shown here do not silently rename

@@ -7,8 +7,8 @@ watchdog authorization records require explicit versioned implementation; exampl
 in the roadmap do not extend this protocol implicitly.
 
 The [contract supplement](implementation-contracts.md) specifies local operation
-fencing (C2), initial manual authenticated setup and later automated enrollment (C4),
-and a later unattended watchdog grant route (C6). Enrollment automation and grants
+fencing (C2), manual provisioning and planned M2 enrollment (C4),
+and the optional M7 unattended watchdog grant route (C6). Enrollment automation and grants
 are **not implemented** by the protocol tables
 below. Registration authenticates an already provisioned target; it must not be reused
 as unauthenticated pairing. New capabilities/routes need explicit negotiation.

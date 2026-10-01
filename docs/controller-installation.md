@@ -98,7 +98,7 @@ The lifecycle owner can now stop and validate/adopt these rootfs results under
 its current claim fence. Complete stock-image intent additionally runs runtime,
 dracut and assembly in the fixed worker, then signs and publishes through the current
 owner. Explicit `serve` worker/signing configuration enables that executor; installed
-persistent service setup remains manual. See the [software handoff](stock-recovery-attended.md). Fake execution establishes software behavior,
+persistent service setup remains manual. See the [software handoff](recovery-operations.md). Fake execution establishes software behavior,
 not actual Podman containment or a deliverable recovery image. Use guarded activation to change installations; do not replace the
 executable directory while an active service uses it. The fixed recovery-rootfs
 service retains its separate 4-GiB contract; development kernel builds use their

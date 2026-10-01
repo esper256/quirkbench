@@ -1,36 +1,10 @@
 # Implementation handoff
 
-**General-purpose correction:** [Boundary audit and implementation packets](general-purpose-boundary.md).
-Installation identities describe software bytes; controller environments and supported
-platforms are explicit selections. External agents are the primary workflow. The
-[completion record](general-purpose-boundary.md#completion-record--2026-09-30) records
-the initial software checks and native installation migration. The
-[follow-up record](general-purpose-boundary.md#follow-up-audit-and-completion--2026-10-01)
-closes the remaining adapter/default/documentation gaps with 161 focused passing
-cases and a refreshed native activation.
-
-**Boundary follow-up, P1b/c and C1/C8:** select planning adapters from reviewed
-profiles, centralize backend architecture/EFI command data, derive omitted recipe
-IDs from the selected lock and remove remaining case-history setup dependencies.
-Use profile/baseline, recipe-input and command-planning regressions; no new platform,
-schema relaxation, kernel/image production or qualification. Record follow-up evidence
-separately from the earlier completion claim.
-Completed: reviewed profile/backend dispatch, unchanged frozen v1 restrictions,
-lock-derived recipe IDs, bundled current documentation and native readiness verified.
-
-**2026-09-30 implementation:** [Upload retention and durable build/composition handoffs](upload-and-background-jobs-handoff-2026-09-30.md).
-`build` and `compose` now acknowledge jobs immediately; explicit `--wait` reads their
-final outputs. Real service/build/boot containment remains unqualified.
-The [hardware-specific experiment kernel design](targeted-experiment-kernels.md)
-is a proposed M3 input. Start the revised delivery sequence with M1a below.
-
-**Delivery revision, 2026-10-01.** The
-[installation-to-patch map](installation-to-patch.md) is the command/screen checklist.
+The [installation-to-patch map](installation-to-patch.md) is the command/screen checklist.
 Implement fresh-user controller setup (M1), connected target setup/pairing (M2),
 investigation/baseline (M3), external-agent loop (M4), reports and everyday use (M5),
 then the explicitly authorized attended release gate (M6). Optional managed
-invocation and unattended grants are independent M7 follow-ons. This supersedes
-the 2026-09-29 manual-first ordering. Preserve the manual compatibility path and
+invocation and unattended grants are independent M7 follow-ons. Preserve the manual compatibility path and
 all exact-candidate approval, storage, trust and ownership requirements.
 
 P0–P8 remain bounded packet identifiers; numeric order does not define dependencies.
@@ -41,8 +15,7 @@ general release, and guided backup completeness belongs to M5. Retain working
 capacity UI and other foundations. P5 is never an attended prerequisite.
 
 Use the [roadmap](product-roadmap.md) and [contracts](implementation-contracts.md).
-The packet table specifies bounded work, not claims of implementation. Dated
-completion records explicitly identify what was actually changed.
+The packet table specifies bounded work, not claims of implementation.
 Names under tests/ below are acceptance suites to create where absent; their listing
 does not mean they already exist or pass. Do not run release qualification to finish
 a routine packet. Use injected adapters and focused software tests.
@@ -99,7 +72,7 @@ manual step. Each closure records exact focused checks and outstanding qualifica
 
 ## Next packet — M1a resumable controller setup contract
 
-**Ready to implement next; not implemented by this documentation revision.**
+**Next implementation task.**
 Owner: P0/P2d, with C0/C2/C8. Read `controller_install.py`, `controller_setup.py`,
 `controller_service.py`, `transport.py`, the current `cli.py`, and the old
 specification-only `product_cli.py`. Reuse stable install/state identity and current
@@ -131,43 +104,3 @@ device tokens and loads a static mapping; do not work around fresh setup with fa
 targets or anonymous target routes. Enrollment needs a restricted C4 exchange and
 durable credential/revocation lookup. Review that trust boundary before enabling it.
 M1 is complete only when the checklist's complete fresh controller criteria pass.
-
-## Contract-alignment completion record — 2026-10-01
-
-Implemented plan sections 1 and 2 as documentation: the starting-point inventory,
-M1–M7/P0–P8 mapping, every manual command/screen's owner/status/acceptance, the revised
-C8 facade/versioning rules and this bounded next packet. Updated the roadmap,
-C0–C8 introductions, agent guide and repository instructions to the same ordering.
-The README remains aspirational. Existing source schemas, parser fixtures, runtime
-behavior, local installation/state and historical evidence are unchanged. Validation
-passed: local Markdown links/anchors (36 documents, 257 links), manual command
-coverage inspection (21 shell command forms plus inline commands/screens), referenced
-existing test-file checks, Markdown fence/stray-marker checks and `git diff --check`.
-No pytest, image build or hardware qualification was run for this documentation-only
-packet. Future implementation and acceptance rows remain open.
-
-## Deferred USB gadget extension
-
-**Post-v1 only; unimplemented and unqualified.** These packets implement the
-[external-hardware design](external-hardware.md), outside the P0–P8 dependency chain.
-They do not authorize extension work, hardware acquisition or tests during v1.
-Suite names are future acceptance targets, not existing passing tests. Preserve
-OSTree and frozen wire records.
-
-| Packet | Dependencies | Permitted scope and acceptance |
-| --- | --- | --- |
-| X1 — media ownership contracts | Stable v1; explicit extension work | Define lifecycle, versioned accessory/media associations, maintenance authorization and restart reconciliation. Fake tests/test_media_ownership.py: exclusive ownership, uncertain shutdown, request replay and stale actions. Higher-reasoning storage/trust review; no new deployment authority. |
-| X2 — Pi mass-storage adapter | X1 | Linux gadget provisioning, allocated backing capacity and one stable LUN. tests/test_gadget_media.py: geometry, rejected concurrent access/resize/replacement, duplicate identities and crash-safe ownership. No new deployment backend, firmware navigation or automatic image reset. |
-| X3 — durability and recovery integration | X2 | Reuse attempts, maintenance fences and evidence retention; add accessory failures/progress and consistent-cut private backup. tests/test_accessory_recovery.py: disconnect/restart, exhaustion, lost acknowledgements, pending evidence and accessory-alive/target-unavailable. Fakes do not qualify physical durability. |
-| X4 — optional diagnostics | X1/X3; demonstrated investigation need | One bounded packet per CDC, HID, Ethernet or DbC channel. tests/test_accessory_channels.py: authenticated provenance, unknown attribution, capability limits, target HTTPS trust and no synthetic heartbeat/recovery. DbC needs a separate USB-host path; no physical reset or independent scheduling. Optional, not a media prerequisite. |
-| X5 — hardware qualification | Stable X1–X3; X4 only for claimed channels; explicit qualification request | Recovery/candidate/fallback, interrupted commissioning, independent power, I/O/flush/power-loss durability, internal-disk/firmware preservation and actual capture coverage. Record Pi/target/kernel/storage identities and surviving evidence. No automatic heavy tests or agent polling. |
-
-X1 specifies observable failure behavior before X2 implementation. Qualify media
-and diagnostic channels independently; passing one does not qualify the other.
-Future reset/actuation authority requires a separate reviewed extension.
-
-## Historical investigation records
-
-**2026-09-30 integration follow-up:** [First audio-patch cycle](audio-patch-cycle-2026-09-30.md)
-records launcher/builder/heartbeat corrections, the candidate-only audio recipe,
-native controller setup and pending recovery/target product evidence.

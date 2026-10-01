@@ -1,7 +1,7 @@
 # Hardware-specific experiment kernels
 
-Status: proposed design, 2026-09-30. This document is the next P1b/P1c/P4
-planning packet. It changes no schema, baseline catalog or kernel configuration.
+Status: proposed M3 design, owned by P1b/P1c/P4. Fresh-user setup precedes
+its integration; this is not the next implementation task. It changes no schema, baseline catalog or kernel configuration.
 Recovery continues to use pinned stock Fedora packages under the
 [recovery decision](recovery-base.md). Experiment execution retains the
 [storage policy](architecture.md#storage-protection-policy), exact candidate

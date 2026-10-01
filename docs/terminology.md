@@ -8,7 +8,7 @@ must not depend on a manufacturer, model, form factor or one reported issue.
 | **Controller** | The Linux computer that owns investigation state, runs the coding agent, builds and publishes images/deployments, schedules experiments and stores evidence. |
 | **Target** | The computer under investigation. It boots Quirkbench recovery and experimental deployments, executes experiments and returns evidence. It may be a laptop, desktop, workstation, server or another Linux-capable computer. |
 | **Builder** | The isolated build component running on the controller. It is a role/component, not a third physical computer in v1. |
-| **Accessory** | Optional device/computer providing media presentation or diagnostic channels. A future Pi gadget is an accessory, not the controller, target or another scheduling authority. Not required or supported in v1. |
+| **Accessory** | Optional device/computer providing media presentation or diagnostic channels. It is not a controller, target or scheduling authority. Accessories are outside the current implementation plan. |
 | **Controller service** | The process exposing the target protocol and owning controller operations; distinguish it from the controller computer when relevant. |
 | **Target supervisor** | The service running in recovery or an experimental deployment on the target. |
 | **Hardware profile** | Versioned capabilities, build requirements, protection rules and limitations for a hardware/architecture/boot combination. It is data used by generic machinery. |
@@ -63,9 +63,7 @@ Generic examples and acceptance templates use neutral identities. Discovery/plan
 fixtures cover different vendors and form factors, absent optional capabilities and
 unsupported platforms. Fixture coverage does not qualify those physical platforms.
 
-A **media instance** is one enrolled external medium: a direct drive in v1 or,
-under the deferred [external-hardware design](external-hardware.md), gadget-backed
-media. It is distinct from a factory release, filesystem IDs and accessory identity.
+A **media instance** is one enrolled external drive. It is distinct from a factory release, filesystem IDs and accessory identity.
 A **target binding** detects accidental movement to another computer; it is neither
 a login credential nor hardware attestation. USB host/device describe bus roles,
 not Quirkbench controller/target roles; a Pi can be a USB device for gadget media

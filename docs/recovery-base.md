@@ -1,19 +1,11 @@
 # Recovery image decision and synthesis contract
 
-**2026-09-29 superseding decision:** recovery uses stock packages and boot-device-only
-storage operations; candidate exclusions remain mandatory. The first delivery is
-attended with manual trust/credential provisioning. Pairing and setup wizards are
-later work. Existing recipe schemas, builder code and completed custom-kernel
-artifacts retain their old meaning. V2 stock contracts and synthesis dispatch now
-exist; see the [current software handoff](stock-recovery-attended.md) for remaining
-coordinator execution and qualification limits.
-
 **Decision: use a minimal Fedora-derived recovery appliance, synthesized with DNF5,
 dracut, systemd and GRUB through Quirkbench's existing build/image adapters, using
 pinned stock Fedora kernel/module packages.** No custom recovery kernel compile is
 required. Upstream live-image reuse is permitted through a bounded integration
 proposal demonstrating simpler delivery under the same storage/boot contract;
-this revision introduces no second builder. The existing assembly remains default.
+Do not introduce a second builder incidentally. The existing assembly remains default.
 
 Recovery is fixed for an investigation. Its job is setup, safe deployment preparation,
 reconciliation and reliable evidence upload. It never runs experimental recipes or
@@ -158,7 +150,7 @@ dracut configuration, package/unit allowlists, layout capacities and recovery po
 Use typed validated references, never shell text from a target inventory. The command
 returns a durable operation ID through P2; stages publish progress and retain resumable
 results. V2 input generation, immutable image admission and the optional fixed executor on
-the existing authenticated controller service exist; see the [software handoff](stock-recovery-attended.md).
+the existing authenticated controller service exist; see the [recovery operations](recovery-operations.md).
 
 The synthesis stages are:
 
@@ -168,7 +160,7 @@ The synthesis stages are:
    and bytes. A moving repository URL or release number is not a reproducible lock.
 2. **Create staged userspace.** In the dedicated rootless Fedora builder, run DNF5
    `--installroot` into a new disposable directory using the recipe package closure.
-   Extend `target-assets/build-rootfs.sh` to consume the locked recipe; never run it
+   Use the versioned stock staging path behind `target-assets/build-rootfs.sh`; never run it
    against the controller root or attach physical block devices. Preserve output/logs
    outside the disposable container. Replay must refuse unavailable locked packages.
 3. **Install the stock recovery kernel.** Install the locked Fedora kernel packages,
@@ -190,8 +182,8 @@ The synthesis stages are:
    tools and grub-mkimage for the compact GPT image, fixed recovery and SMBIOS-bound
    one-shot loader. The established commissioning code creates the final six roles
    on first boot after explicit local device/geometry confirmation is journaled.
-   The current fixed geometry and confirmation are sufficient initially; an advanced
-   capacity wizard is deferred. Confirmation runs from RAM before evidence exists;
+   The implemented capacity screen offers reviewed sizing choices and records the
+   confirmed geometry. Confirmation runs from RAM before evidence exists;
    retries preserve the same plan and existing filesystems. No installer resize service
    or automatic enrolled-media repartition is introduced.
 7. **Publish.** Verify complete staged output and provenance, synchronize, then publish
@@ -233,4 +225,4 @@ storage/firmware. Kernel and watchdog qualification remain separate.
 
 Follow the [testing policy](testing-policy.md): focused fixtures during implementation;
 expensive boot/composition/endurance gates only on an explicitly requested final major
-release. This decision is documented, not yet a newly built or qualified recovery image.
+release. This contract does not qualify any image bytes.
