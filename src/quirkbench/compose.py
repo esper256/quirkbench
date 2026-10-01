@@ -364,7 +364,7 @@ def archive_rpms(source: Path, output: Path, epoch: int, event=None):
 
 
 class FedoraComposer:
-    def __init__(self, workspace: Path, publish_repo: Path, event=None, controller_state: Path | None = None):
+    def __init__(self, workspace: Path, publish_repo: Path, event=None, controller_state: Path | None = None, *, stage_only=False):
         _safe_build_path(workspace)
         _safe_build_path(publish_repo)
         if workspace.resolve() != workspace or publish_repo.resolve() != publish_repo:
@@ -376,6 +376,8 @@ class FedoraComposer:
         if self.controller_state.resolve() != self.controller_state:
             raise BuildError("controller build-lock path cannot traverse symlinks")
         self.evidence_files: dict[str, Path] = {}
+        self.stage_only=stage_only
+        self.staged_repo=None
 
     def compose(self, inputs: ComposeInputs):
         self.controller_state.mkdir(parents=True, exist_ok=True)
@@ -525,18 +527,20 @@ class FedoraComposer:
             revision = run(["ostree", f"--repo={repo}", "rev-parse", treefile["ref"]], "resolve-revision", 60).strip()
             if not re.fullmatch(r"[0-9a-f]{64}", revision):
                 raise BuildError("composer returned invalid revision")
-            run(["ostree", f"--repo={repo}", "gpg-sign", f"--gpg-homedir={inputs.signing_home}", revision, inputs.signing_key], "sign-revision", 120)
             inputs.validate()  # fail before publication if sources changed during composition
             if inputs.identity() != identity or builder_base_digest() != base_digest:
                 raise BuildError("composition inputs or runtime changed during build")
-            if not self.publish_repo.exists():
-                run(["ostree", f"--repo={self.publish_repo}", "init", "--mode=archive"], "init-published-repo")
-            elif (self.publish_repo / "config").is_symlink():
-                raise BuildError("published repository config cannot be a symlink")
-            run(["ostree", f"--repo={self.publish_repo}", "pull-local", str(repo), revision], "publish-revision")
-            run(["ostree", f"--repo={self.publish_repo}", "refs", f"--create=quirkbench/retained/{revision}", revision], "retain-revision")
-            run(["ostree", f"--repo={self.publish_repo}", "fsck"], "verify-publication")
-            _sync_tree(self.publish_repo)
+            self.staged_repo=repo
+            if not self.stage_only:
+                run(["ostree", f"--repo={repo}", "gpg-sign", f"--gpg-homedir={inputs.signing_home}", revision, inputs.signing_key], "sign-revision", 120)
+                if not self.publish_repo.exists():
+                    run(["ostree", f"--repo={self.publish_repo}", "init", "--mode=archive"], "init-published-repo")
+                elif (self.publish_repo / "config").is_symlink():
+                    raise BuildError("published repository config cannot be a symlink")
+                run(["ostree", f"--repo={self.publish_repo}", "pull-local", str(repo), revision], "publish-revision")
+                run(["ostree", f"--repo={self.publish_repo}", "refs", f"--create=quirkbench/retained/{revision}", revision], "retain-revision")
+                run(["ostree", f"--repo={self.publish_repo}", "fsck"], "verify-publication")
+                _sync_tree(self.publish_repo)
             dependency_archive = stage / "dependency-rpms.tar"
             custom_archive = stage / "custom-rpms.tar"
             archive_rpms(snapshot, dependency_archive, inputs.source_date_epoch, self.event)

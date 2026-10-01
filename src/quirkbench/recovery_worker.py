@@ -67,9 +67,9 @@ def _stop_direct_group(process):
         raise WorkerClaimError('direct child shutdown is uncertain; reconcile worker unit') from exc
 
 
-def execute_rootfs(argv, log, *, verify, deadline, clock=time.time):
+def execute_rootfs(argv, log, *, verify, deadline, clock=time.time, max_duration=3600):
     """Drain merged output with bounded retention and fixed elapsed deadline."""
-    remaining = min(3600, deadline - clock())
+    remaining = min(max_duration, deadline - clock())
     if remaining <= 0:
         raise WorkerClaimError('worker deadline expired before launch')
     verify()

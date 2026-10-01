@@ -1,5 +1,13 @@
 # Fedora build environment replay
 
+**Current commands (2026-09-30):** `build` and `compose` submit durable jobs to the
+[manually configured controller user service](../docs/controller-installation.md#durable-build-and-composition-service).
+They return job IDs by default; `--wait` explicitly reads final outputs. The service
+launches the pinned builder through the existing bounded delegated Podman helper.
+Input manifests remain the contracts described below; old synchronous workspace
+invocations below are historical adapter guidance, not current CLI launch commands.
+Do not download/build an image merely to check software edits.
+
 **Recovery design revision, 2026-09-29:** stock Fedora kernel/module/firmware packages
 with DNF5/dracut and existing image assembly replace mandatory recovery kernel builds.
 Development kernel-build instructions below apply to experiments or explicitly

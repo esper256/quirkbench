@@ -238,6 +238,25 @@ closure and avoid reusing paths still pending disposal. Native OSTree refs are p
 only when no unresolved producer remains. Keep historical rows with expired payloads
 unavailable. See [retention settings](local-state-maintenance.md).
 
+Upload ownership is recorded before partial bytes. Pending/resumable or completed
+unacknowledged uploads protect their attempt and CAS content; exact evidence
+acknowledgements permit count-based expiry. Definitive failures/explicitly abandoned
+uploads use failed-staging grace. Legacy unidentified bytes remain protected and
+visible until explicit `maintenance abandon-upload ID`, with active/unresolved
+attempt checks. Retirement commits before associated-file deletion. Terminal upload,
+attempt completion and recovery return persist an idle-owner housekeeping request,
+processed after target responses without a timer or additional service.
+
+`build`/`compose` submit fixed durable jobs by default; `--wait` is query-only.
+Manual configured controller service readiness is required for admission. Input
+capture/hashing happens privately in the first worker stage and is adopted before
+compilation. Cache hints are read-only; writable work/proposals are private. Only
+the current owner validates stopped output, signs composition and publishes shared
+repository/result references. Repository pins precede the short fenced reference
+transaction. Explicit resume is a durable request reconciled by that owner with a
+fresh generation. See [the implementation handoffs](upload-and-background-jobs-handoff-2026-09-30.md)
+and [manual installation](controller-installation.md#durable-build-and-composition-service).
+
 Failed disposable staging defaults to seven days. Optional cache admission/eviction
 uses the configurable 50 GiB default, budget lock and nonblocking lineage locks;
 pending entries count and an unavailable budget skips optional publication. Completed

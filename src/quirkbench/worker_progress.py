@@ -30,9 +30,9 @@ class ReportingRunner:
         self.report(phase, 'Running bounded build command.')
 
         def activity(label, byte_count, objects):
+            callback(label, byte_count, objects)
             self.report(phase, 'Command is quiet; waiting for output or exit.' if label == '__waiting__' else 'Command emitted diagnostic output.',
                         state='WAITING' if label == '__waiting__' else 'ACTIVE', completed=byte_count)
-            callback(label, byte_count, objects)
 
         self.runner.run(command, **{**options, 'on_activity': activity})
         self.report(phase, 'Bounded command exited successfully.', state='COMPLETE')

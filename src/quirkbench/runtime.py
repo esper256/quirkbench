@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 
+from .audio_recipe import audio_observation
 from .binding import BindingError, verify_binding
 from .boot import RecoveryConfig, parse_cmdline, arm_once, reboot_candidate, _verify_stage_identity
 from .commission import BootIdentity, verify_boot_identity
@@ -269,9 +270,9 @@ def create_agent(config, boot, verify, provision, supervisor, *, recovery_only=F
         inventory.update(deployment_id=boot['quirkbench.candidate'], revision=boot['quirkbench.revision'])
     try:
         registry = RecipeRegistry(Path(__file__).with_name('recipes'),
-                                  {'system-observation': system_observation},
-                                  granted_privileges={'read_kernel_log'})
-        capabilities = ['recipe.system-observation'] if 'system-observation' in registry.records else []
+                                  {'system-observation': system_observation,'audio-observation':audio_observation},
+                                  granted_privileges={'read_kernel_log','audio_playback'} if mode=='experiment' else {'read_kernel_log'})
+        capabilities = ['recipe.'+name for name in sorted(registry.records)]
     except (ContractError, OSError):
         # Broken installed metadata must not prevent recovery evidence upload.
         registry = UnavailableRegistry()

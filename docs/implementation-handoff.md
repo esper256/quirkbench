@@ -1,5 +1,14 @@
 # Implementation handoff
 
+**2026-09-30 integration follow-up:** [First audio-patch cycle](audio-patch-cycle-2026-09-30.md)
+records launcher/builder/heartbeat corrections, the candidate-only audio recipe,
+native controller setup and pending recovery/target product evidence.
+
+**2026-09-30 implementation:** [Upload retention and durable build/composition handoffs](upload-and-background-jobs-handoff-2026-09-30.md).
+`build` and `compose` now acknowledge jobs immediately; explicit `--wait` reads their
+final outputs. Real service/build/boot containment remains unqualified.
+The next kernel tailoring packet is the [hardware-specific experiment kernel design](targeted-experiment-kernels.md), proposed metadata/config generation only.
+
 **Delivery split, 2026-09-29.** Initial attended essentials: relevant existing P0
 fixtures; P1 candidate planning; P2a/b/c and minimal P2d installation; P3a1–4,
 P3b and manual P3c configuration; P4; immutable-source P6a/external P6b; and the

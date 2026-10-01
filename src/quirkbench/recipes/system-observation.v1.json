@@ -2,7 +2,7 @@
   "architectures": [
     "x86_64"
   ],
-  "code_sha256": "672597e38fd131f17cfd92cb7cf5fb5e87c4e4d4f16d02944c23e19169c3d7ad",
+  "code_sha256": "fba24cef2b2d35d6f46e7a69481e803268b1ee4ca003021b8b213a7635b88560",
   "entrypoint": "quirkbench.runtime:system_observation",
   "modes": [
     "experiment",

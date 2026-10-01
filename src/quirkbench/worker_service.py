@@ -34,12 +34,16 @@ def _run(argv, timeout):
 
 class SystemdUserWorkerServices:
     def __init__(self, *, worker_program=None, runner=_run, boot_id_reader=controller_boot_id,
-                 cgroup_root=Path('/sys/fs/cgroup'), clock=time.time):
+                 cgroup_root=Path('/sys/fs/cgroup'), clock=time.time, development=False):
         self.worker_program = Path(worker_program) if worker_program is not None else None
         self.runner = runner
         self.boot_id_reader = boot_id_reader
         self.cgroup_root = Path(cgroup_root)
         self.clock = clock
+        self.development = development
+        self.cpu_percent = min(400,max(1,(os.cpu_count() or 1)//2)*100)
+        memory_total=int(next(line.split()[1] for line in Path("/proc/meminfo").read_text().splitlines() if line.startswith("MemTotal:")))*1024
+        self.memory_limit=min(8*1024**3,memory_total//2) if development else 4*1024**3
 
     @staticmethod
     def _unit(unit):
@@ -88,6 +92,8 @@ class SystemdUserWorkerServices:
 
     def preflight(self, state_root, deadline):
         """Reject definite setup failures before the database reserves a unit."""
+        if self.development and self.memory_limit<4*1024**3:
+            raise WorkerServiceError('controller capacity below the 4 GiB builder minimum')
         if self.worker_program is None:
             raise WorkerServiceError('installed worker launcher is not configured')
         program = self.worker_program
@@ -148,12 +154,14 @@ class SystemdUserWorkerServices:
         argv = ['systemd-run', '--user', '--no-ask-password', '--no-block',
                 '--remain-after-exit', '--expand-environment=no', f'--unit={unit}',
                 '--property=KillMode=control-group', '--property=Restart=no',
-                '--property=CPUQuota=400%', '--property=MemoryMax=4294967296',
+                f'--property=CPUQuota={self.cpu_percent if self.development else 400}%', f'--property=MemoryMax={self.memory_limit}',
                 '--property=MemorySwapMax=0', '--property=TasksMax=4096',
                 '--property=TimeoutStopSec=30s', f'--property=RuntimeMaxSec={int(remaining) + 1}s',
                 f'--working-directory={stage}', '--', str(program),
                 '--state', str(root), '--operation', operation, '--worker-epoch', str(epoch),
                 '--worker-generation', str(generation), '--stage-dir', str(stage)]
+        if self.development:
+            argv[argv.index('--') : argv.index('--')] = ['--property=Delegate=cpu memory pids','--property=DelegateSubgroup=runtime']
         try:
             self._invoke(argv, 20)
             observed = self._show(unit)
@@ -181,7 +189,7 @@ class SystemdUserWorkerServices:
             memory = (path / 'memory.max').read_text().strip()
             swap = (path / 'memory.swap.max').read_text().strip()
             tasks = (path / 'pids.max').read_text().strip()
-            bounded = (cpu_ok and memory != 'max' and 0 < int(memory) <= 4 * 1024**3
+            bounded = (cpu_ok and memory != 'max' and 0 < int(memory) <= self.memory_limit
                        and swap == '0' and tasks != 'max' and 0 < int(tasks) <= 4096)
         except (OSError, ValueError) as exc:
             raise WorkerServiceError('worker cgroup resource limits are unreadable') from exc

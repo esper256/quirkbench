@@ -16,7 +16,7 @@ from .contracts import ContractError, Experiment, CapabilityReport, digest, iden
 from .product_contracts import _pairs
 
 MAX_MANIFEST_BYTES = 64 * 1024
-ALLOWED_PRIVILEGES = frozenset({'read_kernel_log'})
+ALLOWED_PRIVILEGES = frozenset({'read_kernel_log','audio_playback'})
 ALLOWED_MODES = frozenset({'recovery', 'experiment', 'simulation'})
 ALLOWED_ARCHITECTURES = frozenset({'x86_64'})
 FIELDS = {'schema_version', 'recipe_id', 'version', 'entrypoint', 'code_sha256',
@@ -52,7 +52,7 @@ def _unique_ids(value, allowed=None):
 
 def validate_manifest(value):
     _exact(value, FIELDS, 'recipe manifest')
-    if type(value['schema_version']) is not int or value['schema_version'] != 1:
+    if type(value['schema_version']) is not int or value['schema_version'] not in (1,2):
         raise RecipeUnavailable('unsupported recipe manifest schema')
     identifier(value['recipe_id'])
     if type(value['version']) is not int or not 1 <= value['version'] <= 65535:
@@ -61,7 +61,7 @@ def validate_manifest(value):
         raise RecipeUnavailable('invalid installed recipe entrypoint')
     sha256(value['code_sha256'])
     for name, allowed in (('modes', ALLOWED_MODES), ('architectures', ALLOWED_ARCHITECTURES),
-                          ('required_capabilities', None), ('required_privileges', ALLOWED_PRIVILEGES),
+                          ('required_capabilities', None), ('required_privileges', ALLOWED_PRIVILEGES if value['schema_version']==2 else frozenset({'read_kernel_log'})),
                           ('physical_observations', None)):
         _unique_ids(value[name], allowed)
     if not value['modes'] or not value['architectures']:

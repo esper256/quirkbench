@@ -43,6 +43,16 @@ def managed_path(root,path):
     root,path=Path(root),Path(path)
     if not path.is_absolute() or path.resolve()!=path or not path.is_relative_to(root) or path==root:
         raise ContractError('product work must be canonical and beneath selected controller state')
+    if path.is_relative_to(root/'workers'):
+        parts=path.relative_to(root/'workers').parts
+        if len(parts)!=2 or not re.fullmatch(r'[0-9a-f]{32}',parts[0]) or not re.fullmatch(r'[1-9][0-9]*-[0-9a-f]{32}',parts[1]):
+            raise ContractError('invalid worker stage path')
+        from .state_reader import StateReader
+        with StateReader(root).connection() as db:
+            records=db.execute("SELECT document FROM operation_events WHERE operation=? AND kind='worker_stopped'",(parts[0],)).fetchall()
+        if not any(json.loads(row[0]).get('stage_dir')==str(path) and json.loads(row[0]).get('stop_kind') in ('stopped','previous_boot') for row in records):
+            raise ContractError('worker stage lacks durable whole-service stop proof')
+        return path
     if len(path.parts)<len(root.parts)+2 or path.parts[len(root.parts)] not in ('workspaces','inputs','deliveries','development-runs','repositories'):
         raise ContractError('use state/workspaces, inputs, deliveries or development-runs for product work')
     return path
@@ -119,6 +129,7 @@ def _retire_candidates(db,config,root):
     nonphysical=[a for a in terminal if not a['handoff_revision']]
     keep={a['id'] for a in physical[:config['completed_attempts']]+nonphysical[:config['completed_builds']]}
     keep.update(a['id'] for a in attempts if a not in terminal or 'attempt:'+a['id'] in pinned)
+    keep.update(r[0] for r in db.execute("SELECT attempt FROM upload_owners WHERE state IN ('PENDING','COMPLETE') AND attempt IS NOT NULL"))
     candidates.update('attempt:'+a['id'] for a in terminal if a['id'] not in keep)
     required_experiments={a['experiment'] for a in attempts if a['id'] in keep}
     required_experiments.update(r[0] for r in db.execute("SELECT DISTINCT experiment FROM jobs WHERE state!='DONE'"))
@@ -181,6 +192,8 @@ def _roots(db,retiring=()):
     for row in db.execute('SELECT report FROM devices'): roots.update(hashes(json.loads(row['report'])))
     for row in db.execute('SELECT id,result FROM attempts WHERE result IS NOT NULL'):
         if 'attempt:'+row['id'] not in retired: roots.update(hashes(json.loads(row['result'])))
+    from .upload_retention import roots as upload_roots
+    roots.update(upload_roots(db,retiring))
     return roots
 
 
@@ -211,6 +224,8 @@ def collect(root,*,dry_run=False):
     config=settings(root); removed=[]; blocked=[]
     with private_lock(Path(root)/'artifacts/store.lock'), connection(root) as db:
         db.execute('BEGIN IMMEDIATE')
+        from .upload_retention import recover_legacy,collect as collect_uploads
+        legacy_uploads=recover_legacy(root,db,dry_run=dry_run)
         candidates=_retire_candidates(db,config,root)
         retiring=[]
         for owner in candidates:
@@ -225,7 +240,10 @@ def collect(root,*,dry_run=False):
                     if path.exists(): disposable(path,Path(root))
             retiring.append(owner)
         # Eligibility precedes reachability. A blocked group remains a live root.
-        live=closure(root,_roots(db,retiring))
+        live=closure(root,_roots(db,retiring)|legacy_uploads['roots'])
+        if legacy_uploads['unidentified_bytes']:
+            live.update(p.name for p in (Path(root)/'artifacts/objects').iterdir() if HASH.fullmatch(p.name))
+            blocked.append('CAS deletion deferred: unidentified legacy upload bytes; explicitly abandon their IDs')
         retired_roots={r['digest'] for r in db.execute('SELECT owner,digest FROM refs') if r['owner'] in retiring}
         garbage=closure(root,retired_roots)-live
         if not dry_run:
@@ -279,6 +297,8 @@ def collect(root,*,dry_run=False):
                         removed.append(str((run/'diagnostics').relative_to(root)))
                 except FileNotFoundError:
                     blocked.append(owner+': development stop record unavailable')
+        uploads=collect_uploads(root,db,dry_run=dry_run,grace_days=config['failed_staging_days'])
+        removed+=uploads['removed']; blocked+=uploads['blocked']
         cutoff=time.time()-config['orphan_days']*86400
         objects=Path(root)/'artifacts/objects'
         queued={r[0] for r in db.execute('SELECT digest FROM storage_garbage')}|garbage

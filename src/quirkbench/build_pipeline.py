@@ -845,38 +845,49 @@ def _build_env_for_stage(stage: Path, source_date_epoch: int) -> dict[str, str]:
             "KBUILD_BUILD_TIMESTAMP": timestamp}
 
 
-def _extract_archive(archive: Path, destination: Path) -> Path:
+def _extract_archive(archive: Path, destination: Path, *, preserve_mode=False, rootfs_links=False) -> Path:
+    """Extract regular members before links; never write through archive links.
+
+    Captured sysroots retain absolute target-OS links (for example resolv.conf).
+    Source archives retain their existing contained-link requirement.
+    """
     destination.mkdir(parents=True)
+    links=[];directories=[];seen=set()
     with tarfile.open(archive, "r:*") as handle:
         for member in handle:
             name = PurePosixPath(member.name)
-            if name.is_absolute() or not name.parts or any(part in ("", "..") for part in name.parts):
-                raise BuildError("archive contains an escaping path")
+            if name.is_absolute() or not name.parts or any(part in ("", "..") for part in name.parts) or name in seen:
+                raise BuildError("archive contains an escaping or duplicate path")
+            seen.add(name)
             target = destination.joinpath(*name.parts)
+            if any(parent.is_symlink() for parent in (target,*target.parents) if parent.is_relative_to(destination)):
+                raise BuildError("archive path traverses a link")
             if member.isdir():
-                target.mkdir(parents=True, exist_ok=True)
+                target.mkdir(parents=True, exist_ok=True);directories.append((target,member.mode))
             elif member.isfile():
                 if shutil.disk_usage(destination).free - member.size < DISK_RESERVE:
                     raise BuildError("20 GiB free-space reserve reached during extraction")
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with handle.extractfile(member) as source, target.open("xb") as output:
-                    if source is None:
-                        raise BuildError("archive member data missing")
-                    while block := source.read(1024 * 1024):
-                        output.write(block)
+                    if source is None: raise BuildError("archive member data missing")
+                    while block := source.read(1024 * 1024): output.write(block)
                     if shutil.disk_usage(destination).free < DISK_RESERVE:
                         raise BuildError("20 GiB free-space reserve reached during extraction")
-                target.chmod(member.mode & 0o755 or 0o644)
+                target.chmod(member.mode & 0o7777 if preserve_mode else member.mode & 0o755 or 0o644)
             elif member.issym():
-                target.parent.mkdir(parents=True, exist_ok=True)
-                if (target.parent / member.linkname).resolve().is_relative_to(destination.resolve()):
-                    target.symlink_to(member.linkname)
-                else:
+                if not member.linkname or ('\x00' in member.linkname): raise BuildError("invalid archive link")
+                if not (rootfs_links and PurePosixPath(member.linkname).is_absolute()) and not (target.parent/member.linkname).resolve().is_relative_to(destination.resolve()):
                     raise BuildError("archive symlink escapes destination")
-            else:
-                raise BuildError("archive contains unsupported special or hardlink member")
+                links.append((target,member.linkname))
+            else: raise BuildError("archive contains unsupported special or hardlink member")
+    for target,value in links:
+        if target.exists() or target.is_symlink() or any(parent.is_symlink() for parent in target.parents if parent.is_relative_to(destination)):
+            raise BuildError("archive link overlaps a member or another link")
+        target.parent.mkdir(parents=True,exist_ok=True);target.symlink_to(value)
+    if preserve_mode:
+        for target,mode in reversed(directories): target.chmod(mode & 0o7777)
     children = list(destination.iterdir())
-    return children[0] if len(children) == 1 and children[0].is_dir() else destination
+    return children[0] if len(children) == 1 and children[0].is_dir() and not children[0].is_symlink() else destination
 
 
 def _validate_userspace_command(command: Command, workspace: Path) -> None:

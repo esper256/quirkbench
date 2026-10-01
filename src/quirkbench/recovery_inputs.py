@@ -38,7 +38,13 @@ def acquisition_command(destination,*,release=FEDORA_RELEASE,kernel=KERNEL_RELEA
         raise BuildError('invalid exact stock package acquisition')
     if release!=FEDORA_RELEASE or kernel!=KERNEL_RELEASE:
         raise BuildError('acquisition requires a separately recorded binary candidate for changed release/kernel')
-    return ('dnf5','--releasever='+release,'--setopt=install_weak_deps=False',
+    # Keep the solver's RPM database/versionlocks separate from the controller.
+    # Explicit Fedora repository paths are read from the execution environment;
+    # the download command never installs packages or alters its host filters.
+    return ('dnf5','--installroot='+str(destination.parent/'dnf-root'),
+            '--setopt=reposdir=/etc/yum.repos.d','--setopt=use_host_config=False',
+            '--releasever='+release,'--setopt=install_weak_deps=False',
+            '--setopt=disable_excludes=all',
             '--disablerepo=*','--enablerepo=fedora','--enablerepo=updates',
             'download','--resolve','--alldeps','--arch=x86_64','--arch=noarch',
             '--destdir='+str(destination),*(p['nevra'] for p in recorded_packages()),
@@ -137,7 +143,12 @@ def download(root,owner):
                 ACTIVE_WORK.reset(token)
                 raise BuildError('acquisition is already claimed')
         try:
-            output=CommandRunner(lambda phase,message:print(message,flush=True),lambda:None,timeout_s=7200)(list(acquisition_command(directory)))
+            def diagnostic(raw):
+                path=generation/'download-failure.log'
+                atomic_write(path,raw)
+                return str(path)
+            output=CommandRunner(lambda phase,message:print(message.replace('OSTree command','Recovery package download'),flush=True),
+                lambda:None,timeout_s=7200,diagnostic=diagnostic)(list(acquisition_command(directory)))
             atomic_write(generation/'download.log',output.encode())
             proof=stop_proof(generation)
             proof['download_complete']=True

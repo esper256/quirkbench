@@ -17,12 +17,17 @@ No target inventory or device credentials are prerequisites for a factory image.
 
 Recovery follows the [selected synthesis pipeline](recovery-base.md): locked DNF5
 installroot, pinned stock Fedora kernel/module packages, dracut, and the existing
-GRUB/GPT assembler. P3a requires versioned recipe/profile successors; existing
-custom-kernel schemas/code remain legacy pending migration. No recovery compile is
-required by the revised design. Upstream image reuse needs a bounded simplification
+GRUB/GPT assembler. Stock recovery uses version 2 recipe/lock records and its own
+storage policy; custom-kernel version 1 records retain their legacy meaning.
+No recovery compile is required. Upstream image reuse needs a bounded simplification
 proposal under the same policy, not an incidental second builder.
 SELinux disablement is recovery-only and must be explicit in its boot arguments and
 release provenance. Existing artifacts are not retroactively changed or qualified.
+
+Use the current
+[recovery handoff](stock-recovery-attended.md) rather than interpreting the legacy
+schemas as stock provenance. The [first audio-cycle handoff](audio-patch-cycle-2026-09-30.md)
+records the integration corrections and next product steps.
 
 ## Build and compose on the controller
 
@@ -40,23 +45,43 @@ Controller storage is separate: initially budget roughly 200 GiB for sources, bu
 
 ### CLI entry points
 
-Run these commands inside the appropriate isolated builder described in [the environment setup](../environments/README.md), with the persistent project mounted at `/workspace`. Replace the input paths with actual recorded files. The `build` command uses a build-input manifest; `compose` uses the separate `ComposeInputs` JSON contract documented in that environment guide, including source and symbol evidence maps. The illustrative `examples/deployment.json` is output-format documentation, not a compose input.
+Submit from the controller's normal terminal after the [manual user-service setup](controller-installation.md#durable-build-and-composition-service).
+The pinned builder image must already exist locally. Inputs use the existing
+BuildInputs/ComposeInputs manifests and absolute declared paths; expensive capture
+and hash checks happen in the first worker stage. Persistent state and private
+worker staging live under the selected XDG home state.
+
+Retain the finished builder's verified OCI archive and config ID separately from
+the Fedora base marker. Version 2 job inputs preserve the original base identity
+in build provenance and execute the verified finished builder. Source archives
+keep contained links; captured target root filesystems also retain absolute OS
+symlinks and permissions without extracting members through those links.
 
 ```sh
-PYTHONPATH=src python3 -m quirkbench --state /workspace/.quirkbench/controller \
-  build /workspace/inputs/build.json --workspace /workspace/.quirkbench/build
-
-PYTHONPATH=src python3 -m quirkbench --state /workspace/.quirkbench/controller \
-  compose /workspace/inputs/compose.json \
-  --workspace /workspace/.quirkbench/compose \
-  --publish-repo /workspace/.quirkbench/published
+quirkbench build /absolute/inputs/build.json --request-id build-001
+quirkbench compose /absolute/inputs/compose.json --request-id compose-001 \
+  --publish-repo "$HOME/.local/state/quirkbench/repositories/lab"
+quirkbench monitor
+quirkbench operation status JOB_ID --json
 ```
 
-Composition prints the deployment manifest and its retained artifact identity as JSON; phase reports go to stderr. Keep the manifest for the deployment qualification fixture. `compose` records the repository alias in the controller's `repositories.json` when none is configured. Use the same persistent state directory when serving that repository or backing it up. Add `--campaign CAMPAIGN_ID` to build/compose to expose their progress in an existing campaign's monitor.
+Default output is the existing C2 operation response with job ID, request ID,
+status/monitor commands and log location. Accepted work continues after the CLI
+returns. Add `--wait` to await the original final build-output map or composition
+manifest/artifact JSON. Ctrl+C stops the waiter. Exact request retries return the
+same job; changed inputs conflict. `--workspace` is rejected because the controller
+owns private staging. Configure composition repository alias/signing identity in
+private service configuration first. Add `--campaign CAMPAIGN_ID` to bind campaign
+pause behavior. Explicit interrupted-job resume uses `operation resume JOB_ID
+--request-id NEW_REQUEST_ID`; verified retained inputs avoid source recapture once
+capture has completed.
+
+See [the implementation handoffs](upload-and-background-jobs-handoff-2026-09-30.md)
+for software checks and unqualified product/release behavior.
 
 ## Publish and prepare exact revisions
 
-The controller publishes a signed OSTree repository over authenticated HTTPS. The target requires Python GI and calls libostree’s strict signature verifier even for cached content; successful `ostree show` output is not sufficient signature authorization. Device credentials are distinct from AI credentials. The deployment manifest is stored in the ordinary content-addressed artifact store and references a configured repository identifier, exact commit and protection profile. Experiments refer to it using the `deployment` artifact role. Never authorize a moving branch or autonomous target update. Publication durably retains the manifest, its build-evidence closure and exact commit before experiment submission; published builds remain pinned until an explicit future cleanup operation.
+The controller publishes a signed OSTree repository over authenticated HTTPS. The target requires Python GI and calls libostree’s strict signature verifier even for cached content; successful `ostree show` output is not sufficient signature authorization. Device credentials are distinct from AI credentials. The deployment manifest is stored in the ordinary content-addressed artifact store and references a configured repository identifier, exact commit and protection profile. Experiments refer to it using the `deployment` artifact role. Never authorize a moving branch or autonomous target update. Publication durably retains the manifest, its build-evidence closure and exact commit before experiment submission; published builds remain pinned while retained attempts, investigations or configured build counts require them. Housekeeping uses the existing command/event-driven retention policy.
 
 OSTree handles missing-object retrieval, verification and transactional deployment with synchronization enabled. Incomplete content must not become armable. Optional static deltas are deferred until transfer measurements justify them. Repository retention must protect all commits referenced by experiments or retained checkpoints. Complete backups include their independent object copies, SQLite, and the explicit build-evidence closure. Required evidence roles are `build_provenance`, `vmlinux`, `system_map`, `kernel_source`, `userspace_source`, `config`, and `modules`; dependency locks and additional debug data can be retained alongside them. Credentials and signing private keys are excluded; restoration requires separately configured repository locations and credentials.
 

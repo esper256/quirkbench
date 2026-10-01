@@ -1,0 +1,15 @@
+# Copy to ~/.config/systemd/user/quirkbench-controller.service, replace both paths,
+# provision private/controller-service.json, then daemon-reload/start explicitly.
+[Unit]
+Description=Quirkbench controller and durable build coordinator
+
+[Service]
+Type=simple
+ExecStart=/ABSOLUTE/INSTALL/bin/quirkbench-controller-service --state /ABSOLUTE/STATE/quirkbench
+KillMode=control-group
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=default.target

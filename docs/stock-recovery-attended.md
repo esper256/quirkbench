@@ -14,6 +14,10 @@ boot, storage-preservation or release qualification. The authoritative
 enumeration and partition-table reads; recovery userspace operations remain confined
 to the identified external boot device. Candidate controller exclusions are separate.
 
+The [first audio-cycle integration handoff](audio-patch-cycle-2026-09-30.md) records
+current native setup and the replacement input/image operation. Historical deleted
+artifact results below are unchanged; replacement preparation is not boot evidence.
+
 ## Recovery inputs and preparation
 
 New recovery input generation uses `RecoveryRecipe` v2, rootfs-lock v2 and

@@ -1,4 +1,9 @@
 > **Product preview:** Quirkbench is still under development. This page describes
+
+Current development: [durable build/compose and upload retention handoff](docs/upload-and-background-jobs-handoff-2026-09-30.md).
+`build`/`compose` return a job ID; use `monitor` or explicit `--wait`. Manual service
+setup is required. [Hardware-specific experiment kernels](docs/targeted-experiment-kernels.md)
+are a proposed next packet; recovery keeps the stock Fedora kernel.
 > the intended finished product. The release downloads, setup wizard and commands
 > below are not all available yet; these instructions do not currently work end to
 > end. See the [implementation roadmap](docs/product-roadmap.md) for current scope.

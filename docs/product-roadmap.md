@@ -1,5 +1,10 @@
 # Quirkbench product roadmap
 
+**2026-09-30 implementation:** [Upload retention and durable build/composition handoffs](upload-and-background-jobs-handoff-2026-09-30.md).
+`build` and `compose` now acknowledge jobs immediately; explicit `--wait` reads their
+final outputs. Real service/build/boot containment remains unqualified.
+The next kernel tailoring packet is the [hardware-specific experiment kernel design](targeted-experiment-kernels.md), proposed metadata/config generation only.
+
 This is the authoritative forward plan. Use the [implementation contracts](implementation-contracts.md)
 and [bounded handoff tasks](implementation-handoff.md) for implementation. Planned
 interfaces below are not claims that setup or session orchestration already exists.

@@ -15,6 +15,8 @@ test = ["pytest>=8,<10", "cryptography>=43", "jsonschema>=4"]
 [project.scripts]
 quirkbench = "quirkbench.cli:main"
 quirkbench-worker = "quirkbench.recovery_worker:main"
+quirkbench-job-worker = "quirkbench.job_worker:main"
+quirkbench-controller-service = "quirkbench.controller_service:main"
 
 [tool.setuptools]
 packages = ["quirkbench", "quirkbench.assets", "quirkbench.schemas", "quirkbench.examples", "quirkbench.guide"]
@@ -27,7 +29,7 @@ quirkbench = "src/quirkbench"
 "quirkbench.guide" = "docs"
 
 [tool.setuptools.package-data]
-quirkbench = ["profiles/*.json", "baselines/*.json", "recipes/*.json"]
+quirkbench = ["*.sh", "*.service", "profiles/*.json", "baselines/*.json", "recipes/*.json"]
 "quirkbench.assets" = ["*.service", "*.mount", "*.conf", "*.fragment", "*.sh"]
 "quirkbench.schemas" = ["*.json"]
 "quirkbench.examples" = ["*.json"]

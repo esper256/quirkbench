@@ -17,6 +17,7 @@ import time
 from urllib.parse import quote
 
 from .controller import controller_boot_id, validate_boot_id
+from .job_operations import STAGES
 
 
 OPERATION = re.compile(r'[0-9a-f]{32}\Z')
@@ -31,6 +32,7 @@ class VerifiedWorkerClaim:
     id: str
     state: str
     stage: str
+    kind: str
     stage_dir: str
     worker_epoch: int
     worker_generation: int
@@ -57,7 +59,8 @@ def _own_cgroup(unit: str, reader) -> None:
         raise WorkerClaimError('worker cgroup is unavailable') from exc
     groups = [line.split('::', 1)[1] for line in lines if line.startswith('0::')]
     if (len(groups) != 1 or not groups[0].startswith('/')
-            or groups[0].rsplit('/', 1)[-1] != unit):
+            or groups[0].rsplit('/', 1)[-1] not in (unit,'runtime')
+            or (groups[0].endswith('/runtime') and groups[0].split('/')[-2]!=unit)):
         raise WorkerClaimError('worker is outside its claimed service cgroup')
 
 
@@ -75,7 +78,7 @@ def read_active_worker_claim(state_root, operation_id, epoch, generation, stage_
             or not OPERATION.fullmatch(operation_id)
             or type(epoch) is not int or epoch < 1
             or type(generation) is not int or generation < 1
-            or expected_stage != 'recovery_rootfs'):
+            or expected_stage not in {'recovery_rootfs','job_inputs','kernel_build','os_compose'}):
         raise WorkerClaimError('invalid rootless worker identity')
     root = Path(state_root)
     stage = Path(stage_dir)
@@ -110,7 +113,7 @@ def read_active_worker_claim(state_root, operation_id, epoch, generation, stage_
         raise WorkerClaimError('controller claim cannot be read') from exc
     now = clock()
     if (lifecycle is None or lifecycle['epoch'] != epoch or row is None
-            or row['kind'] != 'image_prepare' or row['state'] != 'RUNNING'
+            or (row['kind'],expected_stage) not in STAGES or row['state'] != 'RUNNING'
             or row['stage'] != expected_stage or row['stage_dir'] != str(stage)
             or row['worker_epoch'] != epoch or row['worker_generation'] != generation
             or row['worker_unit'] != unit or row['worker_boot_id'] != boot
@@ -120,5 +123,5 @@ def read_active_worker_claim(state_root, operation_id, epoch, generation, stage_
             or not now < row['deadline'] < float('inf')):
         raise WorkerClaimError('worker claim is no longer current')
     return VerifiedWorkerClaim(
-        operation_id, row['state'], row['stage'], str(stage), epoch, generation,
+        operation_id, row['state'], row['stage'], row['kind'], str(stage), epoch, generation,
         unit, boot, row['deadline'], row['input_digest'])

@@ -75,7 +75,7 @@ def retain_diagnostics(root, stage, destination):
     if stage.resolve() != stage or destination.resolve() != destination:
         raise ContractError('diagnostic retention path is linked')
     destination.mkdir(parents=True, exist_ok=True, mode=0o700)
-    for relative in ('.', 'diagnostics', 'output/image-stage', 'output/image-stage/logs', 'output/image-stage/kernel-logs',
+    for relative in ('.', 'logs', 'diagnostics', 'output/image-stage', 'output/image-stage/logs', 'output/image-stage/kernel-logs',
                      'output/image-stage/initramfs-logs', 'kernel-logs'):
         directory = stage / relative
         if not directory.is_dir() or directory.resolve() != directory:
@@ -188,6 +188,36 @@ def _prune(root, *, dry_run=False, owner=None):
             retain_diagnostics(root, stage, root / 'diagnostics' / row['id'])
             remove_tree(stage,root)
         removed.append(str(stage.relative_to(root)))
+    # Input capture was durably adopted before the next stage. Retry its cleanup
+    # from the existing journal even when a later claim replaced stage_dir.
+    with reader.connection() as db:
+        captured=db.execute("SELECT operation,document FROM operation_events WHERE kind='inputs_retained' ORDER BY id").fetchall()
+        stopped=db.execute("SELECT operation,document FROM operation_events WHERE kind='worker_stopped'").fetchall()
+    proofs={(r['operation'],json.loads(r['document']).get('stage_dir'),json.loads(r['document']).get('worker_generation')) for r in stopped
+            if json.loads(r['document']).get('stop_kind') in ('stopped','previous_boot')}
+    for event in captured:
+        record=json.loads(event['document']);name=record.get('stage_dir');generation=record.get('worker_generation')
+        if not isinstance(name,str) or (event['operation'],name,generation) not in proofs: continue
+        path=Path(name)
+        if not path.is_relative_to(root/'workers'/event['operation']) or not path.exists(): continue
+        row=reader.operation_status(event['operation'])['data']
+        if row.get('stage_dir')==name and row.get('worker_unit') is not None: continue
+        value=record.get('prepared_digest')
+        if value not in row['references']['input'] or not (root/'artifacts/objects'/value).is_file():
+            blocked.append(event['operation']+': captured inputs unavailable');continue
+        try:
+            captured_inputs=json.loads(read_file(root,'artifacts/objects/'+value,limit=1024**2))
+            from .contracts import sha256
+            children=[sha256(entry['sha256']) for entry in captured_inputs['files'].values()]
+        except (OSError,ValueError,KeyError,TypeError):
+            blocked.append(event['operation']+': captured input metadata unreadable');continue
+        if any(not (root/'artifacts/objects'/child).is_file() for child in children):
+            blocked.append(event['operation']+': captured child inputs unavailable');continue
+        disposable(path,root)
+        if not dry_run:
+            retain_diagnostics(root,path,root/'diagnostics'/event['operation'])
+            remove_tree(path,root)
+        removed.append(str(path.relative_to(root)))
     cache = {'cache_bytes': None, 'removed': [], 'room': False}
     try:
         with private_lock(root / 'build.lock'):
@@ -269,6 +299,12 @@ def prune(root, *, dry_run=False, owner=None, command_held=False):
     if not command_held:
         with private_lock(root/'command.lock'):
             return prune(root,dry_run=dry_run,owner=owner,command_held=True)
+    # Check inside the publication barrier: a target cannot claim between this
+    # check and cleanup. Housekeeping never competes with an unresolved attempt.
+    with StateReader(root).connection() as db:
+        busy=db.execute("SELECT 1 FROM attempts WHERE state IN ('CLAIMED','RUNNING','BOOT_PENDING','UNCERTAIN') OR (handoff_revision IS NOT NULL AND recovery_returned IS NULL) LIMIT 1").fetchone()
+        busy=busy or db.execute('SELECT 1 FROM operations WHERE worker_unit IS NOT NULL LIMIT 1').fetchone()
+        if busy: raise Conflict('active or unresolved execution defers housekeeping')
     if owner is not None:
         if owner.closed or owner.controller._lifecycle_owner is not owner:
             raise Conflict('maintenance requires current lifecycle owner')

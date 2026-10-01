@@ -938,10 +938,11 @@ def _install_runtime_files(rootfs: Path, assets_dir: Path | None = None, *, cand
     from .contracts import ContractError
     from .recipe_registry import RecipeRegistry
     from .runtime import system_observation
+    from .audio_recipe import audio_observation
     try:
         recipe_registry = RecipeRegistry(source / 'recipes',
-                                         {'system-observation': system_observation},
-                                         granted_privileges={'read_kernel_log'})
+                                         {'system-observation': system_observation,'audio-observation':audio_observation},
+                                         granted_privileges={'read_kernel_log','audio_playback'} if candidate else {'read_kernel_log'})
     except ContractError as exc:
         raise BootError('installed recipe metadata and code differ') from exc
     recipe_destination = package / 'recipes'

@@ -39,8 +39,8 @@ Python 3.11+ must already be installed. No virtualenv, pip installation or
 source checkout is needed for the controller CLI.
 
 Run bin/quirkbench setup-state to select private persistent state, then
-bin/quirkbench setup-check to inspect service prerequisites. Full service
-installation and background-work readiness are still pending. Extraction does
+bin/quirkbench setup-check to inspect service prerequisites. Install lib/quirkbench/quirkbench-controller.service with canonical paths and
+provision private/controller-service.json as described in controller-installation.md. Extraction does
 not start a service, change lingering or install any host package.
 
 On Distrobox controllers, run setup-check from the native controller shell to
@@ -51,11 +51,14 @@ Do not replace an installation being used by an active service.
 bin/quirkbench-worker is the fixed rootfs stage executable for configured systemd
 worker services. It accepts only an existing live controller claim; it is not
 a general shell/build launcher. Stage completion is private and does not finish
-an image operation. Coordinator dispatch/result consumption remains pending.
+an image operation. The configured controller consumes and validates stopped worker output.
+bin/quirkbench-job-worker handles only fixed build/compose stages.
 
 controller-manifest.json records the included file hashes and originating wheel.
 This is provenance, not a cryptographic signature or a release qualification.
 '''
+JOB_LAUNCHER = LAUNCHER.replace(b'from quirkbench.cli import main', b'from quirkbench.job_worker import main')
+SERVICE_LAUNCHER = LAUNCHER.replace(b'from quirkbench.cli import main', b'from quirkbench.controller_service import main')
 WORKER_LAUNCHER = LAUNCHER.replace(b'from quirkbench.cli import main',
                                  b'from quirkbench.recovery_worker import main')
 
@@ -102,11 +105,13 @@ def build_controller_archive(wheel: Path, output: Path) -> dict:
     version = info.get('Version', '')
     if info.get('Name', '').lower() != 'quirkbench' or not re.fullmatch(r'[0-9][A-Za-z0-9.+-]{0,63}', version):
         raise ValueError('invalid Quirkbench wheel metadata')
-    required = ('recovery_worker.py', 'assets/quirkbench-recovery.service', 'schemas/experiment.v1.schema.json',
+    required = ('job_worker.py','job_operations.py','job_coordinator.py','job_cache.py',
+                'controller_service.py','run-bounded-podman.sh','quirkbench-controller.service','recovery_worker.py', 'assets/quirkbench-recovery.service', 'schemas/experiment.v1.schema.json',
                 'examples/experiment.json', 'guide/agent-guide.md')
     if any('lib/quirkbench/' + name not in files for name in required):
         raise ValueError('controller wheel is missing installed resources')
     files.update({'bin/quirkbench': LAUNCHER, 'bin/quirkbench-worker': WORKER_LAUNCHER,
+                  'bin/quirkbench-job-worker': JOB_LAUNCHER, 'bin/quirkbench-controller-service': SERVICE_LAUNCHER,
                   'INSTALL.txt': INSTRUCTIONS})
     manifest = {'schema_version': 1, 'version': version, 'requires_python': '>=3.11',
                 'qualified': False, 'signed': False,

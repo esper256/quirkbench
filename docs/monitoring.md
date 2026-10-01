@@ -21,7 +21,9 @@ migrations, startup reconciliation or ownership changes. Missing setup, incompat
 schemas and unavailable services are reported. The display separates phase advancement,
 heartbeat age, measured counters, waits, deadlines, worker completion and publication.
 Stock preparation reports package/runtime installation, initramfs, assembly and owner
-validation/signing/publication. Worker JSON remains advisory and is accepted only by
+validation/signing/publication. Build/compose jobs report input preparation, compilation
+or composition, owner validation, signing and publication. `--wait` is optional;
+default submission returns the job ID and monitoring commands immediately. Worker JSON remains advisory and is accepted only by
 the current owner under its exact epoch/generation/claim fence. Malformed advisory
 records cannot become execution authorization or terminate the coordinator.
 
@@ -103,3 +105,12 @@ shows scheduling stopped, draining workers, recovery arrival and pending evidenc
 individually. Safe shutdown is a separate derived condition, not a synonym for
 Paused or Recovery ready. Human-input UI uses durable request/response IDs and
 deadlines; late responses cannot satisfy a newer attempt or extend its deadline.
+
+Upload declarations now have durable attempt ownership. Pending/resumable uploads
+and completed uploads awaiting acknowledgement protect their bytes and owner
+retention. Unidentified legacy uploads are visible in `maintenance prune --dry-run
+--json`; `maintenance abandon-upload ID` explicitly retires an unneeded upload,
+subject to active/unresolved-attempt checks and configured grace. Terminal uploads,
+attempt completion and confirmed recovery return request idle-owner housekeeping.
+No monitor cleanup, timer or additional service is involved. See
+[the upload/build handoff](upload-and-background-jobs-handoff-2026-09-30.md).
