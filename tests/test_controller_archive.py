@@ -34,6 +34,10 @@ def test_archive_runs_relocated_without_checkout_and_keeps_selected_state(tmp_pa
     manifest = json.loads((release / 'controller-manifest.json').read_bytes())
     for name, expected in manifest['files'].items():
         assert hashlib.sha256((release / name).read_bytes()).hexdigest() == expected
+    for name in ('controller-installation.md', 'recovery-acquisition.md', 'build-and-boot.md',
+                 'agent-guide.md', 'architecture.md', 'implementation-contracts.md'):
+        assert (release / 'lib/quirkbench/guide' / name).read_bytes() == (ROOT / 'docs' / name).read_bytes()
+    assert 'lib/quirkbench/guide/controller-installation.md' in (release / 'INSTALL.txt').read_text()
     clean_home = tmp_path / 'home'
     clean_home.mkdir()
     env = {**os.environ, 'HOME': str(clean_home), 'XDG_CONFIG_HOME': str(clean_home / 'config'),
@@ -59,7 +63,16 @@ def test_archive_runs_relocated_without_checkout_and_keeps_selected_state(tmp_pa
     assert worker_help.returncode == 0, worker_help.stderr
     assert '--worker-generation' in worker_help.stdout
     assert not (clean_home / '.quirkbench').exists()
-    assert not (clean_home / 'state/quirkbench/controller.sqlite').exists()
+    assert (clean_home / 'state/quirkbench/controller.sqlite').exists()
+    # The current setup-state intentionally initializes the selected controller.
+    # Install the same archive through the managed helper in an unrelated home.
+    from quirkbench.controller_install import install, verify_installation
+    record = install(output, data_home=clean_home/'data')
+    managed = Path(record['runtime_root'])
+    assert verify_installation(managed) == record
+    assert invoke(managed, '--help').returncode == 0
+    assert invoke(managed, 'setup-check').returncode == 0
+    assert verify_installation(managed) == record
 
 
 @pytest.mark.parametrize('member', ['../escape', '/absolute', 'quirkbench/../escape'])

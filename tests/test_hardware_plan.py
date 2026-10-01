@@ -61,6 +61,26 @@ def test_vendor_and_form_factor_do_not_select_different_core_policy(tmp_path):
     assert desktop["inventory_digest"] != laptop["inventory_digest"]
 
 
+def test_planner_uses_reviewed_profiles_instead_of_default_adapter_alias(tmp_path, monkeypatch):
+    import quirkbench.hardware_plan as planner
+    monkeypatch.setattr(planner, 'ADAPTER_ID', 'unrelated-investigation-example')
+    profile = installed_profiles()[0]
+    result = plan(inventory(tmp_path), profiles=[profile])
+    assert result['platform_adapter_id'] == profile['platform_adapter_id']
+    assert 'unsupported_architecture' not in result['blocking_reasons']
+
+
+def test_registry_extension_cannot_silently_expand_frozen_v1_profile(monkeypatch):
+    from quirkbench import platform_adapters
+    profile = copy.deepcopy(installed_profiles()[0])
+    profile['platform_adapter_id'] = 'future-reviewed-backend'
+    monkeypatch.setitem(platform_adapters.ADAPTERS, profile['platform_adapter_id'],
+                        platform_adapters.X86_UEFI_USB)
+    with pytest.raises(PlanError, match='implemented platform adapter'):
+        validate_profile(profile)
+    assert not Draft202012Validator(PROFILE_SCHEMA).is_valid(profile)
+
+
 def test_missing_optional_peripheral_is_a_warning_not_protection_relaxation(tmp_path):
     report = inventory(tmp_path)
     mutate_observation(report, "dmi.chassis_type", status="absent", value=None)

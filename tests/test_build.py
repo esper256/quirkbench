@@ -184,3 +184,12 @@ def test_recovery_compile_plan_checks_resolved_config_before_commands(tmp_path, 
     config.write_text(config.read_text().replace('# CONFIG_ATA is not set', 'CONFIG_ATA=y'))
     with pytest.raises(BuildError, match='protected recovery kernel config mismatch'):
         build.recovery_compile_plan(profile)
+
+
+def test_canonical_account_home_under_var_is_usable_but_system_paths_remain_forbidden(monkeypatch):
+    from types import SimpleNamespace
+    from quirkbench import build
+    monkeypatch.setattr(build.pwd,'getpwuid',lambda uid:SimpleNamespace(pw_dir='/var/home/different-user'))
+    build._safe_build_path(Path('/var/home/different-user/.local/state/quirkbench/workspaces/source'))
+    for path in ('/var','/var/lib/rpm','/var/home/other-user/work','/dev/sda','/mnt/target'):
+        with pytest.raises(BuildError):build._safe_build_path(Path(path))

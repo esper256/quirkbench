@@ -1,5 +1,24 @@
 # Quirkbench agent guide
 
+## Current implemented commands
+
+External coding agents use the same shell interface and selected controller state.
+Start with `quirkbench --help`, `quirkbench setup-state` and `quirkbench setup-check`.
+Use [controller installation](controller-installation.md) for native services and
+manual authenticated setup, and [build and boot](build-and-boot.md) for the existing
+manifest-based campaign/build/compose/approval journey. Neither requires an audio
+investigation, a particular target model or a Distrobox shell.
+
+Read `quirkbench target-inventory TARGET_ID --json` and
+`quirkbench recovery-images --json` before selecting existing evidence or artifacts.
+Select exact recovery inputs with [acquisition specifications](recovery-acquisition.md).
+Read `quirkbench operation status OPERATION_ID --json` or open `quirkbench monitor`
+manually for durable work. These commands do not authorize another physical attempt.
+The installed documentation preserves case histories as evidence; current instructions
+and selected immutable inputs determine behavior.
+
+## Planned session workflow
+
 **Attended-first design, 2026-09-29:** manual authenticated setup precedes the
 external-agent journey. Each candidate attempt requires explicit operator approval
 bound to exact immutable inputs; accepting a proposal or finishing a build is not
@@ -10,7 +29,9 @@ Managed scheduling and unattended watchdog grants are later capabilities.
 
 > **Interface preview:** this guide specifies the intended agent workflow and CLI.
 > The session/context/proposal interfaces below are not implemented end to end.
-> It accompanies the product-preview README; it does not supersede the existing
+> These command forms accompany the [earlier product preview](product-preview.md).
+> The [README manual](../README.md) now describes the intended finished experience;
+> its revised interface has not yet been migrated into these contracts. Neither supersedes the existing
 > [implementation contracts](implementation-contracts.md). Do not translate these
 > examples into unsupported current commands and assume an experiment ran.
 

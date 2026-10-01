@@ -17,6 +17,7 @@ import uuid
 from .build import sha256_file, validate_kernel_config
 from .contracts import canonical, digest
 from .store import atomic_write, sync_directory
+from .platform_adapters import X86_UEFI_USB
 
 class ImageError(RuntimeError):
     pass
@@ -458,12 +459,12 @@ def _create_image(inputs: ImageInputs) -> Path:
                 if part['number']==1:
                     _run('mmd','-i',str(fs),'::/EFI','::/EFI/BOOT')
                     cfg=work/'grub.cfg';cfg.write_text(grub_config(p2['partuuid'],esp_uuid=p1['partuuid'],state_uuid=p3['partuuid'],data_uuid=p4['partuuid'],library_uuid=extra_uuids[0],evidence_uuid=extra_uuids[1],smoke=inputs.smoke,stock_recovery=inputs.recovery_storage_policy is not None))
-                    efi=work/'BOOTX64.EFI'
+                    efi=work/X86_UEFI_USB.removable_efi_filename
                     early=work/'early.cfg'
                     early.write_text('normal\n')
-                    _run('grub-mkimage','--format=x86_64-efi','--output',str(efi),'--prefix=/EFI/BOOT','--config',str(early),'part_gpt','fat','ext2','normal','linux','boot','loadenv','test','regexp','serial','halt','configfile','echo','smbios')
+                    _run('grub-mkimage','--format='+X86_UEFI_USB.grub_image_format,'--output',str(efi),'--prefix=/EFI/BOOT','--config',str(early),'part_gpt','fat','ext2','normal','linux','boot','loadenv','test','regexp','serial','halt','configfile','echo','smbios')
                     _run('mcopy','-i',str(fs),str(cfg),'::/EFI/BOOT/grub.cfg')
-                    for file,destination in ((efi,'EFI/BOOT/BOOTX64.EFI'),(inputs.recovery_kernel,'vmlinuz-recovery'),(inputs.recovery_initramfs,'initramfs-recovery.img')):
+                    for file,destination in ((efi,'EFI/BOOT/'+X86_UEFI_USB.removable_efi_filename),(inputs.recovery_kernel,'vmlinuz-recovery'),(inputs.recovery_initramfs,'initramfs-recovery.img')):
                         _run('mcopy','-i',str(fs),str(file),'::/'+destination)
                 else:
                     _run('mmd','-i',str(fs),'::/quirkbench')

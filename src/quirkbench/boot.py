@@ -936,13 +936,9 @@ def _install_runtime_files(rootfs: Path, assets_dir: Path | None = None, *, cand
             raise BootError("invalid staged runtime module destination: " + name)
         shutil.copyfile(src, destination)
     from .contracts import ContractError
-    from .recipe_registry import RecipeRegistry
-    from .runtime import system_observation
-    from .audio_recipe import audio_observation
+    from .recipe_registry import installed_registry
     try:
-        recipe_registry = RecipeRegistry(source / 'recipes',
-                                         {'system-observation': system_observation,'audio-observation':audio_observation},
-                                         granted_privileges={'read_kernel_log','audio_playback'} if candidate else {'read_kernel_log'})
+        recipe_registry = installed_registry(source / 'recipes', candidate=candidate)
     except ContractError as exc:
         raise BootError('installed recipe metadata and code differ') from exc
     recipe_destination = package / 'recipes'

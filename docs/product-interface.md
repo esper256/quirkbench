@@ -23,8 +23,9 @@ rotation and reject unknown/incompatible releases rather than weakening verifica
 Manual checksum checks alone detect corruption, not publisher authenticity.
 
 Package runtime units, templates, recipes, migrations and the agent guide as installed
-resources. No runtime path may require a source checkout. The installer manages its
-private Python environment and launcher; users should not construct virtualenvs,
+resources. No runtime path may require a source checkout. The current development archive uses existing system Python 3.11+; its guarded
+installer manages immutable runtime directories and the launcher. The future signed
+installer may supply a private Python environment; users should not construct virtualenvs,
 kernel manifests or package recipes to start a supported investigation. Missing host
 prerequisites produce specific instructions, never automatic host package changes.
 A clean-home installation test uses the built archive without a checkout and exercises
@@ -34,7 +35,7 @@ image boot or release-qualification run.
 ## Persistent services and state
 
 The controller's systemd user service manager owns the coordinator and rootless
-container workers. Distrobox remains the build/agent environment; its disposable
+container workers. Distrobox is an optional development/agent environment; its disposable
 filesystem is not the authority for persistence. Stable private configuration,
 credentials, database, source workspaces and retained artifacts live outside it.
 Do not reuse the prototype builder's temporary home for agent authentication.
@@ -79,7 +80,7 @@ same request returns the same durable intent, and changed content conflicts.
 | Commands | Contract |
 | --- | --- |
 | `setup`, `pair`, `targets`, `target qualify TARGET` | Initial manual authenticated setup/readiness; later setup/pairing wizard and separately authorized qualification. |
-| `session start --device TARGET [--problem FILE] [--driver external]` | Persist scope/driver/workspace selection; the session owns its initial attended baseline operation. Final default is managed when configured, otherwise offer external mode. |
+| `session start --device TARGET [--problem FILE] [--driver external]` | Persist scope/driver/workspace selection; the session owns its initial attended baseline operation. Default is external; managed invocation requires explicit selection. |
 | `session context/recipes/proposal-schema SESSION --json` | Bounded context, installed eligible recipes and exact proposal schema. |
 | `session propose SESSION --file FILE --request-id ID` | Accept a proposal and return an operation ID; source validation/freezing and execution happen later under C3. |
 | `session capture-source SESSION --request-id ID` | Explicit quiescent dirty-source handoff; returns a durable capture operation, not a claim of an immediately complete snapshot. |
@@ -107,8 +108,8 @@ of the installed OS's configuration.
 
 ## Agent decisions and source handoff
 
-Implement a complete external-agent journey first. Managed operation remains the
-finished product default, added through one concrete supported command adapter over
+Implement a complete external-agent journey first. Managed operation is an optional, explicitly selected capability,
+added through one concrete supported command adapter over
 the same services. Both modes use C3 immutable source capture and exclusive ownership.
 External agents submit pinned source revisions or completed capture references; an
 accepted proposal cannot later change because its original worktree changed.

@@ -168,6 +168,14 @@ class RecipeRegistry:
             raise RecipeUnavailable('installed recipe code differs from manifest')
         return recipe
 
+    def eligible(self, *, mode, architecture, capabilities=()):
+        """Advertise only runnable installed recipes; resolve still validates identity."""
+        available = set(capabilities)
+        return [name for name, (manifest, _, _) in sorted(self.records.items())
+                if mode in manifest['modes'] and architecture in manifest['architectures']
+                and set(manifest['required_capabilities']) <= (available | {'recipe.' + name})
+                and set(manifest['required_privileges']) <= self.granted_privileges]
+
     def resolve(self, experiment: Experiment, report: CapabilityReport):
         record = self.records.get(experiment.recipe)
         if record is None:
@@ -200,3 +208,16 @@ class UnavailableRegistry:
 
     def resolve(self, experiment, report):
         raise RecipeUnavailable('installed recipe registry unavailable')
+
+
+def reviewed_bindings():
+    """One source allowlist shared by image staging and the target supervisor."""
+    from .runtime import system_observation
+    from .audio_recipe import audio_observation
+    return {'system-observation': system_observation, 'audio-observation': audio_observation}
+
+
+def installed_registry(directory, *, candidate=False):
+    return RecipeRegistry(directory, reviewed_bindings(),
+                          granted_privileges={'read_kernel_log', 'audio_playback'}
+                          if candidate else {'read_kernel_log'})

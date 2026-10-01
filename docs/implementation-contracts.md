@@ -44,7 +44,7 @@ There are three authorities:
 | Session runner / controller application | Validate proposals, account usage, publish immutable inputs, authorize attempts | Infer approval from model text, experiment results or timeout |
 | Target supervisor | Verify its boot, execute installed bounded recipes, report evidence, return to recovery | Run remote shell text, install arbitrary packages or authorize the next attempt |
 
-The controller-side agent is trusted local software under the agreed Distrobox
+The controller-side agent is trusted local software under the agreed local execution
 model, not a security sandbox. Restrict its worktree and validate its outputs;
 do not claim it is technically unable to access controller credentials. Policy
 grants and private credential directories are outside its task workspace and are

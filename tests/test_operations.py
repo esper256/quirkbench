@@ -55,7 +55,7 @@ def test_fenced_complete_and_partial_outputs_survive_backup(tmp_path):
     partial = c.store.put(b'partial build log')
     with c.lifecycle() as owner:
         operation = c.admit_operation('req', 'image_prepare', {})
-        claimed = owner.claim(operation['id'], stage='build', deadline=c.clock() + 30)
+        claimed = owner.claim(operation['id'], stage='recovery_rootfs', deadline=c.clock() + 30)
         epoch, generation = claimed['worker_epoch'], claimed['worker_generation']
         c._publish_operation(operation['id'], epoch, generation, output_refs=[partial.sha256])
         with pytest.raises(Conflict):
@@ -78,7 +78,7 @@ def test_fenced_complete_and_partial_outputs_survive_backup(tmp_path):
 
         assert owner.reconcile_units(StoppedService()) == [operation['id']]
         failed = c.admit_operation('req-failed', 'image_prepare', {})
-        claim = owner.claim(failed['id'], stage='build', deadline=c.clock() + 30)
+        claim = owner.claim(failed['id'], stage='recovery_rootfs', deadline=c.clock() + 30)
         c._publish_operation(failed['id'], claim['worker_epoch'], claim['worker_generation'],
                              output_refs=[partial.sha256], state='FAILED',
                              error={'code': 'BUILD_FAILED', 'message': 'failed after log publication', 'retryable': False})
@@ -96,7 +96,7 @@ def test_restore_interrupts_active_operation_without_losing_partial_output(tmp_p
     partial = c.store.put(b'partial')
     with c.lifecycle() as owner:
         operation = c.admit_operation('req', 'image_prepare', {})
-        claim = owner.claim(operation['id'], stage='build', deadline=c.clock() + 30)
+        claim = owner.claim(operation['id'], stage='recovery_rootfs', deadline=c.clock() + 30)
         c._publish_operation(operation['id'], claim['worker_epoch'], claim['worker_generation'],
                              output_refs=[partial.sha256])
         c.backup(tmp_path / 'backup')
@@ -159,7 +159,7 @@ def test_human_operation_status_renders_measured_progress_and_attached_failure(t
     c = controller(tmp_path)
     with c.lifecycle() as owner:
         row = c.admit_operation('req', 'image_prepare', {})
-        claim = owner.claim(row['id'], stage='rootfs', deadline=c.clock() + 30)
+        claim = owner.claim(row['id'], stage='recovery_rootfs', deadline=c.clock() + 30)
         with c.transaction() as db:
             db.execute('UPDATE operations SET progress=? WHERE id=?',
                        (json.dumps({'phase': 'rootfs', 'state': 'ACTIVE',
@@ -263,7 +263,7 @@ def test_operation_output_reads_only_attached_public_bytes(tmp_path, capsys):
     unlisted = c.store.put(b'private-looking input')
     with c.lifecycle() as owner:
         row = c.admit_operation('req', 'image_prepare', {}, input_refs=[unlisted.sha256])
-        claim = owner.claim(row['id'], stage='build', deadline=c.clock() + 30)
+        claim = owner.claim(row['id'], stage='recovery_rootfs', deadline=c.clock() + 30)
         c._publish_operation(row['id'], claim['worker_epoch'], claim['worker_generation'],
                              output_refs=[output.sha256])
     response = c.operation_output(row['id'], output.sha256, offset=2, length=4)

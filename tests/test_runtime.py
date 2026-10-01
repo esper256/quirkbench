@@ -15,6 +15,29 @@ UUIDS = tuple(str(n)*8+'-'+str(n)*4+'-'+str(n)*4+'-'+str(n)*4+'-'+str(n)*12 for 
 CONFIG = RecoveryConfig('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', *UUIDS)
 
 
+def test_non_audio_recipe_collects_without_audio_tools_or_peripherals(monkeypatch):
+    from quirkbench.contracts import CapabilityReport, Experiment, Outcome
+    from quirkbench.recipe_registry import installed_registry
+    import shutil
+    monkeypatch.setattr(shutil, 'which', lambda name: None)
+    calls = []
+    def collect(argv):
+        calls.append(argv)
+        assert argv == ['dmesg', '--kernel']
+        return 'network driver fixture log'
+    monkeypatch.setattr(runtime, '_command', collect)
+    registry = installed_registry(Path(runtime.__file__).with_name('recipes'))
+    request = Experiment('network-case', 'Collect evidence for a network fault', 'system-observation',
+                         artifacts={'recipe_manifest': registry.records['system-observation'][1]}, timeout_s=30)
+    report = CapabilityReport('server-target', 'boot-one', ['recipe.system-observation'],
+                              mode='recovery', inventory={'architecture': 'x86_64'})
+    recipe = registry.resolve(request, report)
+    chunks = list(recipe(request))
+    assert calls == [['dmesg', '--kernel']]
+    assert chunks[-1].outcome == Outcome.INCONCLUSIVE
+    assert 'reported problem' in chunks[-1].limitations[0]
+
+
 def provision(directory, **changes):
     directory.mkdir(parents=True, exist_ok=True)
     for name in ('ca.pem', 'device.token'):
@@ -264,7 +287,7 @@ def test_invalid_installed_recipe_registry_preserves_recovery_control(tmp_path, 
     monkeypatch.setattr(runtime, 'hardware_identity', lambda: None)
     monkeypatch.setattr(runtime.os.path, 'ismount', lambda path: False)
     monkeypatch.setattr(runtime, 'HTTPSDeviceClient', lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(runtime, 'RecipeRegistry', lambda *a, **k: (_ for _ in ()).throw(ContractError('bad metadata')))
+    monkeypatch.setattr(runtime, 'installed_registry', lambda *a, **k: (_ for _ in ()).throw(ContractError('bad metadata')))
     captured = {}
     def agent(client, path, report, **kwargs):
         captured.update(report=report, registry=kwargs['recipe_registry'])

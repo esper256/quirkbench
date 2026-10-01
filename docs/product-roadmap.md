@@ -1,5 +1,16 @@
 # Quirkbench product roadmap
 
+**General-purpose correction:** [Boundary audit and implementation packets](general-purpose-boundary.md).
+Installation identities describe software bytes; controller environments and supported
+platforms are explicit selections. External agents are the primary workflow.
+
+Boundary follow-up: finish profile-driven adapter selection and move remaining
+architecture command details into the reviewed backend. Derive recovery recipe
+identities from the selected lock; current setup instructions must not depend on
+an investigation handoff. Preserve frozen v1 schemas and the sole supported backend.
+Completed and software-verified; see the
+[follow-up evidence](general-purpose-boundary.md#follow-up-audit-and-completion--2026-10-01).
+
 **2026-09-30 implementation:** [Upload retention and durable build/composition handoffs](upload-and-background-jobs-handoff-2026-09-30.md).
 `build` and `compose` now acknowledge jobs immediately; explicit `--wait` reads their
 final outputs. Real service/build/boot containment remains unqualified.
@@ -27,8 +38,8 @@ must be available to handle unsupported hangs; no unattended reset claim is made
 **Later capabilities:** pairing/credential lifecycle automation (P3d/e), endpoint and
 advanced capacity wizards (P3f/P3a5), guided whole-session backup reporting (P2e),
 managed decision scheduling (P6c), and unattended watchdog grants/qualification (P5).
-These do not gate the attended journey. Managed remains the eventual configured UX
-default, after the external-agent workflow is usable. Basic backups report actual
+These do not gate the attended journey. External-agent operation is the primary journey. Managed invocation is an optional,
+explicitly selected capability after the external-agent workflow is usable. Basic backups report actual
 contents/omissions and do not imply full resumability.
 
 ## Product flow

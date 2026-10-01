@@ -4,6 +4,7 @@ This low-level builder does not authorize publication, a target attempt, or a
 physical write. The full recovery recipe, kernel and image stages remain separate.
 """
 from __future__ import annotations
+from .platform_adapters import X86_UEFI_USB
 
 import json
 import os
@@ -179,7 +180,7 @@ def inspect_candidate_rpm_directory(directory: Path, *, runner=_run) -> tuple[di
         name, evr, arch = rows[0].split('\t')
         nevra = f'{name}-{evr}.{arch}'
         if (not RPM_NAME.fullmatch(name) or not NEVRA.fullmatch(nevra)
-                or arch not in ('x86_64', 'noarch') or nevra in seen):
+                or arch not in X86_UEFI_USB.rpm_architectures or nevra in seen):
             raise BuildError('RPM header is invalid or duplicated')
         seen.add(nevra)
         file_digest = sha256_file(path)

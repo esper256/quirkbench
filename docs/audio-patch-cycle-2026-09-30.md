@@ -1,5 +1,23 @@
 # First audio-patch cycle — integration handoff
 
+**Listing follow-up, 2026-10-01:** `quirkbench recovery-images` is now available
+in the native home launcher, with `--json` and bounded pagination. It queries
+published image operations read-only and shows exact retained image/checksum paths;
+it neither initializes state nor scans/hashes large payloads. A temporary sparse
+8-GiB fixture covered pagination, missing/linked images and missing setup in
+0.057 seconds; syntax, local links and `git diff --check` passed. No tests were
+added. The running controller installation was preserved; only the home CLI launcher
+now points to a fresh verified `20261001-recovery-listing` runtime (archive SHA256
+`d9fc8a5b1c7823647ef4da1b6d19186bb2e619d712daf549e63a9e3f703478c9`).
+
+The native listing confirmed **no published recovery image and no image operation**.
+The preceding archive preparation stopped during RPM verification because RPM
+could not create `diagnostics/signature-rpmdb/.rpm.lock` (permission denied).
+Its diagnostic is retained under
+`STATE/inputs/archive-signature-verification-20261001/package-verification.log`.
+This supersedes the running-input snapshot below. Image production and flashing
+remain pending; a commit title or downloaded inputs do not establish image readiness.
+
 This packet repairs the existing attended path. It introduces no alternative
 controller, image builder, scheduler or hardware-to-configuration generator.
 The stock recovery image and candidate exclusions still follow the

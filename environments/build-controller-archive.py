@@ -25,8 +25,9 @@ def main():
             shutil.copytree(root / name, project / name,
                             ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
         (project / 'docs').mkdir()
-        for name in ('__init__.py', 'agent-guide.md'):
-            shutil.copyfile(root / 'docs' / name, project / 'docs' / name)
+        for path in (root / 'docs').iterdir():
+            if path.name == '__init__.py' or path.suffix == '.md':
+                shutil.copyfile(path, project / 'docs' / path.name)
         shutil.copyfile(root / 'pyproject.toml', project / 'pyproject.toml')
         wheels = Path(temporary) / 'wheels'
         wheels.mkdir()

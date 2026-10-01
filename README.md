@@ -1,480 +1,588 @@
-> **Product preview:** Quirkbench is still under development. This page describes
-
-Current development: [durable build/compose and upload retention handoff](docs/upload-and-background-jobs-handoff-2026-09-30.md).
-`build`/`compose` return a job ID; use `monitor` or explicit `--wait`. Manual service
-setup is required. [Hardware-specific experiment kernels](docs/targeted-experiment-kernels.md)
-are a proposed next packet; recovery keeps the stock Fedora kernel.
-> the intended finished product. The release downloads, setup wizard and commands
-> below are not all available yet; these instructions do not currently work end to
-> end. See the [implementation roadmap](docs/product-roadmap.md) for current scope.
->
-> **First delivery:** an attended investigation using your external coding agent,
-> manual authenticated setup and approval of each exact experiment before boot.
-> Setup/pairing wizards, managed scheduling, advanced capacity/endpoint tooling,
-> guided backup completeness and unattended reset authorization are later features.
-> The wizard-based walkthrough below describes that later finished experience;
-> it is not a prerequisite checklist for the attended delivery.
->
-> Fixed recovery will use stock Fedora kernel packages and restrict storage
-> operations to its identified boot device. Experimental kernels retain stricter
-> controller exclusions. See the [storage policy](docs/architecture.md#storage-protection-policy).
-> Stock recovery and attended approval software now exist; see the
-> [implementation handoff](docs/stock-recovery-attended.md) for available interfaces
-> and product-operation limits.
-> Existing images remain unqualified against the changed design.
-
-Local maintenance reset: the old checkout-local artifacts were intentionally discarded.
-Persistent state now lives in the user's home; `quirkbench monitor` provides a manual
-terminal dashboard without popup windows. No replacement recovery image is included
-in this reset. See [local state maintenance](docs/local-state-maintenance.md).
-From this development checkout, use `./environments/quirkbench monitor`; an installed
-controller provides the same interface as `quirkbench monitor`.
-`./environments/quirkbench settings show` displays configurable history counts and
-the optional-cache limit. Housekeeping runs with commands; no scheduled cleanup
-service is required. Pins and active work remain protected.
-
-For the available development archive and provisional setup commands, see
-[controller installation](docs/controller-installation.md).
-
 # Quirkbench
 
-Quirkbench helps you investigate Linux hardware problems and develop fixes backed
-by evidence. A coding agent proposes changes, Quirkbench builds them, and a second
-computer boots the experiments directly on its hardware. Logs and results return
-to the agent for the next decision.
+**Turn a reproducible Linux problem into a patch, with an experiment history you can inspect.**
 
-The **controller** is the Linux computer running Quirkbench and your coding agent.
-The **target** is the computer with the issue. The target runs from an external USB
-drive; its installed OS and internal disks stay outside the investigation.
+> [!WARNING]
+> **This is the manual for the intended finished product. Quirkbench does not
+> currently work this way end to end.** Commands, screens and release packaging
+> below describe the experience we want to build, including proposed command
+> names. They are not a claim of available features or tested hardware support.
+> For the software you can run today, see [controller installation](docs/controller-installation.md)
+> and the [current agent guide](docs/agent-guide.md#current-implemented-commands).
+> This manual is the destination; the [implementation roadmap](docs/product-roadmap.md)
+> will be revised separately to reach it.
 
-You describe the problem, help with physical observations when needed, and decide
-when to pause or share the results. Quirkbench keeps the source changes, experiment
-history and debugging evidence together. An investigation can produce a patch or
-an actionable bug report; it cannot promise to reproduce or fix every issue.
+Quirkbench gives a coding agent a persistent lab for investigating a Linux computer.
+The agent reads source, forms hypotheses and writes changes. Quirkbench builds those
+changes, runs approved experiments on the computer, and brings the results back.
+You supply the problem, approve physical experiments and contribute observations
+that software cannot make.
 
-## Initial attended delivery
+An investigation can span many builds, reboots and agent conversations. Its source
+changes, hypotheses and evidence remain available when you return. A successful
+investigation ends with a reviewable Linux kernel patch or patch series, reproduction
+instructions and the evidence supporting the fix. An inconclusive investigation
+ends with a useful record of what was tried and what is still unknown.
 
-The planned first journey is fixed recovery → manual network/controller trust and
-credential configuration → passive inventory → reviewed baseline → observable build
-→ explicit approval of the exact candidate/attempt → evidence upload → recovery.
-Use existing authenticated configuration and signature checks; never disable them.
-A person remains available for manual reset. Source inputs are immutable, uncertain
-attempts are reconciled, and another experiment requires fresh approval. Recovery
-may enumerate internal controllers but cannot access their block/filesystem data.
+**In this manual:** [Equipment](#1-prepare-your-equipment) ·
+[Installation](#2-install-quirkbench-on-the-controller) ·
+[Recovery drive](#3-prepare-the-external-drive) ·
+[Connect the target](#4-connect-and-name-the-target) ·
+[Start an investigation](#5-open-an-investigation) ·
+[Work with an agent](#6-hand-the-investigation-to-your-agent) ·
+[Run experiments](#7-review-and-run-experiments) ·
+[Monitor and resume](#8-monitor-recover-and-resume) ·
+[Export a patch](#9-produce-the-kernel-patch-and-report) ·
+[Troubleshooting](#troubleshooting)
 
-[Build and boot](docs/build-and-boot.md), [debug image](docs/debug-image.md) and
-[controller installation](docs/controller-installation.md) describe current low-level
-interfaces. The attended protocol journey passes with fake privileged adapters;
-new media and real target boots still need explicitly recorded product checks.
-Basic backups must state contents and omissions, including private credentials,
-uncaptured edits and potentially pending target evidence. The later guided workflow
-below is not implemented backup-completeness evidence.
+## How the lab works
 
-## 1. Get ready
+You use two computers:
 
-You need:
+- The **controller** runs Quirkbench and your coding agent. It keeps source
+  workspaces, builds, results and the investigation history.
+- The **target** is the computer with the problem. It boots Quirkbench from an
+  external drive and runs experiments on its real hardware.
 
-| Item | What to prepare |
-| --- | --- |
-| Controller | An x86-64 Linux computer with internet access, Python 3.11+, rootless Podman and Distrobox. Setup checks these and gives installation instructions for anything missing. |
-| Build storage | Start with about 200 GiB available for source, builds and evidence, with additional room for retained results and backups. Setup checks capacity and keeps a free-space reserve. |
-| Target | An x86-64 UEFI computer that can boot USB storage, with Secure Boot disabled. Peripheral support is checked after boot; experimental boots require a usable firmware system UUID and the release’s storage protection profile. |
-| External drive | A USB SSD is preferable to a small thumb drive. 256 GB is a useful starting size; targets with substantial RAM or large logs may need more. **Flashing erases the selected external drive.** |
-| Network | Both computers on the same trusted local network. Ethernet is simplest; Wi-Fi setup is available. Guest networks that isolate devices will not work. |
-| Coding agent | For managed investigations, a supported coding-agent command and its account or credentials. Alternatively, use your own interactive agent with shell access to the controller. Agent usage may incur charges. |
+The external drive contains a fixed **recovery environment** and space for
+experimental systems and evidence. Recovery connects to the controller, prepares
+the next approved experiment and receives the target again afterward:
 
-Keep both computers connected to power. Keep the controller awake during an
-investigation; putting it to sleep interrupts builds and communication. Quirkbench
-does not change your power or firmware settings automatically.
+```text
+Describe the problem → establish a baseline → propose a change
+                              ↑                     ↓
+                         read evidence ← build and test
 
-You do not need to install Quirkbench on the target's existing OS, collect a hardware
-report in advance, or know how to build a kernel. Targets without a working automatic
-reset mechanism can still be investigated while someone is available to reset them.
-
-## 2. Install and set up the controller
-
-On the controller, open [Quirkbench Releases](https://github.com/esper256/quirkbench/releases)
-and download `quirkbench-controller-linux-x86_64.tar.gz` and `SHA256SUMS` from the same
-release. In the download directory:
-
-```sh
-sha256sum --check --ignore-missing SHA256SUMS
-tar -xzf quirkbench-controller-linux-x86_64.tar.gz
-./quirkbench/install.sh
+Each target run: recovery → experimental system → recovery
 ```
 
-Continue only if the archive's checksum is reported as `OK`. The installer puts the
-launcher in your user account and explains any PATH adjustment needed. It does not
-replace system packages or require a system-wide Python installation of Quirkbench.
+The target's installed Linux system is left in place. Quirkbench does not mount its
+internal filesystems or install experimental kernels into it. Experiment kernels
+use a reviewed protection profile that excludes internal storage controllers.
+A problem that requires access to those controllers or filesystems is outside this
+workflow. These controls reduce accidental damage; an experimental kernel is
+privileged code, so source review and physical experiment approval still matter.
 
-Start setup:
+Quirkbench is independent of the coding agent you choose. Codex or another agent
+needs shell access to the controller and access to the investigation's source
+workspace. A chat application with no access to those files and commands cannot
+operate the lab by itself.
+
+## 1. Prepare your equipment
+
+| You need | What to check |
+| --- | --- |
+| A Linux controller | Use a controller platform supported by the selected release. Setup checks its service manager, rootless container support and available resources. |
+| Build storage | Allow roughly 200 GiB to start, plus room for retained builds and backups. Setup estimates the space needed for your selected sources and keeps a free-space reserve. |
+| The target computer | It must support the release's external boot method. Check the release's architecture, firmware and peripheral limitations before preparing media. |
+| An external drive | A USB SSD is a practical choice for the USB boot workflow. Start with about 256 GB; large-memory targets or long recordings can need more. The drive will be erased. |
+| A network connection | The target must reach the controller. Wired networking is usually easiest. Both can use a suitable local Wi-Fi network; client isolation must not prevent communication. |
+| A coding agent | Use your existing agent on the controller. Its account, authentication and usage charges are managed by that application. |
+
+Keep both computers powered and the controller awake while work is running. The
+target will be unavailable for ordinary use during experiments. Plan to stay nearby
+for the initial setup and baseline runs.
+
+The target's installed distribution does not have to match the debugging environment.
+That difference can affect reproduction, however. Quirkbench records the environment
+used for every result; booting successfully is not evidence that the original problem
+has been reproduced.
+
+Support is specific to a release and an experiment. A computer may boot recovery
+successfully while a particular device, sleep mode or reset mechanism remains
+unsupported. Quirkbench reports those limits before starting the affected work.
+
+## 2. Install Quirkbench on the controller
+
+Download the controller archive for your platform from
+[Quirkbench Releases](https://github.com/esper256/quirkbench/releases). Follow that
+release's signature-verification instructions before running the installer. A
+checksum verifies the downloaded bytes; release signature verification establishes
+who published them.
+
+Extract the archive and run the included installer. In this example, replace
+`ARCH` with the architecture named in your download:
 
 ```sh
+tar -xf quirkbench-controller-linux-ARCH.tar.gz
+./quirkbench/install
 quirkbench setup
 ```
 
-The wizard guides you through:
+The installer adds Quirkbench to your user account and explains any required PATH
+change. Setup then walks through four decisions:
 
-1. **Storage:** choose where builds and investigation data live.
-2. **Build environment:** create the isolated Fedora containers and check CPU,
-   memory and disk limits. Experimental kernels and packages stay inside build
-   directories; they are never installed into the controller's OS.
-3. **Coding agent:** choose managed operation and authenticate a supported adapter,
-   or choose “Use my own agent” and skip adapter setup. Managed calls run in the
-   controller environment; set usage limits before starting. Credentials are not
-   copied into target images or evidence bundles.
-4. **Connection:** choose the controller's LAN address. Quirkbench creates its TLS
-   identity and checks the device and repository endpoints. If your firewall needs
-   a change, setup shows the specific local-network rules for you to apply.
-5. **Recovery media:** download and verify the matching recovery image. Setup displays
-   its saved path, for example `~/Downloads/quirkbench-recovery-x86_64.img.xz`.
+1. **Where to keep the lab.** Choose persistent storage for source workspaces,
+   builds and evidence. This location is independent of any agent chat or checkout.
+2. **How much resource to use.** Set CPU, memory and storage limits. Setup prepares
+   the isolated build environment and lists any controller packages you must install.
+3. **How the service should run.** Start the controller service and choose whether
+   it may continue after logout. Closing a terminal does not stop submitted work.
+4. **How the target connects.** Select a reachable controller address. Setup creates
+   its connection identity, checks the endpoints and explains any necessary firewall
+   changes for you to apply.
 
-Setup can be rerun after an interruption. It reuses completed work and existing
-credentials instead of creating another controller identity. Container downloads
-and initial setup have their own progress display; no coding agent needs to watch them.
+You can rerun setup after an interruption. It resumes completed preparation and
+preserves the controller's identity. Your agent credentials remain in your normal
+agent environment; they are not copied to the target.
 
-The controller service runs independently of the terminal. Setup reports whether
-it can continue after you log out; keep your login session open unless you enable
-that option. Rebooting the controller preserves progress and pauses investigations.
-
-## 3. Flash the drive and boot the target
-
-Use a normal image writer such as balenaEtcher:
-
-1. Select the recovery `.img.xz` downloaded by setup.
-2. Select the external USB drive. Check its identity and capacity carefully.
-3. Flash it and let the writer finish verification.
-4. Connect it to the target and select it in the computer's boot menu.
-
-Use the owner's normal firmware controls to disable Secure Boot and allow USB boot
-if necessary. Quirkbench never changes those settings. For repeated experiments,
-the USB drive must remain the selected boot device across restarts; a one-time boot
-menu choice is not sufficient on every computer.
-
-Recovery opens a local setup screen. Before changing partitions, it shows the external
-drive identity, available capacity and proposed allocation, with advanced sizing options.
-Confirm the layout to expand the data partitions with visible progress. Interrupted
-setup resumes the recorded plan; later boots reuse that layout. No desktop installation
-or internal-disk selection is part of this process.
-
-If the image cannot support the target's boot or storage-protection requirements,
-it stops with an explanation. Do not install it onto the internal disk as a workaround.
-
-## 4. Connect and pair the target
-
-On the target, choose **Network setup**. Use the connection screen to enable Ethernet
-or join Wi-Fi, then return to Quirkbench. The target only needs access to the controller;
-it does not need its own internet connection.
-
-On the controller:
+Check the result:
 
 ```sh
-quirkbench pair
+quirkbench status
 ```
 
-This displays the controller address, its certificate fingerprint and a short-lived
-pairing code. Enter the address on the target. Compare the fingerprint shown on the
-target with the controller's display, then enter the pairing code. Do not accept a
-fingerprint that differs.
+Proceed when controller setup is ready. Build tools run in isolated containers;
+you do not need to create a development container or learn kernel packaging to start
+a supported investigation.
 
-Choose a target name, such as `target-01`. Recovery saves its network configuration
-and device credentials privately on the external drive, then sends a hardware
-inventory to the controller. It does not start an experiment merely because pairing
-succeeded. Pairing-code expiry is harmless: run `quirkbench pair` again.
+## 3. Prepare the external drive
 
-Check the connection:
+Download a verified recovery image:
 
 ```sh
-quirkbench targets
+quirkbench recovery download
 ```
 
-The target should appear as **Recovery ready**. On subsequent boots it reconnects
-using the saved configuration. This means connected in recovery, not yet qualified for
-every experiment. If the controller address changes, rerun its connection setup and
-use recovery’s endpoint-change screen; the wizard checks certificates and connectivity
-before saving the change. A new trust identity requires fingerprint confirmation. No
-reflash is needed. A stable DHCP reservation avoids most address changes.
+Choose the **target's** platform when prompted. Quirkbench verifies the release
+signature and image checksum, checks controller compatibility and prints the
+image's saved location.
 
-Moving the drive to another computer requires explicit setup for that target.
-Quirkbench will not resume the previous computer's experiment. Previous evidence
-keeps its original attribution; retargeting does not erase it.
+Use a standard disk-image writer to write that image to the external drive. Check
+the selected drive's model and capacity, then let the writer complete verification.
+**Writing the image erases the selected drive.**
 
-## 5. Start an investigation
+Connect the drive to the target and select it in the target's boot menu. Follow the
+recovery release's firmware and Secure Boot requirements using the computer's normal
+firmware controls. Quirkbench does not change those settings for you.
 
-**The agent does the reasoning and source editing. Quirkbench runs the lab:** it
-builds the proposed changes, boots the target, collects evidence and saves progress.
-The agent works on the controller, never inside the recovery image.
+On its first boot, recovery asks you to confirm the external drive and the space
+allocated to experiments and evidence. It accounts for the target's memory and
+the selected log budget. If the drive is too small or its identity is ambiguous,
+setup explains what must change before it can proceed.
 
-Choose how to drive the investigation:
+You normally write this image once. Later experiments transfer new experimental
+systems to the drive while keeping recovery intact.
 
-| Mode | Who asks the agent for the next experiment? | Use it when |
-| --- | --- | --- |
-| **Managed — recommended** | Quirkbench invokes your configured agent when there is a decision to make. | You want the investigation to continue across builds and reboots without keeping an agent chat open. Requires a supported noninteractive command adapter. |
-| **Bring your own agent** | You direct your existing agent, which calls Quirkbench through the shell. | You want to work in your normal agent UI, or your agent has no managed adapter. Requires shell and workspace access on the controller. |
+## 4. Connect and name the target
 
-Both modes use the same saved investigation, experiment API and evidence. No MCP
-server is required. Quirkbench allows only one driver for a session; switching
-requires pausing and reconciling it first. “Managed” describes who drives the AI
-calls; it does not mean the target is qualified to run unattended.
+On the target, open **Network** and connect to the controller's network.
 
-### Managed: describe the problem and let the loop run
-
-On the controller:
+On the controller, start pairing:
 
 ```sh
-quirkbench session start --device target-01
+quirkbench target add target-01
 ```
 
-The wizard uses the agent configured during setup, or offers configuration/external
-mode if none is available. It asks what is wrong, how you
-trigger it, what you expect instead, and whether someone can observe or reset the
-target. A useful description is concrete:
+`target-01` is a name you choose. The command displays the controller address,
+its identity fingerprint and an expiring pairing code. Enter these through the
+target's **Connect to controller** screen. Compare the fingerprint displayed on
+both computers before confirming.
 
-> After waking from suspend, the built-in trackpad sometimes stops responding.
-> A USB mouse still works. I can reproduce it by closing and reopening the lid,
-> but not on every attempt. I can help check whether the pointer moves.
-
-Suspend experiments require an eligible bounded recipe and attended checks of the
-selected sleep mode and recovery limitations. Recovery itself does not automatically
-suspend; unsupported sleep modes remain blocked.
-
-You can also provide a prepared description:
+Recovery saves its private connection settings on the external drive and reports
+the target's hardware. Check the result on the controller:
 
 ```sh
-quirkbench session start --device target-01 --problem ./problem.md
+quirkbench target show target-01
 ```
 
-Review the scope, source versions, agent settings and usage budget before starting.
-Quirkbench selects a supported baseline for the detected hardware and prepares a
-dedicated source workspace. Advanced setup accepts supported versions or source trees
-with an approved build recipe; it cannot build arbitrary distributions automatically. Missing
-hardware/profile support is a visible blocker, not something the agent can bypass.
+The report distinguishes:
 
-**The first session includes an attended baseline check:** build, boot, observation,
-upload and return to recovery. Stay nearby for this cycle. It establishes that the
-lab works; it does not yet prove the reported issue is reproduced.
+- **Connected in recovery:** the controller can communicate with this recovery boot.
+- **Experiments available:** a supported baseline and protection profile can be
+  prepared for the target.
+- **Attended or unattended:** which recovery/reset behavior has actually been checked.
 
-After that, the managed loop works as follows:
+Pairing alone starts no experiment. If support is missing, the report identifies the
+blocker and saves the hardware information needed to investigate it. An agent cannot
+make the target eligible by ignoring that blocker.
 
-1. **Brief the agent.** Quirkbench supplies its [agent guide](docs/agent-guide.md),
-   your problem, target capabilities, approved source workspace, previous hypotheses
-   and a compact summary of new evidence. The agent can query older experiments and
-   specific log excerpts through the CLI.
-2. **Design one useful iteration.** The agent proposes a hypothesis, what observation
-   would support or refute it, and a bounded test. It may edit source to add diagnostics
-   or try a fix. It returns a structured proposal, or asks for your input.
-3. **Run the work.** Quirkbench validates the proposal, freezes the source edits,
-   records the decision, builds the deployment and runs the authorized attempts.
-   The agent invocation ends while that work runs; no model watches a progress bar.
-4. **Interpret the evidence.** When a result or actionable failure is available,
-   Quirkbench calls the agent again. The agent compares observations, updates its
-   hypotheses and proposes the next iteration. A build failure is also useful feedback;
-   a lost target connection is not automatically evidence of a kernel crash.
+Leave the drive with this target during the investigation. Moving it to another
+computer requires explicit reassignment; old results and permissions do not transfer
+to the new machine.
 
-This is a persistent investigation, not a single enormous prompt or an agent chat
-that must remember everything. Replacing an agent session does not erase the ledger,
-source edits or previous results. Only approved source changes and bounded recipe
-proposals can become experiments; model text cannot disable protection, grant reset
-qualification or execute arbitrary shell commands on the target.
+## 5. Open an investigation
 
-### Bring your own agent: use the same lab from your existing workflow
-
-Create the session with an external driver:
+An investigation holds one problem, its source workspace and its accumulated
+reasoning and results. Create one:
 
 ```sh
-quirkbench session start --device target-01 --driver external
+quirkbench investigation start first-fix --target target-01
 ```
 
-The wizard performs the same scope and baseline setup, but does not launch an AI.
-It prints the session ID, source workspace and a local **agent handoff file** with
-absolute paths, the matching agent guide and the command for reading current state.
-Open your preferred coding agent on the controller with access to that workspace
-and the `quirkbench` command, then give it a prompt like:
+Use any name in place of `first-fix`. The wizard asks you to describe:
 
-> Investigate session SESSION_ID. Read the Quirkbench agent guide and the handoff
-> file at HANDOFF_PATH. Inspect the existing experiments before proposing more work.
-> Establish a reproducing baseline, design a discriminating test, and use Quirkbench
-> to submit it. Preserve your reasoning and source edits. If a build or experiment
-> is still running, return its operation ID and stop rather than repeatedly polling.
+- What happens, and what you expected instead.
+- The steps and circumstances that trigger the problem.
+- How often it occurs, including known successful cases.
+- The installed distribution and kernel version, if known.
+- Earlier working versions, relevant logs and workarounds you have already tried.
+- What you can observe or do physically during a test.
 
-Replace the two placeholders with the values printed by the wizard. A chat-only
-agent without controller shell access cannot operate the lab this way.
+You can write this description beforehand and pass `--problem ./problem.md`.
+Distinguish observations from suspected causes: “the link disappears after this
+sequence” is more useful than asserting that a particular driver must be broken.
 
-The [agent guide](docs/agent-guide.md) explains how to read the session context,
-find old attempts and evidence, select available recipes, record hypotheses and
-submit a proposal with a retry-safe request ID. You should not have to relay logs
-between the target and the agent or teach it Quirkbench's commands yourself.
+### Select a baseline and sources
 
-Already submitted builds and attempts continue when the agent chat closes. **The
-next reasoning step waits for you to continue the agent**, unless your agent platform
-has its own explicit completion-event integration. Quirkbench does not silently
-launch another agent in external mode, and cannot enforce spending limits on calls
-made independently by your agent application.
+Quirkbench proposes a supported baseline: exact kernel sources, configuration,
+userspace and diagnostic tools that can run on the target. Review how it differs
+from the system where the problem occurs. Supplying a kernel version helps select
+inputs; it does not let Quirkbench reconstruct your installed system automatically.
 
-### What actually runs on the target
+Accept a suitable baseline, or select another supported version. If you already
+maintain a kernel checkout, choose **Use existing source** and provide its path and
+base revision. Quirkbench checks that a supported build recipe can handle it and
+creates a separate investigation workspace. Your original checkout is preserved.
 
-Every physical attempt follows this cycle, regardless of which mode drives it:
+The investigation records the chosen base revision and prepares an editable source
+workspace for the agent. Downloads and builds show progress without needing an
+agent to watch them. If a pinned input is unavailable, preparation stops with that
+missing input identified rather than substituting a newer version.
+
+The wizard also asks for practical limits: maximum test duration, repetitions,
+resource use and whether you can attend the target. **Attended operation is the
+starting choice.** Creating an investigation does not grant permission to boot
+new experimental code.
+
+### Check the lab before debugging
+
+Quirkbench prepares a first baseline attempt. Review and approve it using the
+process in step 7. Stay with the target for this round trip:
+
+1. Boot the baseline.
+2. Check that the required devices and diagnostic tools are available.
+3. Collect a small result and upload it.
+4. Return to recovery.
+
+This establishes that the lab can run an experiment and preserve its evidence.
+The next task is to reproduce your reported problem under recorded conditions.
+Keep those two questions separate.
+
+## 6. Hand the investigation to your agent
+
+Print the investigation's agent handoff:
+
+```sh
+quirkbench investigation brief first-fix
+```
+
+The output gives you the source workspace, a handoff file and a ready-to-copy prompt.
+Open that workspace in Codex or your preferred coding agent. Give it the prompt,
+which asks it to do the following:
+
+> Work on Quirkbench investigation first-fix. Read the handoff file at the path
+> supplied by Quirkbench and follow its agent guide. Read the existing evidence
+> before starting more work. First establish a reproducible baseline. Then propose
+> a test that distinguishes likely causes, make source changes when justified,
+> and submit experiments through Quirkbench. Record hypotheses, rejected approaches
+> and conclusions in the investigation. When submitted work is still running,
+> return its operation ID and yield. Ask me for physical observations and approvals
+> when needed.
+
+Quirkbench's installed agent guide supplies the actual commands and proposal
+formats. You do not need to teach the agent a kernel build command, relay target
+logs into the chat or maintain an experiment spreadsheet.
+
+The agent can read context, inspect evidence, choose an eligible diagnostic recipe,
+edit source and submit a proposed experiment. A recipe describes a bounded test:
+its inputs, permitted actions, timeout, collected measurements and any observations
+you must supply. Missing diagnostics may require a new reviewed recipe before the
+investigation can continue.
+
+Before building, Quirkbench captures an immutable source revision. For uncommitted
+edits, the agent stops writing while the capture completes. The resulting experiment
+keeps those exact bytes even if the workspace changes later.
+
+Quirkbench runs submitted builds independently of the agent conversation. When
+results are ready, continue your agent with a prompt such as:
+
+> Continue first-fix. Read the new Quirkbench results and decide what they imply
+> before proposing the next experiment.
+
+Closing the chat does not cancel submitted lab work. In this external-agent
+workflow, the next reasoning step waits for you to continue an agent, unless your
+agent application has an explicitly configured completion-event integration.
+
+A fresh agent can use the same handoff later. It reads the saved history rather
+than depending on another conversation's memory. Use one agent or editor at a time
+for the investigation workspace.
+
+## 7. Review and run experiments
+
+An experiment connects a question to a source revision, a diagnostic procedure and
+an expected observation. One experiment may need several physical **attempts**.
+
+When a build is ready, Quirkbench asks you to review it:
+
+```sh
+quirkbench experiment review EXPERIMENT_ID
+```
+
+Use the ID shown in the notification or monitor. The review presents the hypothesis,
+source changes, exact built candidate, target, procedure, duration, observations
+requested from you and recovery limitations. Changes affecting storage protection,
+boot or privileges require independent review before they become eligible.
+
+Approve the specific prepared attempt when you are ready:
+
+```sh
+quirkbench attempt approve ATTEMPT_ID
+```
+
+Approval applies to that exact candidate and attempt. A changed patch or a new
+attempt needs its own authorization. If you cannot attend or the proposed test is
+unclear, leave it waiting; a completed build does not start the target by itself.
+
+Quirkbench transfers the candidate, boots it once, runs the selected procedure,
+retains its results and returns to recovery. It saves the source and build identities,
+logs, measurements and outcome together. Matching debug symbols remain available
+for investigating failures. Recovery is maintained separately from candidate changes.
+
+Some evidence requires a person: operating a physical control, connecting a
+peripheral, or observing whether the reported behavior occurred. Read and answer
+the pending request:
+
+```sh
+quirkbench investigation respond first-fix
+```
+
+The command shows the relevant attempt and asks for the specific observation.
+Report what you saw, including uncertainty. Missed observations remain missing;
+an answer to an earlier attempt is not treated as evidence for a later one.
+
+### Build evidence for a fix
+
+Ask the agent to work toward a comparison you can explain:
+
+1. **Baseline:** reproduce the problem with a recorded procedure.
+2. **Diagnostic experiment:** collect evidence that narrows the likely cause.
+3. **Patched candidate:** apply a focused change and repeat the same procedure.
+4. **Regression checks:** check related behavior that the change might affect.
+5. **Revert comparison, where practical:** remove the fix and test whether the
+   original behavior returns.
+
+For intermittent problems, agree on repetitions and exposure before interpreting
+the results. Quirkbench records counts, conditions and failed observations; it
+does not turn one successful run into proof.
+
+If the problem does not reproduce, compare the debugging environment with the
+reported system and record the differences. The outcome may be a better reproducer,
+a diagnosis outside the kernel, or an unresolved limitation. Patch generation is
+useful only when the proposed change addresses evidence you actually have.
+
+## 8. Monitor, recover and resume
+
+Open the monitor whenever you want:
+
+```sh
+quirkbench monitor first-fix
+```
+
+It shows the current question, running operation, build or transfer progress,
+target state, latest evidence and anything waiting for you. Monitoring does not
+invoke an AI. Closing the monitor leaves work running.
+
+For a snapshot:
+
+```sh
+quirkbench investigation status first-fix
+```
+
+| What you see | What to do |
+| --- | --- |
+| Building or transferring | Let the bounded operation run. Progress shows measurements and the last activity time. |
+| Awaiting approval | Review the prepared experiment and approve its attempt when ready. |
+| Awaiting observation | Answer the named request, or record that you could not make the observation. |
+| Results ready | Continue your agent and ask it to interpret the new evidence. |
+| Recovery needed | Follow the displayed reset instructions and boot the external drive back into recovery. |
+| Paused or blocked | Read the reason, resolve it, then resume the existing investigation. |
+
+A failed boot or hard hang may require you to reset the target. A validated watchdog
+can cover some failures, but cannot guarantee recovery from every failure or capture
+a crash dump. Quirkbench reports which logs survived and which parts of the run are
+unknown. It reconciles the interrupted attempt before permitting another one;
+loss of contact never causes a blind repeat.
+
+If the network disappears, the target keeps produced evidence on the external
+drive and uploads it when the controller becomes reachable. Do not reflash the
+drive to repair a connection problem.
+
+### Stop for the day
+
+```sh
+quirkbench investigation pause first-fix
+```
+
+Pause prevents new work from starting. Active bounded work finishes or reaches its
+declared stopping condition; a running target attempt returns through recovery.
+The status distinguishes stopping new work, draining workers, target recovery and
+pending uploads. Also stop your external agent from editing the workspace.
+
+To turn off the target:
+
+```sh
+quirkbench target poweroff target-01
+```
+
+Wait for confirmed shutdown before disconnecting the external drive. If the
+controller is unavailable, use recovery's local shutdown screen. Evidence may be
+saved safely on the drive while its upload is still pending; keep the drive intact.
+
+Return later with:
+
+```sh
+quirkbench investigation resume first-fix
+```
+
+After a controller restart, investigations remain paused until outstanding work
+has been reconciled and you resume them. Then continue your agent using the same
+handoff. Sleep and power loss preserve recorded progress but cannot keep a build
+executing while the controller is unavailable.
+
+## 9. Produce the kernel patch and report
+
+When the evidence supports a fix, ask your agent to prepare it for review:
+
+> Prepare the final kernel patch series for first-fix against its recorded base
+> revision. Separate temporary diagnostics from the fix, explain the cause and why
+> the change addresses it, and cite the relevant experiments. Identify regression
+> coverage and unresolved limitations. If cleanup changes the tested source,
+> submit a final validation experiment before declaring the series ready.
+
+The agent writes the patch and commit messages. Quirkbench connects that work to
+the tested sources and evidence. A cleanly building patch is not automatically a
+tested fix.
+
+Inspect the investigation summary and export it:
+
+```sh
+quirkbench investigation report first-fix
+quirkbench investigation export first-fix --output ./first-fix-results
+```
+
+The export is a review package:
 
 ```text
-Recovery → prepare experiment → reboot → run and upload → reboot → recovery
+first-fix-results/
+  README.md          How to read and reproduce the investigation
+  report.md          Diagnosis, comparisons, results and limitations
+  patches/           Kernel patches in git format-patch format
+  reproduce/         Exact base revision and recorded test instructions
+  experiments/       Experiment and attempt records
+  evidence/          Selected logs and measurements
 ```
 
-You flash the drive once. Subsequent experiments transfer changed OSTree objects;
-they do not rewrite recovery. Changes may involve the kernel, drivers or userspace.
-If a needed diagnostic is not available, the agent can develop a bounded recipe in
-source and submit it through the build/review path; it cannot improvise remote shell
-commands on the target.
+The report identifies the source base, final tested revision, kernel configuration,
+relevant userspace and hardware, repetitions and any missing observations. It
+distinguishes an evidence-supported fix from an unvalidated patch or an inconclusive
+investigation. You can export an unfinished investigation too.
 
-Some observations need you: confirming that sound actually played, moving a physical
-pointer, or supplying a microphone stimulus. The monitor gives a specific instruction
-and records your response with the attempt. Software loopback or simulated input is
-not proof of physical behavior.
-
-If the problem does not reproduce in the debugging environment, the agent investigates
-relevant differences and records the limitation. It does not call the issue fixed or
-modify the installed OS to force a reproduction.
-
-## 6. See what is happening
-
-Starting a session prints its ID and opens the monitor. You can close the monitor
-without stopping the work, then reconnect from another terminal:
+Check the patch against a separate clean kernel checkout at the recorded base:
 
 ```sh
-quirkbench session watch SESSION_ID
+git switch --detach BASE_COMMIT
+git switch -c review-quirkbench-fix
+git am /absolute/path/to/first-fix-results/patches/*.patch
 ```
 
-Replace `SESSION_ID` with the ID printed when you started the investigation.
+Replace `BASE_COMMIT` and the path with the values in the export. Applying the
+patch confirms that it applies to those sources; it does not retest the hardware.
+A distribution-specific fix may still need adaptation and new testing against the
+upstream tree before submission.
 
-The monitor shows the current hypothesis and phase, build or transfer progress,
-target boot state, last contact, last measurable progress, pending evidence and usage.
-Percentages appear only when there is a known total. A quiet compiler is not reported
-as finished, and a heartbeat is not counted as scientific progress.
+Review the patch, reproduction instructions and report yourself. Exports exclude
+controller credentials and saved network secrets, but diagnostic logs may contain
+identifying information. Inspect what you intend to share.
 
-| Status | What it means |
-| --- | --- |
-| Working | A build, transfer or experiment is in progress. Inspect the last-progress time and counters. |
-| Waiting | Quirkbench is waiting for something named on screen, such as the controller connection or a physical observation. |
-| Needs your input | Read the requested check and enter your observation in the monitor. |
-| Possible stall / deadline exceeded | The operation is not advancing as expected. The monitor shows its deadline and recovery action. |
-| Needs recovery | Execution is uncertain or automatic reset is unavailable. Follow the displayed target-reset instructions; the attempt will not silently repeat. |
-| Paused | Progress is saved and no new experiment will start. |
+You can now send the patch and supporting report to a maintainer, continue testing
+on another target, or retain the package for your own work. Quirkbench does not
+publish patches or install them into your normal operating system automatically.
 
-Monitoring does not invoke the coding agent. In managed mode, Quirkbench invokes it
-only at decision points and pauses on exhausted budgets or expired authentication.
-In external mode, continue your agent when results are ready; its own application
-controls its AI usage. Storage pressure pauses new lab work in either mode.
+## Keep the lab reusable
 
-For a quick summary instead of a live display:
+### Back up before moving or upgrading it
 
-```sh
-quirkbench session status SESSION_ID
-```
-
-## 7. Pause, resume or finish for the day
-
-```sh
-quirkbench session pause SESSION_ID
-```
-
-Pause stops new scheduling immediately. The active bounded build or managed agent decision
-finishes and saves its output; an active physical attempt preserves its results and
-returns to recovery. The monitor distinguishes **Pausing** from **Paused**. It pauses
-between individual repetitions, not after the entire batch. In external mode, also
-stop your agent from editing the shared source workspace; pausing Quirkbench does
-not terminate a separately launched application.
-
-Resume when you are ready:
-
-```sh
-quirkbench session resume SESSION_ID
-```
-
-Source edits, hypotheses, rejected approaches, experiment results and usage survive
-container recreation and controller restart. After a restart, Quirkbench reconciles
-outstanding work and requires this explicit resume. An uncertain attempt needs
-review before another is authorized.
-
-To disconnect the external drive, pause first and wait for the target to show
-**Safe to shut down**, then choose **Shut down** on the target and wait for poweroff.
-This check includes stopped workers, reconciled execution and evidence saved locally;
-**Recovery ready** alone is not permission to unplug a mounted drive. If the controller is
-unavailable, recovery retains unacknowledged evidence on the drive for the next
-connection. Keep that drive intact; do not reflash it to fix a connection problem.
-
-### Leaving an investigation unattended
-
-Start with attended operation. To assess automatic recovery on a target:
-
-```sh
-quirkbench target qualify target-01
-```
-
-This is a separate, guided hardware check that may deliberately cause hangs or
-resets. It explains each trial and requires someone able to recover the machine.
-The resulting report states which failures can be reset and what evidence survives.
-Some early hangs may still require a power button; a watchdog does not guarantee a
-crash dump.
-
-An eligible session's settings can then enable unattended operation within the
-qualified limits and an explicit experimental-kernel risk scope. Changing hardware,
-firmware or recovery-sensitive code can require renewed qualification. A completed
-baseline boot alone does not enable unattended operation.
-
-## 8. Take the results with you
-
-Export an investigation at any point:
-
-```sh
-quirkbench session export SESSION_ID --output ./investigation
-```
-
-The export includes a readable report, the experiment history and selected evidence.
-When a fix is supported by the observations, it also includes:
-
-- Patches grouped by the affected source component.
-- Exact source and build identities, with matching debug symbols.
-- Baseline, patched and reverted comparisons, plus regression checks.
-- Reproduction instructions, exposure counts and remaining uncertainty.
-
-Incomplete or inconclusive investigations are labeled accordingly. Exports exclude
-agent credentials, pairing secrets and saved Wi-Fi profiles, but raw debug logs can
-still contain identifying information. Review the contents before sharing them.
-Quirkbench does not publish patches or install them into your normal OS automatically.
-
-An export is for sharing; it is not a complete resumable backup. Use:
+An export is for review and sharing. A backup preserves the state needed to continue
+work, including retained source workspaces and artifacts:
 
 ```sh
 quirkbench backup --output /path/to/backup-directory
 ```
 
-Backup first checkpoints source edits or identifies any workspace that could not be
-captured. It includes the controller database, retained source/evidence and referenced
-OSTree content, with a completeness report. Pending target-only evidence and unknown
-offline target state are called out; the archive cannot include data not yet uploaded.
-The command explains how to back up private controller credentials separately. Restore into a new state directory with `quirkbench restore`; restored
-sessions stay paused until credentials and target state are reconciled.
+Stop external editors when asked. The backup reports which workspaces were captured,
+whether a target still holds evidence that has not uploaded, and how to preserve
+private controller credentials separately. It cannot include evidence that exists
+only on an offline drive.
 
-## If something gets in the way
+Restore into a new state location with `quirkbench restore`. The restore wizard
+checks private configuration and reconnects targets before allowing paused
+investigations to resume.
 
-| Problem | What to do |
+Recovery updates are explicit maintenance, separate from experimental kernel
+updates. Upload or back up pending evidence before replacing recovery media.
+
+### Optional: let Quirkbench invoke the agent
+
+You can keep using an interactive coding agent for the entire investigation.
+For a supported agent with a noninteractive command interface, Quirkbench can
+instead invoke it when a decision is needed:
+
+```sh
+quirkbench agent configure
+quirkbench investigation pause first-fix
+quirkbench investigation driver first-fix --managed
+```
+
+Configure authentication, a usage budget and a spending-limit policy. Complete the
+handoff from the external editor before resuming. Quirkbench calls the managed
+agent for new results, actionable failures or human responses; the agent exits
+while builds and experiments run. Authentication or usage-limit failures pause
+the investigation.
+
+Managed invocation uses the same source workspace, experiment records and approval
+rules. It does not make the target eligible to run unattended. Quirkbench cannot
+meter or control calls you make independently through another agent application.
+
+### Optional: authorize unattended experiments
+
+Assess the target's reset behavior through a separate attended qualification:
+
+```sh
+quirkbench target qualify target-01
+```
+
+This guided process explains and runs deliberate failure/reset trials. The report
+states what it demonstrated and what still needs a person. Where the target and
+test are eligible, you can explicitly authorize a bounded unattended plan naming
+the approved candidates, attempts, limits and stop conditions. Permission does not
+extend to future patches the agent has not written yet.
+
+If qualification cannot cover the required failure modes, keep the investigation
+attended. Managed AI, successful pairing and a working baseline do not replace
+hardware recovery checks.
+
+## Troubleshooting
+
+| Problem | Next step |
 | --- | --- |
-| The controller cannot prepare its environment | Rerun `quirkbench setup`. It reports missing dependencies, rootless-container permissions, service support or storage instead of requiring you to diagnose a failed kernel build. |
-| The target cannot reach the controller | Check the address shown by `quirkbench pair`, local firewall rules and Wi-Fi client isolation. Use recovery's network screen to correct the connection; never disable TLS checking. |
-| The target has no usable Wi-Fi | Try Ethernet or a USB Ethernet adapter supported by the recovery release. Check the release's hardware limitations; unsupported hardware may need a newer recovery image. |
-| A candidate hangs or fails to boot | Allow a qualified reset to run, or follow the monitor's manual-reset instructions. Boot the USB into recovery so it can upload surviving evidence. Missing logs remain an explicit limitation. |
-| The installed OS boots after an experiment | Restore the USB boot preference using the computer's normal controls, then boot recovery. Do not start a second session to replace the interrupted one. |
-| The agent needs you to authenticate again | Use the agent settings in `quirkbench setup`, then resume the existing session. Credentials are not entered on the target. |
-| Space is running low | Pause and inspect storage usage. Remove disposable build caches through Quirkbench's maintenance screen or add controller storage. Never manually delete target evidence or retained deployments. |
+| Setup cannot prepare the controller | Rerun `quirkbench setup` and follow the named dependency, service or capacity correction. Completed setup steps are retained. |
+| Recovery will not boot | Check image verification, target-platform support and firmware boot settings. Save any visible boot error; an agent cannot diagnose an unreachable target without observations. |
+| The target cannot connect | Check the controller address, firewall and network isolation. Use recovery's network screen. Never bypass an identity mismatch to make pairing succeed. |
+| Recovery has no usable network device | Use a device supported by that recovery release, or obtain a release with the required support. A new kernel experiment cannot run before the lab has a working connection. |
+| The problem vanishes in the baseline | Record an inconclusive reproduction result and compare kernel, userspace, firmware and test conditions with the reported system. |
+| A build fails | Continue the agent with the build result. The failed build has logs and source identity; it has not become a target experiment. |
+| The target boots its installed OS after a reset | Select the external drive through the normal boot menu and let recovery reconcile the attempt. |
+| Storage is nearly full | Use `quirkbench storage` to review usage, retention and disposable caches. Add storage or remove eligible caches; do not manually delete evidence or active builds. |
+| You want to change agents | Pause, finish the workspace handoff, then give the new agent the existing investigation brief. |
+| No supported fix was found | Export the investigation. A reproducible failure, narrowed cause and clear account of failed approaches are useful results. |
 
-Recovery updates are occasional explicit releases, independent of experimental OS
-updates. Before replacing or reflashing media, upload or back up pending evidence.
-Keep a working recovery drive until the replacement has passed its first boot check.
+## Developing Quirkbench
 
-## Contributing
+This README defines the desired user experience. The
+[roadmap](docs/product-roadmap.md), [implementation handoff](docs/implementation-handoff.md)
+and [contracts](docs/implementation-contracts.md) describe implementation work and
+its current limits. Changes to the future CLI shown here do not silently rename
+existing commands or stored protocol fields.
 
-Start with the [architecture](docs/architecture.md), [roadmap](docs/product-roadmap.md)
-and [implementation briefs](docs/implementation-handoff.md). The
-[recovery image decision](docs/recovery-base.md) describes how release media is built.
-Follow the [testing policy](docs/testing-policy.md): focused software tests during
-development, with expensive image and hardware qualification reserved for explicit
-release work. Product use does not require running the project's release test suite.
+Use the [testing policy](docs/testing-policy.md) for development validation.

@@ -131,11 +131,14 @@ def test_pinned_inputs_and_exact_cache_reuse(tmp_path: Path, monkeypatch) -> Non
     experiment = Experiment("build-1", "build target", "noop", provenance={"build": input_mapping})
     assert RepositoryBuilder(pipeline).build(experiment) == first
     cached = next((workspace / "build-cache").iterdir())
-    kernel = cached / "kernel-obj/arch/x86/boot/bzImage"
-    assert kernel.stat().st_mode & 0o222 == 0
-    kernel.chmod(0o600)
-    kernel.write_text("tampered")
-    with pytest.raises(BuildError, match="cached artifact failed verification"):
+    # Published cache entries now retain a role map into CAS, not a second Kbuild tree.
+    references = json.loads((cached / 'artifact-references.json').read_bytes())
+    assert references['outputs']['kernel']['sha256'] == first['kernel'].sha256
+    assert not (cached / 'kernel-obj').exists()
+    kernel = store.path(first['kernel'].sha256)
+    kernel.write_text('tampered')
+    from quirkbench.contracts import ContractError
+    with pytest.raises(ContractError, match='stored artifact failed hash verification'):
         pipeline.build(inputs)
 
 

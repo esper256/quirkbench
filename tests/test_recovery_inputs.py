@@ -26,6 +26,18 @@ def test_default_recipe_is_v2_and_independent_of_candidate_sources(tmp_path):
     assert preflight_recipe(generated,store)['rootfs_lock']==lock
 
 
+def test_omitted_recipe_identity_comes_from_selected_lock(tmp_path):
+    from quirkbench.cli import parser
+    recipe, lock, _, store = stock_fixture(tmp_path)
+    args = parser().parse_args(['recovery-inputs', 'recipe', '--lock', recipe['rootfs_lock_sha256'],
+                               '--builder-image-digest', lock['builder_image_digest'], '--epoch', '0'])
+    assert args.id is None
+    generated = generate_recipe(recipe['rootfs_lock_sha256'], store, recipe_id=args.id,
+        builder_image_digest=lock['builder_image_digest'], source_date_epoch=0, layout=recipe['layout'])
+    assert generated['recipe_id'] == 'stock-recovery-' + recipe['rootfs_lock_sha256']
+    assert preflight_recipe(generated, store)['rootfs_lock'] == lock
+
+
 def retained(tmp_path,monkeypatch,*,bad_signature=False):
     _,lock,_,store=stock_fixture(tmp_path)
     directory=tmp_path/'download'; directory.mkdir()

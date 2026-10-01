@@ -16,6 +16,7 @@ from .build import sha256_file
 from .contracts import ContractError, canonical, digest, identifier, sha256
 from .hardware_plan import validate_plan
 from .product_contracts import _depth, _pairs
+from .platform_adapters import profile_adapter
 
 MAX_CATALOG_BYTES = 4 * 1024 * 1024
 ENTRY_FIELDS = {"schema_version", "baseline_id", "profile_id", "profile_digest",
@@ -58,7 +59,11 @@ def validate_entry(value: Any) -> dict:
         identifier(value[name])
     for name in ("profile_digest", "protection_policy_digest", *INPUT_DIGEST_FIELDS):
         sha256(value[name])
-    if value["platform_adapter_id"] != "x86_64-uefi-usb-v1" or value["architecture"] != "x86_64" or value["boot_method"] != "uefi":
+    try:
+        adapter = profile_adapter(value["platform_adapter_id"])
+    except (ValueError, TypeError) as exc:
+        raise BaselineError("unsupported baseline platform") from exc
+    if value["architecture"] != adapter.target_architecture or value["boot_method"] != adapter.boot_method:
         raise BaselineError("unsupported baseline platform")
     if not isinstance(value["fedora_release"], str) or not re.fullmatch(r"[0-9]{2}", value["fedora_release"]):
         raise BaselineError("invalid Fedora release")

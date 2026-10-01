@@ -50,7 +50,7 @@ def inspect_user_manager(*, runner: Callable = _run, uid: int | None = None,
     elif linger == "unknown":
         instructions.append("Check logout behavior on the controller host with loginctl show-user $USER --property=Linger.")
     builder_tools = {name: which(name) for name in ("podman", "distrobox")}
-    missing_builder_tools = [name for name, path in builder_tools.items() if not path]
+    missing_builder_tools = [name for name, path in builder_tools.items() if not path and name == "podman"]
     if missing_builder_tools and in_distrobox:
         instructions.append("Builder tools not visible inside this Distrobox: "
                             + ", ".join(missing_builder_tools) + ". Host installation is unverified by this report.")
@@ -69,6 +69,7 @@ def inspect_user_manager(*, runner: Callable = _run, uid: int | None = None,
         "reboot_behavior": "service restart is unverified; scheduling requires reconciliation",
         "service_installation": "unverified",
         "builder_tools_scope": "current_process",
+        "optional_tools": ["distrobox"],
         "builder_tools": {name: "available" if path else "not_visible" if in_distrobox else "missing"
                           for name, path in builder_tools.items()},
         "background_work_ready": False,

@@ -1,8 +1,22 @@
 # Implementation handoff
 
-**2026-09-30 integration follow-up:** [First audio-patch cycle](audio-patch-cycle-2026-09-30.md)
-records launcher/builder/heartbeat corrections, the candidate-only audio recipe,
-native controller setup and pending recovery/target product evidence.
+**General-purpose correction:** [Boundary audit and implementation packets](general-purpose-boundary.md).
+Installation identities describe software bytes; controller environments and supported
+platforms are explicit selections. External agents are the primary workflow. The
+[completion record](general-purpose-boundary.md#completion-record--2026-09-30) records
+the initial software checks and native installation migration. The
+[follow-up record](general-purpose-boundary.md#follow-up-audit-and-completion--2026-10-01)
+closes the remaining adapter/default/documentation gaps with 161 focused passing
+cases and a refreshed native activation.
+
+**Boundary follow-up, P1b/c and C1/C8:** select planning adapters from reviewed
+profiles, centralize backend architecture/EFI command data, derive omitted recipe
+IDs from the selected lock and remove remaining case-history setup dependencies.
+Use profile/baseline, recipe-input and command-planning regressions; no new platform,
+schema relaxation, kernel/image production or qualification. Record follow-up evidence
+separately from the earlier completion claim.
+Completed: reviewed profile/backend dispatch, unchanged frozen v1 restrictions,
+lock-derived recipe IDs, bundled current documentation and native readiness verified.
 
 **2026-09-30 implementation:** [Upload retention and durable build/composition handoffs](upload-and-background-jobs-handoff-2026-09-30.md).
 `build` and `compose` now acknowledge jobs immediately; explicit `--wait` reads their
@@ -100,3 +114,9 @@ OSTree and frozen wire records.
 X1 specifies observable failure behavior before X2 implementation. Qualify media
 and diagnostic channels independently; passing one does not qualify the other.
 Future reset/actuation authority requires a separate reviewed extension.
+
+## Historical investigation records
+
+**2026-09-30 integration follow-up:** [First audio-patch cycle](audio-patch-cycle-2026-09-30.md)
+records launcher/builder/heartbeat corrections, the candidate-only audio recipe,
+native controller setup and pending recovery/target product evidence.

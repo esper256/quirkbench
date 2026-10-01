@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Recovery acquisition specification v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_id",
+    "platform_adapter_id",
+    "fedora_release",
+    "kernel_release",
+    "rpm_key_fingerprint",
+    "packages",
+    "repositories"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "candidate_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+    },
+    "platform_adapter_id": {
+      "const": "x86_64-uefi-usb-v1"
+    },
+    "fedora_release": {
+      "type": "string",
+      "pattern": "^[0-9]{2}$"
+    },
+    "kernel_release": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._+-]{1,128}$"
+    },
+    "rpm_key_fingerprint": {
+      "type": "string",
+      "pattern": "^[A-F0-9]{40,64}$"
+    },
+    "packages": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8192,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "nevra",
+          "sha256"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "nevra": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "repositories": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "content",
+          "sha256",
+          "ids"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}\\.repo$"
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 65536
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            }
+          }
+        }
+      }
+    }
+  }
+}

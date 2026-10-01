@@ -50,7 +50,7 @@ def test_missing_manager_and_disabled_linger_report_actionable_status():
     assert any("systemctl --user" in item for item in report["instructions"])
     assert any("enable-linger" in item for item in report["instructions"])
     assert report["builder_tools"] == {"podman": "missing", "distrobox": "missing"}
-    assert any("podman, distrobox" in item for item in report["instructions"])
+    assert any("podman" in item and "distrobox" not in item for item in report["instructions"])
     assert "private error" not in json.dumps(report)
 
 
@@ -83,9 +83,19 @@ def test_distrobox_does_not_confuse_container_visibility_with_host_prerequisites
     assert not any("Install the missing" in item for item in report["instructions"])
 
 
-def test_cli_setup_check_uses_same_read_only_report(monkeypatch, capsys):
-    monkeypatch.setattr(controller_setup, "inspect_user_manager", lambda: {"user_manager": "available",
-                                                                            "background_work_ready": False})
-    assert cli.main(["setup-check"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"user_manager": "available",
-                                                     "background_work_ready": False}
+def test_native_setup_does_not_require_optional_distrobox():
+    report = controller_setup.inspect_user_manager(runner=FakeRunner(linger='yes\n'),
+        which=lambda name:'/usr/bin/podman' if name=='podman' else None,environ={})
+    assert report['instructions']==[]
+    assert report['builder_tools']['distrobox']=='missing'
+    assert report['optional_tools']==['distrobox']
+
+
+def test_cli_setup_check_adds_revision_report_without_initializing_state(monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(controller_setup, 'inspect_user_manager', lambda: {
+        'user_manager':'available','background_work_ready':False,'instructions':[]})
+    assert cli.main(['--state',str(tmp_path/'absent'),'setup-check'])==0
+    report=json.loads(capsys.readouterr().out)
+    assert report['user_manager']=='available' and not report['background_work_ready']
+    assert 'installations' in report
+    assert not (tmp_path/'absent').exists()

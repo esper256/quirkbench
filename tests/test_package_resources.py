@@ -40,7 +40,8 @@ def test_built_wheel_resolves_same_assets_without_checkout(tmp_path):
                     ignore=shutil.ignore_patterns("__pycache__"))
     (project / "docs").mkdir()
     shutil.copyfile(ROOT / "docs/__init__.py", project / "docs/__init__.py")
-    shutil.copyfile(ROOT / "docs/agent-guide.md", project / "docs/agent-guide.md")
+    for path in (ROOT / 'docs').glob('*.md'):
+        shutil.copyfile(path, project / 'docs' / path.name)
     shutil.copyfile(ROOT / "pyproject.toml", project / "pyproject.toml")
     wheel_dir = tmp_path / "wheels"
     wheel_dir.mkdir()
@@ -77,6 +78,8 @@ def test_built_wheel_resolves_same_assets_without_checkout(tmp_path):
     for name in ("schemas", "examples"):
         assert data[name] == {p.name: sha256(p) for p in (ROOT / name).glob("*.json")}
     assert data["guide"] == sha256(ROOT / "docs/agent-guide.md")
+    assert (extracted / 'quirkbench/guide/controller-installation.md').read_bytes() == (
+        ROOT / 'docs/controller-installation.md').read_bytes()
     clean_home = tmp_path / "clean-home"
     clean_home.mkdir()
     setup_code = ("import sys; sys.path.insert(0,sys.argv[1]); "
@@ -89,4 +92,4 @@ def test_built_wheel_resolves_same_assets_without_checkout(tmp_path):
     assert setup.returncode == 0, setup.stderr
     assert json.loads(setup.stdout)["state_root"] == str(clean_home / "state/quirkbench")
     assert (clean_home / "config/quirkbench/controller.json").is_file()
-    assert not (clean_home / "state/quirkbench/controller.sqlite").exists()
+    assert (clean_home / "state/quirkbench/controller.sqlite").exists()

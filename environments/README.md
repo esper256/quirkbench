@@ -1,5 +1,9 @@
 # Fedora build environment replay
 
+Native controller user services and rootless Podman are the current execution
+environment. Distrobox is an optional development shell; it is not required by
+installation, planning, experiment scheduling or evidence collection.
+
 **Current commands (2026-09-30):** `build` and `compose` submit durable jobs to the
 [manually configured controller user service](../docs/controller-installation.md#durable-build-and-composition-service).
 They return job IDs by default; `--wait` explicitly reads final outputs. The service
@@ -11,8 +15,9 @@ Do not download/build an image merely to check software edits.
 **Recovery design revision, 2026-09-29:** stock Fedora kernel/module/firmware packages
 with DNF5/dracut and existing image assembly replace mandatory recovery kernel builds.
 Development kernel-build instructions below apply to experiments or explicitly
-requested custom builds, not an automatic recovery prerequisite. Existing recovery
-worker/recipe code retains legacy contracts pending a versioned migration. Follow
+requested custom builds, not an automatic recovery prerequisite. Recovery v2
+worker/recipe code implements that stock-package path; old v1 records retain their
+original custom-kernel meaning. Follow
 [storage protection](../docs/architecture.md#storage-protection-policy) and
 [attended delivery tiers](../docs/product-roadmap.md#delivery-contract).
 
@@ -200,8 +205,8 @@ resulting cgroup files before accepting a launch. Rootfs dispatch still needs
 durable logs and input/exit identities, plus proof that launcher, conmon and
 payload stay in that cgroup through fenced termination. The command plan does
 not execute a product operation. The installed catalog is still empty, so
-this is not a ready-to-run recovery build. Distrobox remains the development
-and Codex environment.
+this is not a ready-to-run recovery build. Distrobox is an optional development
+environment used in some historical runs.
 
 After the initial container and Fedora target rootfs are populated, run
 `quirkbench.build.capture_package_lock`, `capture_target_package_lock`, and
@@ -285,7 +290,8 @@ and [treefile reference](https://coreos.github.io/rpm-ostree/treefile/).
 ### Nested composition sandbox
 
 Use a dedicated **rootless Podman** container for rpm-ostree composition, alongside
-normal non-root Distrobox controller/kernel builds. Run its process as container
+the native controller user service. An optional development shell has no worker
+ownership role. Run the composition process as container
 UID 0 with the default rootless UID mapping: UID 0 maps to the unprivileged controller
 user, and subordinate UIDs remain mapped. Do not use keep-id for this composition
 profile: rpm-ostree finalization preserves root-owned metadata and fails as UID
@@ -301,13 +307,13 @@ The required additional Podman flags are:
 
 Keep the existing 4 CPU / 4 GiB caps and mount only the explicit workspace. Do
 not use `--privileged`, host networking, or attach any host block device.
-`assemble.ini` remains the normal Distrobox controller/build profile; these extra
-flags belong to the dedicated composition container.
+`assemble.ini` is an optional development profile; these extra flags belong to
+the dedicated composition container.
 
 `--init` is required for this long-lived container: Podman's init process reaps
 orphaned GPG and OSTree helper processes. Using `sleep infinity` directly as PID
 1 leaves exited children as zombies and eventually exhausts the process limit.
-The normal Distrobox lifecycle remains separate.
+An optional Distrobox lifecycle remains separate from product workers.
 
 The namespace-scoped SYS_ADMIN capability permits `rofiles-fuse --copyup`, which
 protects cached package hardlinks during scriptlets. `/dev/fuse` is its virtual

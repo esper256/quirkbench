@@ -26,12 +26,13 @@ release provenance. Existing artifacts are not retroactively changed or qualifie
 
 Use the current
 [recovery handoff](stock-recovery-attended.md) rather than interpreting the legacy
-schemas as stock provenance. The [first audio-cycle handoff](audio-patch-cycle-2026-09-30.md)
-records the integration corrections and next product steps.
+schemas as stock provenance. [Controller installation](controller-installation.md)
+and [acquisition specifications](recovery-acquisition.md) describe current setup and
+input selection independently of investigation histories.
 
 ## Build and compose on the controller
 
-Use the versioned Fedora container environment, immutable base-image identity and recorded build/package/toolchain inputs. Podman and Distrobox are controller prerequisites; all build packages and experimental installations stay inside the container. Persistent project state lives outside its disposable filesystem. Agent authentication and repository/CA signing private keys never enter target filesystems or build outputs. Device-scoped credentials belong only in private provisioning and evidence/control, never in RPMs, OSTree commits, build logs, source snapshots or exported debugging evidence.
+Use the versioned Fedora container environment, immutable base-image identity and recorded build/package/toolchain inputs. Rootless Podman is the current builder prerequisite; Distrobox is optional for development; all build packages and experimental installations stay inside the container. Persistent project state lives outside its disposable filesystem. Agent authentication and repository/CA signing private keys never enter target filesystems or build outputs. Device-scoped credentials belong only in private provisioning and evidence/control, never in RPMs, OSTree commits, build logs, source snapshots or exported debugging evidence.
 
 Build kernels and modules in dedicated output trees. Stage userspace using `DESTDIR` and modules using `INSTALL_MOD_PATH`, preserve matching debug symbols and source archives in the controller artifact store, and package the experimental components as RPMs for composition. The composer produces one revision containing matching kernel, modules, initramfs, userspace and default configuration. Do not apply package overrides on the target. Capture exact source, configuration, package and toolchain identities in the deployment provenance.
 

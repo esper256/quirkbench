@@ -7,6 +7,8 @@ input fields live in Experiment.provenance without changing the v1 schema.
 
 from __future__ import annotations
 
+from .platform_adapters import X86_UEFI_USB
+
 import ast
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -313,7 +315,7 @@ class ResourceLimits:
     def from_cgroup(cls, root: Path = Path("/sys/fs/cgroup")) -> "ResourceLimits":
         """Require kernel-enforced CPU and memory cgroup limits at half the controller resources.
 
-        The Distrobox must be launched with Podman --cpus and --memory. A soft
+        The build container must be launched with Podman --cpus and --memory. A soft
         estimate or a per-process RLIMIT alone does not cap all compiler jobs.
         """
         try:
@@ -454,7 +456,7 @@ def _validate_recovery_source_command(command: Command, phase: str, stage: Path)
                 or not source.resolve().is_relative_to(rpm_root / "BUILD")
                 or not (source / "Kconfig").is_file()):
             raise BuildError("recovery source clean path differs from prepared source")
-        expected = ("make", "-C", str(source), "ARCH=x86_64", "mrproper")
+        expected = ("make", "-C", str(source), X86_UEFI_USB.kernel_arch_arg, "mrproper")
     else:
         raise BuildError("unknown recovery source phase")
     if command.argv != expected:
@@ -522,7 +524,7 @@ def run_recovery_source_stage(*, srpm: Path, entry: dict, stage: Path,
         fields = query_log.read_text(encoding="ascii").strip().split("\t")
     except (OSError, UnicodeError) as exc:
         raise BuildError("invalid recovery source RPM identity") from exc
-    if len(fields) != 4 or fields[0] != "kernel" or fields[2] not in {"src", "x86_64"} or fields[3] != "1":
+    if len(fields) != 4 or fields[0] != "kernel" or fields[2] not in X86_UEFI_USB.source_rpm_architectures or fields[3] != "1":
         raise BuildError("recovery source RPM is not a Fedora kernel source package")
     # Fedora's kernel SRPM can report its build architecture as x86_64. The
     # catalog records the source-package identity, not that header arch tag.
@@ -577,7 +579,7 @@ def run_recovery_source_stage(*, srpm: Path, entry: dict, stage: Path,
     # Fedora's %prep generates in-tree configuration headers. An out-of-tree
     # protected build rejects that tree until Kbuild removes the generated
     # state. The reviewed source files and configs/ remain intact.
-    execute(Command(("make", "-C", str(candidate), "ARCH=x86_64", "mrproper"), stage),
+    execute(Command(("make", "-C", str(candidate), X86_UEFI_USB.kernel_arch_arg, "mrproper"), stage),
             "clean-recovery-source", 300)
     source_tree_sha256 = _tree_hash(candidate, excluded_paths=frozenset())
     candidate.rename(source)
@@ -669,7 +671,7 @@ def run_recovery_kernel_stage(build: KernelBuild, *, base_config: bytes,
         configure = build.recovery_configure_plan(staged_config_sha256)[0]
     else:
         configure = Command(("make", "-C", str(build.source),
-                             f"O={build.build_dir}", "ARCH=x86_64", "olddefconfig"),
+                             f"O={build.build_dir}", X86_UEFI_USB.kernel_arch_arg, "olddefconfig"),
                             build.source)
     execute(configure, "configure-recovery", 1800)
     if (resume_resolved_config_sha256 is not None
@@ -1281,7 +1283,7 @@ class BuildPipeline:
             if sha256_file(object_dir / ".config") != inputs.kernel_config_sha256:
                 raise BuildError("kernel config changed while staging")
         build = KernelBuild(source, object_dir, sysroot, output_dir, jobs=limits.jobs)
-        self._run(Command(("make", "-C", str(source), f"O={object_dir}", "ARCH=x86_64", "olddefconfig"), source),
+        self._run(Command(("make", "-C", str(source), f"O={object_dir}", X86_UEFI_USB.kernel_arch_arg, "olddefconfig"), source),
                   stage, "configure", inputs, limits, 1800)
         validate_kernel_config(object_dir / ".config")
         if work is not None:
@@ -1295,7 +1297,7 @@ class BuildPipeline:
         self._run(compile_commands[0], stage, "compile-kernel", inputs, limits, 8 * 3600)
         self._run(compile_commands[1], stage, "install-modules", inputs, limits, 1800)
         release_log = subprocess.check_output(("make", "-s", "-C", str(source), f"O={object_dir}",
-                                                "ARCH=x86_64", "kernelrelease"), text=True, timeout=30,
+                                                X86_UEFI_USB.kernel_arch_arg, "kernelrelease"), text=True, timeout=30,
                                               env=self._build_env(stage, inputs))
         release = release_log.strip()
         if not re.fullmatch(r"[A-Za-z0-9._+-]+", release):

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from importlib import resources
-from dataclasses import dataclass
+from .platform_adapters import X86UefiUsbAdapter, planning_adapters, profile_adapter
 import json
 import platform
 import re
@@ -11,29 +11,14 @@ from typing import Any, Iterable
 from .contracts import ContractError, canonical, digest, identifier, sha256
 from .inventory import load_inventory
 
-ADAPTER_ID = "x86_64-uefi-usb-v1"
-PROFILE_NAMES = ("generic-x86_64-uefi-usb.v1.json",)
+# Retained import aliases; planning resolves adapters from reviewed profiles.
+ADAPTER_ID = planning_adapters()[0].adapter_id
+PROFILE_NAMES = tuple(name for adapter in planning_adapters() for name in adapter.profile_names)
 
 
 class PlanError(ContractError):
     pass
 
-
-@dataclass(frozen=True)
-class X86UefiUsbAdapter:
-    """The only planning adapter; actual build and boot checks remain separate."""
-
-    adapter_id: str = ADAPTER_ID
-    target_architecture: str = "x86_64"
-    controller_architecture: str = "x86_64"
-    boot_method: str = "uefi"
-    boot_transport: str = "usb"
-
-    def supports(self, *, target_architecture: str, boot_method: str,
-                 controller_architecture: str) -> bool:
-        return (target_architecture == self.target_architecture
-                and boot_method == self.boot_method
-                and controller_architecture == self.controller_architecture)
 
 
 def _id_list(value: Any, name: str) -> list[str]:
@@ -56,7 +41,13 @@ def validate_profile(value: Any) -> dict:
     if type(value["schema_version"]) is not int or value["schema_version"] != 1:
         raise PlanError("unsupported profile version")
     identifier(value["profile_id"])
-    if value["platform_adapter_id"] != ADAPTER_ID or value["architectures"] != ["x86_64"] or value["boot_methods"] != ["uefi"] or value["boot_transport"] != "usb":
+    try:
+        adapter = profile_adapter(value["platform_adapter_id"])
+    except (ValueError, TypeError) as exc:
+        raise PlanError("profile requires an implemented platform adapter") from exc
+    if (value["architectures"] != [adapter.target_architecture]
+            or value["boot_methods"] != [adapter.boot_method]
+            or value["boot_transport"] != adapter.boot_transport):
         raise PlanError("profile requires an implemented platform adapter")
     for name in ("required_boot_drivers", "compatibility_network_drivers", "optional_peripherals"):
         _id_list(value[name], name)
@@ -65,7 +56,7 @@ def validate_profile(value: Any) -> dict:
         raise PlanError("invalid protection policy")
     identifier(policy["policy_id"])
     _id_list(policy["excluded_internal_controller_drivers"], "excluded controllers")
-    if policy["allowed_write_bus"] != "usb" or policy["automount"] is not False or policy["firmware_writes"] is not False:
+    if policy["allowed_write_bus"] != adapter.boot_transport or policy["automount"] is not False or policy["firmware_writes"] is not False:
         raise PlanError("profile would relax storage or firmware protection")
     if type(value["minimum_ram_kib"]) is not int or not 1 <= value["minimum_ram_kib"] <= 1 << 40:
         raise PlanError("invalid minimum RAM")
@@ -75,7 +66,8 @@ def validate_profile(value: Any) -> dict:
 
 def installed_profiles() -> list[dict]:
     root = resources.files("quirkbench").joinpath("profiles")
-    return [validate_profile(json.loads(root.joinpath(name).read_bytes())) for name in PROFILE_NAMES]
+    return [validate_profile(json.loads(root.joinpath(name).read_bytes()))
+            for adapter in planning_adapters() for name in adapter.profile_names]
 
 
 def _observation(inventory: dict, key: str) -> Any:
@@ -94,20 +86,27 @@ def plan_hardware(inventory_bytes: bytes, *, profiles: Iterable[dict] | None = N
         raise PlanError("duplicate profile ID")
     target_architecture = inventory["platform"]["architecture"]
     boot_method = inventory["platform"]["boot_method"]
-    adapter = X86UefiUsbAdapter()
+    adapters = planning_adapters()
     blocking = []
     warnings = []
-    if target_architecture != adapter.target_architecture:
+    if not any(target_architecture == adapter.target_architecture for adapter in adapters):
         blocking.append("unsupported_architecture")
-    if boot_method != adapter.boot_method:
+    if not any(boot_method == adapter.boot_method for adapter in adapters):
         blocking.append("unsupported_boot_method")
-    if controller_architecture != adapter.controller_architecture:
-        blocking.append("controller_architecture_unsupported")
+    if not any(adapter.supports(target_architecture=target_architecture,
+                                boot_method=boot_method,
+                                controller_architecture=controller_architecture)
+               for adapter in adapters):
+        if any(target_architecture == adapter.target_architecture
+               and boot_method == adapter.boot_method for adapter in adapters):
+            blocking.append("controller_architecture_unsupported")
+        elif not any(controller_architecture == adapter.controller_architecture for adapter in adapters):
+            blocking.append("controller_architecture_unsupported")
     if inventory["summary"]["state"] == "partial":
         blocking.append("partial_inventory")
 
     matches = [p for p in catalog if target_architecture in p["architectures"]
-               and boot_method in p["boot_methods"] and p["platform_adapter_id"] == adapter.adapter_id]
+               and boot_method in p["boot_methods"]]
     matches.sort(key=lambda p: p["profile_id"])
     policy_variants = {(p["platform_adapter_id"], digest(canonical(p["protection"])),
                         tuple(p["required_boot_drivers"]), tuple(p["compatibility_network_drivers"]))

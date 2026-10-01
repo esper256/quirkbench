@@ -15,7 +15,6 @@ import subprocess
 import sys
 import time
 
-from .audio_recipe import audio_observation
 from .binding import BindingError, verify_binding
 from .boot import RecoveryConfig, parse_cmdline, arm_once, reboot_candidate, _verify_stage_identity
 from .commission import BootIdentity, verify_boot_identity
@@ -23,7 +22,7 @@ from .contracts import CapabilityReport, ContractError, Outcome, canonical, iden
 from .inventory import InventoryCollector, InventoryLimits, validate_inventory
 from .library import LibraryStore
 from .ostree import OstreeBackend, Remote
-from .recipe_registry import RecipeRegistry, UnavailableRegistry
+from .recipe_registry import installed_registry, UnavailableRegistry
 from .store import atomic_write
 from .target import TargetAgent, RecipeOutput, EvidenceChunk
 from .transport import HTTPSDeviceClient, TransportError
@@ -48,7 +47,7 @@ def system_observation(experiment):
         yield EvidenceChunk('kernel-log', logs[offset:offset+256*1024])
     yield RecipeOutput(Outcome.INCONCLUSIVE, 'Collected running kernel inventory and kernel log.',
                         measurements=inventory,
-                        limitations=['No audio, keyboard or microphone reproduction was attempted.'])
+                        limitations=['Collection does not establish reproduction or correctness of the reported problem.'])
 
 
 def load_provisioning(path=CONTROL/'runtime.json'):
@@ -269,10 +268,9 @@ def create_agent(config, boot, verify, provision, supervisor, *, recovery_only=F
     if mode == 'experiment':
         inventory.update(deployment_id=boot['quirkbench.candidate'], revision=boot['quirkbench.revision'])
     try:
-        registry = RecipeRegistry(Path(__file__).with_name('recipes'),
-                                  {'system-observation': system_observation,'audio-observation':audio_observation},
-                                  granted_privileges={'read_kernel_log','audio_playback'} if mode=='experiment' else {'read_kernel_log'})
-        capabilities = ['recipe.'+name for name in sorted(registry.records)]
+        registry = installed_registry(Path(__file__).with_name('recipes'), candidate=mode == 'experiment')
+        eligible = registry.eligible(mode=mode, architecture=inventory['architecture'])
+        capabilities = ['recipe.' + name for name in eligible]
     except (ContractError, OSError):
         # Broken installed metadata must not prevent recovery evidence upload.
         registry = UnavailableRegistry()

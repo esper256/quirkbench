@@ -6,12 +6,15 @@ supplied; no command installs anything on the workstation.
 
 from __future__ import annotations
 
+from .platform_adapters import X86_UEFI_USB
+
 from dataclasses import dataclass
 from contextlib import contextmanager
 import fcntl
 import hashlib
 import json
 import os
+import pwd
 from pathlib import Path
 import re
 import shutil
@@ -114,7 +117,13 @@ def _safe_build_path(path: Path) -> None:
                  Path("/run"), Path("/usr"), Path("/etc"), Path("/boot"),
                  Path("/lib"), Path("/lib64"), Path("/var"), Path("/mnt"),
                  Path("/media"))
-    if any(resolved == root or (root != Path("/") and root in resolved.parents) for root in forbidden):
+    # Linux homes can live under /var (including canonical /var/home). Treat the
+    # current account's actual home like /home, without allowing arbitrary /var.
+    account_home = Path(pwd.getpwuid(os.geteuid()).pw_dir).resolve()
+    private_home_path = account_home != Path('/') and account_home in resolved.parents
+    if any(resolved == root or (root != Path('/') and root in resolved.parents
+                               and not (root == Path('/var') and private_home_path))
+           for root in forbidden):
         raise BuildError(f"refusing system or mounted build path: {path}")
 
 
@@ -221,9 +230,9 @@ class KernelBuild:
         for key, value in REQUIRED_CONFIG.items():
             switches += ["-e" if value == "y" else "-d", key.removeprefix("CONFIG_")]
         return (
-            Command(("make", "-C", source, f"O={out}", "ARCH=x86_64", "x86_64_defconfig"), self.source),
+            Command(("make", "-C", source, f"O={out}", X86_UEFI_USB.kernel_arch_arg, X86_UEFI_USB.kernel_default_config), self.source),
             Command((str(self.source / "scripts/config"), "--file", config, *switches), self.source),
-            Command(("make", "-C", source, f"O={out}", "ARCH=x86_64", "olddefconfig"), self.source),
+            Command(("make", "-C", source, f"O={out}", X86_UEFI_USB.kernel_arch_arg, "olddefconfig"), self.source),
         )
 
     def stage_recovery_config(self, base: bytes, fragment: bytes,
@@ -267,7 +276,7 @@ class KernelBuild:
                 or sha256_file(config) != expected_sha256):
             raise BuildError("staged recovery config missing or changed")
         return (Command(("make", "-C", str(self.source),
-                         f"O={self.build_dir}", "ARCH=x86_64", "olddefconfig"),
+                         f"O={self.build_dir}", X86_UEFI_USB.kernel_arch_arg, "olddefconfig"),
                         self.source),)
 
     def recovery_compile_plan(self, profile: dict) -> tuple[Command, ...]:
@@ -279,13 +288,13 @@ class KernelBuild:
 
     def kernel_release_plan(self) -> tuple[Command, ...]:
         return (Command(("make", "-C", str(self.source),
-                         f"O={self.build_dir}", "ARCH=x86_64",
+                         f"O={self.build_dir}", X86_UEFI_USB.kernel_arch_arg,
                          "--no-print-directory", "-s", "kernelrelease"),
                         self.source),)
 
     def compile_plan(self) -> tuple[Command, ...]:
         source, out = str(self.source), str(self.build_dir)
-        common = ("make", "-C", source, f"O={out}", "ARCH=x86_64")
+        common = ("make", "-C", source, f"O={out}", X86_UEFI_USB.kernel_arch_arg)
         return (
             Command((*common, f"-j{self.effective_jobs}", "bzImage", "modules", "vmlinux"), self.source),
             Command((*common, "modules_install", f"INSTALL_MOD_PATH={self.sysroot}"), self.source),
@@ -309,7 +318,7 @@ class KernelBuild:
                          str(initramfs)), self.output_dir),)
 
     def artifacts(self, kernel_release: str) -> dict[str, Path]:
-        return {"kernel": self.build_dir / "arch/x86/boot/bzImage",
+        return {"kernel": self.build_dir / X86_UEFI_USB.kernel_image_relative,
                 "vmlinux": self.build_dir / "vmlinux",
                 "module_symvers": self.build_dir / "Module.symvers",
                 "system_map": self.build_dir / "System.map",
@@ -339,7 +348,7 @@ def _validate_command(command: Command) -> bool:
         raise BuildError(f"working directory missing: {command.cwd}")
     argv = command.argv
     if argv[0] == "make":
-        if len(argv) < 6 or argv[1] != "-C" or argv[4] != "ARCH=x86_64":
+        if len(argv) < 6 or argv[1] != "-C" or argv[4] != X86_UEFI_USB.kernel_arch_arg:
             raise BuildError("make command does not match target plan")
         source = Path(argv[2])
         if source != command.cwd or not argv[3].startswith("O="):
@@ -347,7 +356,7 @@ def _validate_command(command: Command) -> bool:
         _safe_build_path(source)
         _safe_build_path(Path(argv[3][2:]))
         tail = argv[5:]
-        if tail in (("x86_64_defconfig",), ("olddefconfig",),
+        if tail in ((X86_UEFI_USB.kernel_default_config,), ("olddefconfig",),
                     ("--no-print-directory", "-s", "kernelrelease")):
             return False
         if (len(tail) == 4 and re.fullmatch(r"-j[1-9][0-9]*", tail[0])

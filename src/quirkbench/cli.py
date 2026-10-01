@@ -23,6 +23,11 @@ def parser():
     preferences.add_argument('action', choices=['show','set'])
     preferences.add_argument('key', nargs='?'); preferences.add_argument('value', type=int, nargs='?')
     commands.add_parser('setup-check', help='inspect user service availability without changing host settings')
+    install = commands.add_parser('controller-install', help='verify an immutable development archive; optionally activate the idle controller')
+    install.add_argument('archive', type=Path, nargs='?')
+    install.add_argument('--activate', action='store_true')
+    install.add_argument('--rollback', action='store_true')
+    install.add_argument('--json', action='store_true')
     monitor = commands.add_parser('monitor', help='manually opened, read-only progress dashboard; never opens windows')
     monitor.add_argument('--run', dest='run_id'); monitor.add_argument('--once', action='store_true')
     monitor.add_argument('--json', action='store_true')
@@ -88,18 +93,24 @@ def parser():
     recovery_actions = recovery.add_subparsers(dest='action', required=True)
     acquire = recovery_actions.add_parser('acquire-plan', help='prepare recorded acquisition and print exact command; does not download')
     acquire.add_argument('directory',type=Path)
+    acquire.add_argument('--spec',type=Path,help='immutable acquisition specification with pinned repository bytes and RPM trust')
     lock = recovery_actions.add_parser('lock', help='verify and retain downloaded binary RPM closure')
     lock.add_argument('directory',type=Path); lock.add_argument('--public-key',type=Path,required=True)
+    lock.add_argument('--spec',type=Path,help='same immutable specification used for acquisition; otherwise retains legacy selection')
     lock.add_argument('--builder-image-digest',required=True); lock.add_argument('--diagnostics',type=Path,required=True)
     recipe = recovery_actions.add_parser('recipe', help='generate default stock RecoveryRecipe v2')
     recipe.add_argument('--lock',required=True); recipe.add_argument('--builder-image-digest',required=True)
-    recipe.add_argument('--id',default='stock-recovery-fedora44'); recipe.add_argument('--epoch',type=int,required=True)
+    recipe.add_argument('--id',help='recipe identity; defaults to the selected lock digest'); recipe.add_argument('--epoch',type=int,required=True)
     recipe.add_argument('--root-mib',type=int,default=2048); recipe.add_argument('--factory-size-mib',type=int,default=4096)
     recipe.add_argument('--experiment-mib',type=int,default=32768); recipe.add_argument('--library-mib',type=int,default=32768)
     recipe.add_argument('--log-budget-mib',type=int,default=4096)
     recovery_image=commands.add_parser('recovery-image',help='admit a complete stock image for the fixed recovery coordinator')
     recovery_image.add_argument('--recipe',required=True); recovery_image.add_argument('--builder-archive',required=True)
     recovery_image.add_argument('--request-id',required=True)
+    recovery_images=commands.add_parser('recovery-images',help='list published recovery images and exact retained file paths; read-only')
+    recovery_images.add_argument('--json',action='store_true')
+    recovery_images.add_argument('--limit',type=int,default=20)
+    recovery_images.add_argument('--before',type=int,default=0,help='older image-operation cursor from the preceding page')
     attempt = commands.add_parser('attempt', help='local operator authorization for an exact physical attempt')
     attempt_actions = attempt.add_subparsers(dest='action', required=True)
     inspect = attempt_actions.add_parser('status'); inspect.add_argument('attempt_id')
@@ -140,6 +151,24 @@ def parser():
 def _main(argv=None):
     args = parser().parse_args(argv)
     explicit_state = args.state is not None
+    if args.command == 'controller-install':
+        from .controller_install import install, activate, rollback
+        from .contracts import Conflict, ContractError
+        from .operations import operation_response
+        try:
+            if args.rollback:
+                if args.archive or args.activate: raise ContractError('--rollback takes no archive or --activate')
+                answer = rollback(discover_state_root(args.state))
+            else:
+                if args.archive is None: raise ContractError('controller-install requires ARCHIVE')
+                answer = install(args.archive)
+                if args.activate: answer = activate(answer, discover_state_root(args.state))
+            print(json.dumps(operation_response(data=answer), sort_keys=True))
+            return 0
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            code = 'CONFLICT' if isinstance(exc, Conflict) else 'INVALID_INPUT' if isinstance(exc, ContractError) else 'INFRASTRUCTURE'
+            print(json.dumps(operation_response(error={'code':code,'message':str(exc)[:512],'retryable':False}), sort_keys=True))
+            return 3 if code == 'CONFLICT' else 2 if code == 'INVALID_INPUT' else 5
     if args.command == 'setup-state':
         try:
             selected = configure_state_root(args.state)
@@ -155,6 +184,19 @@ def _main(argv=None):
     if args.command in ('build','compose') or (args.command=='operation' and args.action=='resume'):
         from .job_cli import run
         return run(args)
+    if args.command=='recovery-images':
+        from .recovery_listing import list_images,render_images
+        from .state_reader import StateReader
+        try:
+            answer=list_images(StateReader(discover_state_root(args.state).expanduser().absolute()),before=args.before,limit=args.limit)
+            print(json.dumps(answer,sort_keys=True) if args.json else render_images(answer))
+            return 0
+        except (OSError,ValueError,sqlite3.Error) as exc:
+            if args.json:
+                from .operations import operation_response
+                print(json.dumps(operation_response(error={'code':'UNAVAILABLE','message':('Recovery image listing unavailable: '+str(exc))[:512],'retryable':False}),sort_keys=True))
+            else: print('Recovery image listing unavailable: '+str(exc),file=sys.stderr)
+            return 2
     if args.command == 'settings':
         try:
             root=discover_state_root(args.state).expanduser().absolute()
@@ -212,6 +254,10 @@ def _main(argv=None):
         from .controller_service import require_ready
         try: report.update(require_ready(discover_state_root(args.state)))
         except (ValueError,OSError,sqlite3.Error) as exc: report['instructions'].append(str(exc))
+        from .controller_install import installation_report
+        report.update(installation_report(discover_state_root(args.state),service_ready=report.get('background_work_ready',False)))
+        if report['installations']['mismatch']:
+            report['instructions'].append('CLI, configured service or last advertised service revisions differ; use controller-install ARCHIVE --activate after reconciling work.')
         print(json.dumps(report, sort_keys=True))
         return 0
     if args.command == 'build-cache':
@@ -509,20 +555,33 @@ def _main(argv=None):
                 from .recovery_inputs import acquisition_command,retain_packages,generate_recipe
                 if args.action=='acquire-plan':
                     from .retention import managed_path,register
+                    from .recovery_acquisition import load_spec,stage_spec,freeze_legacy_spec,MAX_SPEC
+                    from .state_reader import read_file
+                    spec=load_spec(read_file(args.spec.resolve().parent,args.spec.name,limit=MAX_SPEC)) if args.spec else freeze_legacy_spec()
                     directory=managed_path(controller.root,args.directory.resolve())
                     if directory.exists(): raise ValueError('acquisition requires a fresh inputs directory')
                     directory.mkdir(parents=True,mode=0o700)
                     (directory/'rpms').mkdir(mode=0o700)
+                    stage_spec(spec,directory)
                     from .store import atomic_write
                     from .controller import controller_boot_id
                     import os
                     atomic_write(directory/'process-groups.json',canonical({'boot':controller_boot_id(),'pid_namespace':os.readlink('/proc/self/ns/pid'),'groups':[]}))
-                    owner=register(controller.root,'input',paths=(directory,),state='WAITING')
+                    spec_digest=controller.store.put(canonical(spec)).sha256
+                    import uuid
+                    owner=register(controller.root,'input',[spec_digest],owner='storage:acquisition-v1:'+spec_digest+':'+uuid.uuid4().hex,paths=(directory,),state='WAITING')
                     answer={'argv':['python3','-m','quirkbench.recovery_inputs','--state',str(controller.root),'--owner',owner],
-                            'dnf_argv':acquisition_command(directory/'rpms'),'directory':str(directory/'rpms'),'executed':False,'retention_owner':owner}
+                            'dnf_argv':acquisition_command(directory/'rpms',spec=spec),'spec_sha256':spec_digest,'selection':'explicit' if args.spec else 'historical-candidate-compatibility','directory':str(directory/'rpms'),'executed':False,'retention_owner':owner}
                 elif args.action=='lock':
                     from .retention import verified_acquisition,work,published
                     verified_acquisition(controller.root,args.directory.resolve())
+                    from .recovery_acquisition import load_spec,MAX_SPEC
+                    from .state_reader import read_file
+                    from .recovery_acquisition import completed_spec
+                    spec=completed_spec(controller.root,args.directory.resolve())
+                    if args.spec:
+                        requested=load_spec(read_file(args.spec.resolve().parent,args.spec.name,limit=MAX_SPEC))
+                        if spec is None or canonical(requested)!=canonical(spec): raise ValueError('lock specification differs from acquisition')
                     with work(controller.root,'input',args.diagnostics.resolve()) as diagnostic_owner:
                         from .ostree import CommandRunner
                         from .store import atomic_write
@@ -535,7 +594,7 @@ def _main(argv=None):
                             return CommandRunner(lambda *args:None,lambda:None,timeout_s=timeout_s,diagnostic=failure_log)(argv)
                         lock=retain_packages(args.directory.resolve(),args.public_key.resolve(),controller.store,
                             args.diagnostics.resolve()/'diagnostics',builder_image_digest=args.builder_image_digest,
-                            query=query,signature_runner=verify)
+                            query=query,signature_runner=verify,spec=spec)
                         published(controller.root,diagnostic_owner,[digest(canonical(lock))],disposable_work=True)
                     from .retention import register,release_acquisition,release_group
                     value=controller.store.put(canonical(lock)).sha256
@@ -643,14 +702,14 @@ def _main(argv=None):
 def main(argv=None):
     """A publication barrier, not a scheduler; read-only commands do no housekeeping."""
     args=parser().parse_args(argv)
-    readonly=(args.command in ('build','compose','monitor','watch','target-inventory','operation','doctor','setup-check',
+    readonly=(args.command in ('build','compose','monitor','watch','target-inventory','operation','doctor','setup-check','recovery-images',
                                'target','target-service','serve-repository') or
               (args.command=='campaign' and args.action=='status') or
               (args.command=='settings' and args.action=='show') or
               (args.command=='maintenance' and args.action in ('status','prune')) or
               (args.command=='session' and args.action in ('observations','observation')) or
               (args.command=='build-cache' and args.action=='list'))
-    if readonly or args.command in ('setup-state','serve'): return _main(argv)
+    if readonly or args.command in ('setup-state','serve','controller-install'): return _main(argv)
     try:
         root=discover_state_root(args.state).expanduser().absolute()
         if not (root/'controller.sqlite').is_file(): return _main(argv)

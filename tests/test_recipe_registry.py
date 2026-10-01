@@ -56,9 +56,8 @@ def test_manifest_schema_and_packaged_observation_identity(tmp_path):
     Draft202012Validator(schema).validate(manifest())
     assert load_manifest(canonical(manifest())) == manifest()
     from quirkbench import runtime
-    installed = RecipeRegistry(Path(runtime.__file__).with_name('recipes'),
-                               {'system-observation': runtime.system_observation},
-                               granted_privileges={'read_kernel_log'})
+    from quirkbench.recipe_registry import installed_registry
+    installed = installed_registry(Path(runtime.__file__).with_name('recipes'))
     assert 'system-observation' in installed.records
     Draft202012Validator(schema).validate(installed.records['system-observation'][0])
 
@@ -124,3 +123,20 @@ def test_target_dispatch_requires_authorized_installed_manifest(tmp_path):
     assert target.step() == 'completed'
     assert bad_client.results[0].outcome == Outcome.NEEDS_HUMAN
     assert 'manifest' in bad_client.results[0].summary
+
+
+def test_current_mode_capabilities_exclude_unavailable_recipes():
+    from quirkbench import runtime
+    from quirkbench.recipe_registry import installed_registry
+    root=Path(runtime.__file__).with_name('recipes')
+    recovery=installed_registry(root)
+    assert recovery.eligible(mode='recovery',architecture='x86_64')==['system-observation']
+    candidate=installed_registry(root,candidate=True)
+    assert candidate.eligible(mode='experiment',architecture='x86_64')==['audio-observation','system-observation']
+    assert candidate.eligible(mode='experiment',architecture='aarch64')==[]
+
+
+def test_eligibility_does_not_invent_external_capabilities(tmp_path):
+    installed,_=registry(tmp_path)
+    assert installed.eligible(mode='simulation',architecture='x86_64')==[]
+    assert installed.eligible(mode='simulation',architecture='x86_64',capabilities=['fixture.observe'])==['fixture']

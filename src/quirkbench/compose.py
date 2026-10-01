@@ -26,6 +26,7 @@ from typing import Callable
 from .build import BuildError, _require_container, _safe_build_path, sha256_file, validate_kernel_config
 from .build_pipeline import DISK_RESERVE, ResourceLimits, _sync_tree
 from .contracts import canonical
+from .platform_adapters import X86_UEFI_USB
 
 ROLES = {"kernel", "config", "initramfs", "modules", "userspace", "build_provenance"}
 PACKAGES = ["fedora-release", "systemd", "systemd-udev", "NetworkManager", "NetworkManager-tui", "NetworkManager-wifi", "linux-firmware", "bash",
@@ -232,7 +233,7 @@ Version: {version}
 Release: 1
 Summary: Quirkbench staged experiment component
 License: LicenseRef-Quirkbench-Experiment
-BuildArch: x86_64
+BuildArch: {X86_UEFI_USB.target_architecture}
 AutoReqProv: no
 {provides}
 %description

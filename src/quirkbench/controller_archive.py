@@ -26,6 +26,7 @@ MAX_PACKAGE_BYTES = 64 * 1024**2
 LAUNCHER = b'''#!/usr/bin/env python3
 import pathlib
 import sys
+sys.dont_write_bytecode = True
 if sys.version_info < (3, 11):
     raise SystemExit("Quirkbench requires Python 3.11 or newer")
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "lib"))
@@ -34,19 +35,25 @@ raise SystemExit(main())
 '''
 INSTRUCTIONS = b'''Quirkbench controller development archive (unsigned, unqualified)
 
-Extract into a user-owned directory and run bin/quirkbench --help.
+Extract temporarily into a user-owned directory and run:
+bin/quirkbench controller-install /absolute/original-archive.tar.gz --json
+Then use the returned canonical runtime_root/bin/quirkbench --help.
 Python 3.11+ must already be installed. No virtualenv, pip installation or
 source checkout is needed for the controller CLI.
 
 Run bin/quirkbench setup-state to select private persistent state, then
 bin/quirkbench setup-check to inspect service prerequisites. Install lib/quirkbench/quirkbench-controller.service with canonical paths and
-provision private/controller-service.json as described in controller-installation.md. Extraction does
+provision private/controller-service.json as described in
+lib/quirkbench/guide/controller-installation.md. Extraction does
 not start a service, change lingering or install any host package.
 
-On Distrobox controllers, run setup-check from the native controller shell to
-inspect native services. Build/compose tools belong in the isolated builder.
-The archive is relocatable; state remains at its independently selected path.
-Do not replace an installation being used by an active service.
+Run setup-check from the native controller shell to inspect native services.
+Distrobox is an optional development environment. Build/compose tools belong in
+the isolated builder. State remains at its independently selected path.
+Upgrade with controller-install ARCHIVE --activate after reconciling active work.
+Activation switches CLI, service and worker paths together and verifies readiness.
+Current commands and planned session interfaces are distinguished in
+lib/quirkbench/guide/agent-guide.md; case histories are evidence, not prerequisites.
 
 bin/quirkbench-worker is the fixed rootfs stage executable for configured systemd
 worker services. It accepts only an existing live controller claim; it is not
@@ -107,7 +114,9 @@ def build_controller_archive(wheel: Path, output: Path) -> dict:
         raise ValueError('invalid Quirkbench wheel metadata')
     required = ('job_worker.py','job_operations.py','job_coordinator.py','job_cache.py',
                 'controller_service.py','run-bounded-podman.sh','quirkbench-controller.service','recovery_worker.py', 'assets/quirkbench-recovery.service', 'schemas/experiment.v1.schema.json',
-                'examples/experiment.json', 'guide/agent-guide.md')
+                'examples/experiment.json', 'guide/agent-guide.md',
+                'guide/controller-installation.md', 'guide/recovery-acquisition.md',
+                'guide/build-and-boot.md')
     if any('lib/quirkbench/' + name not in files for name in required):
         raise ValueError('controller wheel is missing installed resources')
     files.update({'bin/quirkbench': LAUNCHER, 'bin/quirkbench-worker': WORKER_LAUNCHER,

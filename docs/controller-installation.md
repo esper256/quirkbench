@@ -23,13 +23,39 @@ files. It does not build kernels/images or run release qualification. The return
 JSON and archive's `controller-manifest.json` retain wheel and file hashes; the
 manifest explicitly records unsigned, unqualified status.
 
-Extract the archive into a user-owned directory, then run:
+For a fresh installation, extract the archive temporarily outside a checkout and
+use its launcher to install the original archive:
 
 ```sh
-./quirkbench-controller-0.1.0/bin/quirkbench --help
-./quirkbench-controller-0.1.0/bin/quirkbench setup-state
-./quirkbench-controller-0.1.0/bin/quirkbench setup-check
+./quirkbench-controller-0.1.0/bin/quirkbench controller-install /absolute/output/controller.tar.gz --json
 ```
+
+The response's `data.runtime_root` is the canonical runtime beneath
+`$XDG_DATA_HOME/quirkbench/controller/VERSION-ARCHIVE_SHA256` (default
+`~/.local/share/quirkbench/controller`). Run that directory's `bin/quirkbench`
+for initial `setup-state`, `setup-check` and the manual service setup below.
+The installation is verified before publication, repeatable and never overwritten
+with differing bytes. Installing alone selects no service and starts no work.
+Archive checksums establish integrity and identity, not publisher authenticity;
+these development archives remain unsigned and unqualified.
+
+After manual service/trust setup, or when upgrading an existing installation:
+
+```sh
+quirkbench controller-install /absolute/output/controller.tar.gz --activate --json
+quirkbench setup-check
+```
+
+Activation refuses queued/running work, unreconciled worker units and unresolved
+physical attempts. It excludes CLI publication, stops/verifies the existing fixed
+unit, checks exclusive controller ownership, updates the service and all configured
+workers together, and switches `~/.local/bin/quirkbench`. It retains private settings,
+state and old runtime bytes. Readiness must pass before activation reports success.
+A private durable rollback record precedes shutdown; a failed activation restores
+and verifies the previous setup. After an interrupted activation, explicitly run
+`quirkbench controller-install --rollback --json` after reconciling outstanding work.
+Setup reports CLI, configured-service, verified active-service and last-advertised
+revision identities. A stored advertisement alone is not live readiness.
 
 `setup-state` creates private controller state at `$XDG_STATE_HOME/quirkbench`
 (default `~/.local/state/quirkbench`) and records its identity in the user configuration.
@@ -43,8 +69,8 @@ launcher exposes the same commands without relying on a moved virtualenv's sheba
 The commands select durable private state and report actual configured service
 readiness. Manual service/trust setup below is implemented; the complete planned
 `setup` wizard remains deferred. State selection stays valid if the extracted archive is moved.
-Run native service checks from the controller shell, because Distrobox's PID 1
-and PATH can differ from Bazzite's native service/tool environment. No lingering,
+Run service checks from the native controller shell. An optional development
+container can expose a different service manager and PATH. No lingering,
 firewall or power policy is changed. Build toolchains stay in the isolated builder.
 
 ## Installed rootfs worker
@@ -72,7 +98,7 @@ its current claim fence. Complete stock-image intent additionally runs runtime,
 dracut and assembly in the fixed worker, then signs and publishes through the current
 owner. Explicit `serve` worker/signing configuration enables that executor; installed
 persistent service setup remains manual. See the [software handoff](stock-recovery-attended.md). Fake execution establishes software behavior,
-not actual Podman containment or a deliverable recovery image. Do not replace the
+not actual Podman containment or a deliverable recovery image. Use guarded activation to change installations; do not replace the
 executable directory while an active service uses it. The fixed recovery-rootfs
 service retains its separate 4-GiB contract; development kernel builds use their
 own 8-GiB bounded starter.
@@ -131,9 +157,8 @@ but ambiguous old jobs require explicit resubmission with a new request ID.
 
 Service presence refreshes independently of validation, signing and housekeeping.
 It establishes a current owner; operation phases and measured output establish
-job advancement. One does not imply the other. See the
-[first audio-cycle handoff](audio-patch-cycle-2026-09-30.md) for this installation's
-actual readiness and remaining target setup.
+job advancement. One does not imply the other. Run `quirkbench setup-check` to inspect this installation's current readiness.
+Investigation-specific setup histories are not product prerequisites.
 
 After provisioning, explicitly run:
 

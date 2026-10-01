@@ -14,9 +14,10 @@ boot, storage-preservation or release qualification. The authoritative
 enumeration and partition-table reads; recovery userspace operations remain confined
 to the identified external boot device. Candidate controller exclusions are separate.
 
-The [first audio-cycle integration handoff](audio-patch-cycle-2026-09-30.md) records
-current native setup and the replacement input/image operation. Historical deleted
-artifact results below are unchanged; replacement preparation is not boot evidence.
+Use [controller installation](controller-installation.md) for current native setup
+and [acquisition specifications](recovery-acquisition.md) to select exact inputs.
+Investigation handoffs and deleted artifact results below are historical evidence;
+they are not setup prerequisites or qualification for replacement bytes.
 
 ## Recovery inputs and preparation
 
@@ -26,9 +27,10 @@ identity from candidate profiles. Old v1 records still dispatch to the original
 custom-kernel path; neither their exclusion identifiers nor their provenance fields
 are reinterpreted. The completed custom recovery kernel remains historical evidence.
 
-The installed binary candidate retains the recorded Fedora 44 userspace RPM closure
-and selects stock `7.2.7-200.fc44.x86_64` kernel packages. Acquisition requests exact
-NEVRAs. Preparation refuses missing packages, changed recorded bytes, invalid
+The historical binary candidate retains the recorded Fedora 44 userspace RPM closure
+and stock `7.2.7-200.fc44.x86_64` kernel packages. New acquisition selects an immutable
+specification with repository and trust identities and requests exact NEVRAs.
+Preparation refuses missing packages, changed recorded bytes, invalid
 signatures, inconsistent module releases and an unexpected key fingerprint. It
 cannot select a newer moving kernel as a fallback. RPM inspection, GPG and DNF5
 are explicit tooling prerequisites; preparation never installs controller tooling.
@@ -37,7 +39,7 @@ The retained RPM/key/policy/lock objects travel in CAS and through operation bac
 Available controller commands, using its existing selected private state:
 
 ```sh
-quirkbench recovery-inputs acquire-plan /SELECTED_STATE/inputs/new-generation
+quirkbench recovery-inputs acquire-plan /SELECTED_STATE/inputs/new-generation --spec /absolute/reviewed-candidate.json
 quirkbench recovery-inputs lock /SELECTED_STATE/inputs/new-generation/rpms \
   --public-key /absolute/fedora-signing-key \
   --builder-image-digest sha256:ACTUAL_DIGEST \

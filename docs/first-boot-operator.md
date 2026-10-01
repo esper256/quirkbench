@@ -21,6 +21,20 @@ qualify hardware.
 
 ## Before flashing
 
+Run `quirkbench recovery-images` in the controller's native terminal to list
+published images, absolute retained paths, SHA256, size and qualification status.
+From Distrobox use `distrobox-host-exec quirkbench recovery-images`.
+`--json` returns the existing operation response envelope; `--limit` and `--before`
+page older records. Pending/failed image operations have no published image path.
+An empty list means there is no published image to flash, even if inputs downloaded.
+
+The retained image lives in the content-addressed store and may have no `.img`
+filename extension. Use the listed **Image** path in the writer's all-files picker;
+it is the original raw image, not a JSON record. Listing reads only small publication
+records and file sizes; it does not hash multi-GiB images or reverify signatures.
+Never choose an unfinished file from worker staging. Missing retired bytes are
+reported unavailable rather than as usable images.
+
 Use the exact image path, SHA-256 and development signing fingerprint in the
 image handoff. Verify the `.sha256` file against the image and the detached
 `.checksums.json.sig` against `.checksums.json` with a separately retained

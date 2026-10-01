@@ -2,7 +2,11 @@
 
 Use [the terminology and scope rules](docs/terminology.md): **controller** builds
 and runs investigations; **target** boots experiments and produces evidence.
-Quirkbench is hardware-generic, not tied to one laptop/vendor. Keep platform quirks
+Quirkbench is hardware-generic, not tied to one laptop/vendor. An example can motivate
+a capability, but cannot become a default or requirement without an explicit product
+reason. Classify special cases as core invariants, supported-platform implementations,
+optional diagnostic recipes, investigation inputs, local setup or historical evidence.
+See [the boundary audit](docs/general-purpose-boundary.md). Keep platform quirks
 in reviewed profiles/adapters. Preserve public wire names such as `device_id` and
 technical names such as the network `--host` option; do not break compatibility
 for vocabulary changes. Never equate generic design with universal tested support.
@@ -71,8 +75,7 @@ gate with a skip or mark an unrun qualification complete.
 
 The [product interface contract](docs/product-interface.md) is normative C8. Implement
 the attended external-agent journey with manual authenticated setup and explicit
-exact-candidate operator approval first; managed remains the later configured UX
-default. Pairing/lifecycle automation, advanced wizards, guided backup completeness
+exact-candidate operator approval first; managed invocation is a later optional, explicitly selected feature. Pairing/lifecycle automation, advanced wizards, guided backup completeness
 and unattended watchdog grants are later packets, not initial prerequisites. Controller user services own rootless workers. Do not infer
 source capture, safe shutdown, unattended eligibility or backup completeness from a
 single accepted/paused/ready state. P0 fixtures and foundational recipe/observation

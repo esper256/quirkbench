@@ -20,17 +20,22 @@ from .recovery_rootfs import _rpm_row,verify_stock_rpm_signatures
 from .recovery_runtime_revision import capture_runtime_revision
 from .store import atomic_write
 
-FEDORA_RELEASE='44'
-KERNEL_RELEASE='7.2.7-200.fc44.x86_64'
-RPM_FINGERPRINT='36F612DCF27F7D1A48A835E4DBFCF71C6D9F90A6'
+from .recovery_acquisition import legacy_candidate, load_spec
+_LEGACY = legacy_candidate()
+FEDORA_RELEASE = _LEGACY['fedora_release']
+KERNEL_RELEASE = _LEGACY['kernel_release']
+RPM_FINGERPRINT = _LEGACY['rpm_key_fingerprint']
 
 def recorded_packages():
     from .recovery_rootfs import validate_snapshot,_json
-    path=Path(__file__).parent/'profiles/stock-fedora44-rpm-candidate.v1.json'
+    path=Path(__file__).parent/'profiles'/legacy_candidate()['package_snapshot']
     return validate_snapshot(_json(path.read_bytes(),'recorded binary package candidate'))['packages']
 
 
-def acquisition_command(destination,*,release=FEDORA_RELEASE,kernel=KERNEL_RELEASE):
+def acquisition_command(destination,*,release=FEDORA_RELEASE,kernel=KERNEL_RELEASE,spec=None):
+    if spec is not None:
+        from .recovery_acquisition import acquisition_command as selected_command
+        return selected_command(destination, spec)
     destination=Path(destination)
     if (not destination.is_absolute() or destination.resolve()!=destination or destination.is_symlink()
             or not re.fullmatch(r'[0-9]{2}',release) or not kernel.endswith('.fc'+release+'.x86_64')
@@ -57,7 +62,10 @@ def _query(argv):
 
 def retain_packages(directory,public_key,store,diagnostics,*,builder_image_digest,
                     release=FEDORA_RELEASE,kernel=KERNEL_RELEASE,fingerprint=RPM_FINGERPRINT,
-                    query=_query,signature_runner=None):
+                    query=_query,signature_runner=None,spec=None):
+    if spec is not None:
+        spec = load_spec(canonical(spec))
+        release, kernel, fingerprint = spec['fedora_release'], spec['kernel_release'], spec['rpm_key_fingerprint']
     directory,public_key,diagnostics=map(Path,(directory,public_key,diagnostics))
     if any(not p.is_absolute() or p.resolve()!=p or p.is_symlink() for p in (directory,public_key,diagnostics)):
         raise BuildError('retained recovery inputs require canonical private paths')
@@ -80,9 +88,9 @@ def retain_packages(directory,public_key,store,diagnostics,*,builder_image_diges
         name,nevra=rows[0].split('\t')
         packages.append({'name':name,'nevra':nevra,'sha256':artifact.sha256}); paths.append(retained)
     packages.sort(key=lambda p:(p['name'],p['nevra']))
-    if release==FEDORA_RELEASE and kernel==KERNEL_RELEASE:
+    if spec is not None or (release==FEDORA_RELEASE and kernel==KERNEL_RELEASE):
         actual={p['name']:p for p in packages}
-        for expected in recorded_packages():
+        for expected in (spec['packages'] if spec is not None else recorded_packages()):
             if actual.get(expected['name'])!=expected:
                 raise BuildError('retained userspace package differs from recorded Fedora candidate')
     snapshot=store.put(canonical({'schema_version':1,'packages':packages})).sha256
@@ -108,6 +116,8 @@ def generate_recipe(lock_digest,store,*,recipe_id,builder_image_digest,source_da
     from .recovery_stock import validate_lock
     lock=validate_lock(_json(store.get(lock_digest),'stock rootfs lock'))
     if lock['builder_image_digest']!=builder_image_digest: raise BuildError('recipe builder differs from locked builder')
+    if recipe_id is None:
+        recipe_id = 'stock-recovery-' + lock_digest
     package_dir=Path(package_dir) if package_dir else Path(__file__).parent
     assets_dir=Path(assets_dir) if assets_dir else target_assets_dir()
     recipe={'schema_version':2,'recipe_id':recipe_id,'rootfs_lock_sha256':lock_digest,
@@ -134,6 +144,8 @@ def download(root,owner):
             raise BuildError('acquisition owner is unavailable or already downloaded')
         generation=managed_path(root,Path(json.loads(row['paths'])[0]))
         directory=generation/'rpms'
+        from .recovery_acquisition import bound_spec
+        spec=bound_spec(root,owner,generation)
         if any(directory.iterdir()): raise BuildError('acquisition RPM directory must be empty')
         token=ACTIVE_WORK.set(generation)
         with connection(root) as db:
@@ -148,7 +160,7 @@ def download(root,owner):
                 atomic_write(path,raw)
                 return str(path)
             output=CommandRunner(lambda phase,message:print(message.replace('OSTree command','Recovery package download'),flush=True),
-                lambda:None,timeout_s=7200,diagnostic=diagnostic)(list(acquisition_command(directory)))
+                lambda:None,timeout_s=7200,diagnostic=diagnostic)(list(acquisition_command(directory,spec=spec)))
             atomic_write(generation/'download.log',output.encode())
             proof=stop_proof(generation)
             proof['download_complete']=True
