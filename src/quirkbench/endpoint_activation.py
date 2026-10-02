@@ -1,14 +1,21 @@
 """Atomic first endpoint selection for an original enrolled target; no service action."""
 from itertools import islice
 from pathlib import Path
+import json
+import os
+import stat
 import subprocess
 import time
 
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
 from .controller_endpoint import _strict_read
+from .controller_setup import _private_path
 from .enrollment import _document
-from .enrollment_target import _media
+from .enrollment_activation import _bundle
+from .enrollment_proof import validate_request
+from .enrollment_result import validate_result
+from .enrollment_target import _media,_intent
 from .endpoint_generation import read_generation,verify_transition,_active
 from .endpoint_local import location
 from .endpoint_preflight import owned,validate_source
@@ -16,6 +23,7 @@ from .endpoint_probe import probe
 from .maintenance import private_lock
 from .provisioning import _publish_generation
 from .store import atomic_write
+from .state_reader import read_file
 
 
 def validate_activation(value):
@@ -38,17 +46,76 @@ def _selection(activation):
         'completion_sha256':digest(_completion(activation))})
 
 
+def _original_bundle(control,original):
+    pending=_private_path(control/'enrollment/pending');bundle=_private_path(pending/'activation-bundle')
+    if ({path.name for path in islice(pending.iterdir(),6)}!={'intent.json','request.json','result.json','key.pem','activation-bundle'}
+            or {path.name for path in islice(bundle.iterdir(),17)}!=set(original)
+            or any(_strict_read(bundle,name)!=raw for name,raw in original.items())):
+        raise Conflict('endpoint retained activation bundle differs from original enrollment')
+
+
 def _records(control,request_id):
+    from .endpoint_local import validate_intent
     directory=location(control,request_id);source_raw=_strict_read(directory,'source.json');source=validate_source(_document(source_raw))
-    activation=validate_activation(_document(_strict_read(directory,'activation.json')))
+    intent_raw=_strict_read(directory,'intent.json');intent=validate_intent(_document(intent_raw))
+    activation_raw=_strict_read(directory,'activation.json');activation=validate_activation(_document(activation_raw))
     record=source['transition']
-    if (activation['request_id']!=request_id or activation['source_sha256']!=digest(source_raw)
-            or activation['intent_sha256']!=source['intent_sha256'] or activation['intent_sha256']!=digest(_strict_read(directory,'intent.json'))
+    if (source_raw!=canonical(source) or intent_raw!=canonical(intent) or activation_raw!=canonical(activation)
+            or intent['request_id']!=request_id or record['request_id']!=request_id
+            or record['source_runtime_sha256']!=intent['runtime_sha256']
+            or any(record[name]!=intent[name] for name in ('controller_url','remote_urls','approved_certificate_sha256'))
+            or activation['request_id']!=request_id or activation['source_sha256']!=digest(source_raw)
+            or activation['intent_sha256']!=source['intent_sha256'] or activation['intent_sha256']!=digest(intent_raw)
             or activation['transition_sha256']!=digest(canonical(record)) or activation['generation']!=record['destination_generation']
             or activation['runtime_sha256']!=record['destination_runtime_sha256']):raise Conflict('endpoint activation differs from immutable original source')
+    pending=control/'enrollment/pending'
+    retained={name:_strict_read(pending,name) for name in ('intent.json','request.json','result.json','key.pem')}
+    enrollment_intent=_intent(_document(retained['intent.json']))
+    request=validate_request(_document(retained['request.json']));result=validate_result(_document(retained['result.json']),request)
+    if (digest(retained['request.json'])!=record['enrollment_request_sha256']
+            or digest(retained['result.json'])!=record['enrollment_result_sha256']
+            or request['target_binding']!=intent['target_binding'] or request['media_instance_id']!=intent['media_instance_id']
+            or result['device_id']!=intent['device_id'] or result['schema_version']!=1
+            or any(enrollment_intent[name]!=request[name] for name in ('request_id','code_id','media_instance_id','target_binding'))
+            or enrollment_intent['controller_url']!=result['controller_url']
+            or {path.name for path in islice(pending.iterdir(),6)}!=set(retained)|{'activation-bundle'}):
+        raise Conflict('endpoint original enrollment differs from retained evidence')
     original=read_generation(control,record['source_generation']);destination=read_generation(control,record['destination_generation'])
+    if original!=_bundle(result,request,retained['key.pem']) or digest(_active(original,record['source_generation']))!=intent['runtime_sha256']:
+        raise Conflict('endpoint source generation differs from original enrollment')
+    _original_bundle(control,original)
+    expected={'runtime.json':intent['runtime_sha256'],'media-instance.json':digest(_strict_read(control,'media-instance.json')),
+        'agent/journal.json':digest(canonical({'schema_version':1,'device_id':intent['device_id'],'pending':None,'claim_request_id':None})),
+        **{str(Path('enrollment/pending')/name):digest(raw) for name,raw in retained.items()},
+        **{str(Path('generations')/record['source_generation']/name):digest(raw) for name,raw in original.items()},
+        str(Path('generations')/record['source_generation']/'generation.json'):record['source_generation']}
+    if source['files']!=expected:raise Conflict('endpoint source map differs from exact original enrollment namespace')
     active=verify_transition(record,original,destination)
     return directory,source,activation,active
+
+
+def _journal(control,device_id):
+    """Existing private stable 4 MiB journal policy; no blob traversal."""
+    from .product_contracts import _pairs,_depth
+    agent=_private_path(control/'agent')
+    if not agent.is_dir() or not _private_path(agent/'blobs').is_dir():raise Conflict('endpoint original spool is missing')
+    _strict_read(agent,'agent.lock')
+    path=agent/'journal.json';before=path.lstat()
+    if (not stat.S_ISREG(before.st_mode) or stat.S_IMODE(before.st_mode)!=0o600
+            or before.st_uid!=os.geteuid() or before.st_nlink!=1):raise ContractError('endpoint journal must remain private and single-link')
+    raw=read_file(agent,'journal.json',limit=4*1024**2);after=path.lstat()
+    signature=lambda info:(info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+    if signature(before)!=signature(after):raise Conflict('endpoint journal changed during observation')
+    try:
+        value=json.loads(raw,object_pairs_hook=_pairs,
+            parse_constant=lambda _:(_ for _ in ()).throw(ContractError('nonfinite endpoint journal')));_depth(value)
+    except (ValueError,UnicodeError,RecursionError) as exc:raise ContractError('invalid endpoint journal') from exc
+    if (not isinstance(value,dict) or set(value)!={'schema_version','device_id','pending','claim_request_id'}
+            or type(value['schema_version']) is not int or value['schema_version']!=1 or raw!=canonical(value)
+            or value['device_id']!=device_id or value['pending'] is not None and not isinstance(value['pending'],dict)
+            or value['claim_request_id'] is not None and not isinstance(value['claim_request_id'],str)):
+        raise Conflict('endpoint selected spool differs from original attribution')
+    return raw
 
 
 def completed(control,request_id, *,binding_reader=None):
@@ -56,6 +123,8 @@ def completed(control,request_id, *,binding_reader=None):
     directory=location(control,request_id);intent=validate_intent(_document(_strict_read(directory,'intent.json')))
     verify_binding(intent['target_binding'],reader=binding_reader or read_system_uuid);_media(control,intent['media_instance_id'])
     directory,source,activation,active=_records(control,request_id)
+    if {path.name for path in islice(directory.parent.iterdir(),2)}!={directory.name}:
+        raise Conflict('completed endpoint has ambiguous retained requests')
     names={'intent.json','source.json','approved-controller.pem','capture-completion.json','activation.json','completion.json'}
     if {path.name for path in islice(directory.iterdir(),7)}!=names:raise Conflict('completed endpoint contains unknown retained records')
     import ssl
@@ -72,12 +141,7 @@ def completed(control,request_id, *,binding_reader=None):
     for name,checksum in source['files'].items():
         if name in ('runtime.json','agent/journal.json'):continue
         if digest(_strict_read(control/Path(name).parent,Path(name).name))!=checksum:raise Conflict('endpoint original enrollment/source changed')
-    journal=_document(_strict_read(control/'agent','journal.json'))
-    if (not isinstance(journal,dict) or set(journal)!={'schema_version','device_id','pending','claim_request_id'}
-            or type(journal['schema_version']) is not int or journal['schema_version']!=1 or journal['device_id']!=intent['device_id']
-            or journal['pending'] is not None and not isinstance(journal['pending'],dict)
-            or journal['claim_request_id'] is not None and not isinstance(journal['claim_request_id'],str)):
-        raise Conflict('endpoint selected spool differs from original attribution')
+    _journal(control,intent['device_id'])
     return {'request_id':request_id,'generation':activation['generation'],'activated':True,'boot_authorized':False,'rolled_back':False}
 
 
@@ -93,14 +157,37 @@ def activate(control,config,request_id, *,verify_target,binding_reader=read_syst
     from .boot import _verify_state_identity
     from .runtime import load_provisioning
     identifier(request_id)
-    (recovery_verifier or (lambda cfg:_verify_state_identity(cfg,Path('/boot/quirkbench-state'))))(config)
+    recover=recovery_verifier or (lambda cfg:_verify_state_identity(cfg,Path('/boot/quirkbench-state')))
+    recover(config)
     control,storage=_storage(control,verify_target);directory=location(control,request_id);fault=fault_hook or (lambda _:None)
     # First publication only; normal runtime continues to verify actual binding.
     if _public_retarget(control)[0] is not None:raise Conflict('completed-retarget endpoint activation requires its enrollment association adapter')
     if (control/'endpoint/active.json').exists():
         pointer=_document(_strict_read(control/'endpoint','active.json'))
         if pointer.get('schema_version')==2:
-            storage();return completed(control,request_id,binding_reader=binding_reader)
+            agent=_private_path(control/'agent');_strict_read(agent,'agent.lock');_strict_read(control,'runtime-config.lock')
+            with private_lock(control/'runtime-config.lock') as config_fd,private_lock(agent/'agent.lock') as agent_fd:
+                storage();recover(config)
+                receipt=completed(control,request_id,binding_reader=binding_reader)
+                _,source,activation,_=_records(control,request_id)
+                if digest(canonical(config.to_dict()))!=_document(_strict_read(directory,'intent.json'))['boot_config_sha256']:
+                    raise Conflict('completed endpoint boot configuration changed')
+                names={*source['files'], 'endpoint/active.json',
+                    *(str(path.relative_to(control)) for path in directory.iterdir()),
+                    *(str(Path('enrollment/pending/activation-bundle')/name) for name in read_generation(control,source['transition']['source_generation'])),
+                    *(str(Path('generations')/activation['generation']/name) for name in (*read_generation(control,activation['generation']),'generation.json'))}
+                snapshots={name:_strict_read(control/Path(name).parent,Path(name).name) for name in names if name!='agent/journal.json'}
+                journal=_journal(control,_document(_strict_read(directory,'intent.json'))['device_id'])
+                storage();recover(config)
+                for path,fd in ((control/'runtime-config.lock',config_fd),(agent/'agent.lock',agent_fd)):
+                    held=os.fstat(fd);named=path.lstat()
+                    if (held.st_dev,held.st_ino)!=(named.st_dev,named.st_ino):raise Conflict('completed endpoint ownership changed')
+                if any(_strict_read(control/Path(name).parent,Path(name).name)!=raw for name,raw in snapshots.items()):
+                    raise Conflict('completed endpoint bytes changed during owned observation')
+                if _journal(control,_document(_strict_read(directory,'intent.json'))['device_id'])!=journal:
+                    raise Conflict('completed endpoint journal changed during owned observation')
+                if completed(control,request_id,binding_reader=binding_reader)!=receipt:raise Conflict('completed endpoint receipt changed')
+                return receipt
     source=validate_source(_document(_strict_read(directory,'source.json')));record=source['transition']
     expected=validate_activation({'schema_version':1,'record_type':'target-endpoint-activation','request_id':request_id,
         'source_sha256':digest(canonical(source)),'intent_sha256':source['intent_sha256'],'transition_sha256':digest(canonical(record)),
@@ -123,8 +210,16 @@ def activate(control,config,request_id, *,verify_target,binding_reader=read_syst
         directory,record,files,destination,request,result,pem,owned_exact,deadline=view
         active=verify_transition(record,files,destination)
         if digest(active)!=expected['runtime_sha256']:raise Conflict('endpoint owned source differs from activation scope')
+        def published_exact():
+            _original_bundle(control,files)
+            if (read_generation(control,expected['generation'])!=destination or _strict_read(control,'runtime.json')!=active
+                    or _strict_read(directory,'activation.json')!=canonical(expected)
+                    or _strict_read(directory,'completion.json')!=_completion(expected)
+                    or _strict_read(control/'endpoint','active.json')!=_selection(expected)):
+                raise Conflict('endpoint final destination or receipt bytes changed')
         def exact():
             owned_exact()
+            _original_bundle(control,files)
             if retained and _strict_read(directory,'activation.json')!=canonical(expected):raise Conflict('endpoint activation intent changed')
             for check in final_checks:check()
         kwargs={} if response is None else {'response':response}
@@ -148,5 +243,8 @@ def activate(control,config,request_id, *,verify_target,binding_reader=read_syst
         atomic_write(control/'endpoint/active.json',_selection(expected));selected=True
         fault('endpoint_completed');exact()
         if read_generation(control,generation)!=destination:raise Conflict('endpoint generation changed before receipt')
+        # owned runs these after its LAST native guard. Byte fencing precedes
+        # the captured trust/credential freshness and original deadline checks.
+        final_checks.insert(0,published_exact)
         for check in final_checks:check()
         return {'request_id':request_id,'generation':generation,'activated':True,'boot_authorized':False,'rolled_back':False}

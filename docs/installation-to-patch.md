@@ -866,3 +866,32 @@ cleanup/expiry and source-canonical checks. Higher-reasoning review approved the
 source-only boundary. No activation/unpause, work/contact/approval, live service,
 media/image or release qualification occurred. Atomic target selection/rollback,
 enrollment association readers and wizard/native commissioning remain open.
+
+Development paused at the user's request on 2026-10-01 after local boundary-review
+corrections. First original-enrollment atomic endpoint selection is implemented and
+reviewed at software scope. Initial focused evidence:
+
+```sh
+.venv/bin/python -m pytest tests/test_endpoint_activation.py --basetemp=/var/tmp/quirkbench-m2-first-endpoint-activation-01a0f80e --tb=short
+```
+
+**18 passed** (29.05 s). The subsequent authorized corrections reconstruct original
+enrollment and bind immutable intent in completed readers, hold existing ownership
+locks/recapture recovery/storage and preserve stable private journals up to 4 MiB on
+completed ACK, and fence destination/runtime/receipt bytes after the final native
+guard before freshness/deadline checks. Original retained activation-bundle bytes
+and namespace remain exact before effects and at the final fence; orphan requests
+are refused. Coherently rewritten generation credentials cannot replace original
+enrollment evidence; no clear/HTTP or later journal reset occurs on completed ACK.
+
+```sh
+.venv/bin/python -m pytest tests/test_endpoint_activation.py --basetemp=/var/tmp/quirkbench-endpoint-review-regressions-01a0f80e --tb=short
+.venv/bin/python -m pytest tests/test_endpoint_activation.py tests/test_endpoint_preflight.py tests/test_endpoint_local.py --basetemp=/var/tmp/quirkbench-endpoint-review-final-01a0f80e --tb=short
+.venv/bin/python -m pytest tests/test_endpoint_activation.py --basetemp=/var/tmp/quirkbench-endpoint-activation-guard-alignment-01a0f80e --tb=short
+```
+
+**34 passed** (53.62 s), **91 passed** (114.95 s), then final **47 passed** (75.03 s)
+after retained-bundle/orphan guard alignment. Higher-reasoning boundary re-review
+approved the final narrow scope. No next packet, live installation, image production
+or release qualification was started. Exact rollback, retarget/repeated association
+and wizard/native commissioning remain open; full M1/M2 acceptance remains open.

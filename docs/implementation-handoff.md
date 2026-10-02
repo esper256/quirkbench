@@ -439,7 +439,23 @@ Captured non-native trust/credential freshness follows the final owned/native/so
 checks; no activation/unpause is exposed. Focused 16 checks passed, with final
 cleanup freshness checks recorded in the checklist.
 
-Next bounded software packet: atomic stopped target endpoint activation and exact enrollment association readers (P3f/C4/C8). Keep code creation, authentication,
+Next bounded software packet: exact stopped target endpoint rollback, followed by
+completed-retarget and repeated endpoint association readers (P3f/C4/C8). Keep code creation, authentication,
 enrollment and exact-attempt approval separate. Production publisher provisioning/
 publication does not block ready software work with explicit fixtures. M1 release
 acceptance remains open.
+
+Development paused at the user's request on 2026-10-01 after authorized local review
+corrections. First original-enrollment atomic endpoint selection is implemented and
+boundary-reviewed in `endpoint_activation.py`, using the existing private publication
+phase and completed-pointer readers. Completed reads reconstruct original enrollment
+and bind the transition to immutable intent; completed ACK retains both existing
+owners, recaptures recovery/storage and supports stable private journals up to 4 MiB.
+Exact retained initial activation-bundle/namespace checks precede effects and the
+final destination/runtime/receipt byte fence after the last native guard, before
+trust freshness/deadline checks. Orphan requests remain unavailable. Focused 91 checks
+passed, then final 47 activation checks passed after guard alignment; see checklist.
+
+No next packet was started. Exact rollback, completed-retarget association, repeated
+endpoint history and guided wizard/native acceptance remain open. No live installation
+or release qualification was run; full M1/M2 acceptance is still open.
