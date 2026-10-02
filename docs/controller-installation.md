@@ -17,6 +17,57 @@ manager; use a native Linux host/VM with that capability to run the controller.
 The controller also needs connectivity to its targets; a cloud coding environment
 does not acquire that connectivity by installing Quirkbench.
 
+## Choosing the controller host
+
+The editing environment and the durable controller may be different machines.
+Choose the controller by its execution capabilities, rather than its distribution
+name. In particular, a Fedora Distrobox shell on Bazzite is an editing environment;
+the native Bazzite login session owns the controller user service and its rootless
+workers. A cloud container without a user manager can use the same software
+development workflow, while a separate Linux host or VM owns real execution.
+
+On the intended controller, from its native user login, inspect prerequisites:
+
+```sh
+python3 --version
+systemctl --user show-environment >/dev/null
+stat -fc %T /sys/fs/cgroup
+podman info --format '{{.Host.Security.Rootless}} {{.Host.CgroupsVersion}}'
+command -v ostree gpg gpgconf openssl
+```
+
+Require Python 3.11+, a reachable user manager, `cgroup2fs`, and rootless Podman
+with cgroups v2 for durable build workers. OSTree/GnuPG are needed for the
+composition/publication workflow; OpenSSL is needed for initial TLS setup. These
+are prerequisite observations, not verification of worker containment or readiness.
+Install missing tools through the chosen host's supported package mechanism; the
+development container's packages and service manager do not establish host readiness.
+Do not invent bus/runtime variables or run a worker directly to bypass its service.
+
+For a separate controller host/VM, package the development archive below and
+transfer it using an authenticated channel such as SSH. Extract and install it
+there under that user's home, using the controller host's Python. Do not copy a
+development virtualenv: its interpreter, native extensions and executable paths
+belong to the machine that created it. Keep controller state, signing keys and
+installed runtime on the controller host, outside Git checkouts. Reprovision a
+new controller through the existing setup/trust flow rather than sharing one live
+state directory between machines.
+
+Continue with [initial native user-service setup](#initial-native-user-service-setup)
+on that host, then use `status --json` and `setup-check` to observe its current
+readiness. Builder preparation, authenticated target enrollment, and explicit
+attempt approval remain separate steps. Configure target/repository connectivity
+on the controller host through the existing endpoint and trust settings; the
+editing container does not supply that connectivity. There is no implemented CLI
+that submits local cloud commands to a remote controller automatically.
+
+This route preserves the same systemd ownership and worker containment on Bazzite
+and other Linux hosts. It does not provide durable execution inside a container
+without those capabilities; [issue #4](https://github.com/esper256/quirkbench/issues/4)
+continues to track that additional runtime support.
+
+## Signing prerequisites
+
 Production recovery and OSTree composition signing use the explicitly configured
 external GnuPG home. Before configuring it, check
 `gpgconf --homedir /absolute/private/signing-home --list-dirs agent-socket` and
@@ -28,6 +79,8 @@ to path length, provision a shorter private signing home or a supported GnuPG so
 directory before signing. Do not relocate keys into worker/output directories.
 Release-download verification uses an isolated public keyring with `--no-autostart`
 and does not need a signing agent; shortening its input paths is unnecessary.
+
+## Packaging and installation
 
 The controller can now be packaged as an unsigned development archive, with
 Python code, target assets, schemas, examples and the agent guide. It runs from

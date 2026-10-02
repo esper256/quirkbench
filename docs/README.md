@@ -11,6 +11,7 @@ read-through. Superseded plans, run logs and investigation histories live in Git
 | Delivery order and feature gaps | [Roadmap](product-roadmap.md), [command checklist](installation-to-patch.md) |
 | Implementation rules | Relevant [C0–C7 contract](implementation-contracts.md), [C8 interface](product-interface.md) |
 | Current installation and commands | [Controller installation](controller-installation.md), [agent guide](agent-guide.md) |
+| Controller deployment from a cloud container or Distrobox | [Choosing the controller host](controller-installation.md#choosing-the-controller-host) |
 | Recovery inputs, image production and manual target setup | [Acquisition](recovery-acquisition.md), [recovery operations](recovery-operations.md) |
 | Kernel builds and deployments | [Build and boot](build-and-boot.md), [builder environment](../environments/README.md) |
 | State, cleanup and visibility | [Retention](local-state-maintenance.md), [monitoring](monitoring.md) |
