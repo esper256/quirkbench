@@ -66,7 +66,7 @@ conventions, not required approvals or branch-protection enforcement.
 Follow [testing policy](docs/testing-policy.md):
 
 - `make smoke` or default `make test`: quick sanity check.
-- `make test TESTS=tests/test_feature.py`: affected software regressions.
+- `make test TESTS=tests/test_monitor.py`: affected software regressions.
 - `make test-full` or manual full CI: larger integration milestones, not every fix.
 - Documentation: link/consistency checks and `git diff --check`.
 - Real image/QEMU/composition/endurance qualification: explicit final major-version
