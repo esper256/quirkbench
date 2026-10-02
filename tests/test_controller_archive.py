@@ -16,6 +16,16 @@ from quirkbench.controller_archive import build_controller_archive
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_missing_packaging_dependencies_have_actionable_error_before_staging(tmp_path):
+    output = tmp_path / 'controller.tar.gz'
+    result = subprocess.run([sys.executable, '-S', str(ROOT / 'environments/build-controller-archive.py'),
+                             '--output', str(output)], capture_output=True, text=True, timeout=20,
+                            env={**os.environ, 'PYTHONPATH': ''})
+    assert result.returncode == 2
+    assert 'setuptools and wheel' in result.stderr and "pip install -e '.[test]'" in result.stderr
+    assert not output.exists()
+
+
 def test_archive_runs_relocated_without_checkout_and_keeps_selected_state(tmp_path):
     output = tmp_path / 'controller.tar.gz'
     package = subprocess.run([sys.executable, str(ROOT / 'environments/build-controller-archive.py'),

@@ -7,6 +7,7 @@ read-through. Superseded plans, run logs and investigation histories live in Git
 | --- | --- |
 | Desired finished product | [Product manual](../README.md); its warning distinguishes proposed behavior |
 | Next development task | [Implementation handoff](implementation-handoff.md) |
+| Local or cloud software development | [Development setup and tests](testing-policy.md#portable-software-development) |
 | Delivery order and feature gaps | [Roadmap](product-roadmap.md), [command checklist](installation-to-patch.md) |
 | Implementation rules | Relevant [C0–C7 contract](implementation-contracts.md), [C8 interface](product-interface.md) |
 | Current installation and commands | [Controller installation](controller-installation.md), [agent guide](agent-guide.md) |

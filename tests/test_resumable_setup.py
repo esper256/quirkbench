@@ -164,6 +164,7 @@ def test_journal_symlink_and_checkout_state_refused(tmp_path):
     (config / 'setup-progress.json').unlink()
     tree = tmp_path / 'checkout'
     tree.mkdir(); (tree / '.git').mkdir()
+    (tree / '.git/HEAD').write_text('ref: refs/heads/main\n')
     with pytest.raises(ContractError, match='outside a Git checkout'):
         setup_controller(tree / 'state', config_home=tmp_path / 'config', **observations())
     assert not (tree / 'state').exists()

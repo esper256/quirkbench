@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Package a development controller without building any kernel or image."""
 import argparse
+import importlib.util
 import json
 from pathlib import Path
 import shutil
@@ -18,6 +19,9 @@ def main():
     from quirkbench.controller_archive import build_controller_archive
     if args.output.exists() or args.output.is_symlink():
         parser.error('output must be new')
+    if any(importlib.util.find_spec(name) is None for name in ('setuptools', 'wheel')):
+        parser.exit(2, "Archive packaging needs setuptools and wheel in this interpreter. "
+                       "Install the development dependencies with: python -m pip install -e '.[test]'\n")
     with tempfile.TemporaryDirectory(prefix='quirkbench-controller-package-') as temporary:
         project = Path(temporary) / 'project'
         project.mkdir()

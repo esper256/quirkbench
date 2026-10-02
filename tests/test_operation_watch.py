@@ -15,7 +15,7 @@ def test_watch_once_preserves_active_worker_and_lifecycle_epoch(tmp_path, capsys
     controller = Controller(tmp_path / 'state', reserve_bytes=0)
     with controller.lifecycle() as owner:
         operation = controller.admit_operation('watch', 'image_prepare', {})
-        claim = owner.claim(operation['id'], stage='build', deadline=controller.clock() + 60)
+        claim = owner.claim(operation['id'], stage='recovery_rootfs', deadline=controller.clock() + 60)
         assert main(['--state', str(controller.root), '--reserve-gib', '0',
                      'operation', 'watch', operation['id'], '--once', '--json']) == 0
         assert json.loads(capsys.readouterr().out)['data'] == claim
@@ -28,7 +28,7 @@ def test_watch_tracks_completion_without_measuring_fake_progress(tmp_path):
     controller = Controller(tmp_path / 'state', reserve_bytes=0)
     with controller.lifecycle() as owner:
         operation = controller.admit_operation('watch', 'image_prepare', {})
-        claim = owner.claim(operation['id'], stage='build', deadline=controller.clock() + 60)
+        claim = owner.claim(operation['id'], stage='recovery_rootfs', deadline=controller.clock() + 60)
         waits = []
         def advance(interval):
             waits.append(interval)

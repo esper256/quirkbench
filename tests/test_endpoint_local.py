@@ -108,7 +108,7 @@ def test_exact_orphan_pointer_retry_and_unknown_file_refusal(active):
 
 def test_pending_endpoint_prevents_any_retarget_effect(active):
     control=active[0];prepare(active);clears=[]
-    with pytest.raises(BindingError):retarget_local.prepare_retarget(control,CONFIG,'retarget-new',active[1]['device_id'],
+    with pytest.raises(Conflict,match='finish stopped endpoint maintenance'):retarget_local.prepare_retarget(control,CONFIG,'retarget-new',active[1]['device_id'],
         'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',verify_target=lambda:True,binding_reader=lambda:'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
         clearer=lambda _:clears.append(True),recovery_verifier=lambda _:True)
     assert clears==[] and not (control/'retarget').exists()

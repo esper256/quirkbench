@@ -130,11 +130,11 @@ def test_cli_all_or_none_and_verification_before_publication(inputs, tmp_path, m
     assert receipt['controller_archive_authenticated'] and not receipt['other_release_assets_verified']
 
 
-def test_real_gpg_detached_verification_uses_only_fixture_trust(inputs, tmp_path):
+def test_real_gpg_detached_verification_uses_only_fixture_trust(inputs, tmp_path, signing_home):
     if not shutil.which('gpg'):
         pytest.skip('native gpg unavailable')
     archive, _, _, raw, _ = inputs
-    home = tmp_path / 'fixture-gpg'; home.mkdir(mode=0o700)
+    home = signing_home
     common = ['gpg', '--batch', '--no-tty', '--no-options', '--homedir', str(home)]
     def run(args, **kwargs):
         return subprocess.run([*common, *args], check=True, capture_output=True, timeout=15, **kwargs)
@@ -147,9 +147,6 @@ def test_real_gpg_detached_verification_uses_only_fixture_trust(inputs, tmp_path
     run(['--pinentry-mode', 'loopback', '--passphrase', '', '--output', str(sig), '--detach-sign', str(payload)])
     public = tmp_path / 'fixture-public.asc'; public.write_bytes(run(['--armor', '--export', fingerprint]).stdout)
     assert verify_release(archive, raw, sig.read_bytes(), public, fingerprint)['controller_archive_authenticated']
-    if shutil.which('gpgconf'):
-        subprocess.run(['gpgconf', '--homedir', str(home), '--kill', 'gpg-agent'],
-                       check=True, capture_output=True, timeout=15)
 
 
 def test_supplied_release_assets_authenticate_exact_bytes_without_qualification(inputs, tmp_path):

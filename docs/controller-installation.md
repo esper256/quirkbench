@@ -7,6 +7,28 @@ and worker below remain partial implementation, not evidence of that complete jo
 [delivery order](product-roadmap.md#delivery-contract) and the
 [storage policy](architecture.md#storage-protection-policy).
 
+For cloud or container **software development**, start with the
+[portable development instructions](testing-policy.md#portable-software-development).
+Installing the Python package, running software tests and packaging an archive do
+not require the native controller services described below. Those services are
+needed for durable real execution, not to implement the remaining product.
+There is currently no alternative supervisor for containers without a systemd user
+manager; use a native Linux host/VM with that capability to run the controller.
+The controller also needs connectivity to its targets; a cloud coding environment
+does not acquire that connectivity by installing Quirkbench.
+
+Production recovery and OSTree composition signing use the explicitly configured
+external GnuPG home. Before configuring it, check
+`gpgconf --homedir /absolute/private/signing-home --list-dirs agent-socket` and
+`gpgconf --homedir /absolute/private/signing-home --launch gpg-agent`.
+On Linux, a pathname socket must fit within 107 bytes plus its terminator; a valid
+filesystem path can still be too long for the agent. GnuPG may select a shorter
+runtime socket directory, so inspect its actual choice. If agent launch fails due
+to path length, provision a shorter private signing home or a supported GnuPG socket
+directory before signing. Do not relocate keys into worker/output directories.
+Release-download verification uses an isolated public keyring with `--no-autostart`
+and does not need a signing agent; shortening its input paths is unnecessary.
+
 The controller can now be packaged as an unsigned development archive, with
 Python code, target assets, schemas, examples and the agent guide. It runs from
 an extracted directory without a checkout or virtualenv. Python 3.11+ must
@@ -86,6 +108,18 @@ revision identities. A stored advertisement alone is not live readiness.
 The current directory never selects a new `.quirkbench` root. Existing configured
 selections remain authoritative; explicit legacy paths remain available for read-only
 inspection. New state/build staging inside Git checkouts is rejected.
+Empty sandbox `.git` guards are allowed; linked worktrees and ambiguous metadata
+remain blocked. Controller build paths may also use explicitly selected private
+scratch beneath `/var/tmp` or a build-storage volume under `/mnt` or `/media`.
+Create a dedicated directory owned by the executing user with mode `0700` first
+(for example `/mnt/build-volume/quirkbench`). The volume must already be mounted;
+Quirkbench does not mount it or change permissions. The directory must be below the
+mount root, contain no nested mounts and have no symlink or unsafe writable
+ancestors. Paths below it must remain user-owned and not writable by other users.
+Shared sticky temporary parents are allowed. System trees such as `/var/lib`,
+`/dev`, `/etc` and `/usr` remain forbidden. Use home state or a persistent volume
+for durable work; temporary storage may be cleaned by the host. These controller
+path choices do not change the target's boot-device-only storage policy.
 Use `quirkbench monitor` for the manual terminal dashboard; see [monitoring](monitoring.md).
 Without an installed archive, the checkout's `./environments/quirkbench` development
 launcher exposes the same commands without relying on a moved virtualenv's shebang.

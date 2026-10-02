@@ -55,7 +55,8 @@ def inspect_user_manager(*, runner: Callable = _run, uid: int | None = None,
     if in_distrobox:
         instructions.append("Run quirkbench setup-check in a controller host shell to verify host services and builder tools.")
     elif manager == "unavailable":
-        instructions.append("Start a login session with a systemd user manager, then run systemctl --user status.")
+        instructions.append("For durable controller execution, use a Linux host or VM with a systemd user manager, then run systemctl --user status.")
+        instructions.append("Software development, tests and the simulated demo do not require a systemd user manager; see docs/testing-policy.md.")
     if linger == "disabled":
         instructions.append("To keep user services after the last logout, optionally run loginctl enable-linger $USER.")
     elif linger == "unknown":

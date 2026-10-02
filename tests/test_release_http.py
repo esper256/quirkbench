@@ -119,12 +119,15 @@ def test_real_local_https_preserves_original_hostname_and_requires_native_san(ce
         server.shutdown();server.server_close();worker.join(2)
 
 
-def test_locally_signed_install_uses_injected_trust_and_native_https_only(inputs,tmp_path,cert_files,monkeypatch):
+def test_locally_signed_install_uses_injected_trust_and_native_https_only(inputs,tmp_path,cert_files,monkeypatch,signing_home):
     from quirkbench.contracts import canonical,digest
     from quirkbench.installed_release import inspect_selected
     if not shutil.which('gpg'):pytest.skip('native gpg unavailable')
     archive,_,_,raw,_=inputs
-    home=tmp_path/'fixture-signing';home.mkdir(mode=0o700)
+    # Keep this regression longer than a Linux AF_UNIX pathname even when pytest
+    # itself uses a short base; signatures and HTTPS still use native tools.
+    tmp_path=tmp_path/('nested-signature-fixture-'*5);tmp_path.mkdir()
+    home=signing_home
     command=['gpg','--batch','--no-tty','--no-options','--homedir',str(home)]
     def gpg(args):return subprocess.run([*command,*args],check=True,capture_output=True,timeout=15).stdout
     server=None;worker=None
@@ -164,5 +167,3 @@ def test_locally_signed_install_uses_injected_trust_and_native_https_only(inputs
         assert inspect_selected(Path(result['runtime_root']),config_home=args['config_home'],trust_bundle=trust)==verified
     finally:
         if server is not None:server.shutdown();server.server_close();worker.join(2)
-        if shutil.which('gpgconf'):
-            subprocess.run(['gpgconf','--homedir',str(home),'--kill','gpg-agent'],check=True,capture_output=True,timeout=15)

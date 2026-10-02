@@ -22,8 +22,35 @@ class StateConfigurationError(ContractError):
 def outside_checkout(path: Path) -> Path:
     """New persistent work must never depend on a checkout's ignore rules."""
     path = Path(path).expanduser().resolve()
-    if any((parent / '.git').exists() for parent in (path, *path.parents)):
-        raise StateConfigurationError('persistent state/build staging must be outside a Git checkout')
+    for parent in (path, *path.parents):
+        marker = parent / '.git'
+        try:
+            before = marker.lstat()
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        except OSError as exc:
+            raise StateConfigurationError('cannot inspect Git checkout metadata') from exc
+        # Some sandboxes reserve empty .git directories outside the checkout.
+        # Only a proven-empty ordinary directory is harmless. Files (including
+        # worktree gitfiles), links, partial repositories and unreadable markers
+        # remain blocked, without invoking Git or trusting repository config.
+        empty = False
+        if stat.S_ISDIR(before.st_mode):
+            try:
+                fd = os.open(marker, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                try:
+                    with os.scandir(fd) as entries:
+                        empty = next(entries, None) is None
+                    opened, after = os.fstat(fd), marker.lstat()
+                    signature = lambda info: (info.st_dev, info.st_ino, info.st_mode,
+                                              info.st_mtime_ns, info.st_ctime_ns)
+                    empty = empty and signature(before) == signature(opened) == signature(after)
+                finally:
+                    os.close(fd)
+            except OSError as exc:
+                raise StateConfigurationError('cannot inspect Git checkout metadata') from exc
+        if not empty:
+            raise StateConfigurationError('persistent state/build staging must be outside a Git checkout')
     return path
 
 

@@ -1,5 +1,42 @@
 # Testing and agent quota
 
+## Portable software development
+
+Editing, software tests, the simulated demo and unsigned controller packaging can
+run on a Linux development host or cloud container. They do not require Bazzite,
+Fedora on the host, Distrobox, a systemd user manager, Podman, OSTree or access to a
+target computer. Use Python 3.11+, Git and the test dependencies below. Some native
+tool checks also use OpenSSL/GnuPG; unavailable tools must be reported as such.
+The test extra includes setuptools and wheel for archive packaging; pip's isolated
+build-system dependencies alone do not install these into a development virtualenv.
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -e '.[test]'
+make test
+```
+
+Keep temporary test state and build staging outside the checkout. Pytest's normal
+temporary directory is suitable, including a sandbox parent with an empty `.git`
+guard. Real repositories, linked worktrees and ambiguous Git metadata remain
+excluded. For a custom location, create a private directory and pass
+`--basetemp=/absolute/private/directory/run` to pytest; pytest deletes that run
+directory, so never point it at existing state. Tests should work with either
+`umask 022` or `umask 077`; do not change a cloud host's permissions to appease a
+fixture. CI exercises both settings.
+Native signing fixtures allocate short private homes separately from pytest's
+temporary root because GnuPG agent sockets have a pathname limit. They use only
+disposable test keys and stop their own agent before removing the home.
+
+This development environment is separate from the machine running the controller.
+The currently supported durable controller uses native systemd user services,
+with rootless Podman for build workers. A Linux VM with those capabilities is a
+possible deployment route; a container without a user manager is development-only.
+Missing runtime capabilities do not prevent software development and must not be
+reported as ready. See [controller installation](controller-installation.md).
+
+## Validation scope
+
 Agent tokens per useful finding are the primary optimization. Routine development
 uses focused software regressions. Expensive end-to-end qualification runs only
 for an explicitly requested final release of a major version, against a stable

@@ -2,6 +2,27 @@ from datetime import datetime, timedelta, timezone
 import ipaddress
 import pytest
 
+
+@pytest.fixture
+def signing_home():
+    """Native fixture signing needs a short AF_UNIX socket, regardless of TMPDIR."""
+    from pathlib import Path
+    import shutil
+    import subprocess
+    import tempfile
+
+    if not shutil.which('gpg') or not shutil.which('gpgconf'):
+        pytest.skip('native gpg and gpgconf required for signing and agent cleanup')
+    # /tmp is an intentional socket-length constraint, not a controller state
+    # default. mkdtemp creates a unique private home; no user keyring is touched.
+    with tempfile.TemporaryDirectory(prefix='qb-gpg-', dir='/tmp') as directory:
+        home = Path(directory)
+        try:
+            yield home
+        finally:
+            subprocess.run(['gpgconf', '--homedir', str(home), '--kill', 'gpg-agent'],
+                           check=True, capture_output=True, timeout=15)
+
 @pytest.fixture(scope='session')
 def cert_files(tmp_path_factory):
     from cryptography import x509

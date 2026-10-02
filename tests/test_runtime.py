@@ -210,10 +210,11 @@ def test_control_symlink_is_rejected_before_chmod_or_agent_creation(tmp_path, mo
     context = setup_main(tmp_path, monkeypatch, 'experiment', configured=False)
     other = tmp_path / 'other'
     other.mkdir(mode=0o755)
+    original_mode = other.stat().st_mode
     context.control.rmdir()
     context.control.symlink_to(other, target_is_directory=True)
     assert runtime.main(['--once']) == 1
-    assert other.stat().st_mode & 0o777 == 0o755
+    assert other.stat().st_mode == original_mode
     assert context.resets[0][1]['mode'] == 'experiment'
     assert context.steps == []
 

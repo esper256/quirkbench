@@ -109,8 +109,9 @@ def test_source_root_link_cannot_change_outside_mode(prepared, tmp_path):
     entry, record, source_stage, stage, store = prepared
     source = source_stage/'source'; source.rename(source_stage/'saved-source')
     outside = tmp_path/'outside'; outside.mkdir(mode=0o755); source.symlink_to(outside)
+    original_mode = outside.stat().st_mode
     with pytest.raises(Conflict, match='root is linked'): run(prepared)
-    assert outside.stat().st_mode & 0o777 == 0o755 and list(outside.iterdir()) == []
+    assert outside.stat().st_mode == original_mode and list(outside.iterdir()) == []
 
 
 def test_import_identity_is_fixed_and_not_a_general_git_environment(prepared):
