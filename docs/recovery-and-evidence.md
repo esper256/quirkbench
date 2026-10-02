@@ -55,8 +55,9 @@ requires reconciliation; it is not automatically repeated.
 ## Failure coverage to qualify on the target
 
 Capture-kernel rows below describe deferred capability, not current image behavior.
-The [forward plan](product-roadmap.md) prioritizes actual watchdog driver support,
-an attended baseline round trip and diagnostic logs before that extension.
+The [roadmap](product-roadmap.md) prioritizes the attended baseline round trip
+and diagnostic evidence. Optional unattended/reset qualification remains a later
+[separate task](https://github.com/esper256/quirkbench/issues/46).
 
 | Failure | Route back to recovery | Evidence and remaining limit |
 | --- | --- | --- |

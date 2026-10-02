@@ -2,7 +2,9 @@
 
 Current monitoring shows build and recovery/experiment state without invoking an
 agent. Connection, candidate eligibility and operator approval are separate facts.
-Guided setup and investigation views remain planned in the [roadmap](product-roadmap.md).
+Remaining guided integration and investigation views are tracked in
+[GitHub #29](https://github.com/esper256/quirkbench/issues/29); the
+[roadmap](product-roadmap.md) defines scope.
 
 Run `quirkbench setup-state` once, then open `quirkbench monitor` manually in an
 existing terminal. State defaults to `$XDG_STATE_HOME/quirkbench`, or
