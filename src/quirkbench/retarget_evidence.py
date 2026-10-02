@@ -19,7 +19,7 @@ from .evidence_drain_target import _journal_at,_journal_digest,_source,_export_l
 from .maintenance import private_lock
 from .retarget_activation import completed,_records,_new_view
 from .retarget_enrollment import _same_source_scope
-from .retarget_local import pending_intent,_location,validate_intent,_capture_source,_history
+from .retarget_local import pending_intent,_location,validate_intent,_capture_source,_history,_private_journal
 from .release_http import _remaining
 from .state_reader import read_file
 
@@ -30,7 +30,7 @@ def _archived(control,config,retarget_id,verify_target,binding_reader,recovery_v
     identifier(retarget_id);_remaining(deadline,clock)
     recover=recovery_verifier or (lambda config:_verify_state_identity(config,Path('/boot/quirkbench-state')))
     recover(config);control,storage=_storage(control,verify_target)
-    with private_lock(control/'runtime-config.lock'):
+    with private_lock(control/'runtime-config.lock') as config_fd:
         directory=_location(control,retarget_id);intent=validate_intent(_document(_read(directory,'intent.json')))
         if digest(canonical(config.to_dict()))!=intent['boot_config_sha256']:raise Conflict('archived drain boot identity differs from retarget')
         # Current head, not historical hardware, gates all credential access.
@@ -54,7 +54,7 @@ def _archived(control,config,retarget_id,verify_target,binding_reader,recovery_v
             def basic():
                 _remaining(deadline,clock);storage();recover(config)
                 verify_binding(head['new_target_binding'],reader=binding_reader)
-                for path,fd in ((new_agent/'agent.lock',new_fd),(old_agent/'agent.lock',old_fd)):
+                for path,fd in ((control/'runtime-config.lock',config_fd),(new_agent/'agent.lock',new_fd),(old_agent/'agent.lock',old_fd)):
                     held=os.fstat(fd);named=path.lstat()
                     if (held.st_dev,held.st_ino)!=(named.st_dev,named.st_ino):raise Conflict('archived drain lock ownership changed')
                 if (_read(control/'retarget','active.json')!=pointer or _read(control,'runtime.json')!=runtime
@@ -68,7 +68,7 @@ def _archived(control,config,retarget_id,verify_target,binding_reader,recovery_v
             locations=(archive,archive/'enrollment-pending',old_agent)
             # The immutable raw snapshot pins attribution; only ACK/offset fields
             # can differ in the mutable original journal after scoped drains.
-            snapshot_raw=read_file(archive,'journal.initial.json',limit=4*1024**2)
+            snapshot_raw=_private_journal(archive,name='journal.initial.json')
             if digest(snapshot_raw)!=source['files']['agent/journal.json']:raise Conflict('original retarget journal snapshot changed')
             snapshot=_journal_at(archive,'journal.initial.json');frozen=_journal_digest(snapshot,None)
             def full():
@@ -80,12 +80,22 @@ def _archived(control,config,retarget_id,verify_target,binding_reader,recovery_v
                 captured=_capture_source(control,intent,basic,locations=locations)
                 captured['files']['agent/journal.json']=digest(snapshot_raw)
                 if captured!=source:raise Conflict('static archived enrollment or original generation changed')
-                original=_document(_read(locations[1],'result.json'))
+                from .retarget_endpoint import original as original_endpoint
+                original=original_endpoint(control,intent,locations=locations)
                 _,result,_,_=_new_view(directory,intent,activation)
                 _same_source_scope(result,original,intent)
-                basic()
+                if _private_journal(archive,name='journal.initial.json')!=snapshot_raw:
+                    raise Conflict('immutable original attribution snapshot changed during capture')
+                if _journal_digest(_journal_at(old_agent),None)!=frozen:
+                    raise Conflict('archived original attribution changed during capture')
+                _remaining(deadline,clock)
             full()
-            def source_reader(check):return _source(control,check,locations=locations)
+            def source_reader(check):
+                selected=None
+                if intent['schema_version']==3:
+                    from .retarget_endpoint import files as endpoint_files
+                    check();selected=endpoint_files(control,intent,locations=locations)
+                return _source(control,check,locations=locations,_endpoint_files=selected)
             yield control,full,source_reader,old_agent
             full();_remaining(deadline,clock)
 

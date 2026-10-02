@@ -134,7 +134,7 @@ def run_worker(root,operation,epoch,generation,stage):
     row=StateReader(root).operation_status(operation)['data']
     def verify(): return read_active_worker_claim(root,operation,epoch,generation,stage,expected_stage=row['stage'])
     claim=verify()
-    if claim.kind not in ('build','compose','builder_prepare','recovery_download'): raise ValueError('unsupported job worker kind')
+    if claim.kind not in ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare'): raise ValueError('unsupported job worker kind')
     intent=document(root,'artifacts/objects/'+claim.input_digest); args=binding(intent,executable=True)
     diagnostics=stage/'diagnostics'; diagnostics.mkdir(mode=0o700)
     output=stage/'output'; output.mkdir(mode=0o700)
@@ -151,7 +151,13 @@ def run_worker(root,operation,epoch,generation,stage):
             'input_digest':claim.input_digest,'stage':claim.stage,'state':'FAILED'}
     try:
         from .recovery_podman import _verify_retained_builder_archive
-        if claim.kind=='recovery_download':
+        if claim.kind=='source_prepare':
+            from .source_prepare_operation import run
+            result=run(intent,stage,verify,report,state_root=root,operation_id=operation)
+        elif claim.kind=='source_capture':
+            from .source_operation import capture as capture_source
+            result=capture_source(intent,stage,verify,report,state_root=root,operation_id=operation)
+        elif claim.kind=='recovery_download':
             from .recovery_download import capture
             from .builder_setup import reserve_bytes
             result=capture(intent,stage,verify,report,deadline=claim.deadline,reserve=reserve_bytes(root))

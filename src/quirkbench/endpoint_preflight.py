@@ -22,9 +22,17 @@ from .release_http import _remaining
 
 
 def validate_source(value):
-    if (not isinstance(value,dict) or set(value)!={'schema_version','record_type','intent_sha256','transition','files'}
-            or type(value['schema_version']) is not int or value['schema_version']!=1 or value['record_type']!='target-endpoint-source'):
+    version=value.get('schema_version') if isinstance(value,dict) else None
+    fields={'schema_version','record_type','intent_sha256','transition','files'}|({'enrollment_origin'} if version in (2,3) else set())
+    if version==3:fields.add('previous_selection_sha256')
+    if (not isinstance(value,dict) or set(value)!=fields
+            or type(version) is not int or version not in (1,2,3) or value['record_type']!='target-endpoint-source'):
         raise ContractError('invalid retained endpoint source')
+    if version==3:sha256(value['previous_selection_sha256'])
+    if version in (2,3) and (version==2 or value['enrollment_origin'] is not None):
+        origin=value['enrollment_origin']
+        if not isinstance(origin,dict) or set(origin)!={'retarget_request_id','selection_sha256'}:raise ContractError('invalid completed-retarget endpoint origin')
+        identifier(origin['retarget_request_id']);sha256(origin['selection_sha256'])
     sha256(value['intent_sha256']);validate_transition(value['transition'])
     if not isinstance(value['files'],dict) or not 11<=len(value['files'])<=32:raise ContractError('endpoint source map exceeds bounded limit')
     for name,value_sha in value['files'].items():
@@ -51,6 +59,7 @@ def owned(control,config,request_id, *,verify_target,binding_reader=read_system_
             raise Conflict('exact prepared endpoint/boot selection required')
         verify_binding(intent['target_binding'],reader=binding_reader);_media(control,intent['media_instance_id'])
         public={name:_strict_read(directory,name) for name in ('intent.json','source.json','approved-controller.pem','capture-completion.json')}
+        if intent['schema_version']==2:public['previous-selection.json']=_strict_read(directory,'previous-selection.json')
         source=validate_source(_document(public['source.json']));record=source['transition']
         if public['source.json']!=canonical(source):raise ContractError('endpoint source must remain canonical')
         completion=canonical({'schema_version':1,'record_type':'target-endpoint-capture','source_sha256':digest(public['source.json'])})
@@ -73,7 +82,8 @@ def owned(control,config,request_id, *,verify_target,binding_reader=read_system_
             selected=(_strict_read(control/'endpoint','active.json')==state['pointer'] if state.get('pointer') is not None else pending(control)==intent)
             if not selected or _public_retarget(control)!=lineage or any(_strict_read(directory,name)!=raw for name,raw in public.items()):
                 raise Conflict('endpoint prepared selection or lineage changed')
-            if {path.name for path in islice(directory.parent.iterdir(),2)}!={directory.name}:raise Conflict('endpoint publication has ambiguous retained requests')
+            from .endpoint_history import history
+            history(control,_strict_read(control/'endpoint','active.json'))
             for name in ('activation.json','completion.json'):
                 expected=state.get('files',{}).get(name);path=directory/name
                 if expected is None:
@@ -83,22 +93,19 @@ def owned(control,config,request_id, *,verify_target,binding_reader=read_system_
         public_guard();(clearer or clear_once)(config);public_guard()
         # The public lineage above has no secret fields. Full completion is
         # deliberately deferred until fresh clearance under owned actual binding.
-        if lineage[0] is not None:
+        if lineage[0] is not None and source['schema_version']!=3:
             from .retarget_activation import completed
-            completed(control,lineage[0],binding_reader=binding_reader);public_guard()
+            completed(control,lineage[0],binding_reader=binding_reader,_endpoint_preparation=True);public_guard()
         request_raw=_strict_read(control/'enrollment/pending','request.json');result_raw=_strict_read(control/'enrollment/pending','result.json')
         request=validate_request(_document(request_raw));result=validate_result(_document(result_raw),request)
+        if source['schema_version']!=3 and source['schema_version']!=result['schema_version']:
+            raise Conflict('endpoint source version differs from exact enrollment origin')
         if (request['target_binding']!=intent['target_binding'] or request['media_instance_id']!=intent['media_instance_id']
                 or result['device_id']!=intent['device_id']):raise Conflict('endpoint source enrollment differs from actual prepared binding')
-        files=read_generation(control,record['source_generation'])
-        from .endpoint_generation import transition
-        actual,destination=transition(files,request_id,digest(request_raw),digest(result_raw),record['controller_url'],record['remote_urls'],record['approved_certificate_sha256'])
-        if actual!=record:raise Conflict('endpoint source transition differs from retained generation')
+        from .endpoint_activation import _source_records
+        _,anchored_intent,anchored,files,destination=_source_records(control,request_id)
+        if anchored!=source or anchored_intent!=intent:raise Conflict('endpoint source differs from its selected predecessor')
         verify_transition(record,files,destination)
-        expected_names={'runtime.json','media-instance.json','agent/journal.json',
-            *(str(Path('enrollment/pending')/name) for name in ('intent.json','request.json','result.json','key.pem')),
-            *(str(Path('generations')/record['source_generation']/name) for name in (*files,'generation.json'))}
-        if set(source['files'])!=expected_names:raise Conflict('endpoint source map differs from exact original namespace')
         blank=canonical({'schema_version':1,'device_id':intent['device_id'],'pending':None,'claim_request_id':None})
         def exact():
             public_guard()
@@ -112,13 +119,16 @@ def owned(control,config,request_id, *,verify_target,binding_reader=read_system_
                 raise Conflict('retained endpoint source bytes changed')
             if _strict_read(control/'enrollment/pending','key.pem')!=files['repository.key']:
                 raise Conflict('endpoint source key differs from captured private generation')
+            from .endpoint_activation import _source_records
+            if _source_records(control,request_id)!=(directory,intent,source,files,destination):
+                raise Conflict('endpoint private origin or predecessor changed after native work')
             _remaining(deadline,monotonic)
         exact()
-        names={'intent.json','source.json','approved-controller.pem','capture-completion.json'}
-        if {path.name for path in islice(directory.iterdir(),7)}!=names|set(publication().get('files',{})):raise Conflict('prepared endpoint contains unknown files')
+        names=set(public)
+        if {path.name for path in islice(directory.iterdir(),8)}!=names|set(publication().get('files',{})):raise Conflict('prepared endpoint contains unknown files')
         yield directory,record,files,destination,request,result,public['approved-controller.pem'].decode('ascii'),exact,deadline
         exact()
-        if {path.name for path in islice(directory.iterdir(),7)}!=names|set(publication().get('files',{})):raise Conflict('endpoint preflight staging contains unknown retained files')
+        if {path.name for path in islice(directory.iterdir(),8)}!=names|set(publication().get('files',{})):raise Conflict('endpoint preflight staging contains unknown retained files')
         for check in final_checks or ():check()
 
 

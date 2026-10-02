@@ -150,3 +150,19 @@ def test_pending_retarget_invitation_requires_exact_replace_confirmation(paused,
         if confirmation=='':assert result is None
         else:assert result['activated'] and reads and posts
     if confirmation!='replace':assert not reads and not posts and key_path(paused).read_bytes()==oldkey
+
+
+@pytest.mark.parametrize('owner',['config','agent'])
+def test_completed_console_ack_rechecks_named_owner_after_last_native_guard(paused,owner):
+    from quirkbench.store import atomic_write
+    control=paused[0][1];kw,posts=setup(paused)
+    console.run_retarget(control,CONFIG,input_stream=entered(paused),output_stream=StringIO(),**kw)
+    count=[0]
+    def guard(_):
+        count[0]+=1
+        if count[0]==2:
+            lock=control/('runtime-config.lock' if owner=='config' else 'agent/agent.lock')
+            lock.rename(lock.with_name(lock.name+'.old'));atomic_write(lock,b'')
+        return True
+    with pytest.raises(Conflict,match='ownership'):
+        console.run_retarget(control,CONFIG,input_stream=entered(paused),output_stream=StringIO(),**(kw|{'recovery_verifier':guard}))

@@ -85,6 +85,8 @@ def _records(control,directory,intent):
     if (activation['request_id']!=intent['request_id'] or activation['local_intent_sha256']!=digest(canonical(intent))
             or activation['source_sha256']!=digest(canonical(source)) or source['intent_sha256']!=activation['local_intent_sha256']):
         raise Conflict('retarget activation differs from exact local intent/source')
+    if (intent['schema_version']==3)!=(source['schema_version']==2) or (source['schema_version']==2 and source['endpoint_selection_sha256']!=intent['endpoint_selection_sha256']):
+        raise Conflict('retarget endpoint source version or association changed')
     return activation,source
 
 
@@ -151,7 +153,7 @@ def _completion(activation):
         'reset_qualified':False,'old_evidence_drained':False}
 
 
-def completed(control,request_id, *,binding_reader=None):
+def completed(control,request_id, *,binding_reader=None,_endpoint_preparation=False):
     """Strict read-only completion; no missing-pointer inference by runtime."""
     directory=_location(control,request_id);intent=validate_intent(_document(_read(directory,'intent.json')))
     # Hardware identity precedes any new credential/private-key reads.
@@ -160,6 +162,9 @@ def completed(control,request_id, *,binding_reader=None):
     if _read(directory,'completion.json')!=canonical(_completion(activation)):raise Conflict('retarget completion is missing or changed')
     _media(control,intent['media_instance_id']);new,result,bundle,active=_new_view(directory,intent,activation)
     _generation(control,activation,bundle)
+    if _read(control,'runtime.json')!=active:
+        from .endpoint_origin import selected_runtime
+        active=selected_runtime(control,bundle,active,binding_reader=binding_reader,_prepared=_endpoint_preparation)
     if (_read(control,'runtime.json')!=active or _private_files(control/'enrollment/pending',NAMES)!=new
             or set(p.name for p in (control/'enrollment/pending').iterdir())!=set(NAMES)):
         raise Conflict('completed retarget differs from exact selected runtime/enrollment')
@@ -189,6 +194,9 @@ def completed(control,request_id, *,binding_reader=None):
     if (not (archive/'agent').is_dir() or not (archive/'enrollment-pending').is_dir()
             or digest(_read(archive,'runtime.json'))!=intent['runtime_sha256']):
         raise Conflict('completed retarget original archive is unavailable')
+    if intent['schema_version']==3:
+        from .retarget_endpoint import files as endpoint_files
+        endpoint_files(control,intent,locations=(archive,archive/'enrollment-pending',archive/'agent'))
     return {'request_id':request_id,'device_id':result['device_id'],'credential_generation':activation['new_credential_generation'],
         'generation':activation['generation'],'activated':True,'boot_authorized':False,'reset_qualified':False,
         'old_evidence_drained':False,'original_archive':str(archive)}
@@ -224,12 +232,15 @@ def activate(control,config,request_id,controller_url,approved_certificate_pem,a
     identifier(request_id)
     recover=recovery_verifier or (lambda config:_verify_state_identity(config,Path('/boot/quirkbench-state')))
     recover(config);control,storage=_storage(control,verify_target)
-    with private_lock(control/'runtime-config.lock'):
+    with private_lock(control/'runtime-config.lock') as config_fd:
         pointer=_document(_read(control/'retarget','active.json'))
         if pointer.get('schema_version')==2:
             if pointer.get('request_id')!=request_id:raise Conflict('another completed retarget request is selected')
-            with private_lock(_private_path(control/'agent')/'agent.lock'):
+            with private_lock(_private_path(control/'agent')/'agent.lock') as agent_fd:
                 storage();recover(config)
+                for path,fd in ((control/'runtime-config.lock',config_fd),(control/'agent/agent.lock',agent_fd)):
+                    held=os.fstat(fd);named=path.lstat()
+                    if (held.st_dev,held.st_ino)!=(named.st_dev,named.st_ino):raise Conflict('completed retarget lock ownership changed')
                 receipt=completed(control,request_id,binding_reader=binding_reader)
                 from .retarget_local import pending_intent
                 if pending_intent(control,binding_reader=binding_reader) is not None:raise Conflict('retarget completion unavailable')
@@ -254,7 +265,8 @@ def activate(control,config,request_id,controller_url,approved_certificate_pem,a
             raise Conflict('retarget files changed across authenticated exchange/activation ownership handoff')
         generation=digest(canonical(manifest));active=_active(bundle,generation)
         locations=original_locations(control,directory,intent)
-        original=_document(_read(locations[1],'result.json'));_same_source_scope(result,original,intent)
+        from .retarget_endpoint import original as original_endpoint
+        original=original_endpoint(control,intent,locations=locations);_same_source_scope(result,original,intent)
         activation=validate_activation({'schema_version':1,'record_type':'retarget-activation-intent','request_id':request_id,
             'local_intent_sha256':digest(canonical(intent)),'source_sha256':digest(_read(directory,'source.json')),
             'new_files':{name:digest(data) for name,data in new.items()},'bundle_files':manifest,'generation':generation,
@@ -301,6 +313,8 @@ def activate(control,config,request_id,controller_url,approved_certificate_pem,a
             for name,raw in new.items():verified();_retain(pending_stage,name,raw)
             _rename(pending_stage,control/'enrollment/pending',verified);fault('retarget_new_enrollment_selected')
         elif _present(pending_stage):raise Conflict('both staged and selected new enrollment namespaces exist')
+        if intent['schema_version']==3 and not _present(archive/'endpoint'):
+            _rename(control/'endpoint',archive/'endpoint',verified);fault('retarget_old_endpoint_archived')
         verified();_generation(control,activation,bundle);_blank_agent(root_agent,result['device_id'])
         fault('retarget_before_runtime');verified();_generation(control,activation,bundle)
         atomic_write(control/'runtime.json',active);fault('retarget_runtime_selected');verified()

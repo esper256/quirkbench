@@ -73,16 +73,16 @@ requirements to implement, not existing passing tests.
 | Standard image writer; local external-drive confirmation/capacity screen | Partial: commissioning, capacity UI/journal; `test_capacity_setup.py` | M2/P3a2/a5 | Join delivered console flow to exact drive confirmation; restart same geometry, preserve existing filesystems, block insufficient capacity; retain existing implementation |
 | Recovery **Network** and **Connect to controller**; `target add NAME` | Partial: reviewed managed exchange/repository listeners, operator invitations, initial console pairing and selected network persistence/replay; maintenance and native commissioning remain open | M2/P3c–e | C4 fingerprint-before-code, complete credentials/repositories, activation interruption and private settings across boots; no fake initial target token |
 | `target show NAME`; supported/connected/attended states | Partial: versioned read-only enrollment/binding/planning facts and advisory authenticated contact window; focused fixtures below | M2/P1/P3b | Separate readiness facts; stale/missing report, wrong target, unsupported platform and missing peripheral explicit; pairing queues no experiment; native commissioning remains open |
-| Reassign media, revoke credentials, repair changed endpoints | Partial: reviewed revocation, pending invitation maintenance, repeated attended retarget and archived evidence; endpoint migration/native acceptance remain open | M2/P3e/f | Paused explicit maintenance, old evidence attribution, both-service revocation, new trust reconfirmation and rollback; no reflash as routine connection repair |
-| `investigation start NAME --target TARGET [--problem FILE]`; limits/baseline wizard | Planned facade; campaign and P0 records exist | M3/P1c/P4/P6a | Durable problem/limits/target/catalog identity, one active investigation per target; selected immutable inputs only; unavailable pinned input blocks, never substitutes |
-| **Use existing source** and editable kernel workspace | Partial: source input capture and small snapshot prototype; `test_agent.py`, `test_build_pipeline.py` | M3/P6a | Separate workspace preserves original tree, actual Git base plus distro patch provenance, full tracked/allowed-untracked capture including modes/deletions; concurrent mutation rejected; reconstruct exact build inputs |
-| Initial baseline preparation and approved round trip | Partial: build/compose/attempt primitives and approval tests | M3/P4/P7a/b | Joined application flow with injected adapters; no handwritten manifests; exact approval/rejection and restart; record round-trip readiness separately from problem reproduction; physical commissioning only when requested |
-| `investigation brief NAME` and handoff to any external coding agent | Planned generated handoff; installed guide exists | M4/P6b | Correct workspace/state/schema/guide paths, durable hypotheses and history; a fresh agent can continue without original chat; no automatic agent call |
-| Agent `investigation context/recipes/proposal-schema/propose/capture-source`; evidence/operation queries | Partial: versioned fixtures, operation queries, recipe registry and source primitives | M4/P6a/b/P7a | Atomic proposal/usage/outbox, prompt durable acknowledgment, replay and lost reply, source writer handoff, bounded context/cursors, eligible recipes only, no target shell escape |
+| Reassign media, revoke credentials, repair changed endpoints | Implemented software: revocation, repeated attended retarget/endpoint maintenance, archived evidence and guided recovery; native acceptance remains open | M2/P3e/f | Paused explicit maintenance, old evidence attribution, both-service revocation, new trust reconfirmation and rollback; no reflash as routine connection repair |
+| `investigation start NAME --target TARGET [--problem FILE]`; limits/baseline wizard | Partial: installed start/brief/baseline/default distribution-source commands; immutable paused external investigation and exact missing-input diagnostics | M3/P1c/P4/P6a | Durable problem/limits/target/catalog identity, one active investigation per target; selected immutable inputs only; unavailable pinned input blocks, never substitutes |
+| **Use existing source** and editable kernel workspace | Software implemented: installed user/default distribution source preparation, stopped-owner publication, writer handoff/capture and restart recovery; native source commissioning pending | M3/P6a | Separate workspace preserves original tree, actual Git base plus distro patch provenance, full tracked/allowed-untracked capture including modes/deletions; concurrent mutation rejected; reconstruct exact build inputs |
+| Initial baseline preparation and approved round trip | Partial: pinned candidate package inputs and fixed rootfs worker adapter reviewed/tested; durable candidate execution and build/compose/attempt joining pending | M3/P4/P7a/b | Joined application flow with injected adapters; no handwritten manifests; exact approval/rejection and restart; record round-trip readiness separately from problem reproduction; physical commissioning only when requested |
+| `investigation brief NAME` and handoff to any external coding agent | Partial: human brief gives problem, actual granted workspace/base, writer state and source handoff instructions; proposal/context/history integration next | M4/P6b | Correct workspace/state/schema/guide paths, durable hypotheses and history; a fresh agent can continue without original chat; no automatic agent call |
+| Agent `investigation context/recipes/proposal-schema/propose/capture-source`; evidence/operation queries | Partial: installed `capture-source` plus source preparation/status/release for existing campaigns; context/proposals pending | M4/P6a/b/P7a | Atomic proposal/usage/outbox, prompt durable acknowledgment, replay and lost reply, source writer handoff, bounded context/cursors, eligible recipes only, no target shell escape |
 | `experiment review ID`; `attempt approve ID` | Partial: approval exists with required request ID; `test_operator_approval.py` | M4/P6b | Review exact source/candidate/attempt, procedure and risks; human facade supplies durable retry identity; old explicit interface preserved; changed bytes/new attempt require authorization |
 | `investigation respond NAME`; physical observations | Partial: `session` request/response commands; `test_observations.py` | M4/P7b | Interactive selection backed by same typed records; late/conflicting/missing replies, restart, request/attempt attribution; recipe schema extension explicitly versioned |
 | Baseline/diagnostic/patched/regression/revert comparisons | Partial: immutable experiment/result/evidence records | M4–5/P6b/P7 | Exact identity joins, exposure counts, missing observations and confounders, non-audio and missing-peripheral cases; no unsupported causal conclusion |
-| `monitor NAME`; `investigation status/pause/resume NAME` | Partial: monitor/campaign pause/reconciliation; `test_monitor.py`, `test_controller.py` | M5/P2c/P6b | Same service facts, investigation filtering, actionable waits, restart remains paused; distinguish admission stopped/workers draining/recovery/evidence; agent exit does not cancel work |
+| `monitor NAME`; `investigation status/pause/resume NAME` | Investigation lifecycle/source status installed over existing campaigns; monitor positional filtering pending | M5/P2c/P6b | Same service facts, investigation filtering, actionable waits, restart remains paused; distinguish admission stopped/workers draining/recovery/evidence; agent exit does not cancel work |
 | `target poweroff NAME`; offline recovery shutdown screen | Planned coordinated lifecycle | M5/P6b/P3 | Reconcile active writers/attempts, locally durable evidence and ordered shutdown; show upload backlog independently; network silence never proves poweroff or safe eject |
 | `investigation report/export NAME --output PATH`; documented bundle layout | Planned report and patch exporter | M5/P7 | `git format-patch` against actual recorded base, clean-tree application, exported source matches tested source or explicitly unvalidated; evidence/symbol retention, missing bytes explicit, secrets excluded, inconclusive export supported |
 | `backup --output PATH`; `restore` wizard | Partial: positional backup/restore and retained closures | M5/P2e | Preserve positional API; consistent source checkpoint, offline target uncertainty, separate private identity requirements, omissions explicit, restore paused; export is not backup |
@@ -895,3 +895,221 @@ after retained-bundle/orphan guard alignment. Higher-reasoning boundary re-revie
 approved the final narrow scope. No next packet, live installation, image production
 or release qualification was started. Exact rollback, retarget/repeated association
 and wizard/native commissioning remain open; full M1/M2 acceptance remains open.
+
+P3f exact stopped target endpoint rollback is implemented at software scope for
+original enrollment; higher-reasoning boundary review approved it. Typed rollback v1 binds
+the operator-confirmed capture and optional partial activation. Existing recovery/
+storage/binding/config/spool owners gate durable pause, fresh one-shot clearance,
+original source reconstruction and runtime restoration, with completion/selection v3
+published last. No source, key, spool or blob is discarded. Completed ACK preserves
+later private journals up to 4 MiB without clearance or HTTP. Broken/unpublished
+successors do not prevent restoring the exact retained original; native transport
+checks remain strict and restoration claims neither reachability nor boot approval.
+
+```sh
+.venv/bin/python -m pytest tests/test_endpoint_rollback.py --basetemp=/var/tmp/quirkbench-endpoint-rollback-first-01a0f80e --tb=short
+.venv/bin/python -m pytest tests/test_endpoint_activation.py tests/test_endpoint_generation.py --basetemp=/var/tmp/quirkbench-endpoint-rollback-compatibility-01a0f80e --tb=short
+.venv/bin/python -m pytest tests/test_endpoint_rollback.py --basetemp=/var/tmp/quirkbench-endpoint-rollback-reviewed-01a0f80e --tb=short
+.venv/bin/python -m pytest tests/test_endpoint_rollback.py tests/test_endpoint_activation.py --basetemp=/var/tmp/quirkbench-endpoint-rollback-final-01a0f80e --tb=short
+```
+
+**29 passed** (34.10 s); **81 passed** (75.19 s); **31 passed** (36.83 s); final
+**78 passed** (109.02 s). Review corrected public rollback detection before forward
+completion/source reads; joined crash/failed-clear runtime and actual network replay
+checks confirm no source credentials or RAM profiles are opened. Software/injected native adapters
+only. Removed the unused root-level generation duplicate after checking imports and
+packaging. Completed-retarget/repeated association, guided maintenance and native/
+release acceptance remain open. No image builds, live changes or release gates ran.
+
+P3f first endpoint change after completed retarget is implemented and reviewed.
+Endpoint source v2 binds the exact retarget selection; independent reconstruction
+checks original new enrollment/generation/bundle and retained old archive. Retarget
+completion reads an altered runtime only through exact approved URL association.
+Normal consumers refuse unfinished publication; existing stopped ownership after
+fresh clearance can validate it for exact retry. Initial v1 behavior remains strict.
+Source-v2 downgrade and late private origin changes are refused before effects or
+receipt; no enrollment result, source key, evidence attribution or execution grant
+is rewritten. Exact rollback also supports that completed-retarget origin.
+
+```sh
+.venv/bin/python -m pytest tests/test_endpoint_retarget.py --basetemp=/var/tmp/quirkbench-endpoint-retarget-origin-fenced-01a0f80e --tb=short
+.venv/bin/python -m pytest tests/test_endpoint_retarget.py --basetemp=/var/tmp/quirkbench-endpoint-retarget-reviewed-01a0f80e --tb=short
+.venv/bin/python -m pytest tests/test_endpoint_activation.py tests/test_endpoint_rollback.py tests/test_endpoint_preflight.py tests/test_endpoint_local.py tests/test_retarget_activation.py --basetemp=/var/tmp/quirkbench-endpoint-retarget-compatibility-01a0f80e --tb=short
+```
+
+**15 passed** (98.48 s), final **24 passed** (155.52 s), and **165 passed** (420.61 s).
+Higher-reasoning review approved version binding and final private-origin recapture.
+Repeated endpoint and moved-media source/archive/drain association, guided screens,
+native commissioning and full M1/M2 acceptance remain open. Software fixtures only;
+no live services, media/image production or release qualification ran.
+
+P3f repeated same-binding endpoint selections are implemented and reviewed.
+Versioned explicit predecessor links preserve immutable enrollment and original
+credentials; independently reconstructed history binds each exact source runtime.
+Retarget origins stay associated, repeated/returning URLs are explicit requests,
+and stopped rollback restores the exact immediately preceding selection. Partial
+publication remains paused. Completed replay preserves later evidence and grants
+no new boot, trust, reachability or execution authority.
+
+```sh
+.venv/bin/python -m pytest tests/test_endpoint_history.py -x --basetemp=/var/tmp/quirkbench-endpoint-repeat-first-01a0f80e --tb=short
+.venv/bin/python -m pytest tests/test_endpoint_local.py tests/test_endpoint_history.py tests/test_endpoint_retarget.py --basetemp=/var/tmp/quirkbench-endpoint-repeat-joined-01a0f80e --tb=short
+.venv/bin/python -m pytest tests/test_endpoint_history.py -k 'tenth_unknown or final_native' --basetemp=/var/tmp/quirkbench-endpoint-repeat-native-01a0f80e --tb=short
+.venv/bin/python -m pytest tests/test_endpoint_activation.py tests/test_endpoint_preflight.py tests/test_endpoint_rollback.py --basetemp=/var/tmp/quirkbench-endpoint-repeat-compatibility-01a0f80e --tb=short
+.venv/bin/python -m pytest tests/test_endpoint_activation.py::test_completed_reader_rejects_coherently_rehashed_credentials_without_original_enrollment tests/test_endpoint_activation.py::test_completed_observers_reject_orphan_requests --basetemp=/var/tmp/quirkbench-endpoint-repeat-diagnostics-01a0f80e --tb=short
+```
+
+**15 passed** (45.18 s), **74 passed** (279.18 s), **4 passed** (10.23 s).
+Compatibility: **93 passed**, two diagnostic-text mismatches (153.25 s); wording
+was restored and both focused checks passed. Higher-reasoning review approved
+bounded history, original trust/source ownership, crash retry and exact rollback;
+its directory-limit correction has regression coverage. Software fixtures only.
+Endpoint-before-retarget archival/drain association and guided maintenance remain
+next. Production publisher provisioning/publication, native commissioning and full
+M1/M2 acceptance stay open. No live installation or release qualification ran.
+
+P3e/f endpoint-before-retarget source/archive/drain association is implemented and
+boundary-reviewed. Retarget intent v3/source v2 bind an exact terminal endpoint
+selection. Scoped private history follows actual NEW binding and fresh clearance;
+original endpoint directories, enrollment, generations and evidence retain their
+identities in the existing archive. URL projection is transient and independently
+proved; it changes no original credentials, trust or evidence attribution. Repeated
+retarget/endpoint origins and subsequent new-target endpoints remain associated.
+Review corrections cover final native/private ordering, stable private single-link
+journal/snapshot policy, unchanged attribution after capture and named config/agent
+lock ownership. Missing/changed/partial associations stay paused.
+
+```sh
+.venv/bin/python -m pytest tests/test_retarget_endpoint.py -x --basetemp=/var/tmp/quirkbench-retarget-endpoint-retry-01a0f80e --tb=short
+.venv/bin/python -m pytest tests/test_retarget_local.py tests/test_retarget_history.py tests/test_retarget_evidence.py tests/test_evidence_drain_target.py --basetemp=/var/tmp/quirkbench-retarget-endpoint-compatibility-01a0f80e --tb=short
+.venv/bin/python -m pytest tests/test_retarget_endpoint.py -k 'final_private or single_link or config_lock' --basetemp=/var/tmp/quirkbench-retarget-endpoint-boundary-01a0f80e --tb=short
+.venv/bin/python -m pytest tests/test_retarget_endpoint.py -k 'original_evidence_export or repeated_retarget' -x --basetemp=/var/tmp/quirkbench-retarget-endpoint-deep-01a0f80e --tb=short
+.venv/bin/python -m pytest tests/test_retarget_endpoint.py --basetemp=/var/tmp/quirkbench-retarget-endpoint-final-01a0f80e --tb=short
+.venv/bin/python -m pytest tests/test_retarget_endpoint.py::test_scoped_archived_drain_uses_approved_endpoint_without_new_target_changes tests/test_retarget_evidence.py::test_moved_archive_drains_only_original_attribution_and_leaves_new_work_intact tests/test_retarget_enrollment.py::test_new_key_scope_and_native_proof_yield_authenticated_v2_without_local_activation tests/test_retarget_activation.py::test_atomic_new_runtime_preserves_original_spool_and_no_authorizations --basetemp=/var/tmp/quirkbench-retarget-endpoint-final-compatibility-01a0f80e --tb=short
+```
+
+**18 passed** (167.57 s), **95 passed** (513.04 s), **7 passed** (44.24 s),
+**2 passed** (39.99 s); final **31 passed** (286.28 s). The final four-case joined
+upload/legacy run checks the approved URL, exact old attempt attribution, ACK replay
+and unchanged new target work. Software fixtures only. Guided endpoint maintenance
+is next; native commissioning, production publisher provisioning/publication and
+full M1/M2 acceptance stay open. No live services/media/images or release suite ran.
+Final joined upload/legacy validation: **4 passed** (307.52 s), including actual
+scoped archived upload/ACK replay at the approved endpoint and unchanged new work.
+
+Guided endpoint software is implemented: controller `endpoint` maintenance actions
+and attended wizard, plus verified recovery menu choice 9 for same-binding apply,
+prepared reachability checks and exact rollback. Controller switch retries reuse
+retained choices after publication; target completed ACKs preserve later work.
+Source-only higher-reasoning review approved both ownership and retry corrections.
+Focused guided checks: 55 passed in the joined console/facade suites; the corrected
+later-work fixture and additive command fixture passed (2 tests). Exact commands,
+logs and remaining native/release acceptance are recorded in the handoff. M3 source
+capture/workspace foundations are next; complete M2 acceptance remains open.
+
+M3 source capture foundation is implemented and reviewed (`source_capture.py`,
+source-capture receipt v1): streaming archive/manifest, actual Git base, exact tracked
+and approved untracked content/modes/deletions, retained distribution provenance,
+mutation/serialized-byte fences and bounded offline Git reads. Focused validation:
+40 tests passed, with exact command/log in the handoff. Durable workspace admission,
+worker adoption/publication and the usable investigation facade are next; this
+adapter alone does not complete M3 or authorize an experiment.
+
+M3 durable source handoff/capture integration is implemented and reviewed: additive
+private workspace records, atomic writer handoff/operation admission, existing native
+worker execution, explicit restart reconciliation/resume and stopped-owner source
+scope/archive validation before atomic CAS publication. Historical acknowledgements
+leave current writers intact. Focused joined worker/builder compatibility: 52 passed;
+operation/migration and source failure checks: 37 passed. Exact commands/logs are in
+the handoff. Editable workspace preparation and the usable investigation/baseline
+facade remain next; capture success grants no build or attempt approval.
+
+M3 private editable source preparation is implemented and reviewed: approved source
+is copied without changing the original, preserving actual SHA-1/SHA-256 Git base,
+dirty/index/allowed content, modes/deletions and retained distribution provenance.
+Focused preparation/capture checks: 81 passed; legacy fake-build/cache checks:
+25 passed. Exact commands/logs and failure coverage are in the handoff. Durable
+preparation, stopped-owner validation/live selection and the investigation/baseline
+facade remain next. Private staging alone grants no writer or execution authority.
+
+M3 durable existing-source preparation is implemented and boundary-reviewed. The
+existing operation worker prepares private source; the stopped coordinator validates
+exact source/Git bytes, journals and retains the selection before moving it, and
+atomically publishes its editing grant. Failed/interrupted selections survive
+retention and housekeeping; explicit retry uses a fresh worker and preserves the
+original selection. Joined preparation/capture/worker/operation checks: 100 passed
+(47.24s); exact command and log are in the handoff. Investigation commands,
+distribution-source preparation and the approved baseline round trip remain next.
+Native commissioning, production publisher provisioning/publication and full
+M1–M3 acceptance remain open. No live service or release qualification ran.
+
+Investigation source commands are installed for existing campaigns:
+`prepare-source NAME --source PATH --base-oid OID --quiesced`, `source NAME`,
+`capture-source NAME --request-id ID --quiesced`, `release-source NAME`, and
+`status/pause/resume NAME`. Use `--workspace ID` when multiple workspaces exist;
+JSON preparation requires an explicit request ID. These commands admit existing
+operations and expose live grants only after stopped-owner publication. Source/status
+queries neither initialize nor prune. Higher-reasoning boundary review approved;
+11 joined command/worker/replay tests passed. `investigation start`, distribution
+preparation and the approved baseline flow remain unfinished; acceptance gaps stay
+open. Exact focused command/log are in the handoff.
+
+The prepared distribution-source Git adapter is implemented and reviewed. It uses
+existing rootless SRPM-stage output, pins catalog/package/spec/source-tree identities,
+retains source/patch input provenance and records a reproducible actual Git base.
+Unknown upstream Git ancestry remains explicit. Final adapter checks: 20 passed;
+joined shared preparation/capture/command checks: 107 passed before the reviewed
+adapter-only corrections. Exact commands/logs are in the handoff. Distribution
+operation admission, stopped-owner publication/provenance retention and the default
+investigation/baseline journey remain unfinished. No live grant, container/image or
+release qualification was performed by this adapter packet.
+
+Fixed distribution-source worker planning and private input staging are implemented
+and reviewed. The pinned OCI manifest/config/archive and SRPM are verified before
+the existing delegated rootless container; only private source staging and installed
+code are mounted, with network/pull disabled. Shared guarded input copies also refuse
+moved destinations without deferred flushes. Focused injected-worker/source-stage/OCI
+compatibility: 40 passed (exact command/log in handoff). Durable distribution admission,
+stopped-owner publication and the default investigation/baseline journey remain next.
+This unpublished adapter supplies no editing or physical approval. Native/release
+acceptance remains open; no real container or image work occurred.
+
+Distribution preparation input v2, durable admission, stopped-owner publication and
+complete provenance retention are implemented and reviewed on existing operation
+machinery. Exact import commit/tree and origin bytes are verified; replay inputs are
+synced before selection, and interrupted selection retries without package execution.
+Final focused owner/adapter checks: 41 passed; exact command/log and previous shared
+compatibility evidence are in the handoff. The default investigation creation/source
+interface and approved baseline round trip remain next. Native commissioning and
+production signing/publication acceptance remain open; no native image/release work ran.
+
+Investigation creation/default source software is implemented and reviewed. Installed
+`start NAME --target TARGET [--problem FILE]`, `baseline NAME`, `brief NAME` and
+`prepare-distribution NAME` retain immutable external ownership, problem/limits,
+reserved workspace and inventory/catalog/plan/baseline identities in the existing DB.
+New investigations start paused; resume enforces one active investigation per target.
+Legacy campaigns keep their interfaces; conflicting legacy budget changes cannot
+rewrite frozen investigation limits. Missing inputs show exact SHAs; no substitute
+or attempt authority is supplied. Default source reuses the signed installed/prepared
+builder proof from setup, including mismatch refusal, without manual private edits.
+Focused final investigation/builder/submission checks: 39 passed; prior joined
+source/migration/legacy checks: 88 passed. Exact commands/logs are in the handoff.
+Approved baseline build/compose/attempt integration and full external context/proposal
+loop remain unfinished. Native commissioning and production release acceptance stay open.
+
+Candidate baseline input foundation: typed candidate rootfs input v1, complete
+retained RPM closure and shared local Fedora assembly are implemented and boundary
+reviewed; 52 injected candidate/recovery compatibility checks passed
+(`/tmp/quirkbench-candidate-rootfs-inputs-final.log`). Durable candidate execution,
+build/compose joining and native acceptance remain open. No image or live install ran.
+
+Distribution source execution preserves distinct Fedora base/OCI config/archive
+identities; the native base marker is checked before package work. Boundary review
+and 42 injected joined checks passed (`/tmp/quirkbench-distribution-base-correction-reviewed.log`).
+
+Fixed candidate-rootfs worker foundation is implemented and boundary-reviewed;
+36 focused input/adapter fixture checks passed
+(`/tmp/quirkbench-candidate-rootfs-worker-verified.log`). Native execution is injected.
+Development is paused by request before durable candidate admission/publication;
+M3 round-trip, M4–M5 software and native/release acceptance remain open. See the
+handoff for the exact next packet and retained evidence.

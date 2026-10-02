@@ -100,9 +100,16 @@ def _copy_cas_object(cas_root: Path, value: str, destination: Path,
         if space_check is not None: space_check(source.st_size)
         destination_fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                                  0o600)
+        initial_destination = os.fstat(destination_fd)
+        def destination_guard(fd):
+            held = os.fstat(fd); named = destination.lstat()
+            identity = lambda item: (item.st_dev,item.st_ino,item.st_mode,item.st_uid,item.st_nlink)
+            if (identity(held) != identity(initial_destination) or held.st_nlink != 1
+                    or identity(named) != identity(held)):
+                raise BuildError('retained input destination moved or changed during private staging')
         total = 0
         hasher = hashlib.sha256()
-        with os.fdopen(destination_fd, 'wb') as output:
+        with os.fdopen(destination_fd, 'wb', buffering=0) as output:
             destination_fd = -1
             while True:
                 chunk = os.read(source_fd, min(1024 * 1024, limit - total + 1))
@@ -112,10 +119,17 @@ def _copy_cas_object(cas_root: Path, value: str, destination: Path,
                 if total > limit:
                     raise BuildError('retained recovery object grew beyond staging bounds')
                 if space_check is not None: space_check(len(chunk))
+                destination_guard(output.fileno())
                 hasher.update(chunk)
-                output.write(chunk)
-            output.flush()
+                pending = memoryview(chunk)
+                while pending:
+                    destination_guard(output.fileno())
+                    written = output.write(pending)
+                    if written is None or written <= 0: raise BuildError('short retained input staging write')
+                    pending = pending[written:]
+            destination_guard(output.fileno()); output.flush(); destination_guard(output.fileno())
             os.fsync(output.fileno())
+            destination_guard(output.fileno())
         if total != source.st_size or hasher.hexdigest() != value:
             raise BuildError('retained input changed during private staging')
         return total
@@ -131,7 +145,7 @@ def _copy_cas_object(cas_root: Path, value: str, destination: Path,
 
 
 def _verify_retained_builder_archive(state_root: Path, value: str,
-                                     expected_config: str) -> None:
+                                     expected_config: str, *,expected_manifest=None,require_no_entrypoint=False) -> None:
     """Require the intent's OCI archive bytes to remain in controller CAS."""
     directory_fd = archive_fd = -1
     try:
@@ -156,7 +170,7 @@ def _verify_retained_builder_archive(state_root: Path, value: str,
             raise BuildError('retained builder archive changed during verification')
         os.lseek(archive_fd, 0, os.SEEK_SET)
         with os.fdopen(os.dup(archive_fd), 'rb') as stream:
-            inspect_builder_archive(stream, expected_config)
+            inspect_builder_archive(stream, expected_config, expected_manifest=expected_manifest,require_no_entrypoint=require_no_entrypoint)
         after = os.fstat(archive_fd)
         identity = lambda item: (item.st_dev, item.st_ino, item.st_size,
                                  item.st_mtime_ns, item.st_ctime_ns)

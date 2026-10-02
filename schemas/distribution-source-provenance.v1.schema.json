@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Distribution source provenance v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "record_type", "baseline_id", "baseline_sha256", "source_package_sha256", "spec_sha256", "package_files", "prepared_source_tree_sha256", "source_date_epoch", "upstream_relationship"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "record_type": {"const": "distribution-source-provenance"},
+    "baseline_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
+    "baseline_sha256": {"$ref": "#/$defs/sha256"},
+    "source_package_sha256": {"$ref": "#/$defs/sha256"},
+    "spec_sha256": {"$ref": "#/$defs/sha256"},
+    "prepared_source_tree_sha256": {"$ref": "#/$defs/sha256"},
+    "source_date_epoch": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+    "package_files": {
+      "type": "array", "minItems": 1, "maxItems": 8192,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["path", "sha256", "mode"],
+        "properties": {
+          "path": {"type": "string", "pattern": "^(SPECS|SOURCES)/[^/].*$", "maxLength": 4096},
+          "sha256": {"$ref": "#/$defs/sha256"},
+          "mode": {"type": "integer", "minimum": 0, "maximum": 511}
+        }
+      }
+    },
+    "upstream_relationship": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "upstream_base_oid"],
+      "properties": {
+        "kind": {"const": "distribution-prepared-source"},
+        "upstream_base_oid": {"type": "null"}
+      }
+    }
+  },
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

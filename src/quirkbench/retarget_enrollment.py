@@ -33,7 +33,7 @@ def _paused_source(control,config,request_id, *,verify_target,binding_reader,cle
     identifier(request_id);deadline=monotonic()+120
     recover=recovery_verifier or (lambda config:_verify_state_identity(config,Path('/boot/quirkbench-state')))
     recover(config);control,storage=_storage(control,verify_target);directory=_location(control,request_id)
-    with private_lock(control/'runtime-config.lock'),ExitStack() as ownership:
+    with private_lock(control/'runtime-config.lock') as config_fd,ExitStack() as ownership:
         archived=directory/'archive/agent'
         agent=_private_path(archived if (directory/'activation.json').exists() and archived.exists() else control/'agent')
         if not agent.is_dir():raise Conflict('original retarget spool unavailable; no new initialization permitted')
@@ -47,11 +47,15 @@ def _paused_source(control,config,request_id, *,verify_target,binding_reader,cle
             if monotonic()>=deadline:raise TimeoutError('retarget proof preparation deadline exceeded; maintenance remains paused')
             storage();recover(config);verify_binding(intent['new_target_binding'],reader=binding_reader)
             current_agent=directory/'archive/agent' if (directory/'activation.json').exists() and (directory/'archive/agent').exists() else control/'agent'
-            held=os.fstat(original_fd);named=(current_agent/'agent.lock').lstat()
-            if (held.st_dev,held.st_ino)!=(named.st_dev,named.st_ino):raise Conflict('original retarget agent lock ownership changed')
+            for path,fd in ((control/'runtime-config.lock',config_fd),(current_agent/'agent.lock',original_fd)):
+                held=os.fstat(fd);named=path.lstat()
+                if (held.st_dev,held.st_ino)!=(named.st_dev,named.st_ino):raise Conflict('original retarget lock ownership changed')
             _media(control,intent['media_instance_id'])
             if pending_intent(control)!=intent or _read(directory,'source.json')!=source_raw:
                 raise Conflict('retarget paused authority or original source map changed')
+            if intent['schema_version']==3:
+                from .retarget_endpoint import public
+                public(control,intent)
             if monotonic()>=deadline:raise TimeoutError('retarget proof preparation deadline exceeded; maintenance remains paused')
         basic();(clearer or clear_once)(config);basic()
         def locations():
@@ -60,7 +64,7 @@ def _paused_source(control,config,request_id, *,verify_target,binding_reader,cle
         def guard():
             basic()
             if _capture_source(control,intent,basic,locations=locations())!=source:raise Conflict('original retarget source changed before new-key proof')
-            basic()
+            _remaining(deadline,monotonic)
         final_checks=_FinalChecks(deadline,monotonic)
         with final_checks.locks:
             guard();yield control,directory,intent,guard,final_checks
@@ -184,7 +188,8 @@ def exchange(control,config,request_id,controller_url,approved_certificate_pem,a
     with _paused_source(control,config,request_id,verify_target=verify_target,binding_reader=binding_reader,
             clearer=clearer,recovery_verifier=recovery_verifier,monotonic=monotonic) as (control,directory,intent,guard,final_checks):
         from .retarget_activation import original_locations
-        original=_document(_read(original_locations(control,directory,intent)[1],'result.json'))
+        from .retarget_endpoint import original as original_endpoint
+        original=original_endpoint(control,intent,locations=original_locations(control,directory,intent))
         if controller_url!=original['controller_url']:raise Conflict('retarget cannot also migrate original controller endpoint')
         from .retarget_maintenance import reconcile_selection
         selection_exact=reconcile_selection(control,directory,intent,controller_url,approved_fingerprint,code_id,guard,binding_reader,run)

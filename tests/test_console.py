@@ -193,3 +193,13 @@ def test_manual_binding_uuid_is_available_offline_before_commissioning(tmp_path)
     console.run_console(boot_record=tmp_path/'missing',input_stream=StringIO('2\n'),
         output_stream=output,system_uuid_reader=lambda:identity)
     assert 'Target system UUID for manual binding: '+identity in output.getvalue()
+
+
+def test_endpoint_menu_uses_verified_recovery_and_returns_to_status_on_failure(tmp_path):
+    record=tmp_path/'boot.json';output=StringIO();calls=[]
+    console.run_console(boot_record=record,input_stream=StringIO('9\n'),output_stream=output,run_endpoint_setup=lambda **kw:calls.append(kw))
+    assert calls==[] and 'Endpoint maintenance requires verified recovery' in output.getvalue()
+    boot_record(record)
+    def blocked(**kw):calls.append(kw);raise RuntimeError('fixture failure')
+    console.run_console(boot_record=record,input_stream=StringIO('9\n'),output_stream=output,run_endpoint_setup=blocked)
+    assert len(calls)==1 and 'Partial maintenance remains paused' in output.getvalue()

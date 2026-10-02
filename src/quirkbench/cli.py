@@ -15,6 +15,16 @@ from .state_config import configure_state_root, discover_state_root
 class CommandParser(argparse.ArgumentParser):
     def parse_args(self,args=None,namespace=None):
         value=super().parse_args(args,namespace)
+        if value.command=='endpoint':
+            requirements={'show':(), 'stage':('request_id','host','source_sha256'), 'renew':('request_id','host','source_sha256'),
+                'apply':('request_id','identity_sha256','fingerprint','unit'), 'rollback':('request_id','switch_sha256'), 'wizard':('unit',)}
+            allowed=set(requirements[value.action])|({'request_id','public_certificate'} if value.action=='show' else
+                {'repository_url'} if value.action=='apply' else set())
+            for name in ('request_id','host','source_sha256','identity_sha256','fingerprint','repository_url','unit','switch_sha256','public_certificate'):
+                if name not in allowed and getattr(value,name):self.error('--'+name.replace('_','-')+' is incompatible with endpoint '+value.action)
+            if any(getattr(value,name) is None for name in requirements[value.action]):self.error('endpoint '+value.action+' requires '+', '.join('--'+name.replace('_','-') for name in requirements[value.action]))
+            if value.action=='wizard' and value.json:self.error('endpoint wizard requires attended input; use explicit actions with --json')
+            if value.public_certificate and value.json:self.error('--public-certificate cannot include --json')
         if value.command=='target':
             client=('url','ca','token_file','report')
             if value.action is None:
@@ -50,6 +60,45 @@ def parser():
     result.add_argument('--reserve-gib', type=float, default=20)
     result.add_argument('--repositories', type=Path, help='JSON mapping of configured OSTree repository aliases to absolute directories')
     commands = result.add_subparsers(dest='command', required=True)
+    investigation = commands.add_parser('investigation', help='attended external investigation, source preparation and lifecycle')
+    investigation_actions = investigation.add_subparsers(dest='action', required=True)
+    for name in ('start','brief','baseline','prepare-distribution'):
+        command = investigation_actions.add_parser(name)
+        command.add_argument('name',help='stable investigation identity')
+        command.add_argument('--json',action='store_true')
+        if name in ('start','prepare-distribution'):command.add_argument('--request-id',help='original durable retry identity; required for JSON')
+        if name=='start':
+            command.add_argument('--target',required=True,help='existing enrolled and registered target')
+            command.add_argument('--problem',type=Path,help='bounded UTF-8 problem description')
+            command.add_argument('--workspace',help='reserved private source workspace identity')
+            command.add_argument('--baseline',help='explicit supported baseline ID when catalog selection is ambiguous')
+            command.add_argument('--session-seconds',type=int,default=28800)
+            command.add_argument('--token-budget',type=int,default=1000000)
+    for name in ('status', 'pause', 'resume', 'source', 'prepare-source', 'capture-source', 'release-source'):
+        command = investigation_actions.add_parser(name)
+        command.add_argument('name', help='existing campaign identity')
+        command.add_argument('--json', action='store_true')
+        if name in ('source', 'prepare-source', 'capture-source', 'release-source'):
+            command.add_argument('--workspace', help='exact workspace; inferred only when unique')
+        if name in ('prepare-source', 'capture-source'):
+            command.add_argument('--request-id', help='durable retry identity; required for each capture and JSON preparation')
+            command.add_argument('--quiesced', action='store_true', help='explicitly acknowledge all source writers have stopped')
+        if name == 'prepare-source':
+            command.add_argument('--source', type=Path, required=True, help='canonical existing user Git root; original is preserved')
+            command.add_argument('--base-oid', required=True, help='full actual Git base OID, also the original HEAD')
+            command.add_argument('--allow-untracked', action='append', default=[], metavar='PATH')
+    endpoint = commands.add_parser('endpoint', help='inspect or maintain controller addresses using the existing stopped service')
+    endpoint.add_argument('action',choices=['show','stage','renew','apply','rollback','wizard'])
+    endpoint.add_argument('--request-id',help='exact retained endpoint request; omitted show selects configured identity')
+    endpoint.add_argument('--host',help='literal successor controller bind IP and certificate SAN')
+    endpoint.add_argument('--source-sha256',help='exact original identity SHA256 from endpoint show')
+    endpoint.add_argument('--identity-sha256',help='exact staged successor identity SHA256')
+    endpoint.add_argument('--fingerprint',help='explicit full staged controller certificate SHA256')
+    endpoint.add_argument('--repository-url',help='explicit successor repository service HTTPS URL')
+    endpoint.add_argument('--unit',type=Path,help='existing native controller user-unit file, verified before apply')
+    endpoint.add_argument('--switch-sha256',help='exact retained switch SHA256 for rollback')
+    endpoint.add_argument('--public-certificate',action='store_true',help='show only the selected public PEM certificate')
+    endpoint.add_argument('--json',action='store_true')
     commands.add_parser('setup-state', help='select private controller state for manual service setup')
     setup = commands.add_parser('setup', help='resume initial controller setup and optional native service startup')
     setup.add_argument('--request-id', help='durable retry identity; required with --json')
@@ -228,6 +277,33 @@ def parser():
 
 def _main(argv=None):
     args = parser().parse_args(argv)
+    if args.command == 'investigation':
+        from .investigation_sources import execute
+        from .contracts import Conflict, ContractError
+        from .operations import operation_response
+        try:
+            answer = execute(discover_state_root(args.state), args)
+            if args.json:
+                print(json.dumps(answer, sort_keys=True))
+            elif args.action=='brief':
+                from .investigations import render_brief
+                print(render_brief(answer['data']))
+            elif answer.get('operation_id'):
+                print('Source operation accepted: ' + answer['operation_id'])
+                print('Inspect: ' + answer['data']['status_command'])
+                print('Progress: ' + answer['data']['monitor_command'])
+                print('Preparation/capture completion requires the existing controller service. Resume the investigation explicitly if paused.')
+            else:
+                print(json.dumps(answer['data'], indent=2, sort_keys=True))
+            return 0
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            code = 'CONFLICT' if isinstance(exc, Conflict) else 'INVALID_INPUT' if isinstance(exc, ContractError) else 'INFRASTRUCTURE'
+            message = str(exc)[:512] if code != 'INFRASTRUCTURE' else 'source service unavailable; inspect the retained operation and readiness'
+            if args.json:
+                print(json.dumps(operation_response(error={'code': code, 'message': message, 'retryable': code == 'INFRASTRUCTURE'}), sort_keys=True))
+            else:
+                print(code + ': ' + message, file=sys.stderr)
+            return {'CONFLICT': 3, 'INVALID_INPUT': 2, 'INFRASTRUCTURE': 5}[code]
     if args.command=='recovery':
         from .recovery_download import submit
         from .release_trust import ReleaseUnavailable
@@ -249,6 +325,38 @@ def _main(argv=None):
                 ('CONFLICT',3) if isinstance(exc,Conflict) else ('INVALID_INPUT',2) if isinstance(exc,ContractError) else ('INFRASTRUCTURE',5))
             if args.json:print(json.dumps(operation_response(error={'code':code,'message':str(exc),'retryable':False}),sort_keys=True))
             else:print('Recovery acquisition blocked: '+str(exc),file=sys.stderr)
+            return status
+    if args.command=='endpoint':
+        from .endpoint_facade import execute
+        from .operations import operation_response
+        from .contracts import Conflict,ContractError
+        from .setup_contracts import SetupUnavailable
+        try:
+            root=args.state or discover_state_root()
+            if root is None:raise SetupUnavailable('run quirkbench setup before endpoint maintenance')
+            if args.action=='wizard':
+                from .endpoint_facade import wizard
+                wizard(root,unit=args.unit)
+                return 0
+            answer=execute(root,args.action,request_id=args.request_id,host=args.host,source_sha256=args.source_sha256,
+                identity_sha256=args.identity_sha256,fingerprint=args.fingerprint,repository_url=args.repository_url,
+                unit=args.unit,switch_sha256=args.switch_sha256)
+            if args.public_certificate:print(answer['certificate_pem'],end='')
+            elif args.json:print(json.dumps(answer,sort_keys=True))
+            else:
+                print('Endpoint request: '+answer['request_id'])
+                for key,label in [('identity_sha256','Identity SHA256'),('certificate_sha256','Certificate SHA256'),('controller_url','Controller'),('repository_url','Repository'),('switch_sha256','Switch SHA256')]:
+                    if answer.get(key) is not None:print(label+': '+answer[key])
+                if args.action=='show':print('Recorded public identity; current reachability remains separate.')
+                elif args.action in ('stage','renew'):print('Identity staged with the existing CA. Apply its exact identity and fingerprint with the controller user service stopped.')
+                else:print('Configuration restored.' if answer['rolled_back'] else 'Configuration applied.')
+                if args.action!='show':print('Start the existing controller user service when ready, then use recovery endpoint maintenance for each target. Reachability and target migration remain separate.')
+            return 0
+        except (OSError,ValueError,RuntimeError,sqlite3.Error) as exc:
+            code,status=(('UNAVAILABLE',4) if isinstance(exc,SetupUnavailable) else ('CONFLICT',3) if isinstance(exc,Conflict) else ('INVALID_INPUT',2) if isinstance(exc,ContractError) else ('INFRASTRUCTURE',5))
+            message=str(exc)[:512] if code!='INFRASTRUCTURE' else 'endpoint maintenance unavailable; exact request retained'
+            if args.json:print(json.dumps(operation_response(error={'code':code,'message':message,'retryable':code in ('UNAVAILABLE','CONFLICT')}),sort_keys=True))
+            else:print('Endpoint maintenance blocked: '+message,file=sys.stderr)
             return status
     if args.command=='target' and args.action is not None:
         from .target_setup import add_target,show_target
@@ -703,7 +811,7 @@ def _main(argv=None):
     try:
         args.state = discover_state_root(args.state)
         read_only = args.command in ('watch', 'target-inventory') or (args.command == 'campaign' and args.action == 'status')
-        if not read_only and args.command not in ('doctor','target','target-service','serve-repository'):
+        if not read_only and args.command not in ('doctor','target','endpoint','target-service','serve-repository'):
             from .state_config import outside_checkout
             outside_checkout(args.state)
             if not explicit_state and not args.state.exists():
@@ -1010,8 +1118,9 @@ def main(argv=None):
     """A publication barrier, not a scheduler; read-only commands do no housekeeping."""
     args=parser().parse_args(argv)
     readonly=(args.command in ('build','compose','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
-                               'target','target-service','serve-repository') or
+                               'target','endpoint','target-service','serve-repository') or
               (args.command=='campaign' and args.action=='status') or
+              (args.command=='investigation' and args.action in ('status','source','brief','baseline')) or
               (args.command=='settings' and args.action=='show') or
               (args.command=='maintenance' and args.action in ('status','prune')) or
               (args.command=='session' and args.action in ('observations','observation')) or

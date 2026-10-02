@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "record_type": "source-workspace-preparation",
+  "workspace_id": "kernel-1",
+  "base_oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "capture_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "workspace_path": "output/workspace",
+  "allowed_untracked": [
+    "new.c"
+  ],
+  "provenance": {}
+}

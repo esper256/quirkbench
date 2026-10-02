@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "record_type": "investigation",
+  "session": {
+    "schema_version": 1,
+    "session_id": "example",
+    "campaign_id": "example",
+    "device_id": "target",
+    "driver": "external",
+    "execution_owner": "external",
+    "workspace_id": "example-source",
+    "problem_digest": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "limits": {
+    "session_seconds": 28800,
+    "token_budget": 1000000
+  },
+  "catalog_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+  "inventory_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+  "plan_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+  "baseline_sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+}

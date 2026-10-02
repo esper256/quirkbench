@@ -74,6 +74,8 @@ def compact_context(controller, campaign_id):
 
 
 def run_decision(controller, campaign_id, adapter, decision_id=None):
+    from .investigations import require_managed_invocation
+    require_managed_invocation(controller,campaign_id)
     status = controller.status(campaign_id)
     if status['state'] != 'RUNNING':
         raise AgentError('resume campaign before starting an agent decision')

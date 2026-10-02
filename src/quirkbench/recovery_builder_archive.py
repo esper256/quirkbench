@@ -17,13 +17,15 @@ MAX_ARCHIVE_BYTES = 8 * 1024**3
 MAX_JSON_BYTES = 1024 * 1024
 
 
-def inspect_builder_archive(stream, expected_config: str, *, require_no_entrypoint=False) -> None:
+def inspect_builder_archive(stream, expected_config: str, *, require_no_entrypoint=False, expected_manifest=None) -> None:
     """Require the locked archive to contain exactly the expected OCI image.
 
     Layers are hashed as stored; the archive is never extracted or executed.
     """
     if not isinstance(expected_config, str) or not BLOB.fullmatch(expected_config):
         raise BuildError('invalid derived builder config digest')
+    if expected_manifest is not None and (not isinstance(expected_manifest,str) or not BLOB.fullmatch(expected_manifest)):
+        raise BuildError('invalid pinned builder manifest digest')
     try:
         with tarfile.open(fileobj=stream, mode='r:') as archive:
             files = {}
@@ -108,6 +110,8 @@ def inspect_builder_archive(stream, expected_config: str, *, require_no_entrypoi
                     or len(index['manifests']) != 1):
                 raise BuildError('builder OCI archive requires one image manifest')
             descriptor = index['manifests'][0]
+            if expected_manifest is not None and (not isinstance(descriptor,dict) or descriptor.get('digest') != expected_manifest):
+                raise BuildError('builder OCI manifest differs from pinned baseline')
             if (not isinstance(descriptor, dict) or
                     descriptor.get('mediaType') != 'application/vnd.oci.image.manifest.v1+json'):
                 raise BuildError('builder OCI archive manifest media type is unsupported')

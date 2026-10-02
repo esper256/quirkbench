@@ -1,6 +1,7 @@
 """Attended recovery retarget: exact local confirmation and fingerprint approval."""
 from pathlib import Path
 import subprocess
+import os
 import sys
 import time
 
@@ -27,7 +28,7 @@ def run_retarget(control,config, *,verify_target,input_stream=None,output_stream
     if request_id is None or not request_id:return None
     identifier(request_id);verify()
     directory=_location(control,request_id)
-    if directory.exists():
+    if (directory/'intent.json').exists() or (directory/'intent.json').is_symlink():
         intent=validate_intent(_document(_read(directory,'intent.json')))
         if intent['request_id']!=request_id or intent['new_target_binding']['system_uuid']!=actual:
             raise Conflict('retarget request belongs to another actual hardware binding')
@@ -47,8 +48,11 @@ def run_retarget(control,config, *,verify_target,input_stream=None,output_stream
         from .boot import _verify_state_identity
         recover=recovery_verifier or (lambda config:_verify_state_identity(config,Path('/boot/quirkbench-state')))
         recover(config)
-        with private_lock(control/'runtime-config.lock'),private_lock(control/'agent/agent.lock'):
+        with private_lock(control/'runtime-config.lock') as config_fd,private_lock(control/'agent/agent.lock') as agent_fd:
             verify();recover(config)
+            for path,fd in ((control/'runtime-config.lock',config_fd),(control/'agent/agent.lock',agent_fd)):
+                held=os.fstat(fd);named=path.lstat()
+                if (held.st_dev,held.st_ino)!=(named.st_dev,named.st_ino):raise Conflict('completed retarget console ownership changed')
             if pending_intent(control,binding_reader=binding_reader) is not None:raise Conflict('retarget completion unavailable')
             receipt=completed(control,request_id,binding_reader=binding_reader)
         print('Retarget already activated for '+receipt['device_id']+'. Original evidence remains retained.',file=output,flush=True)

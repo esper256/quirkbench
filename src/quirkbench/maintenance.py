@@ -153,6 +153,10 @@ def _prune(root, *, dry_run=False, owner=None):
         terminal = [dict(row) for row in db.execute(
             "SELECT id,state,updated,result_digest,error_digest,worker_generation,input_digest,stage_dir FROM operations "
             "WHERE state IN ('SUCCEEDED','FAILED') AND worker_unit IS NULL")]
+        pending_source_stages={}
+        for event in db.execute("SELECT e.operation,e.document FROM operation_events e JOIN operations o ON o.id=e.operation WHERE o.kind='source_prepare' AND o.state!='SUCCEEDED' AND e.kind='source_workspace_selection'"):
+            selection=json.loads(event['document'])
+            pending_source_stages.setdefault(event['operation'],set()).add(selection.get('source_stage'))
         claims = {}
         for row in terminal:
             for event in db.execute("SELECT document FROM operation_events WHERE operation=? AND kind='worker_stopped' ORDER BY id DESC", (row['id'],)):
@@ -170,6 +174,9 @@ def _prune(root, *, dry_run=False, owner=None):
         if row['state'] == 'FAILED' and now - row['updated'] < failed_seconds:
             continue
         stage = Path(proof['stage_dir'])
+        if str(stage) in pending_source_stages.get(row['id'],set()):
+            blocked.append(row['id']+': private source selection awaits workspace grant')
+            continue
         if not stage.exists():
             continue
         if not stage.is_relative_to(root / 'workers' / row['id']):

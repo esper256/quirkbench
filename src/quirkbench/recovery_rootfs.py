@@ -244,9 +244,15 @@ def verify_stock_rpm_signatures(lock, store, package_paths, stage, runner=_run):
 def _install(catalog, lock, store, output, *, runner=_run, marker=Path('/etc/quirkbench-container'),
              base_marker=Path('/etc/quirkbench-base-digest'), euid=None):
     entry, packages, target_lock = preflight(catalog, lock, store)
+    return _install_packages(entry,packages,target_lock,store,output,runner=runner,marker=marker,
+        base_marker=base_marker,euid=euid,record=lock,stock_lock=lock if lock['schema_version']==2 else None)
+
+
+def _install_packages(entry,packages,target_lock,store,output, *,runner,marker,base_marker,euid,record,stock_lock=None,candidate=False):
+    """Shared Fedora installroot assembler; callers supply independently pinned inputs."""
     if marker.read_text().strip() != 'quirkbench-fedora-rootless-build-v1':
         raise BuildError('rootfs installation requires the dedicated Fedora builder')
-    if lock['schema_version'] == 2:
+    if stock_lock is not None:
         # Stock v2 pins the complete builder OCI configuration. The fixed worker
         # verifies the retained archive and supplies its exact launch identity.
         if os.environ.get('QUIRKBENCH_BUILDER_CONFIG_DIGEST') != entry['builder_image_digest']:
@@ -268,12 +274,17 @@ def _install(catalog, lock, store, output, *, runner=_run, marker=Path('/etc/qui
     for index, package in enumerate(packages):
         source = store.path(package['sha256'])
         destination = package_dir / f'{index:04d}.rpm'
-        shutil.copyfile(source, destination)
+        if candidate:
+            from .baseline_inputs import cas_root
+            from .recovery_podman import _copy_cas_object
+            _copy_cas_object(cas_root(store),package['sha256'],destination,MAX_RPM_BYTES)
+        else:
+            shutil.copyfile(source, destination)
         if sha256_file(destination) != package['sha256']:
             raise BuildError('RPM bytes changed while staging')
         paths.append(str(destination))
-    if lock['schema_version'] == 2:
-        verify_stock_rpm_signatures(lock, store, paths, stage, runner)
+    if stock_lock is not None:
+        verify_stock_rpm_signatures(stock_lock, store, paths, stage, runner)
     query = ['rpm', '-qp', '--qf', '%{NAME}\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\t%{ARCH}\n', *paths]
     observed = ''.join(sorted(runner(query, 300).splitlines(keepends=True)))
     expected_packages = ''.join(sorted(_rpm_row(item['name'], item['nevra']) + '\n' for item in packages))
@@ -297,9 +308,9 @@ def _install(catalog, lock, store, output, *, runner=_run, marker=Path('/etc/qui
     identity = rootfs / 'etc/quirkbench-rootfs'
     identity.parent.mkdir(parents=True, exist_ok=True)
     identity.write_text('quirkbench-fedora-target-v1\n')
-    record = rootfs / 'usr/lib/quirkbench/recovery-rootfs-lock.json'
-    record.parent.mkdir(parents=True, exist_ok=True)
-    record.write_bytes(canonical(lock) + b'\n')
+    destination = rootfs / 'usr/lib/quirkbench'/('candidate-rootfs-input.json' if candidate else 'recovery-rootfs-lock.json')
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(canonical(record) + b'\n')
     os.replace(rootfs, output)
     sync_directory(output.parent)
     return output

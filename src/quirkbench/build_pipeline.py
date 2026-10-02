@@ -847,49 +847,103 @@ def _build_env_for_stage(stage: Path, source_date_epoch: int) -> dict[str, str]:
             "KBUILD_BUILD_TIMESTAMP": timestamp}
 
 
-def _extract_archive(archive: Path, destination: Path, *, preserve_mode=False, rootfs_links=False) -> Path:
+def _extract_archive(archive: Path, destination: Path, *, preserve_mode=False, rootfs_links=False, reserve_bytes=None, verify=None) -> Path:
     """Extract regular members before links; never write through archive links.
 
     Captured sysroots retain absolute target-OS links (for example resolv.conf).
     Source archives retain their existing contained-link requirement.
     """
-    destination.mkdir(parents=True)
-    links=[];directories=[];seen=set()
-    with tarfile.open(archive, "r:*") as handle:
-        for member in handle:
-            name = PurePosixPath(member.name)
-            if name.is_absolute() or not name.parts or any(part in ("", "..") for part in name.parts) or name in seen:
-                raise BuildError("archive contains an escaping or duplicate path")
-            seen.add(name)
-            target = destination.joinpath(*name.parts)
+    reserve=DISK_RESERVE if reserve_bytes is None else reserve_bytes
+    if type(reserve) is not int or reserve<0:raise BuildError("invalid extraction reserve")
+    if verify is not None:verify()
+    destination.mkdir(parents=True,mode=0o700 if verify is not None else 0o777)
+    from contextlib import nullcontext,contextmanager
+    from .source_capture import _directory_owner
+    with (_directory_owner(destination) if verify is not None else nullcontext(lambda:None)) as directory_guard:
+        def guard():
+            if verify is not None:verify()
+            directory_guard()
+        def effect(target):
+            guard()
             if any(parent.is_symlink() for parent in (target,*target.parents) if parent.is_relative_to(destination)):
                 raise BuildError("archive path traverses a link")
-            if member.isdir():
-                target.mkdir(parents=True, exist_ok=True);directories.append((target,member.mode))
-            elif member.isfile():
-                if shutil.disk_usage(destination).free - member.size < DISK_RESERVE:
-                    raise BuildError("20 GiB free-space reserve reached during extraction")
-                target.parent.mkdir(parents=True, exist_ok=True)
-                with handle.extractfile(member) as source, target.open("xb") as output:
-                    if source is None: raise BuildError("archive member data missing")
-                    while block := source.read(1024 * 1024): output.write(block)
-                    if shutil.disk_usage(destination).free < DISK_RESERVE:
+            if target.resolve()!=target or not target.is_relative_to(destination):
+                raise BuildError("archive extraction path changed")
+        @contextmanager
+        def output_file(target):
+            if verify is None:
+                with target.open("xb") as output:yield output,lambda:None
+                return
+            from .source_capture import _parent,_identity
+            root_fd=os.open(destination,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+            try:
+                with _parent(root_fd,target.relative_to(destination).as_posix()) as (parent,name):
+                    effect(target)
+                    held_parent=os.fstat(parent);named_parent=target.parent.lstat()
+                    if (held_parent.st_dev,held_parent.st_ino)!=(named_parent.st_dev,named_parent.st_ino):
+                        raise BuildError("archive extraction parent changed before create")
+                    fd=os.open(name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_NONBLOCK,0o600,dir_fd=parent)
+                    with os.fdopen(fd,'wb') as output:
+                        original=os.fstat(output.fileno())
+                        def output_guard():
+                            before=os.fstat(output.fileno());effect(target)
+                            try:named=target.lstat()
+                            except FileNotFoundError as exc:raise BuildError('archive extraction named output disappeared') from exc
+                            if _identity(before)!=_identity(named):raise BuildError('archive extraction named output changed')
+                            if _identity(before)!=_identity(os.fstat(output.fileno())) or _identity(before)!=_identity(os.stat(name,dir_fd=parent,follow_symlinks=False)):
+                                raise BuildError("archive extraction output changed")
+                            if (before.st_dev,before.st_ino)!=(original.st_dev,original.st_ino):raise BuildError("archive extraction output replaced")
+                        yield output,output_guard
+            finally:os.close(root_fd)
+        links=[];directories=[];seen=set()
+        with tarfile.open(archive, "r:*") as handle:
+            for member in handle:
+                guard()
+                name = PurePosixPath(member.name)
+                if name.is_absolute() or not name.parts or any(part in ("", "..") for part in name.parts) or name in seen:
+                    raise BuildError("archive contains an escaping or duplicate path")
+                seen.add(name)
+                target = destination.joinpath(*name.parts)
+                if any(parent.is_symlink() for parent in (target,*target.parents) if parent.is_relative_to(destination)):
+                    raise BuildError("archive path traverses a link")
+                if member.isdir():
+                    effect(target);target.mkdir(parents=True, exist_ok=True);directories.append((target,member.mode))
+                elif member.isfile():
+                    if shutil.disk_usage(destination).free - member.size < reserve:
                         raise BuildError("20 GiB free-space reserve reached during extraction")
-                target.chmod(member.mode & 0o7777 if preserve_mode else member.mode & 0o755 or 0o644)
-            elif member.issym():
-                if not member.linkname or ('\x00' in member.linkname): raise BuildError("invalid archive link")
-                if not (rootfs_links and PurePosixPath(member.linkname).is_absolute()) and not (target.parent/member.linkname).resolve().is_relative_to(destination.resolve()):
-                    raise BuildError("archive symlink escapes destination")
-                links.append((target,member.linkname))
-            else: raise BuildError("archive contains unsupported special or hardlink member")
-    for target,value in links:
-        if target.exists() or target.is_symlink() or any(parent.is_symlink() for parent in target.parents if parent.is_relative_to(destination)):
-            raise BuildError("archive link overlaps a member or another link")
-        target.parent.mkdir(parents=True,exist_ok=True);target.symlink_to(value)
-    if preserve_mode:
-        for target,mode in reversed(directories): target.chmod(mode & 0o7777)
-    children = list(destination.iterdir())
-    return children[0] if len(children) == 1 and children[0].is_dir() and not children[0].is_symlink() else destination
+                    effect(target);target.parent.mkdir(parents=True, exist_ok=True)
+                    with handle.extractfile(member) as source, output_file(target) as (output,output_guard):
+                        if source is None: raise BuildError("archive member data missing")
+                        while True:
+                            output_guard();guard()
+                            block=source.read(1024*1024)
+                            if not block:break
+                            guard()
+                            if shutil.disk_usage(destination).free-len(block)<reserve:
+                                raise BuildError("configured free-space reserve reached during extraction")
+                            output_guard();output.write(block)
+                            output.flush();output_guard()
+                        if shutil.disk_usage(destination).free < reserve:
+                            raise BuildError("20 GiB free-space reserve reached during extraction")
+                        if verify is not None:
+                            output_guard();os.fchmod(output.fileno(),member.mode & 0o7777 if preserve_mode else member.mode & 0o755 or 0o644)
+                            output_guard()
+                    if verify is None:effect(target);target.chmod(member.mode & 0o7777 if preserve_mode else member.mode & 0o755 or 0o644)
+                elif member.issym():
+                    if not member.linkname or ('\x00' in member.linkname): raise BuildError("invalid archive link")
+                    if not (rootfs_links and PurePosixPath(member.linkname).is_absolute()) and not (target.parent/member.linkname).resolve().is_relative_to(destination.resolve()):
+                        raise BuildError("archive symlink escapes destination")
+                    links.append((target,member.linkname))
+                else: raise BuildError("archive contains unsupported special or hardlink member")
+        for target,value in links:
+            guard()
+            if target.exists() or target.is_symlink() or any(parent.is_symlink() for parent in target.parents if parent.is_relative_to(destination)):
+                raise BuildError("archive link overlaps a member or another link")
+            effect(target);target.parent.mkdir(parents=True,exist_ok=True);effect(target);target.symlink_to(value)
+        if preserve_mode:
+            for target,mode in reversed(directories):effect(target);target.chmod(mode & 0o7777)
+        guard();children = list(destination.iterdir())
+        return children[0] if len(children) == 1 and children[0].is_dir() and not children[0].is_symlink() else destination
 
 
 def _validate_userspace_command(command: Command, workspace: Path) -> None:

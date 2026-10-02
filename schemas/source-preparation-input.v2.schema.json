@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Distribution source preparation input v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "record_type", "source_kind", "workspace_id", "campaign_id", "baseline_sha256", "kernel_srpm_sha256", "builder_image_digest", "builder_config_digest", "builder_archive_sha256", "source_date_epoch"],
+  "properties": {
+    "schema_version": {"const": 2},
+    "record_type": {"const": "source-preparation-input"},
+    "source_kind": {"const": "distribution"},
+    "workspace_id": {"$ref": "#/$defs/identifier"},
+    "campaign_id": {"$ref": "#/$defs/identifier"},
+    "baseline_sha256": {"$ref": "#/$defs/sha256"},
+    "kernel_srpm_sha256": {"$ref": "#/$defs/sha256"},
+    "builder_archive_sha256": {"$ref": "#/$defs/sha256"},
+    "builder_image_digest": {"$ref": "#/$defs/image"},
+    "builder_config_digest": {"$ref": "#/$defs/image"},
+    "source_date_epoch": {"type": "integer", "minimum": 0, "maximum": 2147483647}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "image": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

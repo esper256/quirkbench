@@ -27,8 +27,8 @@ def active(received):
 
 def prepare(active,**kw):
     control,result,pem,kwargs=active
-    return local.prepare(control,CONFIG,'endpoint-1',kw.pop('device',result['device_id']),kw.pop('runtime_sha',digest((control/'runtime.json').read_bytes())),
-        'https://127.0.0.1:8445',{'lab':'https://127.0.0.1:8446/lab'},pem,digest(__import__('ssl').PEM_cert_to_DER_cert(pem)),
+    return local.prepare(control,CONFIG,kw.pop('request_id','endpoint-1'),kw.pop('device',result['device_id']),kw.pop('runtime_sha',digest((control/'runtime.json').read_bytes())),
+        kw.pop('controller_url','https://127.0.0.1:8445'),kw.pop('remote_urls',{'lab':'https://127.0.0.1:8446/lab'}),pem,digest(__import__('ssl').PEM_cert_to_DER_cert(pem)),
         verify_target=kw.pop('verify_target',lambda:True),binding_reader=kw.pop('binding_reader',lambda:UUID),
         clearer=kw.pop('clearer',lambda _:None),recovery_verifier=kw.pop('recovery_verifier',lambda _:True),**kw)
 

@@ -85,7 +85,7 @@ def _journal_at(agent,name='journal.json'):
     return journal
 
 
-def _source(control,verify, *,locations=None):
+def _source(control,verify, *,locations=None,_endpoint_files=None):
     """Capture exact original enrollment/configuration; do not authenticate as it."""
     verify();runtime_home,pending,agent=locations or (control,control/'enrollment/pending',control/'agent')
     pending=_private_path(pending)
@@ -109,6 +109,15 @@ def _source(control,verify, *,locations=None):
         name=alias+'.public.asc';files[name]=remote['public_key'].encode()
         runtime['remotes'][alias]={'url':remote['url'],'ca':'ca.pem','public_key':name,'client_cert':'repository.crt','client_key':'repository.key'}
     files['runtime.json']=canonical(runtime)
+    if _endpoint_files is None and locations is None and (control/'endpoint/active.json').exists():
+        from .endpoint_history import history
+        from .endpoint_activation import selected_files
+        selected_raw=read(control/'endpoint','active.json');history(control,selected_raw)
+        _endpoint_files=selected_files(control,selected_raw)
+    if _endpoint_files is not None:
+        files=_endpoint_files;runtime=_document(files['runtime.json'])
+        from .retarget_endpoint import project
+        result=project(result,files)
     if (manifest!={name:digest(data) for name,data in sorted(files.items())}
             or set(path.name for path in islice(directory.iterdir(),len(files)+2))!=set(files)|{'generation.json'}
             or any(read(directory,name)!=raw for name,raw in files.items())):
@@ -135,7 +144,10 @@ def _locked(control,verify_target,binding_reader):
     if not agent.is_dir():raise Conflict('original target spool unavailable')
     with private_lock(control/'runtime-config.lock'):
         with private_lock(agent/'agent.lock'):
-            verify();request_raw=_read(control/'enrollment/pending','request.json')
+            verify()
+            from .endpoint_local import require_available
+            require_available(control,binding_reader=binding_reader)
+            request_raw=_read(control/'enrollment/pending','request.json')
             request=validate_request(_document(request_raw));base=verify
             def verify():
                 base();verify_binding(request['target_binding'],reader=binding_reader)

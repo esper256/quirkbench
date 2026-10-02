@@ -26,7 +26,7 @@ def select(prepared,**kw):
         calls.append(url)
         if url.endswith('/endpoint-check'):yield Reply(canonical({'schema_version':1,'data':{'value':{'device_id':result['device_id'],'credential_accepted':True,'work_queued':False}}}))
         else:yield Reply(b'[core]\nrepo_version=1\n')
-    return activation.activate(control,CONFIG,'endpoint-1',verify_target=kw.pop('verify_target',lambda:True),
+    return activation.activate(control,CONFIG,kw.pop('request_id','endpoint-1'),verify_target=kw.pop('verify_target',lambda:True),
         binding_reader=kw.pop('binding_reader',lambda:UUID),clearer=kw.pop('clearer',lambda _:None),
         recovery_verifier=kw.pop('recovery_verifier',lambda _:True),run=kw.pop('run',Commands()),response=kw.pop('response',response),**kw)
 

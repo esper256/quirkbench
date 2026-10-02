@@ -93,7 +93,7 @@ def activate_staged_setup(*, run=subprocess.run):
 def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
                 output_stream=None, run_nmtui=None, profiles_ready=None,
                 run_capacity_setup=None, run_manual_setup=None, system_uuid_reader=None,
-                run_enrollment_setup=None,run_network_save=None,run_evidence_drain=None,run_retarget_setup=None) -> int:
+                run_enrollment_setup=None,run_network_save=None,run_evidence_drain=None,run_retarget_setup=None,run_endpoint_setup=None) -> int:
     """Show the local status even without a cable, controller or enrollment."""
     source = input_stream or sys.stdin
     output = output_stream or sys.stdout
@@ -115,6 +115,9 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
     if run_retarget_setup is None:
         from .retarget_console import connect_retarget
         run_retarget_setup=connect_retarget
+    if run_endpoint_setup is None:
+        from .endpoint_console import connect_endpoint
+        run_endpoint_setup=connect_endpoint
     from .binding import read_system_uuid, BindingError
     try:
         target_uuid = (system_uuid_reader or read_system_uuid)()
@@ -150,6 +153,8 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
         print('7) Review or drain original evidence with explicit controller approval'
               + ('' if verified else ' (waiting for verified recovery)'),file=output)
         print('8) Explicitly retarget enrolled media to this hardware'
+              + ('' if verified else ' (waiting for verified recovery)'),file=output)
+        print('9) Repair or restore this target\'s controller endpoint'
               + ('' if verified else ' (waiting for verified recovery)'),file=output)
         print('Network changes here are temporary until explicitly saved during setup.', file=output)
         print('Selection: ', end='', file=output, flush=True)
@@ -244,8 +249,18 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
                 print('Retarget blocked. Verify exact original revocation/reconciliation, actual new UUID and invitation trust. Partial maintenance stays paused; retry its retained local request.',file=output,flush=True)
             except KeyboardInterrupt:
                 print('Retarget interrupted. Partial maintenance stays paused; resume the same local request and controller invitation.',file=output,flush=True)
+        elif choice.strip()=='9':
+            if not verified:
+                print('Endpoint maintenance requires verified recovery and private evidence storage.',file=output,flush=True)
+                continue
+            try:run_endpoint_setup(input_stream=source,output_stream=output)
+            except SetupUnavailable as exc:print(str(exc),file=output,flush=True)
+            except (OSError,ValueError,RuntimeError,subprocess.TimeoutExpired):
+                print('Endpoint maintenance blocked. Retry its exact request or restore the captured source. Partial maintenance remains paused.',file=output,flush=True)
+            except KeyboardInterrupt:
+                print('Endpoint maintenance interrupted; reuse its exact request. Existing evidence remains retained.',file=output,flush=True)
         elif choice.strip() != '2':
-            print('Choose 1, 2, 3, 4, 5, 6, 7 or 8.', file=output, flush=True)
+            print('Choose 1, 2, 3, 4, 5, 6, 7, 8 or 9.', file=output, flush=True)
 
 
 def main() -> int:

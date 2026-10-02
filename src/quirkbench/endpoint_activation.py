@@ -16,7 +16,7 @@ from .enrollment_activation import _bundle
 from .enrollment_proof import validate_request
 from .enrollment_result import validate_result
 from .enrollment_target import _media,_intent
-from .endpoint_generation import read_generation,verify_transition,_active
+from .endpoint_generation import read_generation,verify_transition,transition,_active
 from .endpoint_local import location
 from .endpoint_preflight import owned,validate_source
 from .endpoint_probe import probe
@@ -46,52 +46,139 @@ def _selection(activation):
         'completion_sha256':digest(_completion(activation))})
 
 
-def _original_bundle(control,original):
-    pending=_private_path(control/'enrollment/pending');bundle=_private_path(pending/'activation-bundle')
+def _original_bundle(control,original, *,_pending=None,_reference=None):
+    pending=_private_path(_pending if _pending is not None else control/'enrollment/pending');bundle=_private_path(pending/'activation-bundle')
+    retained={name:_strict_read(pending,name) for name in ('request.json','result.json','key.pem')}
+    request=validate_request(_document(retained['request.json']));result=validate_result(_document(retained['result.json']),request)
+    enrolled=_bundle(result,request,retained['key.pem'])
+    # A linked endpoint source may contain later URLs. Its unchanged private
+    # files still come from the independently reconstructed enrollment bundle.
+    from .endpoint_generation import _bundle as generation_bundle
+    current,_,_=generation_bundle(original);initial,_,_=generation_bundle(enrolled)
+    projected=_document(canonical(initial));projected['controller_url']=current['controller_url']
+    if set(current['remotes'])!=set(initial['remotes']):raise Conflict('endpoint original aliases changed')
+    from urllib.parse import urlsplit
+    for alias in initial['remotes']:
+        if urlsplit(current['remotes'][alias]['url']).path!=urlsplit(initial['remotes'][alias]['url']).path:
+            raise Conflict('endpoint original repository identity changed')
+        projected['remotes'][alias]['url']=current['remotes'][alias]['url']
+    if original!=enrolled|{'runtime.json':canonical(projected)}:raise Conflict('endpoint original credentials or binding changed')
+    if result['schema_version']==2:
+        from .endpoint_origin import retarget_original
+        _,_,files,_,_,bundle=retarget_original(control,reference=_reference,pending=pending)
+        if files!=enrolled:raise Conflict('endpoint original retarget bundle changed')
+        return bundle
     if ({path.name for path in islice(pending.iterdir(),6)}!={'intent.json','request.json','result.json','key.pem','activation-bundle'}
-            or {path.name for path in islice(bundle.iterdir(),17)}!=set(original)
-            or any(_strict_read(bundle,name)!=raw for name,raw in original.items())):
+            or {path.name for path in islice(bundle.iterdir(),17)}!=set(enrolled)
+            or any(_strict_read(bundle,name)!=raw for name,raw in enrolled.items())):
         raise Conflict('endpoint retained activation bundle differs from original enrollment')
+    return bundle
 
 
-def _records(control,request_id):
+def selected_files(control,selection_raw, *,depth=0,_origin=None):
+    """Reconstruct a historical terminal selection, never compare it to live runtime.
+
+    Callers first check public history and actual binding under their existing
+    ownership. This proof follows only retained predecessor bytes to enrollment.
+    """
+    from .endpoint_history import pointer,MAX_HISTORY
+    from .endpoint_rollback import _receipt,_pointer,validate_rollback
+    if depth>=MAX_HISTORY:raise Conflict('endpoint private history exceeds bounded limit')
+    selection=pointer(selection_raw)
+    if selection['schema_version']==1:raise Conflict('endpoint predecessor is unfinished')
+    directory,intent,source,original,destination=_source_records(control,selection['request_id'],depth=depth,_origin=_origin)
+    if selection['intent_sha256']!=source['intent_sha256']:raise Conflict('endpoint predecessor intent changed')
+    if selection['schema_version']==2:
+        activation=_expected_activation(intent['request_id'],source)
+        if (_strict_read(directory,'activation.json')!=canonical(activation) or _strict_read(directory,'completion.json')!=_completion(activation)
+                or selection_raw!=_selection(activation) or read_generation(control,activation['generation'])!=destination):
+            raise Conflict('endpoint predecessor activation changed')
+        return destination
+    rollback=validate_rollback(_document(_strict_read(directory,'rollback.json')))
+    activation_sha=None
+    if (directory/'activation.json').exists() or (directory/'activation.json').is_symlink():
+        activation=_expected_activation(intent['request_id'],source)
+        if _strict_read(directory,'activation.json')!=canonical(activation):raise Conflict('endpoint predecessor activation changed')
+        activation_sha=digest(canonical(activation))
+    expected={'schema_version':1,'record_type':'target-endpoint-rollback','request_id':intent['request_id'],
+        'source_sha256':digest(canonical(source)),'intent_sha256':source['intent_sha256'],'activation_sha256':activation_sha,
+        'restored_generation':source['transition']['source_generation'],'restored_runtime_sha256':source['transition']['source_runtime_sha256']}
+    if (rollback!=expected or _strict_read(directory,'rollback.json')!=canonical(expected)
+            or _strict_read(directory,'rollback-completion.json')!=_receipt(expected) or selection_raw!=_pointer(expected)):
+        raise Conflict('endpoint predecessor rollback changed')
+    return original
+
+
+def _source_records(control,request_id, *,depth=0,_origin=None):
     from .endpoint_local import validate_intent
-    directory=location(control,request_id);source_raw=_strict_read(directory,'source.json');source=validate_source(_document(source_raw))
+    home=control if _origin is None else _origin[1]
+    directory=location(home,request_id);source_raw=_strict_read(directory,'source.json');source=validate_source(_document(source_raw))
     intent_raw=_strict_read(directory,'intent.json');intent=validate_intent(_document(intent_raw))
-    activation_raw=_strict_read(directory,'activation.json');activation=validate_activation(_document(activation_raw))
     record=source['transition']
-    if (source_raw!=canonical(source) or intent_raw!=canonical(intent) or activation_raw!=canonical(activation)
+    if (source_raw!=canonical(source) or intent_raw!=canonical(intent)
             or intent['request_id']!=request_id or record['request_id']!=request_id
             or record['source_runtime_sha256']!=intent['runtime_sha256']
             or any(record[name]!=intent[name] for name in ('controller_url','remote_urls','approved_certificate_sha256'))
-            or activation['request_id']!=request_id or activation['source_sha256']!=digest(source_raw)
-            or activation['intent_sha256']!=source['intent_sha256'] or activation['intent_sha256']!=digest(intent_raw)
-            or activation['transition_sha256']!=digest(canonical(record)) or activation['generation']!=record['destination_generation']
-            or activation['runtime_sha256']!=record['destination_runtime_sha256']):raise Conflict('endpoint activation differs from immutable original source')
-    pending=control/'enrollment/pending'
+            or source['intent_sha256']!=digest(intent_raw)):
+        raise Conflict('endpoint source differs from immutable original intent')
+    pending=control/'enrollment/pending' if _origin is None else _origin[0]
     retained={name:_strict_read(pending,name) for name in ('intent.json','request.json','result.json','key.pem')}
     enrollment_intent=_intent(_document(retained['intent.json']))
     request=validate_request(_document(retained['request.json']));result=validate_result(_document(retained['result.json']),request)
     if (digest(retained['request.json'])!=record['enrollment_request_sha256']
             or digest(retained['result.json'])!=record['enrollment_result_sha256']
             or request['target_binding']!=intent['target_binding'] or request['media_instance_id']!=intent['media_instance_id']
-            or result['device_id']!=intent['device_id'] or result['schema_version']!=1
+            or result['device_id']!=intent['device_id']
             or any(enrollment_intent[name]!=request[name] for name in ('request_id','code_id','media_instance_id','target_binding'))
-            or enrollment_intent['controller_url']!=result['controller_url']
-            or {path.name for path in islice(pending.iterdir(),6)}!=set(retained)|{'activation-bundle'}):
+            or enrollment_intent['controller_url']!=result['controller_url']):
         raise Conflict('endpoint original enrollment differs from retained evidence')
-    original=read_generation(control,record['source_generation']);destination=read_generation(control,record['destination_generation'])
-    if original!=_bundle(result,request,retained['key.pem']) or digest(_active(original,record['source_generation']))!=intent['runtime_sha256']:
-        raise Conflict('endpoint source generation differs from original enrollment')
-    _original_bundle(control,original)
+    from .endpoint_history import MAX_HISTORY
+    if depth>=MAX_HISTORY:raise Conflict('endpoint private history exceeds bounded limit')
+    enrolled=_bundle(result,request,retained['key.pem']);reference=None
+    if result['schema_version']==2:
+        from .endpoint_origin import retarget_original
+        _,_,files,_,reference,_=retarget_original(control,reference=source.get('enrollment_origin') if _origin is not None else None,pending=pending)
+        if enrolled!=files:raise Conflict('endpoint source differs from completed retarget origin')
+    if intent['schema_version']==2:
+        previous=_strict_read(directory,'previous-selection.json')
+        if (source['schema_version']!=3 or source['enrollment_origin']!=reference
+                or digest(previous)!=intent['previous_selection_sha256'] or source['previous_selection_sha256']!=digest(previous)):
+            raise Conflict('endpoint source predecessor or enrollment origin changed')
+        expected_original=selected_files(control,previous,depth=depth+1,_origin=_origin)
+    else:
+        if source['schema_version']!=result['schema_version'] or (reference is not None and source['enrollment_origin']!=reference):
+            raise Conflict('endpoint source version differs from exact enrollment origin')
+        expected_original=enrolled
+    original=read_generation(control,record['source_generation'])
+    if original!=expected_original or digest(_active(original,record['source_generation']))!=intent['runtime_sha256']:
+        raise Conflict('endpoint source generation differs from original enrollment or exact selected predecessor')
+    _original_bundle(control,original,_pending=pending,_reference=reference)
     expected={'runtime.json':intent['runtime_sha256'],'media-instance.json':digest(_strict_read(control,'media-instance.json')),
         'agent/journal.json':digest(canonical({'schema_version':1,'device_id':intent['device_id'],'pending':None,'claim_request_id':None})),
         **{str(Path('enrollment/pending')/name):digest(raw) for name,raw in retained.items()},
         **{str(Path('generations')/record['source_generation']/name):digest(raw) for name,raw in original.items()},
         str(Path('generations')/record['source_generation']/'generation.json'):record['source_generation']}
+    if intent['schema_version']==2:expected[str(Path('endpoint/requests')/directory.name/'previous-selection.json')]=intent['previous_selection_sha256']
     if source['files']!=expected:raise Conflict('endpoint source map differs from exact original enrollment namespace')
-    active=verify_transition(record,original,destination)
-    return directory,source,activation,active
+    expected_record,destination=transition(original,request_id,digest(retained['request.json']),digest(retained['result.json']),
+        intent['controller_url'],intent['remote_urls'],intent['approved_certificate_sha256'])
+    if expected_record!=record:raise Conflict('endpoint transition differs from exact original enrollment')
+    return directory,intent,source,original,destination
+
+
+def _expected_activation(request_id,source):
+    record=source['transition']
+    return validate_activation({'schema_version':1,'record_type':'target-endpoint-activation','request_id':request_id,
+        'source_sha256':digest(canonical(source)),'intent_sha256':source['intent_sha256'],'transition_sha256':digest(canonical(record)),
+        'runtime_sha256':record['destination_runtime_sha256'],'generation':record['destination_generation']})
+
+
+def _records(control,request_id):
+    directory,intent,source,original,destination=_source_records(control,request_id)
+    raw=_strict_read(directory,'activation.json');activation=validate_activation(_document(raw))
+    if raw!=canonical(_expected_activation(request_id,source)):raise Conflict('endpoint activation differs from immutable original source')
+    if read_generation(control,activation['generation'])!=destination:raise Conflict('endpoint selected generation differs from original source')
+    return directory,source,activation,verify_transition(source['transition'],original,destination)
 
 
 def _journal(control,device_id):
@@ -122,11 +209,12 @@ def completed(control,request_id, *,binding_reader=None):
     from .endpoint_local import validate_intent
     directory=location(control,request_id);intent=validate_intent(_document(_strict_read(directory,'intent.json')))
     verify_binding(intent['target_binding'],reader=binding_reader or read_system_uuid);_media(control,intent['media_instance_id'])
-    directory,source,activation,active=_records(control,request_id)
-    if {path.name for path in islice(directory.parent.iterdir(),2)}!={directory.name}:
-        raise Conflict('completed endpoint has ambiguous retained requests')
+    from .endpoint_history import history
+    history(control,_strict_read(control/'endpoint','active.json'))
     names={'intent.json','source.json','approved-controller.pem','capture-completion.json','activation.json','completion.json'}
-    if {path.name for path in islice(directory.iterdir(),7)}!=names:raise Conflict('completed endpoint contains unknown retained records')
+    if intent['schema_version']==2:names.add('previous-selection.json')
+    if {path.name for path in islice(directory.iterdir(),8)}!=names:raise Conflict('completed endpoint contains unknown retained records')
+    directory,source,activation,active=_records(control,request_id)
     import ssl
     try:approved_der=ssl.PEM_cert_to_DER_cert(_strict_read(directory,'approved-controller.pem').decode('ascii'))
     except (ValueError,UnicodeError) as exc:raise ContractError('completed endpoint approval changed') from exc
@@ -149,10 +237,9 @@ def activate(control,config,request_id, *,verify_target,binding_reader=read_syst
              recovery_verifier=None,run=subprocess.run,clock=time.time,monotonic=time.monotonic,response=None,fault_hook=None):
     """First original-enrollment endpoint change; completed ACK never repeats HTTP/clear.
 
-    Repeated transitions and completed-retarget association are separate adapters;
-    this bounded prerequisite rejects them before any activation effects.
+    Completed retarget origins use their exact enrollment association. Repeated
+    endpoint transitions are a separate adapter.
     """
-    from .endpoint_local import pending,_public_retarget
     from .enrollment_target import _storage
     from .boot import _verify_state_identity
     from .runtime import load_provisioning
@@ -160,8 +247,10 @@ def activate(control,config,request_id, *,verify_target,binding_reader=read_syst
     recover=recovery_verifier or (lambda cfg:_verify_state_identity(cfg,Path('/boot/quirkbench-state')))
     recover(config)
     control,storage=_storage(control,verify_target);directory=location(control,request_id);fault=fault_hook or (lambda _:None)
-    # First publication only; normal runtime continues to verify actual binding.
-    if _public_retarget(control)[0] is not None:raise Conflict('completed-retarget endpoint activation requires its enrollment association adapter')
+    if (directory/'rollback.json').exists() or (directory/'rollback.json').is_symlink():
+        raise Conflict('endpoint selected for rollback; use its exact stopped rollback')
+    # Normal runtime continues to verify actual binding; original retarget
+    # enrollment is independently reconstructed by its explicit origin adapter.
     if (control/'endpoint/active.json').exists():
         pointer=_document(_strict_read(control/'endpoint','active.json'))
         if pointer.get('schema_version')==2:
@@ -174,7 +263,8 @@ def activate(control,config,request_id, *,verify_target,binding_reader=read_syst
                     raise Conflict('completed endpoint boot configuration changed')
                 names={*source['files'], 'endpoint/active.json',
                     *(str(path.relative_to(control)) for path in directory.iterdir()),
-                    *(str(Path('enrollment/pending/activation-bundle')/name) for name in read_generation(control,source['transition']['source_generation'])),
+                    *(str((_original_bundle(control,read_generation(control,source['transition']['source_generation']))/name).relative_to(control))
+                        for name in read_generation(control,source['transition']['source_generation'])),
                     *(str(Path('generations')/activation['generation']/name) for name in (*read_generation(control,activation['generation']),'generation.json'))}
                 snapshots={name:_strict_read(control/Path(name).parent,Path(name).name) for name in names if name!='agent/journal.json'}
                 journal=_journal(control,_document(_strict_read(directory,'intent.json'))['device_id'])

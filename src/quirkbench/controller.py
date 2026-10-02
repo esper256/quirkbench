@@ -100,6 +100,12 @@ from .evidence_drain import MIGRATION as EVIDENCE_DRAIN_MIGRATION,clock_fenced a
 MIGRATIONS.append(EVIDENCE_DRAIN_MIGRATION)
 from .retarget_invitation import MIGRATION as RETARGET_INVITATION_MIGRATION
 MIGRATIONS.append(RETARGET_INVITATION_MIGRATION)
+from .source_workspace import MIGRATION as SOURCE_WORKSPACE_MIGRATION
+MIGRATIONS.append(SOURCE_WORKSPACE_MIGRATION)
+from .source_workspace import PREPARATION_MIGRATION as SOURCE_PREPARATION_MIGRATION
+MIGRATIONS.append(SOURCE_PREPARATION_MIGRATION)
+from .investigations import MIGRATION as INVESTIGATION_MIGRATION
+MIGRATIONS.append(INVESTIGATION_MIGRATION)
 
 def uid():
     return uuid.uuid4().hex
@@ -621,7 +627,7 @@ class Controller(OperatorApprovals):
     def _startup_db(self, db, *, restored=False):
         self._uncertain(db, '1=1', (), 'controller restarted; reconcile before resume')
         db.execute("UPDATE campaigns SET state='PAUSED',reason='controller restarted; explicit resume required'")
-        db.execute("UPDATE operations SET state='INTERRUPTED',worker_epoch=NULL,updated=? WHERE state='QUEUED' AND kind IN ('build','compose','builder_prepare','recovery_download')",(self.clock(),))
+        db.execute("UPDATE operations SET state='INTERRUPTED',worker_epoch=NULL,updated=? WHERE state='QUEUED' AND kind IN ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare')",(self.clock(),))
         db.execute("UPDATE operations SET queued_epoch=(SELECT epoch FROM controller_lifecycle WHERE id=1) WHERE state='QUEUED' AND kind='operation_resume'")
         # A live owner's unit names are evidence needed to stop complete cgroups.
         # Copied unit names in a restored backup refer to another controller.
@@ -715,36 +721,41 @@ class Controller(OperatorApprovals):
             for value in retained_inputs: self.store.verify(value)
         stored = self.store.put(raw)
         with self.transaction() as db:
-            if db.execute('SELECT 1 FROM observation_response_commands WHERE id=?', (request_id,)).fetchone():
-                raise Conflict('request ID already belongs to an observation response')
-            previous = db.execute('SELECT id,request_digest FROM operations WHERE request_id=?', (request_id,)).fetchone()
-            if previous:
-                if db.execute('SELECT 1 FROM storage_retired WHERE owner=?',(previous['id'],)).fetchone():
-                    raise Conflict('operation payload was retired; use a new request ID')
-                if previous['request_digest'] != request_digest:
-                    raise Conflict('request ID already has different immutable operation intent')
-                for value in retained_inputs:
-                    db.execute('INSERT OR IGNORE INTO refs(owner,digest) VALUES(?,?)',(previous['id'],value))
-                    db.execute('INSERT OR IGNORE INTO operation_refs(operation,role,digest) VALUES(?,"input",?)',(previous['id'],value))
-                return self._operation_status(db, previous['id'])
-            if campaign_id is not None:
-                campaign = self._campaign(db, campaign_id)
-                if device_id is not None and device_id != campaign['device']:
-                    raise Conflict('operation target differs from campaign target')
-            if device_id is not None and not db.execute('SELECT 1 FROM devices WHERE id=?', (device_id,)).fetchone():
-                raise ContractError('unknown target')
-            operation_id = uid()
-            now = self.clock()
-            queued_epoch = db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
-            db.execute('INSERT INTO operations(id,request_id,request_digest,input_digest,kind,campaign,device,state,created,updated,queued_epoch) VALUES(?,?,?,?,?,?,?,\'QUEUED\',?,?,?)',
-                       (operation_id, request_id, request_digest, stored.sha256, kind, campaign_id, device_id, now, now, queued_epoch))
-            for role, values in (('input', [stored.sha256] + sorted(retained_inputs)), ('source', intent['source_refs'])):
-                for value in set(values):
-                    db.execute('INSERT OR IGNORE INTO refs(owner,digest) VALUES(?,?)', (operation_id, value))
-                    db.execute('INSERT INTO operation_refs(operation,role,digest) VALUES(?,?,?)', (operation_id, role, value))
-            db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
-                       (operation_id, now, 'accepted', canonical({'state': 'QUEUED'}).decode()))
-            return self._operation_status(db, operation_id)
+            return self._admit_operation_db(db,request_id,kind,intent,request_digest,stored.sha256,retained_inputs,
+                campaign_id=campaign_id,device_id=device_id)
+
+    def _admit_operation_db(self,db,request_id,kind,intent,request_digest,input_digest,retained_inputs, *,campaign_id=None,device_id=None):
+        """Shared transaction for planned additive application admission records."""
+        if db.execute('SELECT 1 FROM observation_response_commands WHERE id=?', (request_id,)).fetchone():
+            raise Conflict('request ID already belongs to an observation response')
+        previous = db.execute('SELECT id,request_digest FROM operations WHERE request_id=?', (request_id,)).fetchone()
+        if previous:
+            if db.execute('SELECT 1 FROM storage_retired WHERE owner=?',(previous['id'],)).fetchone():
+                raise Conflict('operation payload was retired; use a new request ID')
+            if previous['request_digest'] != request_digest:
+                raise Conflict('request ID already has different immutable operation intent')
+            for value in retained_inputs:
+                db.execute('INSERT OR IGNORE INTO refs(owner,digest) VALUES(?,?)',(previous['id'],value))
+                db.execute('INSERT OR IGNORE INTO operation_refs(operation,role,digest) VALUES(?,"input",?)',(previous['id'],value))
+            return self._operation_status(db, previous['id'])
+        if campaign_id is not None:
+            campaign = self._campaign(db, campaign_id)
+            if device_id is not None and device_id != campaign['device']:
+                raise Conflict('operation target differs from campaign target')
+        if device_id is not None and not db.execute('SELECT 1 FROM devices WHERE id=?', (device_id,)).fetchone():
+            raise ContractError('unknown target')
+        operation_id = uid()
+        now = self.clock()
+        queued_epoch = db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
+        db.execute('INSERT INTO operations(id,request_id,request_digest,input_digest,kind,campaign,device,state,created,updated,queued_epoch) VALUES(?,?,?,?,?,?,?,\'QUEUED\',?,?,?)',
+                   (operation_id, request_id, request_digest, input_digest, kind, campaign_id, device_id, now, now, queued_epoch))
+        for role, values in (('input', [input_digest] + sorted(retained_inputs)), ('source', intent['source_refs'])):
+            for value in set(values):
+                db.execute('INSERT OR IGNORE INTO refs(owner,digest) VALUES(?,?)', (operation_id, value))
+                db.execute('INSERT INTO operation_refs(operation,role,digest) VALUES(?,?,?)', (operation_id, role, value))
+        db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
+                   (operation_id, now, 'accepted', canonical({'state': 'QUEUED'}).decode()))
+        return self._operation_status(db, operation_id)
 
     def admit_recovery_image(self, request_id, recipe_sha256, builder_archive_sha256):
         """Admit the complete stock image with immutable recipe, using existing intent."""
@@ -898,7 +909,8 @@ class Controller(OperatorApprovals):
 
     def _publish_operation(self, operation_id, worker_epoch, worker_generation, *,
                            output_refs=(), state=None, result=None, error=None, expected_claim=None, clear_stopped_worker=False,
-                           storage_kind=None, final_output_digest=None, deployment=None):
+                           storage_kind=None, final_output_digest=None, deployment=None, source_workspace=None, source_workspace_fence=None,
+                           source_provenance_refs=()):
         """P2b worker hook: fence and reference publication share one transaction."""
         if clear_stopped_worker and (expected_claim is None or state not in ('SUCCEEDED','FAILED')):
             raise ContractError('clearing a worker requires exact stopped terminal publication')
@@ -917,6 +929,13 @@ class Controller(OperatorApprovals):
         outputs = sorted({sha256(value) for value in output_refs})
         for value in outputs:
             self.store.verify(value)
+        if not isinstance(source_provenance_refs,(tuple,list,set)) or len(source_provenance_refs)>8196:
+            raise ContractError('invalid distribution provenance closure')
+        provenance_refs=sorted({sha256(value) for value in source_provenance_refs})
+        if provenance_refs and source_workspace is None:raise ContractError('provenance retention requires a live workspace publication')
+        for value in provenance_refs:self.store.verify(value)
+        if source_workspace is not None and (storage_kind!='input' or not callable(source_workspace_fence)):
+            raise ContractError('workspace publication requires stopped input publication and independent source fence')
         if final_output_digest is not None:
             sha256(final_output_digest)
             if final_output_digest not in outputs or state!='SUCCEEDED': raise ContractError('final output index must be retained')
@@ -943,6 +962,10 @@ class Controller(OperatorApprovals):
             terminal = self.store.put(canonical({'schema_version': 1, **document}))
         else:
             terminal = None
+        if source_workspace is not None:
+            # Hash outside the database write lock; unrelated evidence uploads
+            # retain access. The transaction then checks a fresh exact claim.
+            source_workspace_fence()
         with self.transaction() as db:
             row = db.execute('SELECT * FROM operations WHERE id=?', (identifier(operation_id),)).fetchone()
             if row is None:
@@ -970,8 +993,8 @@ class Controller(OperatorApprovals):
                 if not set(document['public_artifacts']) <= retained | set(outputs):
                     raise ContractError('operation result names an unpublished output')
             now = self.clock()
-            if state=='FAILED' and clear_stopped_worker and row['kind'] in ('build','compose','builder_prepare','recovery_download'):
-                failed_kind='input' if row['kind'] in ('builder_prepare','recovery_download') else 'build' if row['kind']=='build' else 'deployment'
+            if state=='FAILED' and clear_stopped_worker and row['kind'] in ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare'):
+                failed_kind='input' if row['kind'] in ('builder_prepare','recovery_download','source_capture','source_prepare') else 'build' if row['kind']=='build' else 'deployment'
                 db.execute("INSERT OR REPLACE INTO storage_groups VALUES(?,?,?,?, 'FAILED',?,?)",
                            (operation_id,failed_kind,now,now,canonical([row['stage_dir']]).decode(),canonical(proof).decode()))
             if storage_kind is not None:
@@ -979,11 +1002,12 @@ class Controller(OperatorApprovals):
                     arguments=recovery_rootfs_arguments(json.loads(self.store.get(row['input_digest'])))
                     if row['kind']!='image_prepare' or 'recipe_sha256' not in arguments:
                         raise ContractError('recovery retention requires full image intent')
-                elif (row['kind'],storage_kind) not in (('build','build'),('compose','deployment'),('builder_prepare','input'),('recovery_download','input')):
+                elif (row['kind'],storage_kind) not in (('build','build'),('compose','deployment'),('builder_prepare','input'),('recovery_download','input'),('source_capture','input'),('source_prepare','input')):
                     raise ContractError('job retention kind differs')
                 paths=[] if storage_kind=='recovery' else [row['stage_dir']]
                 stopped={key:row[key] for key in ('worker_unit','worker_boot_id','worker_generation','stage_dir','input_digest')};stopped['stop_kind']='stopped'
-                db.execute("INSERT INTO storage_groups VALUES(?,?,?,?,'SUCCEEDED',?,?)",
+                insert='INSERT OR REPLACE' if row['kind']=='source_prepare' else 'INSERT'
+                db.execute(insert+" INTO storage_groups VALUES(?,?,?,?,'SUCCEEDED',?,?)",
                            (operation_id,storage_kind,now,now,canonical(paths).decode(),canonical(stopped).decode()))
                 if row['kind']=='builder_prepare':
                     db.execute('INSERT OR IGNORE INTO storage_pins VALUES(?,?)',
@@ -994,6 +1018,37 @@ class Controller(OperatorApprovals):
                     if self.deployment_repository is None: raise ContractError('deployment repository is unavailable')
                     for digest_value in evidence.values(): db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)',(operation_id,digest_value))
                     db.execute('INSERT OR IGNORE INTO deployment_refs VALUES(?,?,?,?)',(operation_id,manifest_value,manifest.repository,manifest.revision))
+            if source_workspace is not None:
+                from .source_workspace import validate,owned_path
+                workspace=validate(source_workspace)
+                if row['kind']!='source_prepare' or row['campaign']!=workspace['campaign_id']:
+                    raise Conflict('workspace publication differs from preparation campaign')
+                admitted=db.execute('SELECT * FROM source_preparations WHERE workspace_id=?',(workspace['workspace_id'],)).fetchone()
+                if admitted is None or admitted['operation']!=operation_id:
+                    raise Conflict('workspace has another preparation owner')
+                source_input=json.loads(self.store.get(admitted['input_digest']))
+                if source_input.get('schema_version')==2:
+                    from .distribution_prepare_operation import retained_closure
+                    if provenance_refs!=retained_closure(self.store,source_input,workspace):
+                        raise Conflict('distribution workspace must retain its complete exact provenance')
+                elif provenance_refs:raise ContractError('legacy source preparation has no distribution closure')
+                if db.execute('SELECT 1 FROM source_workspaces WHERE id=?',(workspace['workspace_id'],)).fetchone():
+                    raise Conflict('source workspace has already been granted')
+                document=digest(canonical(workspace))
+                if document not in outputs:raise ContractError('workspace record must be retained by successful publication')
+                owned_path(self.root,workspace)
+                if (self._lifecycle_owner is not owner or owner.closed or self.clock()>=row['deadline']
+                        or db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]!=worker_epoch):
+                    raise Conflict('workspace owner or deadline ended before editing grant')
+                db.execute("INSERT INTO source_workspaces VALUES(?,?,?,'EDITING',NULL)",
+                    (workspace['workspace_id'],workspace['campaign_id'],document))
+                for value in set(outputs)|set(provenance_refs)|{item for key,item in workspace['provenance'].items() if key.endswith('_sha256')}:
+                    db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)',('workspace:'+workspace['workspace_id'],value))
+                selections=db.execute("SELECT document FROM operation_events WHERE operation=? AND kind='source_workspace_selection'",(operation_id,)).fetchall()
+                if len(selections)!=1:raise Conflict('workspace selection must have one retained journal')
+                selection=json.loads(selections[0][0])
+                obsolete='job-stage-'+operation_id+'-'+str(selection['worker_stop']['worker_generation'])
+                db.execute('DELETE FROM storage_pins WHERE owner IN (?,?)',(obsolete,operation_id))
             if final_output_digest is not None:
                 db.execute('UPDATE operations SET final_output_digest=? WHERE id=?',(final_output_digest,operation_id))
             for value in outputs + ([terminal.sha256] if terminal else []):
@@ -1146,6 +1201,8 @@ class Controller(OperatorApprovals):
         self.store.check_space()
         with self.transaction() as db:
             campaign = self._campaign(db, campaign_id)
+            from .investigations import enforce_resume
+            enforce_resume(db,campaign)
             from .credential_registry import require_execution_credentials
             require_execution_credentials(db, campaign['device'], self.clock())
             device = db.execute('SELECT * FROM devices WHERE id=?', (campaign['device'],)).fetchone()
@@ -1205,6 +1262,12 @@ class Controller(OperatorApprovals):
             raise ContractError('token budget must be positive')
         with self.transaction() as db:
             self._campaign(db, campaign_id)
+            from .investigations import record as investigation_record
+            investigation = investigation_record(self,campaign_id,db)
+            if investigation:
+                if investigation['limits'] != {'session_seconds':seconds,'token_budget':tokens}:
+                    raise Conflict('investigation limits are immutable; legacy budget changes require an explicit policy revision')
+                return
             db.execute('UPDATE campaigns SET session_seconds=?,token_budget=? WHERE id=?', (seconds, tokens, campaign_id))
             row = self._campaign(db, campaign_id)
             if row['session_tokens'] >= tokens or (row['session_started'] is not None and self.clock() >= row['session_started'] + seconds):

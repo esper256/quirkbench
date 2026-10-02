@@ -12,8 +12,8 @@ CREATE TABLE controller_job_service(id INTEGER PRIMARY KEY CHECK(id=1),epoch INT
 STAGES = {('image_prepare','recovery_rootfs'),('build','job_inputs'),('build','kernel_build'),
           ('compose','job_inputs'),('compose','os_compose'),
           ('builder_prepare','builder_capture'),('builder_prepare','builder_import'),
-          ('recovery_download','recovery_download')}
-KINDS = {'build','compose','builder_prepare','recovery_download'}
+          ('recovery_download','recovery_download'),('source_capture','source_capture'),('source_prepare','source_prepare')}
+KINDS = {'build','compose','builder_prepare','recovery_download','source_capture','source_prepare'}
 
 
 def manifest(kind, raw):
@@ -30,6 +30,12 @@ def manifest(kind, raw):
 
 
 def binding(intent, *, executable=False):
+    if intent.get('kind')=='source_prepare':
+        from .source_prepare_operation import binding as preparation_binding
+        return preparation_binding(intent)
+    if intent.get('kind')=='source_capture':
+        from .source_operation import binding as source_binding
+        return source_binding(intent)
     if intent.get('kind')=='recovery_download':
         from .recovery_download import binding as recovery_binding
         return recovery_binding(intent)
@@ -61,24 +67,29 @@ def binding(intent, *, executable=False):
     return args
 
 
-def submission(controller, kind, raw, request_id, *, campaign=None, publish_repo=None, image=None, builder_archive=None, builder_config=None):
-    from .controller_service import require_ready
-    require_ready(controller.root)
-    raw=manifest(kind,raw)
-    from .controller_service import configuration
-    config=configuration(controller.root)
+def resolve_builder(controller,config, *,image=None,manifest_image=None,builder_archive=None,builder_config=None):
+    """Reuse the signed installed builder proof for omitted native setup fields."""
     if not all((builder_archive or config.get('builder_archive_sha256'),
                 builder_config or config.get('builder_config_digest'),
-                image or raw.get('base_image_digest') or config.get('builder_image_digest'))):
+                image or manifest_image or config.get('builder_image_digest'))):
         from .builder_setup import inspect_builder
         from .installed_release import inspect_selected
         prepared=inspect_builder(controller.root,inspect_selected(Path(config['runtime']).parent.parent))
-        supplied={'builder_image_digest':(image,raw.get('base_image_digest'),config.get('builder_image_digest')),
+        supplied={'builder_image_digest':(image,manifest_image,config.get('builder_image_digest')),
                   'builder_config_digest':(builder_config,config.get('builder_config_digest')),
                   'builder_archive_sha256':(builder_archive,config.get('builder_archive_sha256'))}
         if any(value is not None and value != prepared[name] for name,values in supplied.items() for value in values):
             raise Conflict('supplied builder identity differs from prepared signed release; provide a coherent explicit manual binding or use the signed builder')
         config={**config,**{name:prepared[name] for name in ('builder_image_digest','builder_config_digest','builder_archive_sha256')}}
+    return config
+
+
+def submission(controller, kind, raw, request_id, *, campaign=None, publish_repo=None, image=None, builder_archive=None, builder_config=None):
+    from .controller_service import require_ready,configuration
+    require_ready(controller.root)
+    raw=manifest(kind,raw)
+    config=resolve_builder(controller,configuration(controller.root),image=image,manifest_image=raw.get('base_image_digest'),
+        builder_archive=builder_archive,builder_config=builder_config)
     excluded={str(controller.root/'private'),str(controller.root/'controller.sqlite'),config['key']}
     if 'tokens_file' in config: excluded.add(config['tokens_file'])
     if config.get('composition_signing'): excluded.add(config['composition_signing']['home'])
@@ -169,8 +180,9 @@ def resume(owner,operation):
     controller=owner.controller
     with controller.transaction() as db:
         row=db.execute('SELECT * FROM operations WHERE id=?',(operation,)).fetchone()
-        if row is None or row['kind'] not in KINDS or row['state']!='INTERRUPTED' or row['worker_unit'] is not None:
-            raise Conflict('job must be interrupted with whole-service stop reconciled before resume')
+        eligible=row is not None and (row['state']=='INTERRUPTED' or (row['kind']=='source_prepare' and row['state']=='FAILED'))
+        if not eligible or row['kind'] not in KINDS or row['worker_unit'] is not None:
+            raise Conflict('job must be interrupted, or a failed source preparation, with whole-service stop reconciled before resume')
         saved=dict(row)
         refs=[r[0] for r in db.execute("SELECT digest FROM operation_refs WHERE operation=? AND role='input'",(operation,))]
     for value in refs: controller.store.verify(value)
@@ -185,4 +197,5 @@ def resume(owner,operation):
             db.execute("INSERT OR IGNORE INTO storage_groups VALUES(?,'build',?,?,'FAILED',?,?)",
                 (obsolete,controller.clock(),controller.clock(),canonical([saved['stage_dir']]).decode(),canonical(proof).decode()))
         db.execute("UPDATE operations SET state='QUEUED',queued_epoch=?,worker_epoch=NULL,stage=NULL,stage_dir=NULL,started=NULL,deadline=NULL,heartbeat=NULL,progress=NULL,updated=? WHERE id=?",(owner.epoch,controller.clock(),operation))
+        if saved['kind']=='source_prepare':db.execute('UPDATE operations SET error_digest=NULL,result_digest=NULL WHERE id=?',(operation,))
         db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',(operation,controller.clock(),'resumed',canonical({'worker_epoch':owner.epoch}).decode()))

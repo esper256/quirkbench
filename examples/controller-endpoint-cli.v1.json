@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "argv": [
+        "endpoint",
+        "show",
+        "--json"
+      ],
+      "expected": {
+        "action": "show",
+        "request_id": null,
+        "json": true
+      }
+    },
+    {
+      "argv": [
+        "endpoint",
+        "show",
+        "--request-id",
+        "endpoint-1",
+        "--public-certificate"
+      ],
+      "expected": {
+        "action": "show",
+        "request_id": "endpoint-1",
+        "public_certificate": true
+      }
+    },
+    {
+      "argv": [
+        "endpoint",
+        "stage",
+        "--request-id",
+        "endpoint-1",
+        "--host",
+        "192.0.2.2",
+        "--source-sha256",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "--json"
+      ],
+      "expected": {
+        "action": "stage",
+        "host": "192.0.2.2",
+        "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "json": true
+      }
+    },
+    {
+      "argv": [
+        "endpoint",
+        "renew",
+        "--request-id",
+        "endpoint-1",
+        "--host",
+        "192.0.2.2",
+        "--source-sha256",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "expected": {
+        "action": "renew",
+        "host": "192.0.2.2"
+      }
+    },
+    {
+      "argv": [
+        "endpoint",
+        "apply",
+        "--request-id",
+        "endpoint-1",
+        "--identity-sha256",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "--fingerprint",
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "--unit",
+        "/home/operator/.config/systemd/user/quirkbench-controller.service"
+      ],
+      "expected": {
+        "action": "apply",
+        "identity_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    },
+    {
+      "argv": [
+        "endpoint",
+        "rollback",
+        "--request-id",
+        "endpoint-1",
+        "--switch-sha256",
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ],
+      "expected": {
+        "action": "rollback",
+        "switch_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+    },
+    {
+      "argv": [
+        "endpoint",
+        "wizard",
+        "--unit",
+        "/home/operator/.config/systemd/user/quirkbench-controller.service"
+      ],
+      "expected": {
+        "action": "wizard",
+        "unit": "/home/operator/.config/systemd/user/quirkbench-controller.service"
+      }
+    }
+  ]
+}

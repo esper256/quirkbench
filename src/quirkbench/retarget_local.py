@@ -26,13 +26,15 @@ def validate_intent(value):
     fields={'schema_version','record_type','request_id','old_device_id','media_instance_id','old_target_binding',
         'new_target_binding','runtime_sha256','boot_config_sha256'}
     version=value.get('schema_version') if isinstance(value,dict) else None
-    if version==2:fields.add('previous_selection_sha256')
+    if version in (2,3):fields.add('previous_selection_sha256')
+    if version==3:fields.add('endpoint_selection_sha256')
     if (not isinstance(value,dict) or set(value)!=fields or type(version) is not int
-            or version not in (1,2) or value['record_type']!='retarget-local-intent'):
+            or version not in (1,2,3) or value['record_type']!='retarget-local-intent'):
         raise ContractError('invalid local retarget intent')
     for key in ('request_id','old_device_id','media_instance_id'):identifier(value[key])
     for key in ('runtime_sha256','boot_config_sha256'):sha256(value[key])
-    if version==2:sha256(value['previous_selection_sha256'])
+    if version==2 or version==3 and value['previous_selection_sha256'] is not None:sha256(value['previous_selection_sha256'])
+    if version==3:sha256(value['endpoint_selection_sha256'])
     for key in ('old_target_binding','new_target_binding'):
         binding=value[key]
         verify_binding(binding,reader=lambda:binding.get('system_uuid') if isinstance(binding,dict) else None)
@@ -46,9 +48,12 @@ def _location(control,request_id):
 
 
 def validate_source(value):
-    if (not isinstance(value,dict) or set(value)!={'schema_version','record_type','intent_sha256','old_credential_generation','files'}
-            or type(value['schema_version']) is not int or value['schema_version']!=1 or value['record_type']!='retarget-local-source'):
+    version=value.get('schema_version') if isinstance(value,dict) else None
+    fields={'schema_version','record_type','intent_sha256','old_credential_generation','files'}|({'endpoint_selection_sha256'} if version==2 else set())
+    if (not isinstance(value,dict) or set(value)!=fields
+            or type(version) is not int or version not in (1,2) or value['record_type']!='retarget-local-source'):
         raise ContractError('invalid retained local retarget source')
+    if version==2:sha256(value['endpoint_selection_sha256'])
     sha256(value['intent_sha256']);identifier(value['old_credential_generation'])
     if not isinstance(value['files'],dict) or not 11<=len(value['files'])<=32:raise ContractError('invalid bounded local retarget source map')
     for name,checksum in value['files'].items():
@@ -87,14 +92,18 @@ def _history(control,raw, *,extra=None):
             completion=_read(directory,'completion.json')
             if completion!=canonical(_completion(activation)) or digest(completion)!=pointer['completion_sha256']:
                 raise Conflict('completed retarget pointer differs from exact retained completion')
+            selected_runtime_sha=activation['runtime_sha256']
+            if child is not None and child['schema_version']==3:
+                from .retarget_endpoint import public
+                public(control,child);selected_runtime_sha=child['runtime_sha256']
             if child is not None and (child['old_device_id']!=activation['new_device_id']
                     or child['old_target_binding']!=intent['new_target_binding']
                     or child['media_instance_id']!=intent['media_instance_id']
-                    or child['runtime_sha256']!=activation['runtime_sha256']):
+                    or child['runtime_sha256']!=selected_runtime_sha):
                 raise Conflict('retarget successor differs from exact previous selection')
         elif child is not None:raise Conflict('retarget predecessor is incomplete')
         seen[directory.name]=(pointer,intent)
-        if intent['schema_version']==1:break
+        if intent['schema_version']==1 or intent['schema_version']==3 and intent['previous_selection_sha256'] is None:break
         previous=_read(directory,'previous-selection.json')
         if digest(previous)!=intent['previous_selection_sha256'] or _pointer(previous)['schema_version']!=2:
             raise Conflict('retarget predecessor selection changed or incomplete')
@@ -151,6 +160,18 @@ def _metadata(control,new_uuid,confirmed_old):
     return runtime,runtime_raw,media['media_instance_id'],new
 
 
+def _private_journal(agent, *,name='journal.json'):
+    """Existing bounded private single-link policy, stable after native callbacks."""
+    path=_private_path(agent)/name;before=path.lstat()
+    if (not stat.S_ISREG(before.st_mode) or before.st_uid!=os.geteuid()
+            or stat.S_IMODE(before.st_mode)!=0o600 or before.st_nlink!=1):
+        raise ContractError('original retarget journal must be private, regular and single-link')
+    raw=read_file(agent,name,limit=4*1024**2);after=path.lstat()
+    signature=lambda info:(info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+    if signature(before)!=signature(after):raise Conflict('original retarget journal changed during capture')
+    return raw
+
+
 def _capture_source(control,intent,verify, *,locations=None):
     """Called only after native one-shot clearance; no old credentials are used."""
     from .enrollment_proof import validate_request
@@ -184,6 +205,9 @@ def _capture_source(control,intent,verify, *,locations=None):
         name=alias+'.public.asc';exact[name]=remote['public_key'].encode()
         source_runtime['remotes'][alias]={'url':remote['url'],'ca':'ca.pem','public_key':name,'client_cert':'repository.crt','client_key':'repository.key'}
     exact['runtime.json']=canonical(source_runtime)
+    if intent['schema_version']==3:
+        from .retarget_endpoint import files as endpoint_files
+        exact=endpoint_files(control,intent,locations=locations);source_runtime=_document(exact['runtime.json'])
     if files!=exact:raise Conflict('original retarget generation differs from exact authenticated enrollment')
     expected=json.loads(canonical(source_runtime))
     prefix='generations/'+generation+'/'
@@ -196,12 +220,7 @@ def _capture_source(control,intent,verify, *,locations=None):
         raise Conflict('original active trust differs from enrolled credentials')
     # Do not traverse/read blobs. The unchanged journal freezes their attribution;
     # later selected drain reads must verify each sealed blob's bytes independently.
-    agent=_private_path(agent);path=agent/'journal.json';verify();before=path.lstat()
-    if not stat.S_ISREG(before.st_mode) or before.st_uid!=os.geteuid() or stat.S_IMODE(before.st_mode)!=0o600 or before.st_nlink!=1:
-        raise ContractError('original retarget journal must be private, regular and single-link')
-    journal_raw=read_file(agent,'journal.json',limit=4*1024**2);after=path.lstat()
-    if (before.st_dev,before.st_ino,before.st_size,before.st_mtime_ns,before.st_ctime_ns)!=(after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns,after.st_ctime_ns):
-        raise Conflict('original retarget journal changed during capture')
+    agent=_private_path(agent);journal_raw=_private_journal(agent)
     try:
         journal=json.loads(journal_raw,object_pairs_hook=_pairs,parse_constant=lambda _:(_ for _ in ()).throw(ContractError('nonfinite original journal')));_depth(journal)
     except (ValueError,UnicodeError,RecursionError) as exc:raise ContractError('invalid original retarget journal') from exc
@@ -213,8 +232,26 @@ def _capture_source(control,intent,verify, *,locations=None):
     mapping={'runtime.json':digest(runtime_raw),'media-instance.json':digest(capture(control,'media-instance.json')),'agent/journal.json':digest(journal_raw)}
     mapping.update({'enrollment/pending/'+name:digest(raw) for name,raw in raws.items()})
     mapping.update({'generations/'+generation+'/'+name:digest(raw) for name,raw in {**files,'generation.json':manifest_raw}.items()})
-    verify();return validate_source({'schema_version':1,'record_type':'retarget-local-source','intent_sha256':digest(canonical(intent)),
-        'old_credential_generation':result['credential_generation']['generation'],'files':mapping})
+    if intent['schema_version']==3:
+        relative=str(Path('retarget/requests')/digest(intent['request_id'].encode())/'previous-endpoint-selection.json')
+        mapping[relative]=intent['endpoint_selection_sha256']
+    verify()
+    # Observe retained private bytes after the last native storage/recovery guard.
+    # Locations are explicit phase mappings, never a search for a usable source.
+    for name,checksum in mapping.items():
+        parts=Path(name).parts
+        if name=='runtime.json':root,relative=runtime_home,'runtime.json'
+        elif name=='agent/journal.json':root,relative=agent,'journal.json'
+        elif parts[:2]==('enrollment','pending'):root,relative=pending,parts[2]
+        else:root,relative=control/Path(name).parent,Path(name).name
+        retained=_private_journal(root) if name=='agent/journal.json' else _read(_private_path(root),relative)
+        if digest(retained)!=checksum:raise Conflict('original retarget source changed after native capture')
+    if intent['schema_version']==3:
+        from .retarget_endpoint import files as endpoint_files
+        if endpoint_files(control,intent,locations=locations)!=files:raise Conflict('original endpoint proof changed after native capture')
+    return validate_source({'schema_version':2 if intent['schema_version']==3 else 1,'record_type':'retarget-local-source','intent_sha256':digest(canonical(intent)),
+        'old_credential_generation':result['credential_generation']['generation'],'files':mapping,
+        **({'endpoint_selection_sha256':intent['endpoint_selection_sha256']} if intent['schema_version']==3 else {})})
 
 
 def prepare_retarget(control,config,request_id,confirmed_old_device_id,new_uuid, *,verify_target,
@@ -228,8 +265,13 @@ def prepare_retarget(control,config,request_id,confirmed_old_device_id,new_uuid,
     if not agent.is_dir():raise Conflict('original target spool is missing; no initialization permitted')
     new_binding={'schema_version':1,'system_uuid':new_uuid};verify_binding(new_binding,reader=binding_reader)
     with private_lock(control/'runtime-config.lock') as config_fd,private_lock(agent/'agent.lock') as agent_fd:
-        from .endpoint_local import require_available
-        require_available(control)
+        from .endpoint_history import history as endpoint_history,pointer as endpoint_pointer
+        endpoint_path=control/'endpoint/active.json';endpoint_raw=_read(control/'endpoint','active.json') if endpoint_path.exists() or endpoint_path.is_symlink() else None
+        if endpoint_raw is not None:
+            if endpoint_pointer(endpoint_raw)['schema_version']==1:raise Conflict('finish stopped endpoint maintenance before moving media')
+            endpoint_history(control,endpoint_raw)
+        elif (control/'endpoint/requests').exists() and any((control/'endpoint/requests').iterdir()):
+            raise Conflict('endpoint history lacks its exact completed selection')
         base_verify=verify
         def verify():
             if clock()>=deadline:raise TimeoutError('local retarget preparation deadline exceeded; maintenance remains paused')
@@ -246,21 +288,22 @@ def prepare_retarget(control,config,request_id,confirmed_old_device_id,new_uuid,
         previous=None;retained=None
         if directory.exists() and (directory/'intent.json').exists():
             retained=validate_intent(_document(_read(directory,'intent.json')))
-            if retained['schema_version']==2:previous=_read(directory,'previous-selection.json')
+            if retained['schema_version'] in (2,3) and retained['previous_selection_sha256'] is not None:previous=_read(directory,'previous-selection.json')
         elif directory.exists() and (directory/'previous-selection.json').exists():
             # Only this exact stopped request may complete its interrupted public
             # predecessor publication; runtime treats the orphan as paused.
-            if set(p.name for p in directory.iterdir())!={'previous-selection.json'}:
+            if set(p.name for p in directory.iterdir())-{'previous-selection.json','previous-endpoint-selection.json'}:
                 raise Conflict('unpublished successor contains unknown retained records')
             previous=_read(directory,'previous-selection.json')
-        if directory.exists() and retained is None and set(p.name for p in directory.iterdir())-{'previous-selection.json'}:
+        if directory.exists() and retained is None and set(p.name for p in directory.iterdir())-{'previous-selection.json','previous-endpoint-selection.json'}:
             raise Conflict('unpublished successor contains unknown retained records')
         if previous is None and selected is not None and selected['schema_version']==2:
             previous=pointer_raw
-        fields={'schema_version':2 if previous is not None else 1,'record_type':'retarget-local-intent','request_id':request_id,
+        fields={'schema_version':3 if endpoint_raw is not None else 2 if previous is not None else 1,'record_type':'retarget-local-intent','request_id':request_id,
             'old_device_id':confirmed_old_device_id,'media_instance_id':media,'old_target_binding':runtime['target_binding'],
             'new_target_binding':binding,'runtime_sha256':digest(raw),'boot_config_sha256':digest(canonical(config.to_dict()))}
-        if previous is not None:fields['previous_selection_sha256']=digest(previous)
+        if previous is not None or endpoint_raw is not None:fields['previous_selection_sha256']=digest(previous) if previous is not None else None
+        if endpoint_raw is not None:fields['endpoint_selection_sha256']=digest(endpoint_raw)
         intent=validate_intent(fields)
         pointer=canonical({'schema_version':1,'request_id':request_id,'intent_sha256':digest(canonical(intent))})
         if retained is not None and retained!=intent:raise Conflict('retarget request already has another immutable source')
@@ -277,14 +320,17 @@ def prepare_retarget(control,config,request_id,confirmed_old_device_id,new_uuid,
                 from .retarget_activation import _records
                 prior_activation,_=_records(control,_location(control,predecessor['request_id']),prior_intent)
                 if (intent['old_device_id']!=prior_activation['new_device_id']
-                        or intent['runtime_sha256']!=prior_activation['runtime_sha256']
+                        or intent['schema_version']!=3 and intent['runtime_sha256']!=prior_activation['runtime_sha256']
                         or intent['media_instance_id']!=prior_intent['media_instance_id']
                         or intent['old_target_binding']!=prior_intent['new_target_binding']):
                     raise Conflict('successor differs from exact previous completed selection')
         elif pointer_raw is None:
             if requests.exists():
                 names=list(islice(requests.iterdir(),MAX_HISTORY+1))
-                if names and (names!=[directory] or retained!=intent):
+                linked=(retained is None and intent['schema_version']==3
+                    and {p.name for p in directory.iterdir()}=={'previous-endpoint-selection.json'}
+                    and _read(directory,'previous-endpoint-selection.json')==endpoint_raw) if directory.exists() else False
+                if names and (names!=[directory] or retained!=intent and not linked):
                     raise Conflict('missing retarget pointer has ambiguous or changed retained intent')
         elif pointer_raw!=pointer or pending_intent(control)!=intent:
             raise Conflict('another explicit retarget must finish first')
@@ -297,6 +343,13 @@ def prepare_retarget(control,config,request_id,confirmed_old_device_id,new_uuid,
                 if _read(directory,'previous-selection.json')!=previous:raise Conflict('retarget predecessor selection changed')
             else:verify();atomic_write(directory/'previous-selection.json',previous)
             fault('retarget_previous_selection_retained')
+        if endpoint_raw is not None:
+            saved=directory/'previous-endpoint-selection.json'
+            if saved.exists() or saved.is_symlink():
+                if _read(directory,saved.name)!=endpoint_raw:raise Conflict('retarget endpoint association changed')
+            else:verify();atomic_write(saved,endpoint_raw)
+            from .retarget_endpoint import public
+            public(control,intent);fault('retarget_endpoint_selection_retained')
         if retained is None:
             verify();atomic_write(directory/'intent.json',canonical(intent));fault('retarget_local_intent_retained')
         verify();_media(control,media)
@@ -308,8 +361,11 @@ def prepare_retarget(control,config,request_id,confirmed_old_device_id,new_uuid,
         def source_verify():
             verify();_media(control,media)
             if pending_intent(control)!=intent or _read(control,'runtime.json')!=raw:raise Conflict('retarget source or pending authority changed')
+            if intent['schema_version']==3:
+                from .retarget_endpoint import public
+                if public(control,intent)[0]!=endpoint_raw:raise Conflict('retarget original endpoint selection changed')
         source_verify();clearer(config);source_verify();fault('retarget_one_shot_cleared')
-        if previous is not None:
+        if previous is not None and intent['schema_version']!=3:
             # Historical verification is confined to stopped maintenance after
             # actual NEW hardware and fresh clearance. It never authorizes an old
             # credential request or an old runtime/recipe/watchdog selection.
