@@ -6,9 +6,9 @@ read-through. Superseded plans, run logs and investigation histories live in Git
 | Need | Start here |
 | --- | --- |
 | Desired finished product | [Product manual](../README.md); its warning distinguishes proposed behavior |
-| Next development task | [Implementation handoff](implementation-handoff.md) |
+| Next development task | [First-usable tracker #29](https://github.com/esper256/quirkbench/issues/29), [contributing](../CONTRIBUTING.md), [cloud worker prompt](cloud-worker-prompt.md) |
 | Local or cloud software development | [Development setup and tests](testing-policy.md#portable-software-development) |
-| Delivery order and feature gaps | [Roadmap](product-roadmap.md), [command checklist](installation-to-patch.md) |
+| Product scope and acceptance | [Roadmap](product-roadmap.md), [acceptance guide](installation-to-patch.md); task status lives in GitHub |
 | Implementation rules | Relevant [C0–C7 contract](implementation-contracts.md), [C8 interface](product-interface.md) |
 | Current installation and commands | [Controller installation](controller-installation.md), [agent guide](agent-guide.md) |
 | Controller deployment from a cloud container or Distrobox | [Choosing the controller host](controller-installation.md#choosing-the-controller-host) |

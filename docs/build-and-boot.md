@@ -4,7 +4,8 @@ The deployment backend is minimal Fedora composed with rpm-ostree and published
 through a signed OSTree repository. Current development use requires the
 [manual controller service setup](controller-installation.md) and
 [manual target provisioning](recovery-operations.md#storage-and-setup).
-The [product roadmap](product-roadmap.md) tracks the guided journey still to build.
+The [product roadmap](product-roadmap.md) defines the guided journey;
+[GitHub tracker #29](https://github.com/esper256/quirkbench/issues/29) tracks remaining work.
 
 Fixed recovery uses locked stock Fedora packages, DNF5 installroot, dracut and the
 existing GRUB/GPT assembler. No recovery kernel compile is required. See

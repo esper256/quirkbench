@@ -10,15 +10,33 @@ investigation input, local setup or historical evidence.
 
 ## Start here
 
-Use the [documentation index](docs/README.md) to find the relevant guide. The root
+Use the [documentation index](docs/README.md) for operating guides. The root
 [README](README.md) is the aspirational product manual, not available-command evidence.
-Follow the [roadmap](docs/product-roadmap.md) and [implementation checklist](docs/installation-to-patch.md).
-Select one bounded task from the [handoff](docs/implementation-handoff.md) and read
-only its relevant [C0–C7 contracts](docs/implementation-contracts.md) and
-[C8 product interface](docs/product-interface.md). Fresh setup and authenticated
-pairing lead to attended external-agent use; managed invocation and unattended
-grants are separate optional capabilities. Do not treat proposed commands or tests
-as implemented behavior. No MCP service in v1.
+The [first-usable tracker #29](https://github.com/esper256/quirkbench/issues/29)
+is the task queue: select one ready, unclaimed issue, check dependencies and open PRs,
+and claim a topic branch before editing. Follow [CONTRIBUTING](CONTRIBUTING.md);
+read only the issue's relevant [C0–C7 contracts](docs/implementation-contracts.md)
+and [C8 product interface](docs/product-interface.md). The
+[roadmap](docs/product-roadmap.md) and [acceptance guide](docs/installation-to-patch.md)
+define scope, not a second status ledger.
+
+Prioritize the attended installation-to-patch journey. Reuse implemented foundations;
+do not rebuild them from historical packet descriptions. Managed invocation and
+unattended grants remain separate optional follow-ons. No MCP service in v1.
+
+When authorized for consecutive work, finish a bounded PR, record focused evidence
+and required review, merge only with session authorization, update its issue/tracker,
+then select the next ready task from current main. Never close an unmerged software
+issue or infer native acceptance from fixtures. Coordinate claims/shared files;
+do not take over another active worker's task. Supporting infrastructure is not
+a prerequisite unless it actually blocks the selected product work.
+
+Pause for conflicting contracts, a new scheduler/database/service, incompatible
+wire/storage semantics, weakened ownership/trust/storage/approval rules or a material
+scope change. Record evidence, options and a recommended decision in the issue.
+Continue independent ready work if safe; otherwise ask the owner. Missing required
+review, production credentials/publication and physical execution are explicit gates.
+See the [cloud worker prompt](docs/cloud-worker-prompt.md) for a reusable work loop.
 
 ## Preserve the boundaries
 

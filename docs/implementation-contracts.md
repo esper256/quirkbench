@@ -1,20 +1,21 @@
-# Implementation contracts for the remaining briefs
+# Implementation contracts
 
 C0–C8 are the contract identifiers. The first
 general release follows fresh controller setup and authenticated pairing with an
 attended external-agent investigation through patch export. Exact experiment approval
 remains explicit. Managed decisions and unattended grants are optional later modes.
-The [implementation map](installation-to-patch.md) tracks delivery; existing manual
+The [acceptance guide](installation-to-patch.md) defines delivery evidence; existing manual
 configuration remains supported. Existing wire schemas
 and implemented validation remain unchanged. The
 [architecture storage policy](architecture.md#storage-protection-policy) governs
 recovery separately from candidate restrictions.
 
-This document makes the [roadmap](product-roadmap.md) executable as bounded tasks.
+This document defines the durable constraints for the [roadmap](product-roadmap.md).
 It specifies **planned behavior**, not features already implemented. Its decisions
 take precedence where the roadmap was less specific. Do not change the frozen
 Experiment/Result envelopes or weaken storage protection to implement these rules.
-Use the [handoff checklist](implementation-handoff.md) for task boundaries.
+Use [GitHub tracker #29](https://github.com/esper256/quirkbench/issues/29) and its
+child issues for task boundaries, dependencies and current implementation status.
 
 ## C0 — Shared contract and authority rules
 
