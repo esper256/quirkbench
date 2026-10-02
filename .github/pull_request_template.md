@@ -1,3 +1,4 @@
+<!-- Scale to the change; remove prompts that add no reviewer value. -->
 ## Problem and resulting behavior
 
 Describe the concrete trigger and what this change makes possible.
@@ -13,5 +14,6 @@ Distinguish smoke, affected regressions, full milestone software and native evid
 
 ## Review and limitations
 
-Record required boundary review and resolved findings when applicable. Note material
+Record required boundary review (reviewer/model, reviewed SHA, findings/resolution)
+when applicable. Note material
 limits, operator gates or changed artifacts that remain unqualified.

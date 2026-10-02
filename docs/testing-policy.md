@@ -198,6 +198,9 @@ they do not instruct agents to rebuild and qualify after each implementation tas
 
 ### Smoke, focused and full software checks
 
+See [CI suites and evidence](ci-evidence.md) for automatic subsystem selections,
+local reproduction, bounded diagnostics, and artifact retrieval/expiry.
+
 ```sh
 make smoke                                  # routine sanity check
 make test                                   # same smoke selection
@@ -243,7 +246,7 @@ prior evidence. Do not launch it merely because a PR or small fix was merged.
 There is no automatic full run on pushes, PRs or a schedule.
 
 `make acceptance-m1` remains a full software gate, and release aggregates retain
-that full prerequisite. Neither `make test-full`, `make acceptance-m1` nor either
+that full prerequisite. Neither `make test-full`, `make acceptance-m1` nor any
 CI workflow invokes real image, VM, composition or hardware campaigns. Keep real
 qualification fixtures outside pytest's normal `tests/` collection and out of CI.
 

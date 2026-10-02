@@ -1,0 +1,22 @@
+{
+  "source-workers": {
+    "paths": ["src/quirkbench/distribution_*", "src/quirkbench/source_*", "src/quirkbench/job_*", "src/quirkbench/worker*", "src/quirkbench/recovery_source_stage.py", "src/quirkbench/recovery_podman.py", "src/quirkbench/builder_setup.py", "tests/test_distribution_*", "tests/test_source_*", "tests/test_worker*", "tests/test_job_*", "tests/test_builder_setup.py"],
+    "tests": ["tests/test_distribution_source.py", "tests/test_distribution_source_worker.py", "tests/test_distribution_prepare_operation.py", "tests/test_source_operation.py", "tests/test_source_prepare_operation.py", "tests/test_worker_claim.py", "tests/test_worker.py"]
+  },
+  "endpoint-control": {
+    "paths": ["src/quirkbench/endpoint*", "src/quirkbench/controller_endpoint.py", "tests/test_endpoint*", "tests/test_controller_endpoint.py"],
+    "tests": ["tests/test_endpoint_probe.py", "tests/test_endpoint_preflight.py", "tests/test_endpoint_history.py", "tests/test_endpoint_generation.py", "tests/test_endpoint_activation.py", "tests/test_controller_endpoint.py"]
+  },
+  "endpoint-retarget": {
+    "paths": ["src/quirkbench/retarget*", "src/quirkbench/endpoint*", "tests/test_retarget*", "tests/test_endpoint_retarget.py"],
+    "tests": ["tests/test_retarget_endpoint.py", "tests/test_retarget_activation.py", "tests/test_endpoint_retarget.py"]
+  },
+  "evidence": {
+    "paths": ["src/quirkbench/*evidence*", "src/quirkbench/release_http.py", "tests/test_*evidence*", "tests/test_release_http.py"],
+    "tests": ["tests/test_archived_evidence_validation.py", "tests/test_retarget_evidence.py", "tests/test_evidence_drain_client.py", "tests/test_evidence_drain_target.py", "tests/test_release_http.py"]
+  },
+  "ci-tooling": {
+    "paths": ["ci/*", ".github/*", "Makefile", "tests/test_ci_*"],
+    "tests": ["tests/test_ci_tools.py", "tests/test_ci_diagnostics.py"]
+  }
+}

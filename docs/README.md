@@ -7,6 +7,7 @@ read-through. Superseded plans, run logs and investigation histories live in Git
 | --- | --- |
 | Desired finished product | [Product manual](../README.md); its warning distinguishes proposed behavior |
 | Next development task | [First-usable tracker #29](https://github.com/esper256/quirkbench/issues/29), [contributing](../CONTRIBUTING.md), [cloud worker prompt](cloud-worker-prompt.md) |
+| Focused CI and retained failure evidence | [Subsystem suites and diagnostics](ci-evidence.md) |
 | Local or cloud software development | [Development setup and tests](testing-policy.md#portable-software-development) |
 | Product scope and acceptance | [Roadmap](product-roadmap.md), [acceptance guide](installation-to-patch.md); task status lives in GitHub |
 | Implementation rules | Relevant [C0–C7 contract](implementation-contracts.md), [C8 interface](product-interface.md) |

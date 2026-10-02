@@ -47,7 +47,7 @@ def test_export_drain_replay_do_not_reconstruct_inside_individual_source_reads(m
         phases.append({'operation':kw['operation'],'captures':captures[0]-before,'source_reads':len(reads)-start})
     monkeypatch.setattr(archive,'_capture_source',capture);monkeypatch.setattr(archive,'_source',source)
     monkeypatch.setattr(archive,'_archived',context)
-    _round_trip(moved)
+    _round_trip(moved,monkeypatch)
     assert len(phases)==3 and [row['operation'] for row in phases]==['archived evidence export','archived evidence drain','archived evidence drain']
     assert all(row['source_reads']>=2 for row in phases)
     print('archived validation counts (export, drain, replay): '+json.dumps(phases,sort_keys=True))

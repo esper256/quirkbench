@@ -12,9 +12,11 @@ concurrency:
   group: smoke-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  QB_PR_HEAD: ${{ github.event.pull_request.head.sha }}
+  QB_PR_BASE: ${{ github.event.pull_request.base.sha }}
+
 jobs:
-  # Routine smoke only; the complete software matrix is a manual milestone gate.
-  # Real composition/image/VM/endurance gates remain release-only.
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -28,13 +30,9 @@ jobs:
             umask: '077'
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: ./.github/actions/software-tests
         with:
+          suite: smoke
           python-version: ${{ matrix.python-version }}
-      # A fresh venv prevents runner-global build tools from hiding omissions.
-      - run: |
-          python -m venv .venv
-          .venv/bin/python -m pip install -e '.[test]'
-      - run: |
-          umask "${{ matrix.umask }}"
-          make smoke
+          umask: ${{ matrix.umask }}
+          timeout: '120'

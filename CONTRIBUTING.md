@@ -20,6 +20,18 @@ abandoned task only after checking its PR/branch and recording the handoff.
 
 ## Implement through a PR
 
+Inspect `git status --short` first. From a clean checkout:
+
+```sh
+git fetch origin main
+git switch -c feature/issue-24 origin/main
+```
+
+For an occupied checkout, use `git worktree add -b feature/issue-24
+../quirkbench-issue-24 origin/main` and work there. Substitute the agreed issue/base;
+do not reset, stash or clean somebody else's work. Reconcile base changes
+intentionally before final validation.
+
 Fetch current main and create a topic branch (for example,
 `feature/30-candidate-job`) or isolated worktree. Preserve unrelated edits and
 never overwrite another worker's branch. If shell GitHub access is unavailable,
@@ -36,19 +48,38 @@ required by AGENTS.md for storage, trust/binding, source/worker ownership, durab
 execution, shutdown or watchdog boundaries. Record reviewer/scope/findings and the
 resolution in the PR; unavailable review is a blocker, not an implied approval.
 
+Commit only intended paths, push the topic branch and open the draft:
+
+```sh
+git add CONTRIBUTING.md
+git commit -m 'Document the contribution workflow'
+git push -u origin feature/issue-24
+gh pr create --draft --base main
+```
+
+Use the [PR template](.github/pull_request_template.md); remove prompts that add no
+reviewer value. A short documentation PR can be brief. These are contribution
+conventions, not required approvals or branch-protection enforcement.
+
 ## Validate and report
 
 Follow [testing policy](docs/testing-policy.md):
 
 - `make smoke` or default `make test`: quick sanity check.
-- `make test TESTS=tests/test_feature.py`: affected software regressions.
+- `make test TESTS=tests/test_monitor.py`: affected software regressions.
 - `make test-full` or manual full CI: larger integration milestones, not every fix.
 - Documentation: link/consistency checks and `git diff --check`.
 - Real image/QEMU/composition/endurance qualification: explicit final major-version
   request and existing release guard. An issue assignment does not authorize it.
 
-Record source SHA, exact focused commands/results, relevant CI links, required
-review and remaining limitations. Preserve first-failure diagnostics; diagnose with
+Install dependencies using the [portable setup](docs/testing-policy.md#portable-software-development).
+[Focused suites and retained evidence](docs/ci-evidence.md) use the same selection
+locally and in CI. Review selected/unselected suites and unmapped-change warnings.
+
+Record source SHA, exact focused commands/results, relevant CI/evidence links,
+required review and remaining limitations. For boundary-sensitive changes record
+reviewer/model identity, reviewed SHA, findings and their disposition; resolve
+findings and re-review affected changes. Tests alone do not satisfy that review. Preserve first-failure diagnostics; diagnose with
 focused checks instead of rerunning until green. Smoke alone does not prove a changed
 subsystem or the native journey. Retrieve completed CI results once; do not occupy
 an agent polling jobs or launch a full suite simply because a PR merged.
@@ -64,6 +95,10 @@ and no blocking feedback remains. Branch protection is not being introduced here
 Without merge authorization, leave a reviewable PR and proceed to another independent
 ready issue when the session permits. Never push directly to main as the normal
 development workflow.
+
+Record final PR head, tested merge SHA/CI URL and merged commit identity (squash
+merges produce a different SHA). Close only when the delivered change and applicable
+validation support closure.
 
 After merge, confirm the issue's acceptance, record evidence, close it and update
 tracker #29's checklist/dependency readiness. Preserve separately open native/operator

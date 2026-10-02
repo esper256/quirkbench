@@ -92,3 +92,11 @@ acceptance-v1-image: test-full acceptance-qemu
 acceptance-standard-image:
 	@test -n "$(IMAGE)" -a -n "$(OVMF_CODE)" -a -n "$(OVMF_VARS)" -a -n "$(WORK_DIR)" || { echo "IMAGE, OVMF_CODE, OVMF_VARS and empty WORK_DIR are required" >&2; exit 2; }
 	$(PYTHON) acceptance/qualify-standard-image.py --image "$(IMAGE)" --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)" --work "$(WORK_DIR)"
+
+# Shared CI/local selections; EVIDENCE must be a new directory outside checkout.
+.PHONY: print-smoke-tests test-suite
+print-smoke-tests:
+	@echo $(SMOKE_TESTS)
+
+test-suite:
+	$(PYTHON) -m ci.run run --suite "$(SUITE)" --output "$(EVIDENCE)"
