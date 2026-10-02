@@ -32,7 +32,7 @@ def submit(setup,request='distribution-prepare', **values):
 def dispatched(setup,owner,monkeypatch):
     c,entry,builder = setup; services = Workers(); coordinator = JobCoordinator(owner,services)
     response = submit(setup); c.resume('campaign'); claim = coordinator.tick()
-    assert worker(c,claim,monkeypatch) == 0
+    assert worker(c,claim,monkeypatch) == 0, (Path(claim['stage_dir'])/'diagnostics/stage-result.json').read_text()
     services.done = True
     return response,claim,coordinator,services
 
