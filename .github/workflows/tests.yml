@@ -2,13 +2,22 @@ name: tests
 
 on:
   push:
+    branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: smoke-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  # Software only. Real composition/image/VM/endurance gates are release-only;
-  # never add them to push/PR CI (see docs/testing-policy.md).
-  unit:
+  # Routine smoke only; the complete software matrix is a manual milestone gate.
+  # Real composition/image/VM/endurance gates remain release-only.
+  smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
@@ -28,4 +37,4 @@ jobs:
           .venv/bin/python -m pip install -e '.[test]'
       - run: |
           umask "${{ matrix.umask }}"
-          .venv/bin/python -m pytest
+          make smoke

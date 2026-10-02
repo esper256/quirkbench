@@ -1,7 +1,13 @@
 export PYTHONPATH := $(CURDIR)/src
 
 PYTHON ?= .venv/bin/python
-TESTS ?= tests
+# Curated existing regressions; explicit paths avoid collecting slow integration
+# modules just to deselect them. Keep this list small (see testing policy).
+SMOKE_TESTS := tests/test_contracts.py tests/test_store.py tests/test_state_config.py \
+ tests/test_controller_review.py tests/test_controller_setup.py \
+ tests/test_cli.py::test_demo_and_monitor_from_separate_interpreter \
+ tests/test_cli.py::test_invalid_command_fails_without_system_changes
+TESTS ?= $(SMOKE_TESTS)
 
 # Expensive real-system fixtures are explicit final major-version release gates.
 # Fail during parsing, before aggregate prerequisites can launch (even with -j).
@@ -12,10 +18,18 @@ $(error Release-only qualification: requires an explicitly requested final major
 endif
 endif
 
-.PHONY: test acceptance-m1 demo monitor acceptance-qemu acceptance-hardware acceptance-patch acceptance-m2 acceptance-ostree-repository acceptance-ostree-signatures acceptance-ostree-deployment acceptance-ostree-controller-backup
+.PHONY: test smoke test-full acceptance-m1 demo monitor acceptance-qemu acceptance-hardware acceptance-patch acceptance-m2 acceptance-ostree-repository acceptance-ostree-signatures acceptance-ostree-deployment acceptance-ostree-controller-backup
 
+# Routine default is smoke; TESTS=... retains focused development checks.
 test:
 	$(PYTHON) -m pytest $(TESTS)
+
+smoke:
+	$(PYTHON) -m pytest $(SMOKE_TESTS)
+
+# Explicit software milestone gate. TESTS never narrows full acceptance.
+test-full:
+	$(PYTHON) -m pytest tests --durations=25
 
 # Software-only development distribution; never runs image or hardware gates.
 .PHONY: controller-archive
@@ -51,7 +65,7 @@ acceptance-m2: acceptance-m1 acceptance-ostree-repository acceptance-ostree-sign
 
 # No hardware cases are skipped inside this gate; separate qualification gates
 # fail visibly when their required real-world inputs are absent.
-acceptance-m1: test
+acceptance-m1: test-full
 
 QUIRKBENCH_STATE_HOME := $(if $(XDG_STATE_HOME),$(XDG_STATE_HOME),$(HOME)/.local/state)
 DEMO_STATE ?= $(QUIRKBENCH_STATE_HOME)/quirkbench/development-demo
@@ -71,7 +85,7 @@ acceptance-patch:
 
 # Fresh layout-v2 gate; never reuse historical layout-v1 boot evidence.
 .PHONY: acceptance-v1-image
-acceptance-v1-image: test acceptance-qemu
+acceptance-v1-image: test-full acceptance-qemu
 
 # Non-smoke image: real commissioning and healthy unprovisioned supervisor wait.
 .PHONY: acceptance-standard-image

@@ -586,4 +586,7 @@ and [contracts](docs/implementation-contracts.md) describe implementation work a
 its current limits. Changes to the future CLI shown here do not silently rename
 existing commands or stored protocol fields.
 
-Use the [testing policy](docs/testing-policy.md) for development validation.
+Use `make smoke` (or `make test`) for a quick development check, and
+`make test TESTS=tests/test_<feature>.py` for affected regressions. Run
+`make test-full` or the manual full software CI workflow at larger integration
+milestones. See the [testing policy](docs/testing-policy.md) for scope and evidence.
