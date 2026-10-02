@@ -70,6 +70,25 @@ TASK_TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/quirkbench-issues-7-8.XXXXXXXX")"
   --basetemp="$TASK_TEST_ROOT/evidence" >"$TASK_TEST_ROOT/evidence.log" 2>&1)
 ```
 
+Further work for [issue #19](https://github.com/esper256/quirkbench/issues/19)
+caches bounded, immutable ancestor/`.git` path layouts, while repeating every
+filesystem, ownership and checkout check. Record reads use a fresh strict
+canonical-root traversal without constructing another resolved `Path`; symlink
+loops fail with `ContractError`, and missing/inaccessible roots still fail closed.
+Drain verification removes one adjacent full reconstruction because each private
+source reader already checks before access and after capture. Request, journal,
+per-file mutation and deadline guards remain active.
+
+For the two-record joined endpoint regression on Debian 13/Python 3.13, the
+profile changed from **106,561,944 to 64,409,757 calls**, with full archive
+validations reduced from **189 to 147**. A same-session unprofiled comparison
+measured test-call time at **17.11 versus 11.73 seconds**. The regression retains
+its behavior checks and budgets at most 150 reconstructions; the previous code
+fails that budget at 189. These measurements describe one case, not a new full
+suite result. Repeated reconstruction remains tracked in #19. Entry rejection
+and post-capture mutation tests verify that no client exchange or archived
+journal write follows a failed reader boundary.
+
 [Issue #8](https://github.com/esper256/quirkbench/issues/8) contains one reported
 exit 139 during pytest's 30-second faulthandler dump on Debian 13, CPython 3.12.14,
 pytest 9.1.1, ending in `python3.12/pathlib.py`. Only that excerpt is available here;

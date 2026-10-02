@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import fcntl
+from functools import lru_cache
 import os
 from pathlib import Path
 import stat
@@ -19,11 +20,37 @@ class StateConfigurationError(ContractError):
     pass
 
 
+@lru_cache(maxsize=512)
+def _lexical_ancestors(raw):
+    """Cache only immutable path syntax; callers still check the live filesystem."""
+    path=Path(raw)
+    return (path,*path.parents)
+
+
+def _ancestors(path):
+    raw=str(path)
+    # Deep/large unusual paths still work, without retaining a large layout.
+    if len(raw)>4096 or raw.count('/')>32:
+        return (path,*path.parents)
+    return _lexical_ancestors(raw)
+
+
+@lru_cache(maxsize=512)
+def _lexical_git_markers(raw):
+    return tuple(parent/'.git' for parent in _lexical_ancestors(raw))
+
+
+def _git_markers(path):
+    raw=str(path)
+    if len(raw)>4096 or raw.count('/')>32:
+        return tuple(parent/'.git' for parent in (path,*path.parents))
+    return _lexical_git_markers(raw)
+
+
 def outside_checkout(path: Path) -> Path:
     """New persistent work must never depend on a checkout's ignore rules."""
     path = Path(path).expanduser().resolve()
-    for parent in (path, *path.parents):
-        marker = parent / '.git'
+    for marker in _git_markers(path):
         try:
             before = marker.lstat()
         except (FileNotFoundError, NotADirectoryError):
