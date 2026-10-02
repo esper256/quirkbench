@@ -9,6 +9,8 @@ from pathlib import Path
 import stat
 import tempfile
 import configparser
+import re
+import time
 
 from .baseline_catalog import validate_entry
 from .contracts import Conflict, ContractError, canonical, identifier, sha256
@@ -164,8 +166,44 @@ def retain_input(root, entry, expected_identity, stage, store, verify):
     finally: os.close(root_fd)
 
 
+class _GitPublicationInProgress(Exception):
+    pass
+
+
+def _git_node(metadata, parts, *,active):
+    if (metadata.st_uid != os.geteuid() or metadata.st_mode & 0o7000
+            or not (stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode))):
+        raise ContractError('distribution Git tree is linked, foreign or special')
+    if stat.S_ISREG(metadata.st_mode) and metadata.st_nlink != 1:
+        # Git publishes a loose object with link(temp, object), then unlink(temp).
+        # Never accept either alias while linked; only request a fresh strict pass.
+        if (active and metadata.st_nlink == 2 and len(parts) == 3 and parts[0] == 'objects'
+                and re.fullmatch('[0-9a-f]{2}', parts[1])
+                and re.fullmatch('(?:[0-9a-f]{38}|tmp_obj_[A-Za-z0-9]{6})', parts[2])):
+            raise _GitPublicationInProgress()
+        raise ContractError('distribution Git tree is linked, foreign or special')
+
+
 def import_git_policy(source, *,recursive=True,active=False):
+    """Require a strict pass, allowing bounded settling of active Git publication."""
+    deadline = None
+    for attempt in range(16):
+        try:
+            return _import_git_policy(source, recursive=recursive, active=active, settling_deadline=deadline)
+        except _GitPublicationInProgress as exc:
+            now = time.monotonic()
+            if deadline is None: deadline = now + 0.25
+            if attempt == 15 or now >= deadline:
+                raise ContractError('distribution Git loose-object publication remained linked') from exc
+            time.sleep(0.005)
+
+
+def _import_git_policy(source, *,recursive=True,active=False,settling_deadline=None):
     """Pure metadata fence; no callbacks or native Git interpretation."""
+    def budget():
+        if settling_deadline is not None and time.monotonic() >= settling_deadline:
+            raise ContractError('distribution Git loose-object publication exceeded settling budget')
+    budget()
     from .state_reader import read_file
     directory = source/'.git'; info = directory.lstat()
     if (not stat.S_ISDIR(info.st_mode) or directory.resolve() != directory or info.st_uid != os.geteuid()
@@ -177,6 +215,7 @@ def import_git_policy(source, *,recursive=True,active=False):
     unexpected = set(os.listdir(directory))-allowed
     if unexpected: raise ContractError('distribution Git namespace has unapproved behavior: '+repr(sorted(unexpected)[:4])[:256])
     for name in ('config','HEAD'):
+        budget()
         item = directory/name; metadata = item.lstat()
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or metadata.st_uid != os.geteuid():
             raise ContractError('distribution Git metadata is linked or foreign')
@@ -186,6 +225,7 @@ def import_git_policy(source, *,recursive=True,active=False):
             'core':{'repositoryformatversion':'0','filemode':'true','bare':'false','logallrefupdates':'true'}}:
         raise ContractError('distribution Git configuration has unapproved behavior')
     for name in os.listdir(directory):
+        budget()
         item = directory/name
         try: metadata = item.lstat()
         except FileNotFoundError:
@@ -196,27 +236,28 @@ def import_git_policy(source, *,recursive=True,active=False):
                 or (stat.S_ISREG(metadata.st_mode) and metadata.st_nlink != 1)):
             raise ContractError('distribution Git tree is linked, foreign or special')
     for path in (directory/'objects', directory/'objects/info', directory/'refs', directory/'logs'):
+        budget()
         if path.exists() or path.is_symlink():
             value = path.lstat()
             if not stat.S_ISDIR(value.st_mode) or path.resolve() != path or value.st_uid != os.geteuid():
                 raise ContractError('distribution Git object/ref directory changed')
     for path in (directory/'objects/info/alternates',directory/'objects/info/http-alternates',directory/'refs/replace'):
+        budget()
         if path.exists() or path.is_symlink(): raise ContractError('distribution Git object interpretation is unapproved')
     if recursive:
         root_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         count = [0]
-        def nodes(parent):
+        def nodes(parent, prefix=()):
             for name in os.listdir(parent):
+                budget()
+                parts = (*prefix, name)
                 count[0] += 1
                 if count[0] > 1000000: raise ContractError('distribution Git namespace exceeds bounds')
                 try: before = os.stat(name, dir_fd=parent, follow_symlinks=False)
                 except FileNotFoundError:
                     if active: continue
                     raise
-                if (before.st_uid != os.geteuid() or before.st_mode & 0o7000
-                        or not (stat.S_ISDIR(before.st_mode) or stat.S_ISREG(before.st_mode))
-                        or (stat.S_ISREG(before.st_mode) and before.st_nlink != 1)):
-                    raise ContractError('distribution Git tree is linked, foreign or special')
+                _git_node(before, parts, active=active)
                 try:
                     child = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK |
                                     (os.O_DIRECTORY if stat.S_ISDIR(before.st_mode) else 0), dir_fd=parent)
@@ -225,20 +266,16 @@ def import_git_policy(source, *,recursive=True,active=False):
                     raise
                 try:
                     held = os.fstat(child)
-                    if (not (stat.S_ISDIR(held.st_mode) or stat.S_ISREG(held.st_mode)) or held.st_uid != os.geteuid()
-                            or held.st_mode & 0o7000 or (stat.S_ISREG(held.st_mode) and held.st_nlink != 1)):
-                        raise ContractError('distribution Git tree is linked, foreign or special')
+                    _git_node(held, parts, active=active)
                     if ((not active or stat.S_ISDIR(before.st_mode))
                             and (before.st_dev,before.st_ino,before.st_uid,before.st_mode) != (held.st_dev,held.st_ino,held.st_uid,held.st_mode)):
                         raise Conflict('distribution Git node changed during policy check')
-                    if stat.S_ISDIR(before.st_mode): nodes(child)
+                    if stat.S_ISDIR(before.st_mode): nodes(child, parts)
                     try: current = os.stat(name, dir_fd=parent, follow_symlinks=False)
                     except FileNotFoundError:
                         if active and stat.S_ISREG(held.st_mode): continue
                         raise
-                    if (not (stat.S_ISDIR(current.st_mode) or stat.S_ISREG(current.st_mode)) or current.st_uid != os.geteuid()
-                            or current.st_mode & 0o7000 or (stat.S_ISREG(current.st_mode) and current.st_nlink != 1)):
-                        raise ContractError('distribution Git tree is linked, foreign or special')
+                    _git_node(current, parts, active=active)
                     if ((not active or stat.S_ISDIR(held.st_mode))
                             and (held.st_dev,held.st_ino,held.st_uid,held.st_mode) != (current.st_dev,current.st_ino,current.st_uid,current.st_mode)):
                         raise Conflict('distribution Git node changed during policy check')
@@ -249,6 +286,7 @@ def import_git_policy(source, *,recursive=True,active=False):
             if (held.st_dev,held.st_ino,held.st_uid,held.st_mode) != (named.st_dev,named.st_ino,named.st_uid,named.st_mode):
                 raise Conflict('distribution Git root changed during policy check')
         finally: os.close(root_fd)
+    budget()
     return (info.st_dev,info.st_ino,info.st_mode,info.st_uid)
 
 
