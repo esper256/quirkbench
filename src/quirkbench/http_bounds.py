@@ -8,16 +8,16 @@ class BoundedHTTPError(OSError):
 
 
 class _DeadlineRaw(io.RawIOBase):
-    def __init__(self,sock,deadline,clock):
-        self.sock=sock;self.deadline=deadline;self.clock=clock
+    def __init__(self,sock,deadline,clock, *,operation='enrollment exchange'):
+        self.sock=sock;self.deadline=deadline;self.clock=clock;self.operation=operation
         self.stream=sock.makefile('rb',buffering=0)
     def readable(self):return True
     def readinto(self,buffer):
         remaining=self.deadline-self.clock()
-        if remaining<=0:raise BoundedHTTPError('enrollment exchange exceeded deadline')
+        if remaining<=0:raise BoundedHTTPError(self.operation+' exceeded deadline')
         self.sock.settimeout(min(15,remaining))
         count=self.stream.readinto(buffer)
-        if self.clock()>=self.deadline:raise BoundedHTTPError('enrollment exchange exceeded deadline')
+        if self.clock()>=self.deadline:raise BoundedHTTPError(self.operation+' exceeded deadline')
         return count
     def close(self):
         try:self.stream.close()
@@ -36,8 +36,8 @@ class _HeaderReader(io.BufferedReader):
 
 
 class _DeadlineSocket:
-    def __init__(self,sock,deadline,clock):self.sock=sock;self.deadline=deadline;self.clock=clock
-    def makefile(self,*a,**k):return _HeaderReader(_DeadlineRaw(self.sock,self.deadline,self.clock))
+    def __init__(self,sock,deadline,clock, *,operation='enrollment exchange'):self.sock=sock;self.deadline=deadline;self.clock=clock;self.operation=operation
+    def makefile(self,*a,**k):return _HeaderReader(_DeadlineRaw(self.sock,self.deadline,self.clock,operation=self.operation))
 
 
 

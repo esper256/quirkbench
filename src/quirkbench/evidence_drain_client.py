@@ -4,11 +4,12 @@ import re
 import ssl
 import time
 
-from .contracts import ContractError
+from .contracts import Conflict,ContractError
 from .evidence_drain import validate_grant
 from .transport import MAX_CHUNK,MAX_BODY,TransportError,_strict_json
 from .enrollment_client import endpoint
 from .release_http import _response,_length,_remaining
+from .http_bounds import BoundedHTTPError
 
 
 class HTTPSDrainClient:
@@ -38,22 +39,23 @@ class HTTPSDrainClient:
         if action not in ('upload','evidence'):raise ContractError('drain client permits only upload/evidence')
         deadline=self._monotonic()+self.timeout
         if self._absolute_deadline is not None:deadline=min(deadline,self._absolute_deadline)
-        _remaining(deadline,self._monotonic)
-        raw=canonical({'schema_version':1,**payload});_remaining(deadline,self._monotonic)
+        _remaining(deadline,self._monotonic,operation='evidence drain request')
+        raw=canonical({'schema_version':1,**payload});_remaining(deadline,self._monotonic,operation='evidence drain request')
         headers={'X-Evidence-Drain-ID':self.record['grant_id'],'X-Device-ID':self.device_id,
             'Authorization':'Bearer '+self._token,'Content-Type':'application/json'}
         try:
             with _response(self.base_url+'/v1/evidence-drain/'+action,deadline,self._monotonic,
-                    method='POST',body=raw,headers=headers,context=self.context,expected_status=None) as response:
+                    method='POST',body=raw,headers=headers,context=self.context,expected_status=None,operation='evidence drain request') as response:
                 if response.status!=200:raise TransportError('HTTP '+str(response.status))
                 size=_length(response,MAX_BODY);answer=bytearray()
                 while len(answer)<size:
-                    _remaining(deadline,self._monotonic);chunk=response.read1(min(65536,size-len(answer)))
-                    _remaining(deadline,self._monotonic)
+                    _remaining(deadline,self._monotonic,operation='evidence drain request');chunk=response.read1(min(65536,size-len(answer)))
+                    _remaining(deadline,self._monotonic,operation='evidence drain request')
                     if not chunk:raise TransportError('incomplete drain response')
                     answer.extend(chunk)
                 value=_strict_json(bytes(answer));_depth(value)
-        except TransportError:raise
+        except (TransportError,Conflict):raise
+        except BoundedHTTPError as exc:raise TransportError(str(exc)) from exc
         except (OSError,ValueError,RecursionError) as exc:raise TransportError('bounded drain connection/response failed') from exc
         if type(value.get('schema_version')) is not int or value['schema_version']!=1 or not isinstance(value.get('data'),dict):
             raise TransportError('invalid drain response envelope')

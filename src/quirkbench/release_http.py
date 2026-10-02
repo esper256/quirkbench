@@ -24,36 +24,36 @@ sys.stdout.buffer.write(raw)
 
 
 class _DeadlineWrites:
-    def __init__(self,sock,deadline,clock):self.sock=sock;self.deadline=deadline;self.clock=clock
+    def __init__(self,sock,deadline,clock, *,operation='release acquisition'):self.sock=sock;self.deadline=deadline;self.clock=clock;self.operation=operation
     def __getattr__(self,name):return getattr(self.sock,name)
     def sendall(self,data):
         view=memoryview(data)
         while view:
-            self.sock.settimeout(_remaining(self.deadline,self.clock))
+            self.sock.settimeout(_remaining(self.deadline,self.clock,operation=self.operation))
             written=self.sock.send(view[:16384])
-            _remaining(self.deadline,self.clock)
+            _remaining(self.deadline,self.clock,operation=self.operation)
             if type(written) is not int or not 0<written<=min(16384,len(view)):raise OSError('bounded HTTPS write made no progress')
             view=view[written:]
 
 
-def _remaining(deadline,clock):
+def _remaining(deadline,clock, *,operation='release acquisition'):
     now=clock()
     if (type(now) not in (int,float) or not math.isfinite(now) or now<0
             or type(deadline) not in (int,float) or not math.isfinite(deadline)):
-        raise Conflict('release acquisition monotonic deadline unavailable')
+        raise Conflict(operation+' monotonic deadline unavailable')
     remaining=deadline-now
-    if remaining<=0:raise Conflict('release acquisition total deadline expired')
+    if remaining<=0:raise Conflict(operation+' total deadline expired')
     return min(15,remaining)
 
 
-def _resolve(host,port,deadline,clock, *,run=subprocess.run):
+def _resolve(host,port,deadline,clock, *,run=subprocess.run,operation='release acquisition'):
     if (not isinstance(host,str) or not 0<len(host)<=253 or any(ord(c)<33 for c in host)
             or type(port) is not int or not 0<port<=65535):raise ContractError('invalid release acquisition host/port')
     try:
         answer=run([sys.executable,'-I','-S','-c',RESOLVER,host,str(port)],capture_output=True,check=False,
-                   timeout=_remaining(deadline,clock),stdin=subprocess.DEVNULL,close_fds=True)
-    except subprocess.TimeoutExpired as exc:raise Conflict('release acquisition DNS deadline expired') from exc
-    _remaining(deadline,clock)
+                   timeout=_remaining(deadline,clock,operation=operation),stdin=subprocess.DEVNULL,close_fds=True)
+    except subprocess.TimeoutExpired as exc:raise Conflict(operation+' DNS deadline expired') from exc
+    _remaining(deadline,clock,operation=operation)
     if answer.returncode or not isinstance(answer.stdout,bytes) or not 0<len(answer.stdout)<=16384:
         raise ContractError('bounded release DNS resolution failed')
     try:rows=json.loads(answer.stdout)
@@ -77,17 +77,18 @@ def _resolve(host,port,deadline,clock, *,run=subprocess.run):
     return addresses
 
 
-def _connect(address,deadline,clock, *,source_address=None,resolve=_resolve,socket_factory=socket.socket):
+def _connect(address,deadline,clock, *,source_address=None,resolve=_resolve,socket_factory=socket.socket,operation=None):
     host,port=address;last=None
-    for family,kind,protocol,destination in resolve(host,port,deadline,clock):
-        timeout=_remaining(deadline,clock);sock=socket_factory(family,kind,protocol)
+    context=operation or 'release acquisition'
+    for family,kind,protocol,destination in resolve(host,port,deadline,clock,**({'operation':context} if operation is not None and resolve is _resolve else {})):
+        timeout=_remaining(deadline,clock,operation=context);sock=socket_factory(family,kind,protocol)
         try:
             sock.settimeout(timeout)
             if source_address is not None:sock.bind(source_address)
             sock.connect(destination)
             # HTTPSConnection wraps this socket with native TLS immediately;
             # its timeout is the remaining budget, preserving original-host SNI.
-            sock.settimeout(_remaining(deadline,clock));return sock
+            sock.settimeout(_remaining(deadline,clock,operation=context));return sock
         except BaseException as exc:
             sock.close()
             if not isinstance(exc,OSError):raise
@@ -98,12 +99,13 @@ def _connect(address,deadline,clock, *,source_address=None,resolve=_resolve,sock
 @contextmanager
 def _response(url,deadline,clock, *,connection_factory=http.client.HTTPSConnection,
               method='GET',body=None,headers=None,context=None,expected_status=200,
-              expected_peer_sha256=None):
+              expected_peer_sha256=None,operation=None):
     """No redirect/proxy; the reviewed stream bounds status, headers and body."""
+    deadline_context=operation or 'release acquisition'
     parts=urlsplit(url)
     if parts.scheme!='https' or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment:
         raise ContractError('release acquisition requires a fixed HTTPS URL')
-    remaining=_remaining(deadline,clock)
+    remaining=_remaining(deadline,clock,operation=deadline_context)
     if expected_peer_sha256 is not None:sha256(expected_peer_sha256)
     if method not in ('GET','POST') or (method=='GET' and (body is not None or headers)):
         raise ContractError('invalid bounded HTTPS request method/body')
@@ -118,20 +120,20 @@ def _response(url,deadline,clock, *,connection_factory=http.client.HTTPSConnecti
             or context.hostname_checks_common_name):raise ContractError('bounded HTTPS requires native original-host SAN verification')
     connection=connection_factory(parts.hostname,parts.port or 443,context=context,timeout=min(15,remaining))
     if connection_factory is http.client.HTTPSConnection:
-        connection._create_connection=lambda address,timeout,source_address=None:_connect(address,deadline,clock,source_address=source_address)
-    connection.response_class=lambda sock,**kw:http.client.HTTPResponse(_DeadlineSocket(sock,deadline,clock),**kw)
+        connection._create_connection=lambda address,timeout,source_address=None:_connect(address,deadline,clock,source_address=source_address,operation=operation)
+    connection.response_class=lambda sock,**kw:http.client.HTTPResponse(_DeadlineSocket(sock,deadline,clock,**({'operation':operation} if operation is not None else {})),**kw)
     try:
         connection.connect()
-        remaining=_remaining(deadline,clock)
+        remaining=_remaining(deadline,clock,operation=deadline_context)
         if expected_peer_sha256 is not None:
             sock=getattr(connection,'sock',None)
             der=None if sock is None else sock.getpeercert(binary_form=True)
             if not isinstance(der,bytes) or not 0<len(der)<=65536 or digest(der)!=expected_peer_sha256:
                 raise Conflict('controller trust changed before enrollment request')
-            _remaining(deadline,clock)
+            _remaining(deadline,clock,operation=deadline_context)
         if getattr(connection,'sock',None) is not None:connection.sock.settimeout(remaining)
         if method=='POST' and getattr(connection,'sock',None) is not None:
-            connection.sock=_DeadlineWrites(connection.sock,deadline,clock)
+            connection.sock=_DeadlineWrites(connection.sock,deadline,clock,operation=deadline_context)
         connection.request(method,parts.path or '/',**({'body':body} if method=='POST' else {}),
             headers={'Accept-Encoding':'identity','Connection':'close',**(headers or {})})
         response=connection.getresponse()

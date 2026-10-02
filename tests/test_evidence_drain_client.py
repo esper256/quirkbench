@@ -135,3 +135,46 @@ def test_absolute_batch_budget_includes_native_request_serialization(cert_files,
     monkeypatch.setattr(evidence_drain_client,'_response',lambda *a,**kw:(_ for _ in ()).throw(AssertionError('expired serialization cannot send secrets')))
     with pytest.raises(Conflict,match='deadline'):
         client.evidence('attempt-1','original-token','log',0,'a'*64,128)
+
+
+def test_drain_total_deadline_reports_the_request_operation(cert_files,monkeypatch):
+    from quirkbench import evidence_drain_client
+    cert,_=cert_files;client=HTTPSDrainClient('https://localhost:8443',credential(),str(cert))
+    client._monotonic=lambda:10;client._absolute_deadline=10
+    monkeypatch.setattr(evidence_drain_client,'_response',lambda *a,**kw:pytest.fail('expired request launched'))
+    with pytest.raises(Conflict,match='evidence drain request total deadline expired'):
+        client.evidence('attempt-1','original-token','log',0,'a'*64,128)
+
+
+def test_drain_transport_passes_operation_context_through_native_deadline(cert_files,monkeypatch):
+    from quirkbench import evidence_drain_client
+    cert,_=cert_files;client=HTTPSDrainClient('https://localhost:8443',credential(),str(cert))
+    @contextmanager
+    def expired(*a,**kw):
+        assert kw['operation']=='evidence drain request'
+        raise Conflict(kw['operation']+' total deadline expired')
+        yield
+    monkeypatch.setattr(evidence_drain_client,'_response',expired)
+    with pytest.raises(Conflict,match='evidence drain request total deadline expired'):
+        client.evidence('attempt-1','original-token','log',0,'a'*64,128)
+
+
+def test_native_read_deadline_keeps_drain_context_in_visible_client_error(cert_files,monkeypatch):
+    from quirkbench import evidence_drain_client
+    from quirkbench.http_bounds import _DeadlineRaw
+    cert,_=cert_files;client=HTTPSDrainClient('https://localhost:8443',credential(),str(cert));now=[0]
+    class Raw(io.RawIOBase):
+        def readable(self):return True
+        def readinto(self,buffer):now[0]=1;return 0
+    class Socket:
+        def makefile(self,*a,**kw):return Raw()
+        def settimeout(self,value):assert value==.5
+    @contextmanager
+    def expired(*a,**kw):
+        with _DeadlineRaw(Socket(),.5,lambda:now[0],operation=kw['operation']) as raw:
+            raw.readinto(bytearray(1))
+        pytest.fail('expired response was accepted')
+        yield
+    monkeypatch.setattr(evidence_drain_client,'_response',expired)
+    with pytest.raises(TransportError,match='evidence drain request exceeded deadline'):
+        client.evidence('attempt-1','original-token','log',0,'a'*64,128)

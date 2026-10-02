@@ -35,6 +35,78 @@ possible deployment route; a container without a user manager is development-onl
 Missing runtime capabilities do not prevent software development and must not be
 reported as ready. See [controller installation](controller-installation.md).
 
+## Focused cloud checks: archived evidence and delayed traceback
+
+[Issue #7](https://github.com/esper256/quirkbench/issues/7) reported an endpoint
+archive case taking 219.26 seconds across export, drain and replay, each with its
+own unchanged absolute deadline. At checkout `83a364f`, individual `_source` reads
+called `full`, whose `_capture_source` read callbacks called `basic`; each `basic`
+rebuilt history/completion and private bundles. The correction keeps live binding,
+ownership, deadlines and exact retained bytes, moves semantic reconstruction to
+full boundaries and pins each reader's identity to the immutable archive. No global
+cache, timestamp trust, longer deadline or short-state-path requirement is added.
+Higher-reasoning source review approved; runtime validation is **deferred to cloud**.
+
+The focused regression creates both shallow and eight-level configured paths,
+executes the original joined endpoint export/drain/replay case, prints separate
+phase counts and asserts no recursive capture inside individual source reads or
+history/completion reconstruction inside capture callbacks. Other cases retain
+late private-byte/permission/link mutations, exact attribution, later current
+endpoint history, scoped upload authorization and original-deadline checks.
+
+Run from the checkout with the test extra installed. Every `--basetemp` below is a
+new disposable child; do not substitute existing state. The deep fixture supplies
+path depth independently of the temporary parent. This is focused software work:
+
+```sh
+TASK_TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/quirkbench-issues-7-8.XXXXXXXX")"
+(umask 022; .venv/bin/python -m pytest -q -s \
+  tests/test_archived_evidence_validation.py tests/test_retarget_evidence.py \
+  tests/test_retarget_endpoint.py::test_new_target_endpoint_history_can_coexist_with_immutable_original_archive \
+  tests/test_retarget_endpoint.py::test_repeated_retarget_after_completed_retarget_endpoint_keeps_both_origins \
+  tests/test_retarget_endpoint.py::test_owned_context_never_runs_native_callback_after_final_private_source_fence \
+  tests/test_retarget_endpoint.py::test_archived_identity_and_snapshot_are_rechecked_after_capture_callbacks \
+  tests/test_evidence_drain_client.py tests/test_release_http.py \
+  --basetemp="$TASK_TEST_ROOT/evidence" >"$TASK_TEST_ROOT/evidence.log" 2>&1)
+```
+
+[Issue #8](https://github.com/esper256/quirkbench/issues/8) contains one reported
+exit 139 during pytest's 30-second faulthandler dump on Debian 13, CPython 3.12.14,
+pytest 9.1.1, ending in `python3.12/pathlib.py`. Only that excerpt is available here;
+there is no core/native stack or complete crash artifact to assign a cause. The
+local editing runtime is CPython 3.14.7 (GCC 15.3.1, Fedora/glibc 2.42), pytest
+9.1.1; it is not the reported runtime. Inspection of the installed pytest hook
+shows it calls `faulthandler.dump_traceback_later` around the test protocol and
+cancels it afterward. No local reproduction was attempted and no defect is assigned
+to Quirkbench, pytest, CPython or the supplied runtime build.
+
+The bounded stdlib-only probe prints runtime/build identity and forces a delayed
+dump during path resolution. Its paired test leaves timer setup to pytest. Run
+each once on the affected cloud runtime, retain both logs and statuses:
+
+```sh
+TASK_PYTHON_STATUS=0
+timeout 10s .venv/bin/python -I tests/faulthandler_probe.py \
+  --path "$TASK_TEST_ROOT" --duration 1 --delay .25 \
+  >"$TASK_TEST_ROOT/python-dump.log" 2>&1 || TASK_PYTHON_STATUS=$?
+printf '%s\n' "$TASK_PYTHON_STATUS" >"$TASK_TEST_ROOT/python-dump.exit"
+TASK_PYTEST_STATUS=0
+timeout 10s .venv/bin/python -m pytest -q -s tests/test_faulthandler_probe.py \
+  -o faulthandler_timeout=0.1 -o faulthandler_exit_on_timeout=false \
+  --basetemp="$TASK_TEST_ROOT/pytest-dump" \
+  >"$TASK_TEST_ROOT/pytest-dump.log" 2>&1 || TASK_PYTEST_STATUS=$?
+printf '%s\n' "$TASK_PYTEST_STATUS" >"$TASK_TEST_ROOT/pytest-dump.exit"
+```
+
+A crash in the Python-only probe narrows the scope beyond pytest/Quirkbench; a
+pytest-only crash isolates integration for further investigation, without proving
+which component is faulty. Two successful probes do not resolve the original
+fixture-specific report. Preserve its diagnostic form (the original joined case
+with `-o faulthandler_timeout=30`) and recorded exit 139. A faster #7 case that
+never fires that timer provides no #8 crash evidence. These commands leave product
+diagnostics enabled and do not skip the evidence regression or request a runtime
+matrix, image build or qualification campaign.
+
 ## Validation scope
 
 Agent tokens per useful finding are the primary optimization. Routine development

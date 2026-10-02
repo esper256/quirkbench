@@ -167,3 +167,25 @@ def test_locally_signed_install_uses_injected_trust_and_native_https_only(inputs
         assert inspect_selected(Path(result['runtime_root']),config_home=args['config_home'],trust_bundle=trust)==verified
     finally:
         if server is not None:server.shutdown();server.server_close();worker.join(2)
+
+
+def test_remaining_keeps_default_release_diagnostic_and_explicit_operation_context():
+    for context,message in (({},'release acquisition'),({'operation':'archived evidence export'},'archived evidence export')):
+        assert http._remaining(20,lambda:10,**context)==10
+        with pytest.raises(Conflict,match=message+' total deadline expired'):http._remaining(10,lambda:10,**context)
+        with pytest.raises(Conflict,match=message+' monotonic deadline unavailable'):http._remaining(10,lambda:float('nan'),**context)
+
+
+def test_deadline_write_context_preserves_release_default_and_names_drain_request():
+    class Socket:
+        def send(self,data):raise AssertionError('expired budget cannot write')
+        def settimeout(self,value):raise AssertionError('expired budget cannot touch socket')
+    for context,message in (({},'release acquisition'),({'operation':'evidence drain request'},'evidence drain request')):
+        with pytest.raises(Conflict,match=message+' total deadline expired'):
+            http._DeadlineWrites(Socket(),10,lambda:10,**context).sendall(b'x')
+
+
+def test_expired_native_dns_budget_reports_the_supplied_operation():
+    with pytest.raises(Conflict,match='evidence drain request total deadline expired'):
+        http._resolve('localhost',443,10,lambda:10,operation='evidence drain request',
+            run=lambda *a,**kw:pytest.fail('expired DNS launched'))
