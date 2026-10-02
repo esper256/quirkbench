@@ -1,6 +1,6 @@
 """Authoritative state machine. Each externally visible acknowledgement follows commit."""
 from __future__ import annotations
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import asdict
 import base64
 import fcntl
@@ -545,7 +545,7 @@ class Controller(OperatorApprovals):
         self.db_path = self.root / 'controller.sqlite'
         with (self.root / 'migration.lock').open('a+b') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            with self._connect() as db:
+            with closing(self._connect()) as db, db:
                 version = db.execute('PRAGMA user_version').fetchone()[0]
                 if version > len(MIGRATIONS):
                     raise ContractError('database created by newer software')
@@ -577,10 +577,14 @@ class Controller(OperatorApprovals):
 
     def _connect(self):
         db = sqlite3.connect(self.db_path, timeout=30)
-        db.row_factory = sqlite3.Row
-        db.execute('PRAGMA foreign_keys=ON')
-        db.execute('PRAGMA journal_mode=WAL')
-        db.execute('PRAGMA synchronous=FULL')
+        try:
+            db.row_factory = sqlite3.Row
+            db.execute('PRAGMA foreign_keys=ON')
+            db.execute('PRAGMA journal_mode=WAL')
+            db.execute('PRAGMA synchronous=FULL')
+        except BaseException:
+            db.close()
+            raise
         return db
 
     @contextmanager
@@ -1639,7 +1643,7 @@ class Controller(OperatorApprovals):
 
     def deployment_references(self):
         """Read retained revisions for audit/cleanup; an absent adapter cannot erase them."""
-        with self._connect() as db:
+        with closing(self._connect()) as db, db:
             return self._deployment_rows(db)
 
     def _library_closure(self, values):

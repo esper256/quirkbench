@@ -110,8 +110,14 @@ def test_unmapped_root_owner_does_not_authorize_arbitrary_volume_owners(tmp_path
     monkeypatch.setattr(maintenance, 'nested_mounts', lambda root: [str(volume)])
     original_stat, original_lstat = Path.stat, Path.lstat
     overflow = 65534 if os.geteuid() != 65534 else 65533
-    monkeypatch.setattr(Path, 'stat', lambda path, *a, **kw:
-        SimpleNamespace(st_uid=overflow) if path == Path('/') else original_stat(path, *a, **kw))
+    def root_owner(path, *args, **kwargs):
+        info = original_stat(path, *args, **kwargs)
+        if path == Path('/'):
+            # Path.lstat may delegate to Path.stat(follow_symlinks=False).
+            # Keep the mode needed by the infrastructure wrapper in that path.
+            return SimpleNamespace(st_uid=overflow, st_mode=info.st_mode)
+        return info
+    monkeypatch.setattr(Path, 'stat', root_owner)
     def mapped(path, *args, **kwargs):
         info = original_lstat(path, *args, **kwargs)
         if path == root or path in root.parents or path == volume:

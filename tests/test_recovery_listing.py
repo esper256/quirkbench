@@ -1,5 +1,7 @@
 """Read-only released-image discovery; small CAS fixtures, no image build."""
 import json
+import sqlite3
+import stat
 from pathlib import Path
 
 import pytest
@@ -33,7 +35,13 @@ def published(signed_factory,tmp_path,monkeypatch):
 def test_listing_exposes_retained_publisher_evidence_without_writes_or_authority(published,monkeypatch):
     c,row,final,receipt=published
     before=(c.root/'controller.sqlite').read_bytes()
-    files={path.relative_to(c.root) for path in c.root.rglob('*')}
+    # SQLite's mode=ro still owns WAL/SHM bookkeeping on a stopped database.
+    # Only these exact auxiliary names are outside the application-file snapshot.
+    sidecars={Path('controller.sqlite-wal'),Path('controller.sqlite-shm')}
+    files={path.relative_to(c.root) for path in c.root.rglob('*')}-sidecars
+    wal=c.root/'controller.sqlite-wal'
+    try:wal_before=wal.read_bytes()
+    except FileNotFoundError:wal_before=None
     monkeypatch.setattr(Controller,'__init__',lambda *a,**kw:pytest.fail('listing must not initialize controller'))
     answer=list_images(StateReader(c.root));item,=answer['data']['items']
     assert item['id']==row['id'] and item['availability']=='retained'
@@ -44,7 +52,38 @@ def test_listing_exposes_retained_publisher_evidence_without_writes_or_authority
     assert 'does not rehash image or reverify current publisher trust' in item['verification']
     assert 'Publisher fingerprint: '+receipt['publisher_fingerprint'] in render_images(answer)
     assert (c.root/'controller.sqlite').read_bytes()==before
-    assert {path.relative_to(c.root) for path in c.root.rglob('*')}==files
+    assert {path.relative_to(c.root) for path in c.root.rglob('*')}-sidecars==files
+    for relative in sidecars:
+        try:info=(c.root/relative).lstat()
+        except FileNotFoundError:continue
+        assert stat.S_ISREG(info.st_mode)
+        if relative.name=='controller.sqlite-wal' and wal_before is None:
+            # A new WAL is empty/header-only, with no transaction frames.
+            assert info.st_size in (0,32)
+    if wal_before is not None:assert wal.read_bytes()==wal_before
+
+
+def test_listing_reads_live_uncheckpointed_commit_and_rejects_sql_writes(published):
+    c,row,final,receipt=published
+    writer=c._connect()
+    try:
+        writer.execute('PRAGMA wal_autocheckpoint=0')
+        before=(c.root/'controller.sqlite').read_bytes()
+        updated=writer.execute('SELECT updated FROM operations WHERE id=?',(row['id'],)).fetchone()[0]+1
+        writer.execute('UPDATE operations SET updated=? WHERE id=?',(updated,row['id']))
+        writer.commit()
+        assert (c.root/'controller.sqlite-wal').stat().st_size>32
+        assert (c.root/'controller.sqlite').read_bytes()==before
+        reader=StateReader(c.root)
+        item,=list_images(reader)['data']['items']
+        assert item['updated']==updated and item['availability']=='retained'
+        with reader.connection() as query:
+            with pytest.raises(sqlite3.OperationalError,match='readonly'):
+                query.execute('UPDATE operations SET updated=0 WHERE id=?',(row['id'],))
+        assert writer.execute('SELECT updated FROM operations WHERE id=?',(row['id'],)).fetchone()[0]==updated
+        assert (c.root/'controller.sqlite').read_bytes()==before
+    finally:
+        writer.close()
 
 
 @pytest.mark.parametrize('change',['missing','image-size','image-link','receipt-bytes','statement-bytes','asset-ref','final-ref','statement-linkage'])

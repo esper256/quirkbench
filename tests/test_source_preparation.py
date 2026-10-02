@@ -2,11 +2,19 @@
 import json
 import os
 from pathlib import Path
+import stat
 import pytest
 from quirkbench import source_preparation as preparation
 from quirkbench.contracts import Conflict,ContractError
 from quirkbench.store import ArtifactStore
 from test_source_capture import repository,git
+
+
+def change_mode(path):
+    # The starting mode depends on the host umask; always make a real mutation.
+    before=stat.S_IMODE(path.stat().st_mode)
+    path.chmod(before ^ stat.S_IXUSR)
+    assert stat.S_IMODE(path.stat().st_mode)!=before
 
 
 def prepare(repository,**kwargs):
@@ -115,7 +123,7 @@ def test_late_workspace_mutation_cannot_match_original_capture(repository,mutati
         if phase!='source_workspace_verified':return
         path=state/'workers/output/workspace'
         if mutation=='contents':(path/'driver.c').write_text('late mutation')
-        elif mutation=='mode':(path/'driver.c').chmod(0o600)
+        elif mutation=='mode':change_mode(path/'driver.c')
         elif mutation=='deletion':(path/'driver.c').unlink()
         elif mutation=='index':(path/'injected.c').write_text('new');git(path,'add','injected.c')
         else:git(path,'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','--allow-empty','-qm','late head')
@@ -141,7 +149,7 @@ def test_last_claim_callback_mutation_is_caught_without_later_callbacks(reposito
         if fired[0] or not armed[0]:return
         fired[0]=True
         if mutation=='contents':(path/'driver.c').write_text('late callback mutation')
-        elif mutation=='mode':(path/'driver.c').chmod(0o600)
+        elif mutation=='mode':change_mode(path/'driver.c')
         elif mutation=='deletion':(path/'driver.c').unlink()
         elif mutation=='index':(path/'injected.c').write_text('new');git(path,'add','injected.c')
         else:git(path,'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','--allow-empty','-qm','late callback head')
