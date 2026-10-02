@@ -45,8 +45,12 @@ as implemented behavior. No MCP service in v1.
 
 ## Validate the change
 
-Follow the [testing policy](docs/testing-policy.md). Run focused software tests;
-documentation changes need link/consistency checks and `git diff --check`. Image,
+Follow the [testing policy](docs/testing-policy.md). Use `make smoke` as needed
+during development and focused software regressions for changed code. `make test`
+defaults to smoke; `make test TESTS=...` selects focused cases. Run `make test-full`
+or dispatch the full CI matrix only at larger software integration milestones,
+not after every small bugfix or change. Documentation changes need link/consistency
+checks and `git diff --check`. Image,
 QEMU, composition/transfer/backup qualification and endurance gates require an
 explicit final major-version release request; never bypass `RELEASE_QUALIFICATION=1`.
 Requested image production, scientific experiments and attended commissioning are

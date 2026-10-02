@@ -13,7 +13,7 @@ build-system dependencies alone do not install these into a development virtuale
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[test]'
-make test
+make smoke
 ```
 
 Keep temporary test state and build staging outside the checkout. Pytest's normal
@@ -162,8 +162,9 @@ runtime is a development route while the original crash remains under investigat
 
 ## Validation scope
 
-Agent tokens per useful finding are the primary optimization. Routine development
-uses focused software regressions. Expensive end-to-end qualification runs only
+Routine development uses a tiny smoke suite as needed, plus focused software
+regressions for changed code. Full software CI runs only at larger integration
+milestone boundaries, not for every small bugfix or change. Expensive end-to-end qualification runs only
 for an explicitly requested final release of a major version, against a stable
 candidate. Milestone acceptance descriptions specify the eventual evidence needed;
 they do not instruct agents to rebuild and qualify after each implementation task.
@@ -171,14 +172,61 @@ they do not instruct agents to rebuild and qualify after each implementation tas
 | Work | Validation |
 | --- | --- |
 | Documentation or policy | Inspect links, consistency and `git diff --check` |
-| Local implementation change | Relevant pytest files or test cases |
-| Broad software integration | `make test` when justified; push/PR CI runs the software suite |
+| Development sanity check | `make smoke` (also the default `make test`) |
+| Local implementation change | Smoke as needed, plus relevant pytest files or test cases |
+| Larger software integration milestone | `make test-full` or manually dispatch the full software CI matrix |
 | Final major-version candidate | Explicit release qualification, with recorded inputs and retained results |
 
-For example, `make test TESTS=tests/test_monitor.py` runs one software suite.
-`make test`, `make acceptance-m1` and ordinary CI never invoke real image, VM,
-composition or hardware campaigns. Keep expensive fixtures outside pytest's normal
-`tests/` collection and out of push/PR CI.
+### Smoke, focused and full software checks
+
+```sh
+make smoke                                  # routine sanity check
+make test                                   # same smoke selection
+make test TESTS=tests/test_monitor.py         # affected feature
+make test TESTS=tests/test_cli.py::test_invalid_command_fails_without_system_changes
+make test-full                              # explicit milestone, all software tests
+```
+
+The smoke list lives in `SMOKE_TESTS` in the root Makefile. It reuses existing
+contract/schema, artifact publication/upload, state-path, controller lifecycle
+and setup tests, plus a simulated CLI demo and independent monitor. Setup uses
+injected service responses, not a live systemd manager. Explicit file/node paths
+avoid importing every integration module as `pytest -m smoke` would. All smoke
+cases remain part of the full suite. No tests or assertions are removed or skipped
+by this split. Smoke checks basic functionality; they do not replace regressions
+for the code being changed.
+
+The initial selection ran **79 tests in 0.87 seconds** on Debian 13/Python 3.13;
+the previous full cloud suite took **18 minutes 19 seconds**. These are measured
+examples, not deadlines on arbitrary machines. Keep smoke around one second on
+that baseline (a few seconds on slower hosts); additions need representative
+coverage and measured cost. Keep long reconstruction, subprocess timeout and
+network integration scenarios in focused/full runs rather than growing smoke.
+Underlying full-suite performance is still tracked separately in issue #19.
+
+PR updates and pushes to `main` automatically run smoke on Python 3.11/umask 022
+and Python 3.13/umask 077. Topic-branch pushes do not duplicate PR jobs; superseded
+smoke runs are cancelled. Runner startup and dependency installation add CI time
+beyond pytest's elapsed time.
+
+At a milestone, use Actions **full software tests** → **Run workflow**, select
+the branch/tag to validate, and enter the milestone description. Alternatively:
+
+```sh
+gh workflow run full-tests.yml --ref main -f milestone='Integration milestone description'
+```
+
+Both interpreter/umask combinations run the entire `tests/` suite, retain JUnit
+results and print the tested commit and slowest 25 cases. Record the run URL and
+commit when reporting milestone acceptance; ordinary smoke CI is not full-suite
+evidence. A new milestone run is appropriate when integration changes invalidate
+prior evidence. Do not launch it merely because a PR or small fix was merged.
+There is no automatic full run on pushes, PRs or a schedule.
+
+`make acceptance-m1` remains a full software gate, and release aggregates retain
+that full prerequisite. Neither `make test-full`, `make acceptance-m1` nor either
+CI workflow invokes real image, VM, composition or hardware campaigns. Keep real
+qualification fixtures outside pytest's normal `tests/` collection and out of CI.
 
 Release targets (`acceptance-m2`, `acceptance-v1-image`, `acceptance-qemu`,
 `acceptance-standard-image` and `acceptance-ostree-*`) require
