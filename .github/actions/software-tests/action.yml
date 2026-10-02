@@ -1,0 +1,69 @@
+name: Software tests with retained evidence
+description: Shared bounded software run, including setup-failure evidence and upload.
+inputs:
+  suite:
+    required: true
+    description: Validated software suite name
+  python-version:
+    required: true
+    description: Python version
+  umask:
+    required: true
+    description: Test umask
+  timeout:
+    default: '720'
+    description: Inner timeout in seconds, leaving time to upload before job timeout
+runs:
+  using: composite
+  steps:
+    - name: Initialize evidence before dependency setup
+      shell: bash
+      env:
+        QB_SUITE: ${{ inputs.suite }}
+        QB_PYTHON: ${{ inputs.python-version }}
+        QB_UMASK: ${{ inputs.umask }}
+      run: |
+        bundle="$RUNNER_TEMP/qb-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$QB_SUITE-$QB_PYTHON-$QB_UMASK"
+        echo "QB_EVIDENCE=$bundle" >> "$GITHUB_ENV"
+        echo "QB_ARTIFACT=software-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$QB_SUITE-$QB_PYTHON-$QB_UMASK" >> "$GITHUB_ENV"
+        python -m ci.run init --suite "$QB_SUITE" --output "$bundle"
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install test dependencies
+      shell: bash
+      run: |
+        python -m venv .venv
+        .venv/bin/python -m pip install -e '.[test]'
+    - name: Run software selection
+      shell: bash
+      env:
+        QB_SUITE: ${{ inputs.suite }}
+        QB_UMASK: ${{ inputs.umask }}
+        QB_TIMEOUT: ${{ inputs.timeout }}
+      run: |
+        umask "$QB_UMASK"
+        .venv/bin/python -m ci.run run --suite "$QB_SUITE" --output "$QB_EVIDENCE" --timeout "$QB_TIMEOUT"
+    - name: Report complete or partial evidence
+      if: always()
+      shell: bash
+      run: python -m ci.run summary --output "$QB_EVIDENCE"
+    - uses: actions/upload-artifact@v4
+      id: evidence
+      if: always()
+      with:
+        name: ${{ env.QB_ARTIFACT }}
+        path: ${{ env.QB_EVIDENCE }}
+        retention-days: 14
+        if-no-files-found: warn
+    - name: Link evidence
+      if: always()
+      shell: bash
+      env:
+        ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
+      run: |
+        if [ -n "$ARTIFACT_URL" ]; then
+          echo "[Download $QB_ARTIFACT]($ARTIFACT_URL) (expires after 14 days)." >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "Evidence upload missing or incomplete; inspect the failed steps." >> "$GITHUB_STEP_SUMMARY"
+        fi

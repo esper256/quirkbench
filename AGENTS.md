@@ -10,6 +10,8 @@ investigation input, local setup or historical evidence.
 
 ## Start here
 
+Use the [contribution workflow](CONTRIBUTING.md) for issue, branch, validation and PR handoff.
+
 Use the [documentation index](docs/README.md) to find the relevant guide. The root
 [README](README.md) is the aspirational product manual, not available-command evidence.
 Follow the [roadmap](docs/product-roadmap.md) and [implementation checklist](docs/installation-to-patch.md).

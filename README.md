@@ -1,5 +1,7 @@
 # Quirkbench
 
+Development: [contribution workflow](CONTRIBUTING.md) · [testing policy](docs/testing-policy.md).
+
 **Turn a reproducible Linux problem into a patch, with an experiment history you can inspect.**
 
 > [!WARNING]

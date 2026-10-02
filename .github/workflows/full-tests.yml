@@ -1,8 +1,7 @@
 name: full software tests
 run-name: Full software tests — ${{ inputs.milestone }}
 
-# Dispatch on the chosen branch/tag only at a software integration milestone.
-# This does not authorize real image, VM or hardware release qualification.
+# Explicit software milestone only; never release/hardware qualification.
 on:
   workflow_dispatch:
     inputs:
@@ -28,21 +27,9 @@ jobs:
             umask: '077'
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: ./.github/actions/software-tests
         with:
+          suite: full
           python-version: ${{ matrix.python-version }}
-      - run: |
-          python -m venv .venv
-          .venv/bin/python -m pip install -e '.[test]'
-      - name: Record tested source
-        run: git rev-parse HEAD
-      - name: Full software suite
-        run: |
-          umask "${{ matrix.umask }}"
-          .venv/bin/python -m pytest tests --durations=25 --junitxml=full-results.xml
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: full-results-${{ matrix.python-version }}-${{ matrix.umask }}-${{ github.sha }}
-          path: full-results.xml
-          if-no-files-found: warn
+          umask: ${{ matrix.umask }}
+          timeout: '2400'

@@ -198,6 +198,9 @@ they do not instruct agents to rebuild and qualify after each implementation tas
 
 ### Smoke, focused and full software checks
 
+See [CI suites and evidence](ci-evidence.md) for automatic subsystem selections,
+local reproduction, bounded diagnostics, and artifact retrieval/expiry.
+
 ```sh
 make smoke                                  # routine sanity check
 make test                                   # same smoke selection

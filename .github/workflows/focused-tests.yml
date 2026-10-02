@@ -1,0 +1,61 @@
+name: focused software tests
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      suites:
+        description: 'Space/comma-separated names from ci/suites.json (validated, no shell evaluation)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: focused-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  QB_PR_HEAD: ${{ github.event.pull_request.head.sha }}
+  QB_PR_BASE: ${{ github.event.pull_request.base.sha }}
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      suites: ${{ steps.select.outputs.suites }}
+      any: ${{ steps.select.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: select
+        env:
+          REQUESTED_SUITES: ${{ inputs.suites }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            python -m ci.select --base "$QB_PR_BASE" --head "$QB_PR_HEAD"
+          else
+            python -m ci.select --suites "$REQUESTED_SUITES"
+          fi
+  focused:
+    needs: select
+    if: needs.select.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(needs.select.outputs.suites) }}
+    steps:
+      - uses: actions/checkout@v4
+      # Focused cost is measured on one current interpreter/restrictive umask.
+      # Smoke and manually dispatched full runs retain both supported pairs.
+      - uses: ./.github/actions/software-tests
+        with:
+          suite: ${{ matrix.suite }}
+          python-version: '3.13'
+          umask: '077'
+          timeout: '720'
