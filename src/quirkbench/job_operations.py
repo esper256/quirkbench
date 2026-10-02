@@ -12,8 +12,8 @@ CREATE TABLE controller_job_service(id INTEGER PRIMARY KEY CHECK(id=1),epoch INT
 STAGES = {('image_prepare','recovery_rootfs'),('build','job_inputs'),('build','kernel_build'),
           ('compose','job_inputs'),('compose','os_compose'),
           ('builder_prepare','builder_capture'),('builder_prepare','builder_import'),
-          ('recovery_download','recovery_download'),('source_capture','source_capture'),('source_prepare','source_prepare')}
-KINDS = {'build','compose','builder_prepare','recovery_download','source_capture','source_prepare'}
+          ('recovery_download','recovery_download'),('source_capture','source_capture'),('source_prepare','source_prepare'),('candidate_prepare','candidate_rootfs')}
+KINDS = {'candidate_prepare','build','compose','builder_prepare','recovery_download','source_capture','source_prepare'}
 
 
 def manifest(kind, raw):
@@ -30,6 +30,9 @@ def manifest(kind, raw):
 
 
 def binding(intent, *, executable=False):
+    if intent.get('kind')=='candidate_prepare':
+        from .candidate_rootfs_operation import binding as candidate_binding
+        return candidate_binding(intent)
     if intent.get('kind')=='source_prepare':
         from .source_prepare_operation import binding as preparation_binding
         return preparation_binding(intent)

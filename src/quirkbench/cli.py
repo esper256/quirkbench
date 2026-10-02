@@ -253,6 +253,10 @@ def parser():
     target.add_argument('--url'); target.add_argument('--ca'); target.add_argument('--token-file', type=Path); target.add_argument('--report', type=Path); target.add_argument('--once', action='store_true'); target.add_argument('--interval', type=float, default=5)
     watch = commands.add_parser('watch'); watch.add_argument('campaign_id'); watch.add_argument('--interval', type=float, default=2); watch.add_argument('--once', action='store_true'); watch.add_argument('--json', action='store_true'); watch.add_argument('--session', help='include human requests for this session')
     build = commands.add_parser('build',help='build pinned source manifests inside the dedicated Fedora container'); build.add_argument('manifest',type=Path); build.add_argument('--workspace',type=Path); build.add_argument('--campaign')
+    candidate = commands.add_parser('candidate-rootfs',help='queue pinned candidate sysroot preparation; grants no execution approval')
+    candidate.add_argument('input',type=Path,help='strict candidate-rootfs-input v1 JSON')
+    candidate.add_argument('--builder-image-digest',help='pinned Fedora base marker identity')
+    candidate.add_argument('--json',action='store_true',help='return the operation response envelope (the default)')
     image = commands.add_parser('image',help='assemble a new regular-file USB image'); image.add_argument('manifest',type=Path)
     qualify = commands.add_parser('qualify-image',help='run ten real UEFI recovery, candidate, load-failure, panic and fallback trials'); qualify.add_argument('image',type=Path); qualify.add_argument('--manifest',type=Path,required=True); qualify.add_argument('--ovmf-code',type=Path,required=True); qualify.add_argument('--ovmf-vars',type=Path,required=True); qualify.add_argument('--work',type=Path,required=True); qualify.add_argument('--timeout',type=int,default=180)
     compose = commands.add_parser('compose',help='compose and sign a complete experimental Fedora OSTree revision'); compose.add_argument('manifest',type=Path); compose.add_argument('--workspace',type=Path); compose.add_argument('--publish-repo',type=Path,required=True); compose.add_argument('--campaign')
@@ -260,7 +264,7 @@ def parser():
     repo.add_argument('--credential-registry', action='store_true', help='require live registered leaf certificate in addition to mutual TLS')
     serve.add_argument('--job-worker',type=Path,help='installed fixed build/compose worker')
     serve.add_argument('--service-runtime',type=Path,help=argparse.SUPPRESS)
-    for command in (build,compose):
+    for command in (build,compose,candidate):
         command.add_argument('--request-id'); command.add_argument('--wait',action='store_true')
         command.add_argument('--builder-archive',help='retained OCI archive SHA256; defaults to private service configuration')
         command.add_argument('--builder-config-digest',help='actual local builder image config ID; defaults to private service configuration')
@@ -589,7 +593,7 @@ def _main(argv=None):
         except (ValueError, OSError, sqlite3.Error) as exc:
             print(f'setup blocked: {exc}', file=sys.stderr)
             return 2
-    if args.command in ('build','compose') or (args.command=='operation' and args.action=='resume'):
+    if args.command in ('build','compose','candidate-rootfs') or (args.command=='operation' and args.action=='resume'):
         from .job_cli import run
         return run(args)
     if args.command=='recovery-images':
@@ -1117,7 +1121,7 @@ def _main(argv=None):
 def main(argv=None):
     """A publication barrier, not a scheduler; read-only commands do no housekeeping."""
     args=parser().parse_args(argv)
-    readonly=(args.command in ('build','compose','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
+    readonly=(args.command in ('build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
                                'target','endpoint','target-service','serve-repository') or
               (args.command=='campaign' and args.action=='status') or
               (args.command=='investigation' and args.action in ('status','source','brief','baseline')) or

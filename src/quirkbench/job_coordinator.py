@@ -41,12 +41,12 @@ class JobCoordinator:
         if owner.closed or c._lifecycle_owner is not owner: raise Conflict('controller ownership ended')
         with c.transaction() as db:
             active=[dict(r) for r in db.execute('SELECT * FROM operations WHERE worker_unit IS NOT NULL')]
-            queued=[dict(r) for r in db.execute("SELECT * FROM operations WHERE state='QUEUED' AND kind IN ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare','operation_resume') AND queued_epoch=? ORDER BY created",(owner.epoch,))]
+            queued=[dict(r) for r in db.execute("SELECT * FROM operations WHERE state='QUEUED' AND kind IN ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare','candidate_prepare','operation_resume') AND queued_epoch=? ORDER BY created",(owner.epoch,))]
             physical=db.execute("SELECT 1 FROM attempts WHERE state IN ('CLAIMED','RUNNING','BOOT_PENDING','UNCERTAIN') OR (handoff_revision IS NOT NULL AND recovery_returned IS NULL) LIMIT 1").fetchone()
         if active:
             if len(active)!=1: raise Conflict('multiple workers require reconciliation')
             claim=active[0]
-            if claim['kind'] not in ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare') or claim['state']!='RUNNING': return None
+            if claim['kind'] not in ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare','candidate_prepare') or claim['state']!='RUNNING': return None
             expired=c.clock()>=claim['deadline']
             if not expired:
                 owner.collect_activity(claim)
@@ -82,7 +82,8 @@ class JobCoordinator:
                         db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
                                    (row['id'],c.clock(),'resubmission_required',canonical({'message':str(exc)[:512]}).decode()))
                 continue
-            if row['kind']=='source_prepare':stage='source_prepare'
+            if row['kind']=='candidate_prepare':stage='candidate_rootfs'
+            elif row['kind']=='source_prepare':stage='source_prepare'
             elif row['kind']=='source_capture':stage='source_capture'
             elif row['kind']=='recovery_download':stage='recovery_download'
             elif row['kind']=='builder_prepare':stage='builder_capture' if row['prepared_digest'] is None else 'builder_import'
@@ -126,6 +127,9 @@ class JobCoordinator:
             raise ValueError(record.get('error','worker did not report a complete matching stage'))
         args=binding(json.loads(c.store.get(claim['input_digest'])),executable=True)
         data=record['result']
+        if claim['kind']=='candidate_prepare':
+            from .candidate_rootfs_operation import consume
+            return consume(self,claim,json.loads(c.store.get(claim['input_digest'])),data)
         if claim['kind']=='source_prepare':
             from .source_prepare_operation import consume
             return consume(self,claim,json.loads(c.store.get(claim['input_digest'])),data)

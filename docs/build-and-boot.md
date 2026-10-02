@@ -62,6 +62,56 @@ capture has completed.
 
 Software support does not establish real service containment or boot qualification.
 
+### Durable candidate sysroot preparation
+
+`candidate-rootfs` prepares a retained package sysroot through the same operation
+service and delegated worker. Supply a strict
+[candidate-rootfs-input v1](../examples/candidate-rootfs-input.json) whose baseline,
+RPM snapshot, locks, recipes and packages are already retained in the controller
+artifact store. Missing pinned bytes are a blocker, not permission to download or
+substitute newer inputs.
+
+```sh
+quirkbench candidate-rootfs /absolute/inputs/candidate-rootfs.json \
+  --request-id candidate-rootfs-001
+quirkbench operation status JOB_ID --json
+```
+
+The command promptly returns the C2 operation envelope and durable ID. Admission
+reads bounded metadata and protects the entire declared dependency closure;
+large package/OCI verification and assembly happen in the worker. The builder
+defaults to exact configured identities or the retained signed preparation proof.
+Selection is not a native-readiness assertion. A manual binding must supply all
+three `--builder-image-digest`, `--builder-config-digest` and `--builder-archive`
+values. Exact request replay retains the originally selected builder even after
+configuration changes. `--wait` reads the final retained result; interrupting the
+waiter does not cancel accepted work.
+
+Responses always use the C2 JSON envelope. Exit codes are 0 accepted/query,
+2 invalid input, 3 conflicting intent, 4 blocked service/storage and
+5 infrastructure failure. An accepted ID does not mean assembly has succeeded.
+
+Only after whole-worker stop does the current owner independently verify inputs,
+builder, result and tree, serialize a bounded sysroot archive and validate its
+contents (at most 250,000 nodes and 128 GiB of file contents, with the configured
+free-space reserve). The [retained result v1](../examples/candidate-rootfs-result.json) binds
+the exact input, builder, tree and archive digests. Package modes, absolute OS
+symlinks and observed rootless UID/GID metadata are retained; internal package
+hardlinks become independent regular archive members. Credential exclusions match
+the build pipeline. No private signing/control state enters the worker.
+
+Restart interrupts the job. Reconcile the old whole service before explicitly
+using `operation resume JOB_ID --request-id NEW_REQUEST_ID`; it uses a fresh
+worker generation/stage and the same pinned inputs. A failed job is terminal;
+retry with a new candidate request ID. Partial artifact writes confer no readiness
+and remain unreferenced. The operation retains failed diagnostics and complete
+input/output references for existing retention and backup.
+
+This result is a package sysroot, not a built/composed candidate, physical attempt
+or operator approval. Connecting it to captured source builds/composition belongs
+to [issue #31](https://github.com/esper256/quirkbench/issues/31). Cloud tests inject
+package/container calls and do not establish native installroot/build readiness.
+
 ### Worker validation and publication
 
 Workers receive captured inputs, private outputs and read-only cache hints; writable
