@@ -175,6 +175,12 @@ def _git_node(metadata, parts, *,active):
             or not (stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode))):
         raise ContractError('distribution Git tree is linked, foreign or special')
     if stat.S_ISREG(metadata.st_mode) and metadata.st_nlink != 1:
+        # Native Git can replace index/HEAD or remove a transient lock while a
+        # stat or held-descriptor observation is in flight. An unlinked ordinary
+        # owned file has no external aliases, but must never be accepted as live
+        # metadata: restart the entire bounded strict inspection instead.
+        if active and metadata.st_nlink == 0:
+            raise _GitPublicationInProgress()
         # Git publishes a loose object with link(temp, object), then unlink(temp).
         # Never accept either alias while linked; only request a fresh strict pass.
         if (active and metadata.st_nlink == 2 and len(parts) == 3 and parts[0] == 'objects'
@@ -194,7 +200,7 @@ def import_git_policy(source, *,recursive=True,active=False):
             now = time.monotonic()
             if deadline is None: deadline = now + 0.25
             if attempt == 15 or now >= deadline:
-                raise ContractError('distribution Git loose-object publication remained linked') from exc
+                raise ContractError('distribution Git metadata publication did not settle') from exc
             time.sleep(0.005)
 
 
@@ -202,7 +208,7 @@ def _import_git_policy(source, *,recursive=True,active=False,settling_deadline=N
     """Pure metadata fence; no callbacks or native Git interpretation."""
     def budget():
         if settling_deadline is not None and time.monotonic() >= settling_deadline:
-            raise ContractError('distribution Git loose-object publication exceeded settling budget')
+            raise ContractError('distribution Git metadata publication exceeded settling budget')
     budget()
     from .state_reader import read_file
     directory = source/'.git'; info = directory.lstat()
@@ -217,8 +223,10 @@ def _import_git_policy(source, *,recursive=True,active=False,settling_deadline=N
     for name in ('config','HEAD'):
         budget()
         item = directory/name; metadata = item.lstat()
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or metadata.st_uid != os.geteuid():
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.geteuid()
+                or name == 'config' and metadata.st_nlink != 1):
             raise ContractError('distribution Git metadata is linked or foreign')
+        _git_node(metadata,(name,),active=active if name == 'HEAD' else False)
     config = configparser.ConfigParser(interpolation=None, strict=True)
     config.read_string(read_file(source,'.git/config',limit=16384).decode())
     if {section:dict(config[section]) for section in config.sections()} != {
@@ -232,9 +240,9 @@ def _import_git_policy(source, *,recursive=True,active=False,settling_deadline=N
             if active: continue
             raise
         if (metadata.st_uid != os.geteuid() or metadata.st_mode & 0o7000
-                or item.resolve() != item or not (stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode))
-                or (stat.S_ISREG(metadata.st_mode) and metadata.st_nlink != 1)):
+                or item.resolve() != item or not (stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode))):
             raise ContractError('distribution Git tree is linked, foreign or special')
+        _git_node(metadata,(name,),active=active)
     for path in (directory/'objects', directory/'objects/info', directory/'refs', directory/'logs'):
         budget()
         if path.exists() or path.is_symlink():

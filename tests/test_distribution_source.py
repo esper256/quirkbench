@@ -250,7 +250,7 @@ def test_persistent_git_object_aliases_fail_closed_in_active_and_stopped_modes(l
     with pytest.raises(ContractError,match='Git tree is linked'): distro.import_git_policy(source)
     retries = []; monkeypatch.setattr(distro.time,'sleep',retries.append)
     monkeypatch.setattr(distro.time,'monotonic',lambda:0.0)
-    with pytest.raises(ContractError,match='publication remained linked'):
+    with pytest.raises(ContractError,match='publication did not settle'):
         distro.import_git_policy(source,active=True)
     assert 0 < len(retries) <= 15 and object_file.stat().st_nlink == 2
 
@@ -291,3 +291,150 @@ def test_active_git_does_not_retry_three_link_object(loose_object,monkeypatch):
     monkeypatch.setattr(distro.time,'sleep',lambda _:pytest.fail('three-link object was retried'))
     with pytest.raises(ContractError,match='Git tree is linked'):
         distro.import_git_policy(source,active=True)
+
+
+@pytest.mark.parametrize('observation',['named-before','held','named-after'])
+@pytest.mark.parametrize('active', [False,True],ids=['stopped','active'])
+def test_git_index_replacement_restarts_strict_inspection(loose_object,monkeypatch,active,observation):
+    source,_,_=loose_object
+    index=source/'.git/index';index.write_bytes(b'old index')
+    identity=(index.stat().st_dev,index.stat().st_ino)
+    native_fstat,native_stat=os.fstat,os.stat;replaced=[False];retries=[];observations=[0]
+    def replace():
+        replacement=source/'.git/index.lock';replacement.write_bytes(b'new index')
+        os.replace(replacement,index);replaced[0]=True
+    def named(path,**kwargs):
+        if path==index.name and 'dir_fd' in kwargs:
+            observations[0]+=1
+            selected=1 if observation=='named-before' else 2
+            if observation!='held' and observations[0]==selected:
+                fd=os.open(index,os.O_RDONLY)
+                try:
+                    replace();metadata=native_fstat(fd)
+                    assert metadata.st_nlink==0
+                    return metadata
+                finally:os.close(fd)
+        return native_stat(path,**kwargs)
+    def held(fd):
+        metadata=native_fstat(fd)
+        if observation=='held' and not replaced[0] and (metadata.st_dev,metadata.st_ino)==identity:
+            replace()
+            metadata=native_fstat(fd)
+            assert metadata.st_nlink==0
+        return metadata
+    monkeypatch.setattr(distro.os,'fstat',held)
+    monkeypatch.setattr(distro.os,'stat',named)
+    monkeypatch.setattr(distro.time,'sleep',retries.append)
+    if active:
+        expected=distro.import_git_policy(source,recursive=False)
+        assert distro.import_git_policy(source,active=True)==expected
+        assert retries==[0.005] and index.read_bytes()==b'new index'
+    else:
+        with pytest.raises(ContractError,match='Git tree is linked'):
+            distro.import_git_policy(source)
+        assert retries==[]
+    assert replaced[0]
+
+
+def test_git_index_replacement_retry_still_rejects_unsafe_successor(loose_object,monkeypatch):
+    source,_,_=loose_object
+    index=source/'.git/index';index.write_bytes(b'old index')
+    identity=(index.stat().st_dev,index.stat().st_ino)
+    native_fstat=os.fstat;replaced=[False]
+    def held(fd):
+        metadata=native_fstat(fd)
+        if not replaced[0] and (metadata.st_dev,metadata.st_ino)==identity:
+            replacement=source/'.git/index.lock';replacement.write_bytes(b'unsafe successor')
+            os.link(replacement,source.parent/'outside-index')
+            os.replace(replacement,index);replaced[0]=True
+            metadata=native_fstat(fd)
+        return metadata
+    monkeypatch.setattr(distro.os,'fstat',held)
+    monkeypatch.setattr(distro.time,'sleep',lambda _:None)
+    with pytest.raises(ContractError,match='Git tree is linked'):
+        distro.import_git_policy(source,active=True)
+    assert replaced[0] and index.stat().st_nlink==2
+
+
+def test_continuous_git_index_replacement_exhausts_bounded_retries(loose_object,monkeypatch):
+    source,_,_=loose_object
+    index=source/'.git/index';index.write_bytes(b'index')
+    native_fstat=os.fstat;retries=[]
+    def held(fd):
+        metadata=native_fstat(fd);named=index.stat()
+        if (metadata.st_dev,metadata.st_ino)==(named.st_dev,named.st_ino):
+            replacement=source/'.git/index.lock';replacement.write_bytes(b'next index')
+            os.replace(replacement,index);metadata=native_fstat(fd)
+        return metadata
+    monkeypatch.setattr(distro.os,'fstat',held)
+    monkeypatch.setattr(distro.time,'sleep',retries.append)
+    monkeypatch.setattr(distro.time,'monotonic',lambda:0.0)
+    with pytest.raises(ContractError,match='publication did not settle'):
+        distro.import_git_policy(source,active=True)
+    assert len(retries)==15
+
+
+@pytest.mark.parametrize('name', ['HEAD','HEAD.lock','refs/heads/main','logs/HEAD','objects/ab/tmp_obj_ABC123'])
+def test_active_git_metadata_replacement_requires_a_fresh_strict_pass(loose_object,monkeypatch,name):
+    source,_,_=loose_object
+    metadata_path=source/'.git'/name
+    metadata_path.parent.mkdir(parents=True,exist_ok=True)
+    if not metadata_path.exists():metadata_path.write_bytes(b'metadata')
+    identity=(metadata_path.stat().st_dev,metadata_path.stat().st_ino)
+    native_fstat=os.fstat;replaced=[False];retries=[]
+    def held(fd):
+        metadata=native_fstat(fd)
+        if not replaced[0] and (metadata.st_dev,metadata.st_ino)==identity:
+            replacement=source.parent/'replacement';replacement.write_bytes(metadata_path.read_bytes())
+            os.replace(replacement,metadata_path);replaced[0]=True
+            metadata=native_fstat(fd)
+        return metadata
+    monkeypatch.setattr(distro.os,'fstat',held)
+    monkeypatch.setattr(distro.time,'sleep',retries.append)
+    distro.import_git_policy(source,active=True)
+    assert replaced[0] and retries==[0.005] and metadata_path.stat().st_nlink==1
+
+
+def test_active_git_unlinked_unsafe_mode_is_not_retried(loose_object,monkeypatch):
+    source,_,_=loose_object
+    index=source/'.git/index';index.write_bytes(b'index')
+    identity=(index.stat().st_dev,index.stat().st_ino)
+    native_fstat=os.fstat
+    def held(fd):
+        metadata=native_fstat(fd)
+        if (metadata.st_dev,metadata.st_ino)==identity:
+            os.fchmod(fd,0o4600);index.unlink();metadata=native_fstat(fd)
+            assert metadata.st_nlink==0 and metadata.st_mode & 0o4000
+        return metadata
+    monkeypatch.setattr(distro.os,'fstat',held)
+    monkeypatch.setattr(distro.time,'sleep',lambda _:pytest.fail('unsafe unlinked metadata was retried'))
+    with pytest.raises(ContractError,match='Git tree is linked'):
+        distro.import_git_policy(source,active=True)
+
+
+@pytest.mark.parametrize('active',[False,True],ids=['stopped','active'])
+def test_preliminary_git_head_replacement_requires_strict_retry(loose_object,monkeypatch,active):
+    source,_,_=loose_object
+    head=source/'.git/HEAD';native_stat,native_fstat=os.stat,os.fstat
+    expected=distro.import_git_policy(source,recursive=False)
+    replaced=[False];retries=[]
+    def named(path,**kwargs):
+        if path==head and kwargs.get('follow_symlinks') is False and not replaced[0]:
+            fd=os.open(head,os.O_RDONLY)
+            try:
+                replacement=source/'.git/HEAD.lock';replacement.write_bytes(head.read_bytes())
+                os.replace(replacement,head);replaced[0]=True
+                metadata=native_fstat(fd);assert metadata.st_nlink==0
+                return metadata
+            finally:os.close(fd)
+        return native_stat(path,**kwargs)
+    monkeypatch.setattr(distro.os,'stat',named)
+    monkeypatch.setattr(distro.time,'sleep',retries.append)
+    if active:
+        assert distro.import_git_policy(source,active=True)==expected
+        assert retries==[0.005]
+    else:
+        with pytest.raises(ContractError,match='Git tree is linked'):
+            distro.import_git_policy(source)
+        assert retries==[]
+    assert replaced[0]
