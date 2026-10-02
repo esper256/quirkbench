@@ -14,7 +14,7 @@ from typing import Callable, Mapping
 
 from .contracts import Conflict, ContractError, canonical, digest, identifier
 from .setup_contracts import MAX_SETUP_BYTES, STEPS, load_progress, validate_intent, validate_progress
-from .state_config import _config_home, configure_state_root, discover_state_root, default_state_root, outside_checkout
+from .state_config import _ancestors, _config_home, configure_state_root, discover_state_root, default_state_root, outside_checkout
 from .state_reader import StateReader, read_file
 from .store import atomic_write, sync_directory
 
@@ -91,7 +91,7 @@ def inspect_user_manager(*, runner: Callable = _run, uid: int | None = None,
 
 def _private_path(path):
     path = Path(path).expanduser().absolute()
-    if any(part.is_symlink() for part in (path, *path.parents)):
+    if any(part.is_symlink() for part in _ancestors(path)):
         raise ContractError('setup paths cannot contain symlinks')
     path = outside_checkout(path)
     if path == Path('/'):

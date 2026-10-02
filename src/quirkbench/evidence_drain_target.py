@@ -244,6 +244,9 @@ def export_plan(control,request_id, *,verify_target,binding_reader=read_system_u
 
 def _drain_locked(control,verify,request_id,grant_id, *,client_factory=HTTPSDrainClient,
                   timeout_s=120,clock=time.monotonic,fault_hook=None,source_reader=None,agent_root=None,deadline=None):
+    # Private adapters must call check() before any source read and after capture,
+    # before returning, propagating failures. Both _source and the archived reader
+    # do this; their entry check also gates every network request/journal write.
     source_reader=source_reader or (lambda check:_source(control,check));agent_root=agent_root or control/'agent'
     identifier(grant_id)
     if type(timeout_s) not in (int,float) or not 0<timeout_s<=120:raise ContractError('old-evidence drain window must be 0 to 120 seconds')
@@ -263,7 +266,6 @@ def _drain_locked(control,verify,request_id,grant_id, *,client_factory=HTTPSDrai
     if isinstance(client,HTTPSDrainClient):
         client._absolute_deadline=deadline;client._monotonic=clock
     def live_verify():
-        verify()
         if clock()>=deadline:raise TimeoutError('bounded old-evidence drain window elapsed')
         latest,current,ca,source=source_reader(verify)
         if (source!=saved['source_sha256'] or digest(ca)!=saved['ca_sha256']

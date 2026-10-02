@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 from contextlib import contextmanager
+import errno
 import hashlib
 import json
 import os
@@ -27,7 +28,16 @@ def safe_text(value):
 def read_file(root, relative, *, limit=LOG_BYTES, tail=False):
     """Traverse beneath a canonical root using no-follow directory descriptors."""
     root, relative = Path(root), Path(relative)
-    if root.resolve() != root or root.is_symlink() or relative.is_absolute() or '..' in relative.parts:
+    # realpath performs the same fresh filesystem traversal without constructing
+    # and comparing another Path for every retained record. Strict traversal also
+    # rejects ancestor symlink loops consistently on all supported Python versions.
+    try:
+        resolved=os.path.realpath(root,strict=True)
+    except OSError as exc:
+        if exc.errno==errno.ELOOP:
+            raise ContractError('diagnostic path is not canonical') from exc
+        raise
+    if resolved != str(root) or root.is_symlink() or relative.is_absolute() or '..' in relative.parts:
         raise ContractError('diagnostic path is not canonical')
     fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:

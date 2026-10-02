@@ -124,3 +124,40 @@ def test_preflight_consumes_single_original_deadline_and_request_budget(moved):
         result,clients=drain(moved,grant,owner,timeout_s=10,clock=lambda:now[0],recovery_verifier=recovery,fault_hook=elapsed)
     assert result['acknowledged_records']==2 and clients[0].calls
     assert all(timeout==1 for _,timeout in clients[0].calls)
+
+
+@pytest.mark.parametrize('boundary',['entry','exit'])
+def test_archived_source_reader_guards_prevent_access_and_exchange(moved,monkeypatch,boundary):
+    paused,receipt=moved;c,control,old,attempt,_=paused[0]
+    _,credential,grant=staged(moved)
+    original_journal=Path(receipt['original_archive'])/'agent/journal.json'
+    before=original_journal.read_bytes();armed=[False];source_reads=[];clients=[]
+    native_source=archive._source
+    def source(*args,**kwargs):
+        if armed[0]:
+            source_reads.append(True)
+            if boundary=='entry':pytest.fail('source read after failed entry check')
+        value=native_source(*args,**kwargs)
+        if armed[0] and boundary=='exit':
+            path=control/'runtime.json';runtime=json.loads(path.read_bytes())
+            runtime['controller_url']='https://changed.invalid'
+            atomic_write(path,canonical(runtime))
+        return value
+    native_agent=legacy.TargetAgent
+    def guarded_agent(*args,**kwargs):
+        # Exercise live_verify, whose source reader owns both full boundaries,
+        # before the actual agent constructor can touch the archived spool.
+        armed[0]=True
+        return native_agent(*args,**kwargs)
+    monkeypatch.setattr(archive,'_source',source)
+    monkeypatch.setattr(legacy,'TargetAgent',guarded_agent)
+    with c.lifecycle() as owner:
+        def factory(url,credential,cafile):
+            client=Client(c,owner,credential);clients.append(client);return client
+        with pytest.raises((Conflict,ContractError)):
+            archive.drain_archived(control,CONFIG,'retarget-1','archived-plan',grant,
+                verify_target=lambda:True,binding_reader=lambda:UUID if armed[0] and boundary=='entry' else NEW,
+                recovery_verifier=lambda _:True,client_factory=factory)
+    assert armed[0] and len(clients)==1 and clients[0].calls==[]
+    assert len(source_reads)==(0 if boundary=='entry' else 1)
+    assert original_journal.read_bytes()==before

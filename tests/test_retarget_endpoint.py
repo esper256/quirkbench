@@ -282,9 +282,14 @@ def test_archived_identity_and_snapshot_are_rechecked_after_capture_callbacks(mo
     assert changed[0] and not (control/'evidence-drain/plans').exists()
 
 
-def test_scoped_archived_drain_uses_approved_endpoint_without_new_target_changes(moved):
+def test_scoped_archived_drain_uses_approved_endpoint_without_new_target_changes(moved,monkeypatch):
     from quirkbench import evidence_drain as grants
     from test_evidence_drain_target import Client
+    captures=[];native_capture=retarget_evidence._capture_source
+    def capture(*args,**kwargs):
+        captures.append(True)
+        return native_capture(*args,**kwargs)
+    monkeypatch.setattr(retarget_evidence,'_capture_source',capture)
     c,control,old,attempt,_=moved[0];prepare(moved);receipt=activate(moved);archive=Path(receipt['original_archive'])
     plan=retarget_evidence.export_archived_plan(control,CONFIG,'retarget-1','approved-endpoint-drain',verify_target=lambda:True,binding_reader=lambda:NEW,recovery_verifier=lambda _:True)
     approved=grants.approve(c.root,old['device_id'],plan['plan'],'approve-endpoint-drain');credential=grants.read_credential(Path(approved['credential_file']));grant=credential['record']['grant_id']
@@ -303,3 +308,6 @@ def test_scoped_archived_drain_uses_approved_endpoint_without_new_target_changes
     assert (archive/'enrollment-pending/result.json').read_bytes()==original_result
     with c.transaction() as db:
         assert all(row['attempt']==attempt['attempt_id'] for row in db.execute('SELECT attempt FROM evidence'))
+    # Two records, export, drain and ACK repair must not multiply adjacent full
+    # reconstructions. Budget work counts, not wall time on a particular host.
+    assert len(captures)<=150,len(captures)
