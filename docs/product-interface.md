@@ -4,7 +4,8 @@ Implement the README's fresh-user installation,
 guided authenticated setup/pairing and attended external-agent investigation through
 patch export. Fresh controller setup comes first; managed invocation and unattended
 target operation are separate optional follow-ons. The
-[implementation map](installation-to-patch.md) records current gaps and acceptance.
+[acceptance guide](installation-to-patch.md) defines evidence;
+[GitHub tracker #29](https://github.com/esper256/quirkbench/issues/29) owns current gaps.
 Manual authenticated setup remains a supported development/compatibility path, but
 does not satisfy the general-release user journey. Exact operator-approved attempts remain mandatory.
 Use the [storage policy](architecture.md#storage-protection-policy) for distinct
@@ -12,7 +13,7 @@ recovery and experimental protections; no runtime/schema change is claimed here.
 
 This is the planned C8 extension to the [implementation contracts](implementation-contracts.md).
 It makes the [preview manual](../README.md) implementable; features below remain
-pending until their handoff gates pass. Existing C0–C7 safety and durability rules
+pending until their issue acceptance gates pass. Existing C0–C7 safety and durability rules
 continue to apply. There is one controller database and one attempt state machine.
 
 ## Release and installation

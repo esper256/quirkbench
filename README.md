@@ -11,8 +11,9 @@ Development: [contribution workflow](CONTRIBUTING.md) · [testing policy](docs/t
 > names. They are not a claim of available features or tested hardware support.
 > For the software you can run today, see [controller installation](docs/controller-installation.md)
 > and the [current agent guide](docs/agent-guide.md#current-implemented-commands).
-> This manual is the destination; the [implementation roadmap](docs/product-roadmap.md)
-> and [command checklist](docs/installation-to-patch.md) track the work to reach it.
+> This manual is the destination. [GitHub tracker #29](https://github.com/esper256/quirkbench/issues/29)
+> tracks remaining work; the [roadmap](docs/product-roadmap.md) and
+> [acceptance guide](docs/installation-to-patch.md) define the intended scope.
 
 Quirkbench gives a coding agent a persistent lab for investigating a Linux computer.
 The agent reads source, forms hypotheses and writes changes. Quirkbench builds those
@@ -583,9 +584,11 @@ hardware recovery checks.
 
 This README defines the desired user experience. Use the
 [documentation index](docs/README.md) to find current operating guides. The
-[roadmap](docs/product-roadmap.md), [implementation handoff](docs/implementation-handoff.md)
-and [contracts](docs/implementation-contracts.md) describe implementation work and
-its current limits. Changes to the future CLI shown here do not silently rename
+[first-usable tracker](https://github.com/esper256/quirkbench/issues/29) owns the
+remaining work. Follow [CONTRIBUTING](CONTRIBUTING.md) and the
+[cloud worker prompt](docs/cloud-worker-prompt.md) to select and finish issues;
+the [roadmap](docs/product-roadmap.md) and [contracts](docs/implementation-contracts.md)
+define scope and architecture. Changes to the future CLI shown here do not silently rename
 existing commands or stored protocol fields.
 
 Use `make smoke` (or `make test`) for a quick development check, and

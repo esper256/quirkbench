@@ -1,7 +1,9 @@
 # Recovery operations
 
 Current low-level stock-recovery commands, manual setup and initial console pairing.
-The complete guided journey remains unfinished; see the [implementation checklist](installation-to-patch.md).
+The complete guided journey remains unfinished; see
+[GitHub tracker #29](https://github.com/esper256/quirkbench/issues/29) and the
+[acceptance guide](installation-to-patch.md).
 Software support does not establish image or hardware qualification. Use
 [controller installation](controller-installation.md) and explicit
 [acquisition specifications](recovery-acquisition.md) before admitting work.

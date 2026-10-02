@@ -1,9 +1,10 @@
 # Development controller archive
 
-The current development installation uses manual authenticated controller/target
-setup. The planned general release requires guided setup/pairing under the
-[fresh-user implementation map](installation-to-patch.md). The provisional archive
-and worker below remain partial implementation, not evidence of that complete journey. See
+The development installation provides authenticated setup and pairing foundations.
+Complete installed/native acceptance is tracked in
+[GitHub #29](https://github.com/esper256/quirkbench/issues/29), against the
+[fresh-user acceptance guide](installation-to-patch.md). The provisional archive
+and worker below are not evidence of that complete journey. See
 [delivery order](product-roadmap.md#delivery-contract) and the
 [storage policy](architecture.md#storage-protection-policy).
 

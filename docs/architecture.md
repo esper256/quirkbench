@@ -1,6 +1,6 @@
 # Quirkbench: architecture and v1 contracts
 
-This repository is a local, evidence-first laboratory for Linux experiments. The controller owns scheduling and durable state. A booted target reports capabilities, claims one bounded attempt, runs a locally installed recipe and uploads observations. The physical runtime and OSTree boot control are implemented; actual target commissioning remains outstanding. Simulation `smoke` and physical `system-observation` recipes do not claim to reproduce an issue. The [forward product plan](product-roadmap.md) specifies the remaining discovery, provisioning and session work; planned extensions below are not current runtime guarantees.
+This repository is a local, evidence-first laboratory for Linux experiments. The controller owns scheduling and durable state. A booted target reports capabilities, claims one bounded attempt, runs a locally installed recipe and uploads observations. The physical runtime and OSTree boot control are implemented; actual target commissioning remains outstanding. Simulation `smoke` and physical `system-observation` recipes do not claim to reproduce an issue. The [roadmap](product-roadmap.md) specifies product scope and [GitHub tracker #29](https://github.com/esper256/quirkbench/issues/29) owns remaining integration work; planned extensions below are not current runtime guarantees.
 
 ## Forward product boundary
 

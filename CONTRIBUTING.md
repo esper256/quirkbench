@@ -1,66 +1,125 @@
-# Contributing
+# Contributing to Quirkbench
 
-Start with an issue describing the concrete problem and expected behavior. Read
-[AGENTS.md](AGENTS.md) for architectural boundaries and review requirements, and
-[the testing policy](docs/testing-policy.md) for authoritative validation tiers.
-The [documentation index](docs/README.md) points to implementation contracts.
-These are contribution conventions, not branch protection or required-approval settings.
+## Choose and claim a task
 
-## Checkout to review
+Start with [first-usable tracker #29](https://github.com/esper256/quirkbench/issues/29).
+GitHub issues and linked PRs own task status; the [roadmap](docs/product-roadmap.md)
+and [acceptance guide](docs/installation-to-patch.md) describe product scope.
+Read [AGENTS.md](AGENTS.md), then only the contracts relevant to the chosen issue.
 
-1. Inspect `git status --short` and preserve unrelated work. Fetch the intended
-   base; do not assume a stale local `main` is current. From a clean checkout:
+Reconcile current main, the issue's dependencies and any open PR/claim before
+coding. Reuse existing foundations. Choose one ready product issue; supporting
+infrastructure is lower priority unless it blocks that task or is explicitly requested.
+Do not select deferred managed/unattended work or operator gates as cloud work.
 
-   ```sh
-   git fetch origin main
-   git switch -c feature/issue-24 origin/main
-   ```
+Claim the issue in a comment with your worker/session identity, intended branch,
+scope and likely shared files. Assign yourself if supported. Re-read the issue to
+detect a concurrent claim; comments are coordination, not a lock. Coordinate an
+overlap rather than both changing the same CLI/schema/service. Reclaim an apparently
+abandoned task only after checking its PR/branch and recording the handoff.
 
-   For an occupied checkout, use an isolated worktree instead:
+## Implement through a PR
 
-   ```sh
-   git fetch origin main
-   git worktree add -b feature/issue-24 ../quirkbench-issue-24 origin/main
-   cd ../quirkbench-issue-24
-   ```
+Inspect `git status --short` first. From a clean checkout:
 
-   Substitute the agreed base/issue. Do not reset, stash, clean or force-push
-   somebody else's work. Reconcile base changes intentionally before final checks.
-2. Install the test extra using the [portable setup](docs/testing-policy.md#portable-software-development).
-   Implement a bounded change with affected regressions. Inspect the diff and run
-   `git diff --check`. Documentation-only edits need link and consistency checks.
-3. Choose appropriate validation. `make test` defaults to smoke, just like
-   `make smoke`; `make test TESTS=tests/test_monitor.py` runs an explicit selection.
-   [Focused suites and retained evidence](docs/ci-evidence.md) are reproducible
-   locally. Run `make test-full` or dispatch `full-tests.yml` only at a larger
-   software milestone. Real-system release qualification requires the explicit
-   authorization described in the testing policy. Smoke is never full-suite or
-   hardware evidence.
-4. Commit only intended paths, push the topic branch and open a draft PR early:
+```sh
+git fetch origin main
+git switch -c feature/issue-24 origin/main
+```
 
-   ```sh
-   git add CONTRIBUTING.md
-   git commit -m 'Document the contribution workflow'
-   git push -u origin feature/issue-24
-   gh pr create --draft --base main
-   ```
+For an occupied checkout, use `git worktree add -b feature/issue-24
+../quirkbench-issue-24 origin/main` and work there. Substitute the agreed issue/base;
+do not reset, stash or clean somebody else's work. Reconcile base changes
+intentionally before final validation.
 
-   Use the [PR template](.github/pull_request_template.md). Explain the problem,
-   resulting behavior, related issue, exact checks and results, material limits
-   and evidence links. Delete inapplicable prompts; a short docs PR can be brief.
-5. Review the final diff and CI results, including selected/unselected suites and
-   selection warnings. Follow AGENTS.md's higher-reasoning review requirement for
-   boundary-sensitive changes. Record reviewer/model identity, reviewed source SHA,
-   findings and their disposition in the PR; resolve findings and re-review affected
-   changes. Passing tests alone do not satisfy that review. Ordinary docs/test-tool
-   changes do not require inventing a boundary approval.
-6. On failure retain the first attempt's evidence, diagnose using focused checks
-   and fix the cause. Do not rerun just to obtain green or overwrite failed evidence.
-   Record any unavailable validation and its consequence. Mark the PR ready once
-   the change and applicable review/validation are complete, then merge under the
-   owner's normal workflow. Record final PR head, tested merge SHA/CI URL, and the
-   merged commit identity (a squash produces a different SHA).
+Fetch current main and create a topic branch (for example,
+`feature/30-candidate-job`) or isolated worktree. Preserve unrelated edits and
+never overwrite another worker's branch. If shell GitHub access is unavailable,
+use the authenticated connector; report missing capabilities instead of blocking
+on repeated inaccessible commands.
 
-Close the linked issue only when the delivered change and applicable validation
-support closure. `Closes #24` in a PR schedules closure on merge to the default
-branch; an open draft or green smoke run alone does not complete the issue.
+Implement the bounded issue outcome through existing services. Keep interfaces,
+records and compatibility rules intact. Update installed help and user documentation
+when behavior becomes available. Open a linked draft PR early for substantial work.
+
+Use [C0–C7](docs/implementation-contracts.md), [C8](docs/product-interface.md) and
+the storage policy as durable constraints. Obtain the higher-reasoning review
+required by AGENTS.md for storage, trust/binding, source/worker ownership, durable
+execution, shutdown or watchdog boundaries. Record reviewer/scope/findings and the
+resolution in the PR; unavailable review is a blocker, not an implied approval.
+
+Commit only intended paths, push the topic branch and open the draft:
+
+```sh
+git add CONTRIBUTING.md
+git commit -m 'Document the contribution workflow'
+git push -u origin feature/issue-24
+gh pr create --draft --base main
+```
+
+Use the [PR template](.github/pull_request_template.md); remove prompts that add no
+reviewer value. A short documentation PR can be brief. These are contribution
+conventions, not required approvals or branch-protection enforcement.
+
+## Validate and report
+
+Follow [testing policy](docs/testing-policy.md):
+
+- `make smoke` or default `make test`: quick sanity check.
+- `make test TESTS=tests/test_feature.py`: affected software regressions.
+- `make test-full` or manual full CI: larger integration milestones, not every fix.
+- Documentation: link/consistency checks and `git diff --check`.
+- Real image/QEMU/composition/endurance qualification: explicit final major-version
+  request and existing release guard. An issue assignment does not authorize it.
+
+Install dependencies using the [portable setup](docs/testing-policy.md#portable-software-development).
+[Focused suites and retained evidence](docs/ci-evidence.md) use the same selection
+locally and in CI. Review selected/unselected suites and unmapped-change warnings.
+
+Record source SHA, exact focused commands/results, relevant CI/evidence links,
+required review and remaining limitations. For boundary-sensitive changes record
+reviewer/model identity, reviewed SHA, findings and their disposition; resolve
+findings and re-review affected changes. Tests alone do not satisfy that review. Preserve first-failure diagnostics; diagnose with
+focused checks instead of rerunning until green. Smoke alone does not prove a changed
+subsystem or the native journey. Retrieve completed CI results once; do not occupy
+an agent polling jobs or launch a full suite simply because a PR merged.
+
+## Merge, close and continue
+
+Keep PRs limited to one issue or a clearly explained inseparable slice. Use
+`Fixes #N` only if merging will satisfy the issue's entire bounded acceptance;
+use `Refs #N` for partial work. A plan, open PR or passing smoke run is not closure.
+
+Merge only when session authorization covers merging, relevant checks/review pass
+and no blocking feedback remains. Branch protection is not being introduced here.
+Without merge authorization, leave a reviewable PR and proceed to another independent
+ready issue when the session permits. Never push directly to main as the normal
+development workflow.
+
+Record final PR head, tested merge SHA/CI URL and merged commit identity (squash
+merges produce a different SHA). Close only when the delivered change and applicable
+validation support closure.
+
+After merge, confirm the issue's acceptance, record evidence, close it and update
+tracker #29's checklist/dependency readiness. Preserve separately open native/operator
+gates. Start the next ready issue from current main; do not implement a dependent
+task on an unmerged assumed interface.
+
+## Architectural obstacles and operator gates
+
+Make routine implementation decisions within existing contracts. Pause the affected
+task when it needs a new database/scheduler/service, incompatible wire/storage
+semantics, a weaker trust/storage/approval boundary, conflicting contracts or a
+material change in first-usable scope. Record the evidence, alternatives, recommended
+option and specific decision needed. Do not quietly redesign to keep a queue moving.
+
+Production credentials/signing/publication, physical target operations and release
+qualification require their own explicit authorization and inputs. Cloud development
+does not need to run a real controller.
+
+Continue independent ready work if a bounded task is blocked. Stop and ask the owner
+when the obstacle changes shared architecture, required review is unavailable for
+all remaining work, or no safe ready tasks remain. Leave branch/PR, commands, evidence
+and the exact next step in the issue before ending a session.
+
+For a reusable consecutive-task instruction, see the [cloud worker prompt](docs/cloud-worker-prompt.md).

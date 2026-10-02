@@ -1,14 +1,19 @@
-<!-- Scale this to the change; remove prompts that add no reviewer value. -->
-## Change
+<!-- Scale to the change; remove prompts that add no reviewer value. -->
+## Problem and resulting behavior
 
-<!-- Concrete problem and resulting behavior. Include a small before/after example if helpful. -->
+Describe the concrete trigger and what this change makes possible.
 
-Closes #
+## Issue and scope
+
+Fixes #... (use Refs for partial work). State any acceptance left open.
 
 ## Validation
 
-<!-- Exact focused commands/results, tested SHA and CI/evidence links. Distinguish smoke, focused, full software and real-system evidence. -->
+Record focused commands/results, CI links and tested source identity as available.
+Distinguish smoke, affected regressions, full milestone software and native evidence.
 
-## Limits and review
+## Review and limitations
 
-<!-- Material limitations or unavailable checks. For AGENTS.md boundary changes, record higher-reasoning reviewer/model, reviewed SHA, findings and resolution. Otherwise omit. -->
+Record required boundary review (reviewer/model, reviewed SHA, findings/resolution)
+when applicable. Note material
+limits, operator gates or changed artifacts that remain unqualified.

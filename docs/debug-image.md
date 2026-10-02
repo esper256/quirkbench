@@ -3,7 +3,7 @@
 Recovery confines storage operations to its physical boot device; experimental
 kernels retain internal-controller exclusions. See the authoritative
 [storage policy](architecture.md#storage-protection-policy). The
-[roadmap](product-roadmap.md) tracks guided setup and the attended external-agent
+[roadmap](product-roadmap.md) defines guided setup and the attended external-agent
 journey; [recovery operations](recovery-operations.md) describes current manual use.
 
 The recovery OS is fixed, independent of the experimental OSTree repository, and

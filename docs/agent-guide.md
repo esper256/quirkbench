@@ -37,7 +37,8 @@ publish patches or install them into the normal OS without user authorization.
 
 The [product manual](../README.md) describes the desired `investigation` workflow.
 [C8](product-interface.md#public-cli-and-sessions) owns its command contract; the
-[implementation checklist](installation-to-patch.md) tracks availability. Those forms
+[GitHub tracker #29](https://github.com/esper256/quirkbench/issues/29) tracks
+availability against the [acceptance guide](installation-to-patch.md). Those forms
 are not current executable commands. The older `product_cli.py` parser is a frozen
 specification fixture, not an alternative operating manual. Continue using implemented
 commands until their replacement facades are recorded as usable.
