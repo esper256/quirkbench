@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "record_type": "controller-tls-identity",
+  "request_id": "endpoint-1",
+  "host": "127.0.0.2",
+  "files": {
+    "ca.key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "ca.crt": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "controller.key": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "controller.crt": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "previous_directory": "setup-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "previous_identity_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}

@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Complete private enrollment result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_type",
+    "request_id",
+    "request_digest",
+    "device_id",
+    "media_instance_id",
+    "target_binding",
+    "controller_url",
+    "credential_generation",
+    "controller_ca_pem",
+    "device_token",
+    "repository_certificate_pem",
+    "repository_remotes"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "record_type": {
+      "const": "enrollment-result"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "request_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "device_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "media_instance_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "target_binding": {
+      "title": "Quirkbench TargetBinding v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "system_uuid"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "type": "integer"
+        },
+        "system_uuid": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$",
+          "not": {
+            "enum": [
+              "00000000-0000-0000-0000-000000000000",
+              "ffffffff-ffff-ffff-ffff-ffffffffffff"
+            ]
+          }
+        }
+      }
+    },
+    "controller_url": {
+      "type": "string",
+      "pattern": "^https://[^/?#@]+:[0-9]+$",
+      "maxLength": 4096
+    },
+    "credential_generation": {
+      "title": "Credential generation v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "generation",
+        "device_id",
+        "media_instance_id",
+        "system_uuid",
+        "device_token_sha256",
+        "repository_certificate_sha256",
+        "expires_at"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "device_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "media_instance_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "system_uuid": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$",
+          "not": {
+            "enum": [
+              "00000000-0000-0000-0000-000000000000",
+              "ffffffff-ffff-ffff-ffff-ffffffffffff"
+            ]
+          }
+        },
+        "device_token_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "repository_certificate_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "expires_at": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4102444800
+        }
+      }
+    },
+    "controller_ca_pem": {
+      "type": "string",
+      "maxLength": 65536
+    },
+    "device_token": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$"
+    },
+    "repository_certificate_pem": {
+      "type": "string",
+      "maxLength": 65536
+    },
+    "repository_remotes": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 8,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "url",
+          "public_key"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 4096,
+            "pattern": "^https://[^/?#@]+:[0-9]+/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+          },
+          "public_key": {
+            "type": "string",
+            "maxLength": 65536
+          }
+        }
+      }
+    }
+  }
+}

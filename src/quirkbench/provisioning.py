@@ -26,12 +26,12 @@ def _read(path):
     return raw
 
 
-def validate_signing_key(path, *, runner=None):
+def validate_signing_key(path, *, runner=None,temporary_parent=None):
     """Inspect public signing material without modifying active repository trust."""
     import subprocess
     import tempfile
     runner=runner or subprocess.run
-    with tempfile.TemporaryDirectory(prefix='quirkbench-trust-') as home:
+    with tempfile.TemporaryDirectory(prefix='quirkbench-trust-',dir=temporary_parent) as home:
         result=runner(['gpg','--batch','--no-options','--homedir',home,
                        '--with-colons','--import-options','show-only','--dry-run',
                        '--import',str(path)],check=False,capture_output=True,text=True,timeout=30)
@@ -44,7 +44,68 @@ def validate_signing_key(path, *, runner=None):
         raise ContractError('repository trust lacks a usable public signing key')
 
 
-def activate_bundle(bundle: Path, control: Path, *, verify_target, validator=None, fault=None, maintenance=False):
+def _publish_generation(files,control,verify_target,validator,fault):
+    """Caller holds configuration/execution locks; retain the existing generation."""
+    from .runtime import load_provisioning
+    from .binding import verify_binding
+    manifest={name:digest(data) for name,data in sorted(files.items())}
+    generation=digest(canonical(manifest));generations=control/'generations'
+    config=json.loads(files['runtime.json'],object_pairs_hook=_pairs)
+    staging=generations/('.pending-'+uuid.uuid4().hex)
+    staging.mkdir(mode=0o700)
+    try:
+        for name,data in files.items():
+            verify_target()
+            atomic_write(staging/name,data)
+        atomic_write(staging/'generation.json',canonical(manifest))
+        validated=validator(staging/'runtime.json')
+        if validator is load_provisioning:
+            verify_binding(validated.get('target_binding'))
+            from urllib.parse import urlsplit
+            import ssl
+            url=urlsplit(validated['controller_url'])
+            if url.scheme!='https' or not url.hostname or url.username or url.password or url.query or url.fragment:
+                raise ContractError('manual controller configuration requires authenticated HTTPS origin')
+            token=validated['token_file'].read_text().strip()
+            if not re.fullmatch(r'[A-Za-z0-9._~-]{32,512}',token):
+                raise ContractError('manual device credential is invalid')
+            for remote in validated['remotes'].values():
+                tls=ssl.create_default_context(cafile=str(remote.ca))
+                tls.load_cert_chain(str(remote.client_cert),str(remote.client_key))
+                validate_signing_key(remote.public_key,temporary_parent=staging)
+            from .transport import HTTPSDeviceClient
+            HTTPSDeviceClient(validated['controller_url'],validated['device_id'],
+                validated['token_file'].read_text().strip(),str(validated['ca']))
+        fault('validated')
+        target=generations/generation
+        verify_target()
+        if target.exists() and target.stat().st_dev!=control.stat().st_dev:
+            raise ContractError('private generation is on a different storage device')
+        if target.exists() or target.is_symlink():
+            if target.is_symlink() or not target.is_dir() or set(p.name for p in target.iterdir())!=set(files)|{'generation.json'}:
+                raise ContractError('existing private generation differs')
+            for name,data in files.items():
+                if _read(target/name)!=data: raise ContractError('existing private generation changed')
+            if _read(target/'generation.json')!=canonical(manifest):
+                raise ContractError('existing private generation manifest changed')
+            shutil.rmtree(staging)
+        else:
+            verify_target()
+            os.rename(staging,target); sync_directory(generations)
+        fault('generation_published')
+        active=json.loads(canonical(config))
+        prefix='generations/'+generation+'/'
+        for key in ('ca','token_file'): active[key]=prefix+active[key]
+        for remote in active['remotes'].values():
+            for key in ('ca','public_key','client_cert','client_key'): remote[key]=prefix+remote[key]
+        return target,generation,active
+    finally:
+        if staging.exists():
+            verify_target()
+            shutil.rmtree(staging)
+
+
+def activate_bundle(bundle: Path, control: Path, *, verify_target, validator=None, fault=None, maintenance=False,expected_files=None):
     """Publish immutable credential files, then atomically activate the v1 config last."""
     from .runtime import load_provisioning
     from .binding import verify_binding
@@ -79,6 +140,8 @@ def activate_bundle(bundle: Path, control: Path, *, verify_target, validator=Non
         raise ContractError('manual trust files must be direct allowlisted bundle names')
     files={name:_read(bundle/name) for name in set(names)}
     files['runtime.json']=canonical(config)
+    if expected_files is not None and files!=expected_files:
+        raise ContractError('captured private activation files differ from authenticated enrollment')
     manifest={name:digest(data) for name,data in sorted(files.items())}
     generation=digest(canonical(manifest))
     generations=control/'generations'
@@ -109,70 +172,25 @@ def activate_bundle(bundle: Path, control: Path, *, verify_target, validator=Non
                 raise ContractError('manual activation cannot retarget an existing media identity')
             if previous.get('ca')!='generations/'+generation+'/'+config['ca'] and not maintenance:
                 raise ContractError('changed private generation requires explicit stopped maintenance')
-        staging=generations/('.pending-'+uuid.uuid4().hex)
-        staging.mkdir(mode=0o700)
-        try:
-            for name,data in files.items():
-                verify_target()
-                atomic_write(staging/name,data)
-            atomic_write(staging/'generation.json',canonical(manifest))
-            validated=validator(staging/'runtime.json')
-            if validator is load_provisioning:
-                verify_binding(validated.get('target_binding'))
-                from urllib.parse import urlsplit
-                import ssl
-                url=urlsplit(validated['controller_url'])
-                if url.scheme!='https' or not url.hostname or url.username or url.password or url.query or url.fragment:
-                    raise ContractError('manual controller configuration requires authenticated HTTPS origin')
-                token=validated['token_file'].read_text().strip()
-                if not re.fullmatch(r'[A-Za-z0-9._~-]{32,512}',token):
-                    raise ContractError('manual device credential is invalid')
-                for remote in validated['remotes'].values():
-                    tls=ssl.create_default_context(cafile=str(remote.ca))
-                    tls.load_cert_chain(str(remote.client_cert),str(remote.client_key))
-                    validate_signing_key(remote.public_key)
-                from .transport import HTTPSDeviceClient
-                HTTPSDeviceClient(validated['controller_url'],validated['device_id'],
-                    validated['token_file'].read_text().strip(),str(validated['ca']))
-            fault('validated')
-            target=generations/generation
-            verify_target()
-            if target.exists() and target.stat().st_dev!=control.stat().st_dev:
-                raise ContractError('private generation is on a different storage device')
-            if target.exists() or target.is_symlink():
-                if target.is_symlink() or not target.is_dir() or set(p.name for p in target.iterdir())!=set(files)|{'generation.json'}:
-                    raise ContractError('existing private generation differs')
-                for name,data in files.items():
-                    if _read(target/name)!=data: raise ContractError('existing private generation changed')
-                if _read(target/'generation.json')!=canonical(manifest):
-                    raise ContractError('existing private generation manifest changed')
-                shutil.rmtree(staging)
-            else:
-                verify_target()
-                os.rename(staging,target); sync_directory(generations)
-            fault('generation_published')
-            active=json.loads(canonical(config))
-            prefix='generations/'+generation+'/'
-            for key in ('ca','token_file'): active[key]=prefix+active[key]
-            for remote in active['remotes'].values():
-                for key in ('ca','public_key','client_cert','client_key'): remote[key]=prefix+remote[key]
-            verify_target()
-            media=control/'media-instance.json'
-            if not media.exists():
-                atomic_write(media,canonical({'schema_version':1,'media_instance_id':str(uuid.uuid4())}))
-            else:
-                previous=json.loads(_read(media),object_pairs_hook=_pairs)
-                if set(previous)!={'schema_version','media_instance_id'} or type(previous['schema_version']) is not int or previous['schema_version']!=1:
-                    raise ContractError('invalid existing media instance')
-                from .contracts import identifier
-                identifier(previous['media_instance_id'])
-            fault('before_activation')
-            atomic_write(control/'runtime.json',canonical(active))
-            return {'generation':generation,'activated':True}
-        finally:
-            if staging.exists():
-                verify_target()
-                shutil.rmtree(staging)
+        target,generation,active=_publish_generation(files,control,verify_target,validator,fault)
+        verify_target()
+        media=control/'media-instance.json'
+        if not media.exists():
+            atomic_write(media,canonical({'schema_version':1,'media_instance_id':str(uuid.uuid4())}))
+        else:
+            previous=json.loads(_read(media),object_pairs_hook=_pairs)
+            if set(previous)!={'schema_version','media_instance_id'} or type(previous['schema_version']) is not int or previous['schema_version']!=1:
+                raise ContractError('invalid existing media instance')
+            from .contracts import identifier
+            identifier(previous['media_instance_id'])
+        fault('before_activation')
+        verify_target()
+        if (set(path.name for path in target.iterdir())!=set(files)|{'generation.json'}
+                or any(_read(target/name)!=data for name,data in files.items())
+                or _read(target/'generation.json')!=canonical(manifest)):
+            raise ContractError('private generation changed before runtime activation')
+        atomic_write(control/'runtime.json',canonical(active))
+        return {'generation':generation,'activated':True}
     finally:
         os.close(fd)
         os.close(config_fd)

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "setup_id": "setup-f4273aed83076f85fdab08afe889a0d6",
+  "request_id": "initial-setup",
+  "request_digest": "01c789bd5d3007d1ee4e90ecb072c7f1abbf3593a43576dac4ad8fd4af50e2c6",
+  "intent": {
+    "state_root": "/home/operator/.local/state/quirkbench",
+    "runtime_root": null,
+    "cache_gib": 50,
+    "reserve_gib": 20.0,
+    "host": "127.0.0.1",
+    "port": 8443,
+    "allow_lan": false,
+    "logout_policy": "session",
+    "runtime_archive_sha256": null,
+    "runtime_manifest_sha256": null
+  },
+  "completed_steps": []
+}

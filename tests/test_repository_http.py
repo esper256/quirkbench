@@ -169,3 +169,15 @@ def test_short_object_body_closes_connection_instead_of_reusing_it(tmp_path,cert
             response=connection.getresponse()
             with pytest.raises(http.client.IncompleteRead):response.read()
         finally:connection.close()
+
+
+def test_server_close_terminates_established_keepalive_session(tmp_path,cert_files):
+    with repository_server(tmp_path,cert_files) as (server,_,_,context):
+        connection=http.client.HTTPSConnection('localhost',server.server_address[1],context=context,timeout=3)
+        connection.request('GET','/lab/summary')
+        response=connection.getresponse();assert response.status==200;response.read()
+        assert connection.sock is not None
+    try:
+        with pytest.raises((OSError,ssl.SSLError,http.client.HTTPException)):
+            connection.request('GET','/lab/summary');connection.getresponse()
+    finally:connection.close()

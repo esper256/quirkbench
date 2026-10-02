@@ -21,7 +21,8 @@ class Store:
 
 
 class FakeController:
-    def __init__(self):
+    def __init__(self, root=None):
+        self.root = root
         self.store = Store()
         self.uploads = {}
         self.results = []
@@ -67,9 +68,9 @@ class FakeController:
         return device_id == "target-1" and checksum in self.store.blobs
 
 
-def test_https_roundtrip_and_device_scope(cert_files):
+def test_https_roundtrip_and_device_scope(cert_files, tmp_path):
     cert, key = cert_files
-    controller = FakeController()
+    controller = FakeController(tmp_path)
     server = make_server(controller, certfile=str(cert), keyfile=str(key), device_tokens={
         "target-1": "A" * 32,
         "target-2": "B" * 32,
@@ -81,6 +82,8 @@ def test_https_roundtrip_and_device_scope(cert_files):
         client = HTTPSDeviceClient(url, "target-1", "A" * 32, str(cert))
         assert client.register(CapabilityReport("target-1", "boot-1", [], mode="simulation")) == {"registered": "target-1"}
         assert client.reconcile("boot-1") == {"boot_id": "boot-1"}
+        assert client._request('/v1/endpoint-check',{})=={'device_id':'target-1','credential_accepted':True,'work_queued':False}
+        with pytest.raises(TransportError,match='400'):client._request('/v1/endpoint-check',{'boot_id':'boot-1'})
         assert client.claim("boot-1", "request-1") is None
         assert client.start("attempt-1", "attempt-secret", "boot-1") == {"started": True}
         raw = b"actual TLS evidence"

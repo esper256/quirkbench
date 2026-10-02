@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "purpose": "quirkbench-enrollment",
+  "challenge_id": "challenge-fixture",
+  "request_id": "target-request-fixture",
+  "request_digest": "ca71746bef53a46ce9fac620d02e9b896cdfdfe7ba213fb2d393c30cee7ee0b9",
+  "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "certificate_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "expires_at": 1760000060
+}

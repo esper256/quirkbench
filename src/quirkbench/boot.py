@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -321,6 +322,109 @@ def prepare_recovery(config: RecoveryConfig, *, cmdline: str, kernel_log: str,
 
 def _read_env(path: Path, runner: Callable[[list[str]], str]) -> dict[str, str]:
     return dict(line.split("=", 1) for line in runner(["grub2-editenv", str(path), "list"]).splitlines() if "=" in line)
+
+
+def _verify_state_identity(config: RecoveryConfig, state_mount: Path, *, identity_verifier=None,
+                           mountinfo: str | None = None) -> tuple[int, int]:
+    """Recovery disarm needs p3; unavailable experiment/library mounts are allowed."""
+    from .commission import BootIdentity, verify_boot_identity
+    if (not state_mount.is_absolute() or state_mount.resolve() != state_mount
+            or identity_verifier is None and state_mount != Path('/boot/quirkbench-state')):
+        raise BootError('one-shot state must use the fixed direct recovery mount')
+    expected = BootIdentity(config.disk_guid, (config.esp_partuuid, config.root_partuuid,
+        config.state_partuuid, config.data_partuuid, config.library_partuuid, config.evidence_partuuid))
+    layout = (identity_verifier or verify_boot_identity)(expected, allow_data_mounted=True, mode='recovery')
+    if len(layout.partitions) != 6:
+        raise BootError('one-shot clearance requires the commissioned boot layout')
+    inventory = Path('/proc/self/mountinfo').read_text() if mountinfo is None else mountinfo
+    matches = []
+    for line in inventory.splitlines():
+        before, separator, after = line.partition(' - ')
+        fields, detail = before.split(), after.split()
+        if not separator or len(fields) < 6 or len(detail) < 3:
+            raise BootError('malformed one-shot mount inventory')
+        # A submount cannot supply the environment or its containing directory.
+        point = fields[4].replace('\\040', ' ').replace('\\011', '\t').replace('\\012', '\n').replace('\\134', '\\')
+        if Path(point).is_relative_to(state_mount) and point != str(state_mount):
+            raise BootError('one-shot state contains a nested mount')
+        if point == str(state_mount):
+            matches.append((fields, detail))
+    if len(matches) != 1:
+        raise BootError('one-shot clearance needs exactly one verified p3 mount')
+    fields, detail = matches[0]
+    partition = layout.partitions[2]
+    options = dict(item.split('=', 1) for item in detail[2].split(',') if '=' in item)
+    def private_mask(name):
+        value = options.get(name, options.get('umask', ''))
+        return bool(re.fullmatch(r'0?[0-7]{3}', value)) and int(value, 8) & 0o077 == 0o077
+    if (fields[3] != '/' or detail[0] != 'vfat'
+            or Path(detail[1]).resolve() != partition.path.resolve()
+            or fields[2] != f'{partition.major_minor[0]}:{partition.major_minor[1]}'
+            or not private_mask('fmask') or not private_mask('dmask')
+            or not {'rw', 'nosuid', 'nodev', 'noexec'} <= set(fields[5].split(','))):
+        raise BootError('one-shot clearance needs the restricted whole p3 filesystem')
+    return partition.major_minor
+
+
+def clear_once(config: RecoveryConfig, *, state_mount: Path = Path('/boot/quirkbench-state'),
+               runner=_run, identity_verifier=None, mountinfo: str | None = None) -> None:
+    """Clear and verify local one-shot state; grants no retarget/reboot authority.
+
+    The caller owns target configuration/execution locks. Every invocation performs
+    fresh native recovery/GPT and environment checks, including an exact retry.
+    """
+    state_mount = Path(state_mount)
+    def verify():
+        return _verify_state_identity(config, state_mount, identity_verifier=identity_verifier, mountinfo=mountinfo)
+    expected_device = verify()
+    env = state_mount/'quirkbench/next.env'
+    state_fd = directory_fd = env_fd = None
+    try:
+        state_fd = os.open(state_mount, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        directory_fd = os.open('quirkbench', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=state_fd)
+        env_fd = os.open('next.env', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
+        descriptors = ((state_fd, state_mount), (directory_fd, env.parent), (env_fd, env))
+        before = [os.fstat(fd) for fd, _ in descriptors]
+        def stable():
+            if verify() != expected_device:
+                raise BootError('one-shot state device changed during clearance')
+            for index, ((fd, path), original) in enumerate(zip(descriptors, before)):
+                held, named = os.fstat(fd), path.lstat()
+                if (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino) or (held.st_dev, held.st_ino) != (original.st_dev, original.st_ino):
+                    raise BootError('one-shot state was replaced during clearance')
+                if ((os.major(held.st_dev), os.minor(held.st_dev)) != expected_device
+                        or held.st_dev != before[0].st_dev or held.st_uid != os.geteuid() or held.st_mode & 0o077):
+                    raise BootError('one-shot state must remain private on the verified p3 filesystem')
+                if index < 2 and not stat.S_ISDIR(held.st_mode) or index == 2 and (
+                        not stat.S_ISREG(held.st_mode) or held.st_nlink != 1 or held.st_size != 1024):
+                    raise BootError('preallocated one-shot state is missing or unsafe')
+        stable()
+        runner(['grub2-editenv', str(env), 'unset', 'next_entry', 'candidate_id', 'target_uuid'])
+        stable()
+        os.fsync(env_fd); os.fsync(directory_fd)
+        stable()
+        captured = os.fstat(env_fd)
+        raw = runner(['grub2-editenv', str(env), 'list'])
+        if not isinstance(raw, str) or len(raw) > 4096 or not raw.isascii():
+            raise BootError('invalid bounded one-shot environment response')
+        values = {}
+        for line in raw.splitlines():
+            key, separator, value = line.partition('=')
+            if (not separator or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,127}', key)
+                    or key in values or len(value) > 1024 or any(ord(char) < 32 or ord(char) == 127 for char in value)):
+                raise BootError('invalid one-shot environment response')
+            values[key] = value
+        stable()
+        observed = os.fstat(env_fd)
+        if (captured.st_size, captured.st_mtime_ns, captured.st_ctime_ns) != (
+                observed.st_size, observed.st_mtime_ns, observed.st_ctime_ns):
+            raise BootError('one-shot state changed during confirmation')
+        if any(key in values for key in ('next_entry', 'candidate_id', 'target_uuid')):
+            raise BootError('cannot verify cleared one-shot boot selection')
+    finally:
+        for fd in (env_fd, directory_fd, state_fd):
+            if fd is not None:
+                os.close(fd)
 
 
 def _verify_stage_identity(config: RecoveryConfig, *, data_mount: Path, state_mount: Path,
@@ -981,9 +1085,12 @@ def _install_runtime_files(rootfs: Path, assets_dir: Path | None = None, *, cand
     network_mount = "quirkbench-network-state.service"
     (units / network_mount).write_text(
         "[Unit]\nDescription=Quirkbench transient network profiles\nBefore=NetworkManager.service\n"
+        f"After={prerequisite}\nRequires={prerequisite}\n"
         "[Service]\nType=oneshot\nRemainAfterExit=yes\n"
+        "Environment=PYTHONPATH=/usr/lib/quirkbench\n"
         "ExecStartPre=/usr/bin/mkdir -p -m 0700 /etc/NetworkManager/system-connections\n"
         "ExecStart=/usr/bin/mount -t tmpfs -o mode=0700,nosuid,nodev,noexec,size=1M tmpfs /etc/NetworkManager/system-connections\n"
+        "ExecStartPost=/usr/bin/python3 -m quirkbench.network_profiles\n"
         "ExecStop=/usr/bin/umount /etc/NetworkManager/system-connections\n")
     network_dropin = units / "NetworkManager.service.d"
     network_dropin.mkdir(exist_ok=True)

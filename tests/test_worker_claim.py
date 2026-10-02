@@ -43,10 +43,12 @@ def test_worker_claim_rejects_wrong_stage_and_private_path_escape(tmp_path):
     controller = Controller(root, reserve_bytes=0)
     with controller.lifecycle() as owner:
         operation = controller.admit_operation('request', 'image_prepare', {})
-        row = owner.claim(operation['id'], stage='build',
+        with pytest.raises(Conflict, match='kind/stage'):
+            owner.claim(operation['id'], stage='build', deadline=controller.clock()+30)
+        row = owner.claim(operation['id'], stage='recovery_rootfs',
                           deadline=controller.clock() + 30)
         with pytest.raises(WorkerClaimError, match='current'):
-            _read(root, row)
+            _read(root, row, expected_stage='kernel_build')
         with pytest.raises(WorkerClaimError, match='private claim path'):
             _read(root, row, stage_dir=root)
         link = root / 'workers' / row['id'] / 'link'

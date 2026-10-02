@@ -151,12 +151,15 @@ class SystemdUserWorkerServices:
             raise WorkerServiceError('controller boot identity unavailable') from exc
         if recorded_boot != current_boot:
             raise WorkerServiceError('controller boot changed before worker launch')
+        runtime_seconds = int(remaining) + 1
+        if claim.get('kind') == 'recovery_download' and claim.get('stage') == 'recovery_download':
+            runtime_seconds = min(runtime_seconds, 3600)
         argv = ['systemd-run', '--user', '--no-ask-password', '--no-block',
                 '--remain-after-exit', '--expand-environment=no', f'--unit={unit}',
                 '--property=KillMode=control-group', '--property=Restart=no',
                 f'--property=CPUQuota={self.cpu_percent if self.development else 400}%', f'--property=MemoryMax={self.memory_limit}',
                 '--property=MemorySwapMax=0', '--property=TasksMax=4096',
-                '--property=TimeoutStopSec=30s', f'--property=RuntimeMaxSec={int(remaining) + 1}s',
+                '--property=TimeoutStopSec=30s', f'--property=RuntimeMaxSec={runtime_seconds}s',
                 f'--working-directory={stage}', '--', str(program),
                 '--state', str(root), '--operation', operation, '--worker-epoch', str(epoch),
                 '--worker-generation', str(generation), '--stage-dir', str(stage)]

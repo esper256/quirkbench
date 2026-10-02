@@ -82,7 +82,7 @@ def _metadata_object(cas_root: Path, value: str, limit: int) -> bytes:
 
 
 def _copy_cas_object(cas_root: Path, value: str, destination: Path,
-                     remaining: int) -> int:
+                     remaining: int, *, space_check=None) -> int:
     """Copy one regular CAS object with no-follow handles and a byte budget."""
     try:
         sha256(value)
@@ -97,6 +97,7 @@ def _copy_cas_object(cas_root: Path, value: str, destination: Path,
         limit = min(MAX_RPM_BYTES, remaining)
         if not stat.S_ISREG(source.st_mode) or not 0 <= source.st_size <= limit:
             raise BuildError('retained recovery object exceeds staging bounds')
+        if space_check is not None: space_check(source.st_size)
         destination_fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                                  0o600)
         total = 0
@@ -110,6 +111,7 @@ def _copy_cas_object(cas_root: Path, value: str, destination: Path,
                 total += len(chunk)
                 if total > limit:
                     raise BuildError('retained recovery object grew beyond staging bounds')
+                if space_check is not None: space_check(len(chunk))
                 hasher.update(chunk)
                 output.write(chunk)
             output.flush()

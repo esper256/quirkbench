@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "record_type": "retarget-completion",
+  "request_id": "local-retarget-example",
+  "activation_intent_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "activated": true,
+  "boot_authorized": false,
+  "reset_qualified": false,
+  "old_evidence_drained": false
+}

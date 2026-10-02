@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "record_type": "target-revocation",
+  "request_id": "revoke-1",
+  "action": "revoke",
+  "target": "lab",
+  "code_id": null,
+  "device_id": "target-1",
+  "generation": "generation-1",
+  "revoked": true,
+  "created_at": 1790812800,
+  "paused_campaigns_at_revoke": [
+    "investigation-1"
+  ],
+  "unresolved_attempts_at_revoke": [
+    "attempt-1"
+  ],
+  "workers_pending_at_revoke": [],
+  "physical_shutdown_verified": false,
+  "evidence_drain_authorized": false,
+  "boot_authorized": false,
+  "paused_campaign_count_at_revoke": 1,
+  "unresolved_attempt_count_at_revoke": 1,
+  "worker_count_at_revoke": 0,
+  "work_lists_truncated": false
+}

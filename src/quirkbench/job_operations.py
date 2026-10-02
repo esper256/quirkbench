@@ -10,8 +10,10 @@ CREATE TABLE controller_job_service(id INTEGER PRIMARY KEY CHECK(id=1),epoch INT
     boot TEXT NOT NULL,unit TEXT NOT NULL,runtime TEXT NOT NULL,pid INTEGER NOT NULL,heartbeat REAL NOT NULL);
 '''
 STAGES = {('image_prepare','recovery_rootfs'),('build','job_inputs'),('build','kernel_build'),
-          ('compose','job_inputs'),('compose','os_compose')}
-KINDS = {'build','compose'}
+          ('compose','job_inputs'),('compose','os_compose'),
+          ('builder_prepare','builder_capture'),('builder_prepare','builder_import'),
+          ('recovery_download','recovery_download')}
+KINDS = {'build','compose','builder_prepare','recovery_download'}
 
 
 def manifest(kind, raw):
@@ -28,6 +30,12 @@ def manifest(kind, raw):
 
 
 def binding(intent, *, executable=False):
+    if intent.get('kind')=='recovery_download':
+        from .recovery_download import binding as recovery_binding
+        return recovery_binding(intent)
+    if intent.get('kind') == 'builder_prepare':
+        from .builder_setup import binding as builder_binding
+        return builder_binding(intent)
     if intent.get('kind') not in KINDS or intent.get('local_paths') or intent.get('source_refs'):
         raise ContractError('invalid fixed job intent')
     args=intent['arguments']
@@ -56,12 +64,25 @@ def binding(intent, *, executable=False):
 def submission(controller, kind, raw, request_id, *, campaign=None, publish_repo=None, image=None, builder_archive=None, builder_config=None):
     from .controller_service import require_ready
     require_ready(controller.root)
+    raw=manifest(kind,raw)
     from .controller_service import configuration
     config=configuration(controller.root)
-    excluded={str(controller.root/'private'),str(controller.root/'controller.sqlite'),config['key'],config['tokens_file']}
+    if not all((builder_archive or config.get('builder_archive_sha256'),
+                builder_config or config.get('builder_config_digest'),
+                image or raw.get('base_image_digest') or config.get('builder_image_digest'))):
+        from .builder_setup import inspect_builder
+        from .installed_release import inspect_selected
+        prepared=inspect_builder(controller.root,inspect_selected(Path(config['runtime']).parent.parent))
+        supplied={'builder_image_digest':(image,raw.get('base_image_digest'),config.get('builder_image_digest')),
+                  'builder_config_digest':(builder_config,config.get('builder_config_digest')),
+                  'builder_archive_sha256':(builder_archive,config.get('builder_archive_sha256'))}
+        if any(value is not None and value != prepared[name] for name,values in supplied.items() for value in values):
+            raise Conflict('supplied builder identity differs from prepared signed release; provide a coherent explicit manual binding or use the signed builder')
+        config={**config,**{name:prepared[name] for name in ('builder_image_digest','builder_config_digest','builder_archive_sha256')}}
+    excluded={str(controller.root/'private'),str(controller.root/'controller.sqlite'),config['key']}
+    if 'tokens_file' in config: excluded.add(config['tokens_file'])
     if config.get('composition_signing'): excluded.add(config['composition_signing']['home'])
     if config.get('recovery_signing_home'): excluded.add(config['recovery_signing_home'])
-    raw=manifest(kind,raw)
     publication=None
     if kind=='compose':
         destination=Path(publish_repo)
@@ -139,7 +160,7 @@ def request_resume(controller,operation,request_id):
     operation=identifier(operation)
     with controller.transaction() as db:
         row=db.execute('SELECT kind,state FROM operations WHERE id=?',(operation,)).fetchone()
-        if row is None or row['kind'] not in KINDS: raise ContractError('resume requires a build or compose job')
+        if row is None or row['kind'] not in KINDS: raise ContractError('resume requires a fixed build, compose, builder preparation or recovery acquisition job')
     request=controller.admit_operation(request_id,'operation_resume',{'operation_id':operation})
     return envelope(controller.root,request,request_id)
 

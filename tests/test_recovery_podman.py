@@ -26,18 +26,18 @@ CONFIG = canonical({'architecture': 'amd64', 'os': 'linux',
 IMAGE = 'sha256:' + hashlib.sha256(CONFIG).hexdigest()
 
 
-def builder_archive(*, changed_layer=False):
+def builder_archive(*, changed_layer=False, config=CONFIG):
     def descriptor(raw, media_type):
         return {'mediaType': media_type, 'digest': 'sha256:' + hashlib.sha256(raw).hexdigest(),
                 'size': len(raw)}
     manifest = canonical({'schemaVersion': 2,
-                          'config': descriptor(CONFIG, 'application/vnd.oci.image.config.v1+json'),
+                          'config': descriptor(config, 'application/vnd.oci.image.config.v1+json'),
                           'layers': [descriptor(LAYER, 'application/vnd.oci.image.layer.v1.tar')]})
     index = canonical({'schemaVersion': 2, 'manifests': [
         descriptor(manifest, 'application/vnd.oci.image.manifest.v1+json')]})
     files = {'oci-layout': canonical({'imageLayoutVersion': '1.0.0'}),
              'index.json': index}
-    for raw in (manifest, CONFIG, LAYER):
+    for raw in (manifest, config, LAYER):
         files['blobs/sha256/' + hashlib.sha256(raw).hexdigest()] = raw
     if changed_layer:
         files['blobs/sha256/' + hashlib.sha256(LAYER).hexdigest()] = b'changed layer bytes'

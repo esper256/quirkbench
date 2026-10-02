@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quirkbench.local/schemas/builder-preparation.v1.schema.json",
+  "title": "Verified signed builder preparation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "record_type", "release_statement_sha256", "builder_archive_sha256", "builder_config_digest", "builder_image_digest", "native_import_verified", "bounded_marker_verified", "qualified"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "record_type": {"const": "builder-preparation"},
+    "release_statement_sha256": {"$ref": "#/$defs/sha256"},
+    "builder_archive_sha256": {"$ref": "#/$defs/sha256"},
+    "builder_config_digest": {"$ref": "#/$defs/image"},
+    "builder_image_digest": {"$ref": "#/$defs/image"},
+    "native_import_verified": {"const": true},
+    "bounded_marker_verified": {"const": true},
+    "qualified": {"const": false}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "image": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

@@ -23,9 +23,12 @@ def archive(tmp_path):
     names=('cli.py','job_worker.py','job_operations.py','job_coordinator.py','job_cache.py',
            'controller_service.py','run-bounded-podman.sh','quirkbench-controller.service',
            'recovery_worker.py','assets/quirkbench-recovery.service',
-           'schemas/experiment.v1.schema.json','examples/experiment.json','guide/agent-guide.md')
+            'schemas/experiment.v1.schema.json','examples/experiment.json','guide/agent-guide.md',
+            'guide/controller-installation.md','guide/recovery-acquisition.md','guide/build-and-boot.md')
     with zipfile.ZipFile(wheel,'w') as out:
-        for name in names: out.writestr('quirkbench/'+name,b'fixture')
+        for name in names:
+            raw=(Path(__file__).resolve().parents[1]/'src/quirkbench/quirkbench-controller.service').read_bytes() if name=='quirkbench-controller.service' else b'fixture'
+            out.writestr('quirkbench/'+name,raw)
         out.writestr('quirkbench-0.1.0.dist-info/METADATA','Name: quirkbench\nVersion: 0.1.0\n')
     output=tmp_path/'arbitrary-name.tar.gz'
     build_controller_archive(wheel,output)

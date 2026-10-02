@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_type",
+    "request_id",
+    "host",
+    "previous_directory",
+    "previous_identity_sha256",
+    "configuration_sha256",
+    "created_at",
+    "days"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 2
+    },
+    "record_type": {
+      "const": "controller-tls-intent"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "host": {
+      "type": "string",
+      "maxLength": 45
+    },
+    "previous_directory": {
+      "type": "string",
+      "pattern": "^(setup|endpoint)-[0-9a-f]{32}$"
+    },
+    "previous_identity_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "configuration_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "created_at": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4102444800
+    },
+    "days": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 365
+    }
+  },
+  "$id": "https://quirkbench.invalid/schemas/controller-tls-intent.v2.schema.json"
+}

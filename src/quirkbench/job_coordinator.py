@@ -41,12 +41,12 @@ class JobCoordinator:
         if owner.closed or c._lifecycle_owner is not owner: raise Conflict('controller ownership ended')
         with c.transaction() as db:
             active=[dict(r) for r in db.execute('SELECT * FROM operations WHERE worker_unit IS NOT NULL')]
-            queued=[dict(r) for r in db.execute("SELECT * FROM operations WHERE state='QUEUED' AND kind IN ('build','compose','operation_resume') AND queued_epoch=? ORDER BY created",(owner.epoch,))]
+            queued=[dict(r) for r in db.execute("SELECT * FROM operations WHERE state='QUEUED' AND kind IN ('build','compose','builder_prepare','recovery_download','operation_resume') AND queued_epoch=? ORDER BY created",(owner.epoch,))]
             physical=db.execute("SELECT 1 FROM attempts WHERE state IN ('CLAIMED','RUNNING','BOOT_PENDING','UNCERTAIN') OR (handoff_revision IS NOT NULL AND recovery_returned IS NULL) LIMIT 1").fetchone()
         if active:
             if len(active)!=1: raise Conflict('multiple workers require reconciliation')
             claim=active[0]
-            if claim['kind'] not in ('build','compose') or claim['state']!='RUNNING': return None
+            if claim['kind'] not in ('build','compose','builder_prepare','recovery_download') or claim['state']!='RUNNING': return None
             expired=c.clock()>=claim['deadline']
             if not expired:
                 owner.collect_activity(claim)
@@ -82,8 +82,12 @@ class JobCoordinator:
                         db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
                                    (row['id'],c.clock(),'resubmission_required',canonical({'message':str(exc)[:512]}).decode()))
                 continue
-            stage='job_inputs' if row['prepared_digest'] is None else 'kernel_build' if row['kind']=='build' else 'os_compose'
-            return owner.dispatch(row['id'],stage=stage,deadline=c.clock()+self.timeout,services=self.services)
+            stage=('recovery_download' if row['kind']=='recovery_download' else
+                   ('builder_capture' if row['prepared_digest'] is None else 'builder_import')
+                   if row['kind']=='builder_prepare' else
+                   'job_inputs' if row['prepared_digest'] is None else 'kernel_build' if row['kind']=='build' else 'os_compose')
+            timeout=min(self.timeout,3599) if row['kind']=='recovery_download' else self.timeout
+            return owner.dispatch(row['id'],stage=stage,deadline=c.clock()+timeout,services=self.services)
         return None
 
     def verify(self,claim):
@@ -121,6 +125,12 @@ class JobCoordinator:
             raise ValueError(record.get('error','worker did not report a complete matching stage'))
         args=binding(json.loads(c.store.get(claim['input_digest'])),executable=True)
         data=record['result']
+        if claim['kind']=='recovery_download':
+            from .recovery_download import consume
+            return consume(self,claim,json.loads(c.store.get(claim['input_digest'])),data)
+        if claim['kind']=='builder_prepare':
+            from .builder_setup import consume
+            return consume(self,claim,json.loads(c.store.get(claim['input_digest'])),data)
         if claim['stage']=='job_inputs':
             expected=input_files(claim['kind'],args['manifest'])
             if claim['kind']=='build':
@@ -275,4 +285,3 @@ class JobCoordinator:
         remove_tree(path,root)
         with self.owner.controller.transaction() as db:
             db.execute("UPDATE storage_groups SET paths='[]' WHERE owner=?",(claim['id'],))
-

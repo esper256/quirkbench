@@ -1,10 +1,35 @@
 # Recovery operations
 
-Current low-level stock-recovery commands and manual target setup. The guided
-user journey remains planned; see the [implementation checklist](installation-to-patch.md).
+Current low-level stock-recovery commands, manual setup and initial console pairing.
+The complete guided journey remains unfinished; see the [implementation checklist](installation-to-patch.md).
 Software support does not establish image or hardware qualification. Use
 [controller installation](controller-installation.md) and explicit
 [acquisition specifications](recovery-acquisition.md) before admitting work.
+
+For initial pairing on verified recovery, configure temporary networking with
+**Network**, then choose **Connect to controller**. Supply the endpoint from
+controller `target add NAME`; compare and type the full displayed certificate SHA-256
+before entering its code ID and one-use code. The console retains its own private
+key/request before exchange, stops the existing supervisor for activation and
+restarts it afterward. Pairing grants no candidate or attempt approval. Missing
+native `openssl`/`gpg`, unknown clock, mismatched trust or an active configuration
+block this initial path. The current recorded stock RPM candidate needs an updated,
+exact `openssl` package input before native pairing acceptance. Staged manual setup
+remains available. After pairing/manual activation, **Save selected network connections**
+lists only RAM connection filenames; choose the numbered connections to retain
+privately. Only supported Ethernet/Wi-Fi profiles are saved. Passwords stay outside
+public artifacts. Later recovery/candidate boots check actual target/media/binding
+and active configuration before replay into private RAM. Changed or invalid selections
+stay blocked; uncertain replay cleanup blocks NetworkManager. Local Network setup
+remains available for clean pre-write rejection or complete rollback. Lifecycle
+maintenance for active enrollments remains unfinished. A lost COMPLETE reply can
+retry the same request/key. For an expired unredeemed invitation, obtain a new
+controller invitation and enter its code ID in **Connect to controller**. Confirm
+replacement of the displayed pending request; its original key stays in private
+history. Entering an archived invitation ID offers explicit original-request resume.
+An already completed controller redemption blocks a second identity; recover the
+original request or use explicit controller lifecycle maintenance. These initial-only
+choices refuse prior activation evidence, target work and changed trust/binding.
 
 ## Recovery inputs and preparation
 
@@ -100,7 +125,8 @@ validates the complete generation, uses private immutable files, fsync/atomic
 activation, preserves the previous generation and shares the runtime/journal locks.
 Pending work or an unresolved claim request blocks activation. It cannot silently
 retarget already bound media. TLS trust and usable public signing material are
-validated before activation. Guided enrollment is not yet implemented; it is planned in M2.
+validated before activation. Guided initial pairing is implemented in the recovery console; full native M2
+acceptance remains open.
 
 Runtime revalidates mounted p6 and actual journal/spool/private destination devices
 before mutation. A removed evidence mount or a nested mount redirecting control data
@@ -238,3 +264,82 @@ grants no execution approval. Later experiment creation consumes these observati
 alongside pinned sources, reviewed profiles, operator goals and dependency resolution;
 modalias/driver strings are descriptive data, never shell commands or approval to
 relax experimental storage exclusions.
+
+## Released factory acquisition
+
+`quirkbench recovery download` admits the matching signed installed-controller v2
+factory set using the existing native background owner. Machine calls require
+`--request-id ID --json`; `--trust-bundle PATH` explicitly selects independently
+provisioned trust, never a key from the download. Missing production trust is
+UNAVAILABLE. Inspect the returned operation/status command and manually open
+`quirkbench monitor` for progress. Interrupted acquisition requires confirmed worker
+stop and explicit ordinary operation resume; retries retain exact intent.
+
+A successful operation retains the released-recovery-acquisition v1 index and its
+public factory/metadata/signature digests. The image is an ordinary retained CAS
+file at the configured state's `artifacts/objects/IMAGE_SHA256`; use a standard image
+writer separately. `quirkbench recovery-images [--limit N] [--before CURSOR] [--json]`
+lists these acquired sets alongside existing prepared images, with retained publisher
+statement/signature paths and full fingerprint. It validates bounded retained metadata,
+references and local asset sizes. It reports publication verification as historical;
+it does not rehash the whole image or reverify current publisher trust. Missing,
+linked or inconsistent retained objects are unavailable. Verify image bytes and
+signature with independently provisioned trust before writing confirmed external media. This
+command supplies no media writer, device selection, flash approval or qualification.
+Production publication/native commissioning and stock recovery crypto RPM inputs
+remain acceptance requirements.
+
+## Attended original evidence drain
+
+Recovery console choice 7 requires verified recovery/evidence storage and the original
+hardware binding. Enter `plan REQUEST_ID` to freeze at most 128 unacknowledged
+original records/1 GiB. The public plan is retained under
+`evidence/control/evidence-drain/plans/REQUEST_ID_SHA256/plan.json`; the console
+reports its path and selected versus additional retained counts. Preserve the same
+request ID for retries. A new selection needs a new explicit request.
+
+On the original controller, explicitly revoke the original generation, pause and
+reconcile all target work and confirm whole-worker stops using the existing lifecycle
+commands. Then `quirkbench target drain-approve TARGET --file PLAN --request-id ID`
+produces a private credential file. Stage that exact file privately as
+`evidence/control/setup/GRANT_ID.json` (owned mode 0600). Enter
+`drain REQUEST_ID GRANT_ID` in choice 7 to use only its selected manifest and original
+attribution. Each invocation has a 120-second batch deadline; interruptions retry
+the same selection/grant without widening or extending authorization.
+
+This action stops and restarts the existing supervisor around local maintenance.
+It preserves original pending attempt/result/blobs and unselected records, and repairs
+selected acknowledgments after lost responses. It does not complete an attempt,
+clear one-shot state, retarget hardware or authorize execution/shutdown. Changed
+hardware is blocked. Native commissioning and fresh runtime image checks remain open.
+
+## Retarget invitation prerequisite
+
+After explicit original-generation revocation and reconciliation/whole-worker stops,
+the controller can issue `quirkbench target retarget-code OLD --generation EXACT
+--new-name NAME --new-uuid ACTUAL_NEW_UUID --request-id ID`. It retains original
+media and scopes the invitation to that different UUID. Compare the full controller
+certificate fingerprint through the independently attended path. Retarget-only
+exchange returns an authenticated v2 reply carrying exact old/new scope; initial
+console pairing/activation refuses that reply. This controller prerequisite alone
+does not implement local retarget activation, clear one-shot state, move old evidence
+or transfer reset/watchdog/attempt approval. The full paused local transaction remains
+unavailable pending its implementation and native commissioning.
+
+The implemented attended recovery menu now offers **Explicitly retarget enrolled
+media to this hardware**. Confirm the exact old target and actual new UUID, then
+compare and approve the full controller certificate fingerprint before entering
+the retarget invitation. Reuse the local request ID after interruption; its private
+new key is retained. The software facade supports repeated moved-media retargets and exact replay.
+For an expired pending retarget invitation, enter the new code ID under the same
+local retarget request and explicitly confirm replacement; the old key remains
+recoverable. An archived invitation requires explicit original-key resume. A remote
+COMPLETE generation requires explicit revocation and work reconciliation before
+replacement; local maintenance cannot cancel it. Retarget grants no candidate or reset authority.
+
+The evidence-drain screen accepts explicit `archived-plan RETARGET_ID PLAN_ID` and
+`archived-drain RETARGET_ID PLAN_ID GRANT_ID` after a strict current completed retarget, selecting any completed linked history
+member explicitly.
+Original evidence uses its original target/generation/attempt attribution and
+explicit scoped grant; new work and one-shot state remain unchanged. Native image
+commissioning is still required for the changed recovery inputs.

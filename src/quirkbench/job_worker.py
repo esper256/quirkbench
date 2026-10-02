@@ -134,7 +134,7 @@ def run_worker(root,operation,epoch,generation,stage):
     row=StateReader(root).operation_status(operation)['data']
     def verify(): return read_active_worker_claim(root,operation,epoch,generation,stage,expected_stage=row['stage'])
     claim=verify()
-    if claim.kind not in ('build','compose'): raise ValueError('unsupported job worker kind')
+    if claim.kind not in ('build','compose','builder_prepare','recovery_download'): raise ValueError('unsupported job worker kind')
     intent=document(root,'artifacts/objects/'+claim.input_digest); args=binding(intent,executable=True)
     diagnostics=stage/'diagnostics'; diagnostics.mkdir(mode=0o700)
     output=stage/'output'; output.mkdir(mode=0o700)
@@ -151,10 +151,25 @@ def run_worker(root,operation,epoch,generation,stage):
             'input_digest':claim.input_digest,'stage':claim.stage,'state':'FAILED'}
     try:
         from .recovery_podman import _verify_retained_builder_archive
-        _verify_retained_builder_archive(root,args['builder_archive_sha256'],args['builder_config_digest'])
-        if claim.stage=='job_inputs':
+        if claim.kind=='recovery_download':
+            from .recovery_download import capture
+            from .builder_setup import reserve_bytes
+            result=capture(intent,stage,verify,report,deadline=claim.deadline,reserve=reserve_bytes(root))
+        elif claim.kind=='builder_prepare':
+            from .builder_setup import capture as capture_builder, import_builder
+            if claim.stage=='builder_capture':
+                result=capture_builder(intent,stage,verify,report,state_root=root)
+            else:
+                if not row['prepared_digest']: raise ValueError('retained builder required before import')
+                prepared=document(root,'artifacts/objects/'+row['prepared_digest'])
+                if canonical(prepared)!=canonical({'schema_version':1,'archive_sha256':args['builder_archive_sha256']}):
+                    raise ValueError('retained builder preparation differs')
+                result=import_builder(root,args,stage,verify,report,claim.deadline)
+        elif claim.stage=='job_inputs':
+            _verify_retained_builder_archive(root,args['builder_archive_sha256'],args['builder_config_digest'])
             result=capture(claim.kind,args['manifest'],stage,verify,report,state_root=root,excluded_roots=args['excluded_roots'])
         else:
+            _verify_retained_builder_archive(root,args['builder_archive_sha256'],args['builder_config_digest'])
             if not row['prepared_digest']: raise ValueError('retained inputs required before build')
             prepared=document(root,'artifacts/objects/'+row['prepared_digest'])
             raw=restore(claim.kind,args['manifest'],prepared,root,stage)

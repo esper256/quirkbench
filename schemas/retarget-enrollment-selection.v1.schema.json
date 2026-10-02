@@ -1,0 +1,421 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Private initial-enrollment selection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_type",
+    "request_id",
+    "action",
+    "code_id",
+    "domain",
+    "source",
+    "selected",
+    "retarget_request_id",
+    "local_intent_sha256",
+    "source_sha256"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "record_type": {
+      "const": "retarget-enrollment-selection"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "action": {
+      "enum": [
+        "new",
+        "resume"
+      ]
+    },
+    "code_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "controller_url",
+        "certificate_sha256",
+        "media_instance_id",
+        "target_binding"
+      ],
+      "properties": {
+        "controller_url": {
+          "type": "string",
+          "maxLength": 4096,
+          "pattern": "^https://"
+        },
+        "certificate_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "media_instance_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "target_binding": {
+          "title": "Quirkbench TargetBinding v1",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema_version",
+            "system_uuid"
+          ],
+          "properties": {
+            "schema_version": {
+              "const": 1,
+              "type": "integer"
+            },
+            "system_uuid": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$",
+              "not": {
+                "enum": [
+                  "00000000-0000-0000-0000-000000000000",
+                  "ffffffff-ffff-ffff-ffff-ffffffffffff"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "intent",
+        "files"
+      ],
+      "properties": {
+        "intent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema_version",
+            "controller_url",
+            "certificate_sha256",
+            "media_instance_id",
+            "target_binding",
+            "request_id",
+            "code_id"
+          ],
+          "properties": {
+            "schema_version": {
+              "type": "integer",
+              "const": 1
+            },
+            "controller_url": {
+              "type": "string",
+              "maxLength": 4096,
+              "pattern": "^https://"
+            },
+            "certificate_sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "media_instance_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+            },
+            "target_binding": {
+              "title": "Quirkbench TargetBinding v1",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schema_version",
+                "system_uuid"
+              ],
+              "properties": {
+                "schema_version": {
+                  "const": 1,
+                  "type": "integer"
+                },
+                "system_uuid": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$",
+                  "not": {
+                    "enum": [
+                      "00000000-0000-0000-0000-000000000000",
+                      "ffffffff-ffff-ffff-ffff-ffffffffffff"
+                    ]
+                  }
+                }
+              }
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+            },
+            "code_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+            }
+          }
+        },
+        "files": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "intent.json",
+            "key.pem",
+            "request.json"
+          ],
+          "properties": {
+            "intent.json": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "key.pem": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "request.json": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        }
+      }
+    },
+    "selected": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "intent",
+            "files"
+          ],
+          "properties": {
+            "intent": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schema_version",
+                "controller_url",
+                "certificate_sha256",
+                "media_instance_id",
+                "target_binding",
+                "request_id",
+                "code_id"
+              ],
+              "properties": {
+                "schema_version": {
+                  "type": "integer",
+                  "const": 1
+                },
+                "controller_url": {
+                  "type": "string",
+                  "maxLength": 4096,
+                  "pattern": "^https://"
+                },
+                "certificate_sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "media_instance_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+                },
+                "target_binding": {
+                  "title": "Quirkbench TargetBinding v1",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schema_version",
+                    "system_uuid"
+                  ],
+                  "properties": {
+                    "schema_version": {
+                      "const": 1,
+                      "type": "integer"
+                    },
+                    "system_uuid": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$",
+                      "not": {
+                        "enum": [
+                          "00000000-0000-0000-0000-000000000000",
+                          "ffffffff-ffff-ffff-ffff-ffffffffffff"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "request_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+                },
+                "code_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+                }
+              }
+            },
+            "files": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "intent.json",
+                "key.pem",
+                "request.json"
+              ],
+              "properties": {
+                "intent.json": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "key.pem": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "request.json": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "retarget_request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "local_intent_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "resume"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "selected": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "intent",
+              "files"
+            ],
+            "properties": {
+              "intent": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schema_version",
+                  "controller_url",
+                  "certificate_sha256",
+                  "media_instance_id",
+                  "target_binding",
+                  "request_id",
+                  "code_id"
+                ],
+                "properties": {
+                  "schema_version": {
+                    "type": "integer",
+                    "const": 1
+                  },
+                  "controller_url": {
+                    "type": "string",
+                    "maxLength": 4096,
+                    "pattern": "^https://"
+                  },
+                  "certificate_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "media_instance_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+                  },
+                  "target_binding": {
+                    "title": "Quirkbench TargetBinding v1",
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schema_version",
+                      "system_uuid"
+                    ],
+                    "properties": {
+                      "schema_version": {
+                        "const": 1,
+                        "type": "integer"
+                      },
+                      "system_uuid": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$",
+                        "not": {
+                          "enum": [
+                            "00000000-0000-0000-0000-000000000000",
+                            "ffffffff-ffff-ffff-ffff-ffffffffffff"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+                  },
+                  "code_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+                  }
+                }
+              },
+              "files": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "intent.json",
+                  "key.pem",
+                  "request.json"
+                ],
+                "properties": {
+                  "intent.json": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "key.pem": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "request.json": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$id": "https://quirkbench.invalid/schemas/retarget-enrollment-selection.v1.schema.json"
+}

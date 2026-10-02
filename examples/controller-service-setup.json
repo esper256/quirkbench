@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "record_type": "controller-service-setup",
+  "request_id": "initial-setup",
+  "request_digest": "89cc6f065b39112d0407bea0505eff2a6085956fe1bc57fa038bfc8305efc054",
+  "intent": {
+    "initial_intent": {
+      "state_root": "/home/operator/.local/state/quirkbench",
+      "runtime_root": "/home/example/.local/share/quirkbench/controller/0.1.0-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "cache_gib": 50,
+      "reserve_gib": 20.0,
+      "host": "127.0.0.1",
+      "port": 8443,
+      "allow_lan": false,
+      "logout_policy": "session",
+      "runtime_archive_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "runtime_manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "setup_request_digest": "5046657509d315432cd866bf6ac91ccb51852d297431b2e48795c16f0e1cd652",
+    "config_home": "/home/example/.config",
+    "bin_home": "/home/example/.local/bin"
+  },
+  "completed_steps": [],
+  "tls_identity_sha256": null
+}

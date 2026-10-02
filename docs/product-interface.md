@@ -99,6 +99,107 @@ repeated input after a lost reply resumes the pending intent or requires explici
 new-intent selection. Same ID/content returns the same durable result; changed content
 conflicts. A friendly wizard must not turn a lost acknowledgment into another attempt.
 
+M1a implements additive `setup`/`status` syntax in the executable parser; the earlier
+product CLI v1 fixture stays unchanged. `setup --json` requires `--request-id`;
+human setup generates and prints one and reuses the existing intent on retry.
+Optional `--runtime`, `--cache-gib`, `--reserve-gib`, `--host`, `--port`, `--allow-lan`
+and `--logout-policy session|existing_linger` choices are normalized before publication.
+Omitted retry choices retain the recorded values. The single initial setup journal
+refuses a different request or changed intent; later maintenance uses its own APIs.
+`status [--json]` does not initialize/migrate state or acquire execution ownership.
+
+Setup progress v1 lives privately in the controller configuration because intent
+must precede creation of its database. It is a synchronous setup journal, not a
+scheduler or second database. Its schema records state/runtime identity (including
+archive and manifest digests), resource/connection/logout choices and ordered completed
+steps. Runtime validation additionally checks canonical paths/IPs and digest relationships.
+Readiness retains existing service fields and separately reports database, resources,
+runtime, release, builder, enrollment and target count. Accepted setup is still partial:
+native service startup is available with explicit `--start-service`. Signed release
+readiness rechecks retained authenticated archives. `setup --builder-archive` admits
+capture/import through the existing worker; read-only builder readiness requires
+retained exact OCI inputs and current native image availability. A separately
+advertised current-owner publication capability reports enrollment availability;
+it requires explicit repository publication and verified current TLS identity.
+Full setup acceptance and native commissioning remain pending.
+
+The executable target CLI v2 adds `target add NAME [--request-id ID]
+[--ttl-seconds 60..900] [--json]` and `target show TARGET [--json]` alongside the
+existing flags-only HTTPS client. JSON add requires an explicit request ID. Human
+add retains a name-derived request and original lifetime before dispatch; expired
+or redeemed intents need a new explicit ID. The displayed endpoint/full leaf SHA-256
+must be compared on the recovery console before transmitting the one-use code.
+Show derives names from existing invitation records, or accepts assigned target IDs;
+ambiguous names require IDs. Status v1 reports recorded recovery, live credentials
+and candidate inputs independently. JSON defaults to this unchanged v1 shape.
+`target show TARGET --status-version 2 --json` adds the last authenticated protocol
+receipt time and a 30-second advisory contact window; human output uses v2.
+Only successful registry-authenticated registration, claim or reconciliation
+records a receipt. Current boot/generation and live credentials must still match;
+this does not prove continuous connectivity, hardware binding or candidate readiness.
+Unattended eligibility remains unknown; pairing/status never grants an attempt approval.
+
+The executable target CLI v4 adds local `target revoke TARGET [--generation ID]
+[--request-id ID] [--json]` and `target revoke-code CODE_ID [--request-id ID] [--json]`.
+JSON mutation requires an explicit request ID. Human retry retains its target/action
+request; another generation requires a new explicit ID. Revocation is available
+without a live publication service. Exact generation selection, both-channel denial,
+active campaign pauses and the strict target-revocation v1 receipt commit atomically.
+Receipt facts describe the decision time, with complete counts and bounded sorted
+identity samples. Already paused history retains its reason. COMPLETE invitations
+require explicit generation revocation; BOUND pending requests are terminally revoked.
+Existing attempts/evidence and worker stop obligations remain separately unresolved;
+revocation grants no physical stop, one-shot clearance, drain or retarget authority.
+
+Explicit `target drain-approve TARGET --file PLAN --request-id ID [--ttl-seconds N]
+[--json]` grants only the original evidence manifest (at most 128 records/1 GiB)
+for one exact revoked generation/attempt/boot/media/binding, after all target work
+and worker stops are reconciled. Public output names a private credential file;
+tokens stay outside public results/CAS. Grants expire within one hour; exact replay
+never extends them. `target drain-revoke TARGET --grant ID [--json]` is terminal.
+Only two explicit registry routes accept this separate credential: upload and
+evidence acknowledgment. No register/claim/start/heartbeat/handoff/completion,
+repository access or physical-state claim is permitted. Fresh owner/scope/time
+checks fence I/O and ACK replay; original attempt tokens and attribution remain.
+Recovery console choice 7 exports an exact original plan with `plan REQUEST_ID`
+and drains its selected records with `drain REQUEST_ID GRANT_ID` after private grant
+staging. Original binding/media/runtime/trust and immutable source checks precede
+requests and selected ACK saves; retries never widen the plan or complete the attempt.
+It reports selected versus additional retained records. Changed hardware stays blocked
+pending explicit retarget maintenance.
+
+Explicit `target retarget-code OLD --generation EXACT --new-name NAME --new-uuid
+UUID --request-id ID [--ttl-seconds N] [--json]` issues a short-lived invitation
+after exact original revocation and all target reconciliation/whole-worker stops.
+It preserves original media and binds a different new UUID. Purpose/scope commit
+atomically; new ownership and old work fences apply throughout exchange and replay.
+Retarget-invitation v1 and authenticated enrollment-result v2 carry exact controller
+scope, with no downgrade or old identity inheritance. Initial activation rejects v2.
+The invitation alone does not claim local clearance, evidence drain, reset qualification
+or boot approval. The reviewed recovery retarget screen now performs explicit stopped
+local preparation/activation, preserving bounded linked history and original spools.
+Choice 7 accepts explicit archived-plan/drain IDs for any completed linked retarget.
+Changed actual hardware, incomplete history or scope changes block secret use. Pending
+invitation replacement/resume preserves original keys under the same paused transaction;
+remote generation revocation also requires work reconciliation before replacement.
+
+The executable `recovery download [--request-id ID] [--trust-bundle PATH] [--json]`
+admits signed factory acquisition on the existing native worker. JSON mutation requires
+an explicit request ID; human retry retains the release/archive-derived ID. Current
+independent publisher trust and an authenticated compatible v2 installation are
+required. The exact signed statement must match the installed release. Completion
+retains public factory image, manifest, candidate, statement/signature and the
+released-recovery-acquisition v1 index in operation output/CAS. Use the ordinary
+operation status/output readers to inspect references; CAS image bytes may be supplied
+to a separately operated standard writer. Acquisition neither writes media nor
+establishes qualification, builder, baseline or physical execution readiness.
+The existing read-only `recovery-images` lists successful acquired sets alongside
+prepared images. Additive fields expose publisher statement/signature paths and
+fingerprint; old prepared-image fields retain their meanings. Exact retained index,
+statement linkage, references and asset sizes are checked within bounded reads.
+Publication verification is historical; listing does not rehash whole images or
+assert current trust. Missing or inconsistent retained objects are unavailable.
+
 | Commands | Contract |
 | --- | --- |
 | `setup`, `status` | Resumable controller setup and read-only readiness, including an empty target registry; no fabricated enrollment. |
@@ -133,6 +234,12 @@ Each packet freezes its mechanical schema and failure fixtures before adapters.
 | --- | --- | --- |
 | Signed release set | Exact controller, recovery, builder and baseline/catalog digests; platform/API compatibility, publisher trust and qualification evidence | New/successor distribution record; existing private `unqualified` recovery statements never become qualified by relabeling; development archives remain readable |
 | Setup progress | Selected state/runtime, completed configuration steps, operation/request identity, prerequisites and separate readiness facts | New versioned journal; resume and reconcile existing configuration without merging another state root |
+| Credential lookup generation | Target/media/generation/system UUID, token digest, exact repository leaf fingerprint and expiry; terminal revocation | Additive controller migration; registry mode opt-in and exclusive with legacy static authentication; no enrollment/attempt authority |
+| Controller TLS identity and service continuation | Private local CA/server file identities, exact initial setup intent and verified service publication stages | New v1 records; no target credentials, publisher identity or second execution owner |
+| Controller release-set statement | Authenticated archive/version, platform/API/Python constraints, expiry and exact recovery/builder/catalog references | Versioned v1/v2 verifier and independent trust loader; v2 structural reader checks stay separate from runtime readiness and qualification |
+| Target revocation | Exact terminal generation/invitation decision and immutable bounded work observations | Additive command receipts and admitted attempt generation references in the existing database; no physical completion or drain authorization |
+| Released recovery acquisition | Exact installed publisher statement, verified factory image/metadata and retained unqualified asset references | New v1 index in existing operation/CAS records; preserve RPM acquisition specifications and all readiness/approval boundaries |
+| Builder preparation | Exact release statement, archive/config/base identities and stopped-worker native import/base-marker proof | New v1 output in existing operation/CAS records; no baseline closure, enrollment or qualification authority |
 | Enrollment | C4 expiring request/key binding, durable credential issuance, private generation and revocation | New strict exchange records; retain validated manual generations and existing target protocol readers |
 | Investigation | Stable identity/name mapping, campaign/session references, problem digest, workspace/base, limits, driver and execution owner | Additive database migration and explicit reader for legacy session/observation records; no invented historical workspace or source coverage |
 | Source workspace/capture | Repository origin and actual Git object ID, distribution source/patch provenance, immutable captured content/config identities, capture completeness | Keep Git commit OIDs distinct from artifact SHA-256; existing proposal-v1 `base_revision` digest is not silently redefined as a Git OID |

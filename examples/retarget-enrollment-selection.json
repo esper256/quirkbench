@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "record_type": "retarget-enrollment-selection",
+  "request_id": "selection-fixture",
+  "action": "new",
+  "code_id": "new-code",
+  "domain": {
+    "controller_url": "https://192.0.2.1:8443",
+    "certificate_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "media_instance_id": "media-fixture",
+    "target_binding": {
+      "schema_version": 1,
+      "system_uuid": "12345678-1234-1234-1234-123456789abc"
+    }
+  },
+  "source": {
+    "intent": {
+      "schema_version": 1,
+      "controller_url": "https://192.0.2.1:8443",
+      "certificate_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "media_instance_id": "media-fixture",
+      "target_binding": {
+        "schema_version": 1,
+        "system_uuid": "12345678-1234-1234-1234-123456789abc"
+      },
+      "request_id": "enroll-fixture",
+      "code_id": "old-code"
+    },
+    "files": {
+      "intent.json": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "key.pem": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "request.json": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "selected": null,
+  "retarget_request_id": "retarget-1",
+  "local_intent_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "source_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+}

@@ -44,7 +44,7 @@ def _open_file(root, parts):
         os.close(directory)
 
 
-def make_repository_server(address, repositories, cert, key, client_ca):
+def make_repository_server(address, repositories, cert, key, client_ca, *, credential_registry=None,tls_context=None,availability=None):
     """Return a server exposing /<configured-alias>/<public-OSTree-path>.
 
     All connections require a client certificate trusted by client_ca. Callers
@@ -60,11 +60,18 @@ def make_repository_server(address, repositories, cert, key, client_ca):
         roots[alias] = path
     if not roots:
         raise ContractError('at least one repository is required')
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.minimum_version = ssl.TLSVersion.TLSv1_2
-    context.load_cert_chain(str(cert), str(key))
-    context.load_verify_locations(cafile=str(client_ca))
-    context.verify_mode = ssl.CERT_REQUIRED
+    if credential_registry is not None:
+        credential_registry.preflight()
+    context=tls_context
+    if context is None:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(str(cert), str(key))
+        context.load_verify_locations(cafile=str(client_ca))
+        context.verify_mode = ssl.CERT_REQUIRED
+    elif (not isinstance(context,ssl.SSLContext) or context.protocol!=ssl.PROTOCOL_TLS_SERVER
+            or context.verify_mode!=ssl.CERT_REQUIRED or context.minimum_version<ssl.TLSVersion.TLSv1_2):
+        raise ContractError('repository requires the captured mutually authenticated server TLS context')
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = 'HTTP/1.1'
@@ -85,7 +92,12 @@ def make_repository_server(address, repositories, cert, key, client_ca):
             # Honor HTTP/1.1 keep-alive to avoid a TLS handshake per small object.
             # The server bounds concurrent workers and idle socket time.
             try:
+                if availability is not None:availability()
                 if not self.connection.getpeercert():
+                    self.send_error(403)
+                    return
+                if credential_registry is not None and not credential_registry.authenticate_repository(
+                        self.connection.getpeercert(binary_form=True)):
                     self.send_error(403)
                     return
                 url = urlsplit(self.path)
@@ -137,6 +149,7 @@ def make_repository_server(address, repositories, cert, key, client_ca):
                         remaining = end - start + 1
                         deadline = time.monotonic() + 1800
                         while remaining and time.monotonic() < deadline:
+                            if availability is not None:availability()
                             chunk = source.read(min(1024 * 1024, remaining))
                             if not chunk:
                                 break
@@ -164,6 +177,8 @@ def make_repository_server(address, repositories, cert, key, client_ca):
         request_queue_size = 32
 
         def __init__(self):
+            from .http_bounds import AcceptedSockets
+            self.accepted=AcceptedSockets()
             self.slots = threading.BoundedSemaphore(32)
             super().__init__(address, Handler)
 
@@ -172,7 +187,9 @@ def make_repository_server(address, repositories, cert, key, client_ca):
             connection.settimeout(30)
             try:
                 # Handshake happens in the worker, never in the accept loop.
-                return context.wrap_socket(connection, server_side=True, do_handshake_on_connect=False), peer
+                wrapped=context.wrap_socket(connection, server_side=True, do_handshake_on_connect=False)
+                self.accepted.add(wrapped)
+                return wrapped,peer
             except BaseException:
                 connection.close()
                 raise
@@ -192,6 +209,14 @@ def make_repository_server(address, repositories, cert, key, client_ca):
                 super().process_request_thread(request, client_address)
             finally:
                 self.slots.release()
+
+        def shutdown_request(self,request):
+            self.accepted.discard(request)
+            super().shutdown_request(request)
+
+        def server_close(self):
+            self.accepted.close()
+            super().server_close()
 
         def handle_error(self, request, client_address):
             # TLS authentication failures are expected; do not print tracebacks.

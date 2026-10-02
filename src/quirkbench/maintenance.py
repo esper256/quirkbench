@@ -64,7 +64,7 @@ def private_lock(path, *, shared=False):
             fcntl.flock(fd, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise Conflict('active execution protects this workspace') from exc
-        yield
+        yield fd
     finally:
         os.close(fd)
 

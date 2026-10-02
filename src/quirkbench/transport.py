@@ -13,6 +13,8 @@ import ipaddress
 import json
 import socket
 import ssl
+import threading
+import time
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -65,13 +67,17 @@ def make_server(
     port: int = 0,
     certfile: str,
     keyfile: str,
-    device_tokens: dict[str, str],
+    device_tokens: dict[str, str] | None = None,
+    credential_registry=None,
     allow_lan: bool = False,
+    enrollment_service=None,
+    tls_context=None,
 ) -> ThreadingHTTPServer:
     """Create an HTTPS server; call serve_forever on the returned instance.
 
     A non-loopback bind needs explicit allow_lan=True. TLS is mandatory even on
-    loopback, and every route requires a device bearer token.
+    loopback. Anonymous enrollment is an explicit registry-only application;
+    existing target routes require a device bearer token.
     """
     try:
         loopback = ipaddress.ip_address(socket.gethostbyname(host)).is_loopback
@@ -79,10 +85,18 @@ def make_server(
         raise ValueError("host must resolve to an IP address") from exc
     if not loopback and not allow_lan:
         raise ValueError("non-loopback bind requires allow_lan=True")
-    if not device_tokens:
+    if credential_registry is not None and device_tokens is not None:
+        raise ValueError('registry and static device authentication are mutually exclusive')
+    if credential_registry is not None:
+        credential_registry.preflight()
+    elif not device_tokens:
         raise ValueError("at least one device token is required")
+    if enrollment_service is not None:
+        if credential_registry is None or enrollment_service.controller is not controller:
+            raise ValueError('enrollment requires this controller and registry authentication')
+        enrollment_service.preflight(certfile,keyfile)
     tokens = {}
-    for device_id, token in device_tokens.items():
+    for device_id, token in (device_tokens or {}).items():
         identifier(device_id)
         if not isinstance(token, str) or len(token) < 32:
             raise ValueError("device tokens must have at least 32 characters")
@@ -94,6 +108,9 @@ def make_server(
         def setup(self):
             super().setup()
             self.connection.settimeout(15)
+            from .http_bounds import _DeadlineRaw,_HeaderReader
+            self.rfile.close()
+            self.rfile=_HeaderReader(_DeadlineRaw(self.connection,time.monotonic()+45,time.monotonic))
 
         def log_message(self, format, *args):
             # HTTP paths and headers may contain credentials; never log them.
@@ -117,21 +134,36 @@ def make_server(
             device_id = self.headers.get("X-Device-ID", "")
             supplied = self.headers.get("Authorization", "")
             expected = tokens.get(device_id)
-            if expected is None or not supplied.startswith("Bearer ") or not hmac.compare_digest(supplied[7:], expected):
+            if credential_registry is not None:
+                authorized = supplied.startswith('Bearer ') and credential_registry.authenticate_device(device_id, supplied[7:])
+            else:
+                authorized = expected is not None and supplied.startswith('Bearer ') and hmac.compare_digest(supplied[7:], expected)
+            if not authorized:
                 raise PermissionError("unauthorized device")
             return device_id
 
-        def _read(self) -> dict:
+        def _read(self,limit=MAX_BODY) -> dict:
             content_type = self.headers.get("Content-Type", "").split(";", 1)[0]
             if content_type != "application/json":
                 raise ContractError("application/json required")
-            value = self.headers.get("Content-Length")
+            lengths=self.headers.get_all('Content-Length',[])
+            if len(lengths)!=1 or self.headers.get_all('Transfer-Encoding',[]):
+                raise ContractError('unambiguous Content-Length required')
+            value = lengths[0]
             if value is None or not value.isdecimal():
                 raise ContractError("Content-Length required")
             length = int(value)
-            if length > MAX_BODY:
+            if length > limit:
                 raise OverflowError("request body too large")
-            return _strict_json(self.rfile.read(length))
+            raw=self.rfile.read(length)
+            if len(raw)!=length:raise ContractError('incomplete request body')
+            try:
+                data=_strict_json(raw)
+                from .product_contracts import _depth
+                _depth(data)
+                return data
+            except (ValueError,UnicodeError,RecursionError) as exc:
+                raise ContractError('invalid bounded request JSON') from exc
 
         def do_POST(self):
             from .maintenance import private_lock
@@ -143,10 +175,36 @@ def make_server(
 
         def _post(self):
             try:
+                if enrollment_service is not None and self.path in {'/v1/enrollment/challenge','/v1/enrollment/redeem'}:
+                    from .enrollment_client import MAX_BODY as ENROLLMENT_LIMIT
+                    data=self._read(ENROLLMENT_LIMIT)
+                    answer=enrollment_service.handle(self.path,data,self.client_address[0])
+                    if len(canonical({'schema_version':1,'data':{'value':answer}}))>ENROLLMENT_LIMIT:
+                        raise OverflowError('enrollment response too large')
+                    self._send(200,{'value':answer})
+                    return
+                if self.path in {'/v1/evidence-drain/upload','/v1/evidence-drain/evidence'}:
+                    if credential_registry is None:raise PermissionError('registry evidence drain unavailable')
+                    from .evidence_drain import Authorization,preflight
+                    supplied=self.headers.get('Authorization','')
+                    if not supplied.startswith('Bearer '):raise PermissionError('drain credential required')
+                    drain=Authorization(self.headers.get('X-Evidence-Drain-ID',''),self.headers.get('X-Device-ID',''),
+                        supplied[7:],controller._lifecycle_owner)
+                    preflight(controller,drain)
+                    data=self._read()
+                    answer=self._attempt_action('/v1/'+self.path.rsplit('/',1)[-1],drain.device_id,data,drain=drain)
+                    self._send(200,{'value':answer})
+                    return
                 device_id = self._authorize()
                 data = self._read()
                 path = self.path
-                if path == "/v1/register":
+                if path == "/v1/endpoint-check":
+                    _body(data, set())
+                    # Read-only credential acceptance; never register/contact,
+                    # claim/reconcile work or imply physical readiness.
+                    if self._authorize()!=device_id:raise PermissionError('device mismatch')
+                    answer={'device_id':device_id,'credential_accepted':True,'work_queued':False}
+                elif path == "/v1/register":
                     _body(data, {"report"})
                     report = CapabilityReport.from_dict(data["report"])
                     if report.device_id != device_id:
@@ -166,6 +224,10 @@ def make_server(
                 else:
                     self._send(404, {"error": "unknown route"})
                     return
+                if credential_registry is not None and path in {'/v1/register','/v1/claim','/v1/reconcile'}:
+                    from .protocol_contact import observe_contact
+                    boot_id=report.boot_id if path=='/v1/register' else data['boot_id']
+                    observe_contact(controller,device_id,self.headers['Authorization'][7:],boot_id)
                 self._send(200, {"value": answer})
             except PermissionError:
                 self._send(403, {"error": "forbidden"})
@@ -182,7 +244,9 @@ def make_server(
                 status = 409 if name == "Conflict" else 500
                 self._send(status, {"error": name})
 
-        def _attempt_action(self, path: str, device_id: str, data: dict) -> dict:
+        def _attempt_action(self, path: str, device_id: str, data: dict, *,drain=None) -> dict:
+            if drain is not None and path not in {'/v1/upload','/v1/evidence'}:
+                raise PermissionError('drain grants only exact upload/evidence')
             if path in {"/v1/handoff", "/v1/candidate-started"}:
                 _body(data, {"attempt_id", "token", "boot_id", "revision"})
                 attempt_id = identifier(data["attempt_id"])
@@ -221,6 +285,8 @@ def make_server(
             if path == "/v1/heartbeat":
                 return controller.heartbeat(attempt_id, token, identifier(data["boot_id"]))
             if path == "/v1/evidence":
+                if drain is not None:
+                    return controller.evidence(attempt_id,token,identifier(data['stream']),data['sequence'],sha256(data['sha256']),data['size'],drain=drain)
                 return controller.evidence(attempt_id, token, identifier(data["stream"]), data["sequence"], sha256(data["sha256"]), data["size"])
             if path == "/v1/complete":
                 return controller.complete(result, token, identifier(data["boot_id"]))
@@ -230,6 +296,7 @@ def make_server(
             return controller.upload(
                 attempt_id, token, identifier(data["boot_id"]), identifier(data["upload_id"]),
                 data["offset"], raw, sha256(data["expected_digest"]), data["total_size"],
+                **({'drain':drain} if drain is not None else {}),
             )
 
         def do_GET(self):
@@ -294,12 +361,44 @@ def make_server(
             except Exception:
                 self._send(500, {"error": "server error"})
 
-    server = ThreadingHTTPServer((host, port), Handler)
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.minimum_version = ssl.TLSVersion.TLSv1_2
-    context.load_cert_chain(certfile=certfile, keyfile=keyfile)
-    server.socket = context.wrap_socket(server.socket, server_side=True)
-    return server
+    context=tls_context
+    if context is None:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(certfile=certfile, keyfile=keyfile)
+    elif (not isinstance(context,ssl.SSLContext) or context.protocol!=ssl.PROTOCOL_TLS_SERVER
+            or context.verify_mode!=ssl.CERT_NONE or context.minimum_version<ssl.TLSVersion.TLSv1_2):
+        raise ContractError('target protocol requires the captured bearer-authenticated server TLS context')
+    class Server(ThreadingHTTPServer):
+        daemon_threads=True
+        request_queue_size=32
+        def __init__(self):
+            from .http_bounds import AcceptedSockets
+            self.accepted=AcceptedSockets()
+            self.slots=threading.BoundedSemaphore(32)
+            super().__init__((host,port),Handler)
+        def get_request(self):
+            connection,peer=super().get_request();connection.settimeout(15)
+            try:
+                wrapped=context.wrap_socket(connection,server_side=True,do_handshake_on_connect=False)
+                self.accepted.add(wrapped);return wrapped,peer
+            except BaseException:
+                connection.close();raise
+        def process_request(self,request,client_address):
+            if not self.slots.acquire(blocking=False):
+                self.shutdown_request(request);return
+            try:super().process_request(request,client_address)
+            except BaseException:
+                self.slots.release();raise
+        def process_request_thread(self,request,client_address):
+            try:super().process_request_thread(request,client_address)
+            finally:self.slots.release()
+        def handle_error(self,request,client_address):pass
+        def shutdown_request(self,request):
+            self.accepted.discard(request);super().shutdown_request(request)
+        def server_close(self):
+            self.accepted.close();super().server_close()
+    return Server()
 
 
 class HTTPSDeviceClient:

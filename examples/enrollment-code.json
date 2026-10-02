@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "record_type": "enrollment-code",
+  "code_id": "code-11111111111111111111111111111111",
+  "request_id": "pair-workstation-1",
+  "request_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+  "name": "workstation",
+  "controller_url": "https://192.0.2.10:8443",
+  "certificate_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+  "created_at": 1790812800,
+  "expires_at": 1790813100
+}

@@ -44,7 +44,15 @@ def test_archive_runs_relocated_without_checkout_and_keeps_selected_state(tmp_pa
            'XDG_STATE_HOME': str(clean_home / 'state'), 'PYTHONPATH': '/nonexistent'}
     def invoke(path, *args):
         return subprocess.run([sys.executable, '-I', str(path / 'bin/quirkbench'), *args],
-                              cwd=clean_home, env=env, capture_output=True, text=True, timeout=20)
+                          cwd=clean_home, env=env, capture_output=True, text=True, timeout=20)
+    signed = subprocess.run([sys.executable, '-I', str(release / 'install'), '0.1.0',
+                             '--request-id', 'production-install', '--json'], cwd=clean_home,
+                            env={**env, 'XDG_CACHE_HOME': str(clean_home / 'cache')},
+                            capture_output=True, text=True, timeout=20)
+    assert signed.returncode == 4, signed.stderr
+    assert json.loads(signed.stdout)['error']['code'] == 'UNAVAILABLE'
+    assert not (clean_home / 'cache').exists() and not (clean_home / 'config').exists()
+    assert not (clean_home / 'state').exists()
     setup = invoke(release, 'setup-state')
     assert setup.returncode == 0, setup.stderr
     chosen = json.loads(setup.stdout)
@@ -72,6 +80,18 @@ def test_archive_runs_relocated_without_checkout_and_keeps_selected_state(tmp_pa
     assert verify_installation(managed) == record
     assert invoke(managed, '--help').returncode == 0
     assert invoke(managed, 'setup-check').returncode == 0
+    guided = invoke(managed, 'setup', '--request-id', 'installed-setup', '--json')
+    assert guided.returncode == 0, guided.stderr
+    result = json.loads(guided.stdout)['data']
+    assert result['readiness']['runtime_verified'] and result['readiness']['target_count'] == 0
+    assert result['setup_progress']['intent']['runtime_root'] == str(managed)
+    assert not result['readiness']['setup_complete']
+    status = invoke(managed, 'status', '--json')
+    assert status.returncode == 0, status.stderr
+    assert json.loads(status.stdout)['data']['setup_progress']['request_id'] == 'installed-setup'
+    assert (managed / 'lib/quirkbench/schemas/controller-setup-progress.v1.schema.json').is_file()
+    assert (managed / 'lib/quirkbench/schemas/credential-generation.v1.schema.json').is_file()
+    assert (managed / 'lib/quirkbench/schemas/controller-release-set.v1.schema.json').is_file()
     assert verify_installation(managed) == record
 
 

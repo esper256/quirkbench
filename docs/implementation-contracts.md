@@ -442,11 +442,22 @@ attempts. Provide an explicit old-evidence drain using original attribution and 
 credentials after approval; it cannot register the new hardware as the old target.
 New media/target binding invalidates reset qualification and all old attempt grants.
 
-Current implementation is partial: the low-level runtime configuration reader and
-boot identity guard are available; the setup UI, enrollment protocol, persistent
-network-profile selection and retargeting transaction are planned P3 work. Existing
+Current implementation is partial: runtime configuration and boot identity guards,
+reviewed initial console pairing/exchange and explicit private network-profile
+selection/binding-gated RAM replay have software implementations. Native production
+commissioning, endpoint maintenance and complete M2 acceptance remain open P3 work.
+Explicit revocation, paused retarget/archival, repeated moved-media history and pending
+invitation maintenance now have reviewed software implementations. Existing
 unbound provisioning remains readable but cannot be activated automatically. Rebuild
 older bootloader images; no in-place conversion or silent binding migration.
+
+P3f retained-CA controller staging, explicit expired-source renewal and exact stopped
+configuration switch/rollback now have reviewed software implementations. URL-only
+target generation provenance uses a separate typed transition record; it preserves
+original enrollment documents and every credential/trust/binding byte. Hash labels
+alone do not prove an original enrollment anchor. Owned activation must reconstruct
+that anchor from independently verified original request/result/generation evidence,
+then verify native trust and endpoint reachability before selecting runtime state.
 
 ## C5 — Commissioning and physical safety (P4/P7)
 

@@ -67,6 +67,8 @@ class OperatorApprovals:
         with self.transaction() as db:
             row=db.execute('SELECT * FROM attempts WHERE id=?',(attempt_id,)).fetchone()
             if row is None: raise Conflict('unknown attempt')
+            from .credential_registry import require_execution_credentials
+            require_execution_credentials(db,row['device'],self.clock(),expected_generation=row['credential_generation'])
             context,campaign=self._approval_context(db,row)
             if context is None: raise Conflict('legacy attempt has no negotiated approval contract')
             current_inventory=json.loads(db.execute('SELECT report FROM devices WHERE id=?',(row['device'],)).fetchone()[0]).get('inventory',{})
@@ -88,6 +90,11 @@ class OperatorApprovals:
             return document
 
     def _approval_status(self, db, row):
+        from .credential_registry import require_execution_credentials
+        try:
+            require_execution_credentials(db, row['device'], self.clock(),expected_generation=row['credential_generation'])
+        except Conflict:
+            return {'state':'blocked','reason':'credentials_not_live'}
         context,campaign=self._approval_context(db,row)
         if context is None: return {'state':'not_required'}
         if self._campaign(db,campaign)['state']!='RUNNING': return {'state':'blocked','reason':'campaign_paused'}

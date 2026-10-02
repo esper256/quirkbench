@@ -8,6 +8,7 @@ import subprocess
 import sys
 
 from .boot import BootError, RecoveryConfig
+from .setup_contracts import SetupUnavailable
 
 
 BOOT_RECORD = Path('/run/quirkbench-boot.json')
@@ -91,7 +92,8 @@ def activate_staged_setup(*, run=subprocess.run):
 
 def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
                 output_stream=None, run_nmtui=None, profiles_ready=None,
-                run_capacity_setup=None, run_manual_setup=None, system_uuid_reader=None) -> int:
+                run_capacity_setup=None, run_manual_setup=None, system_uuid_reader=None,
+                run_enrollment_setup=None,run_network_save=None,run_evidence_drain=None,run_retarget_setup=None) -> int:
     """Show the local status even without a cable, controller or enrollment."""
     source = input_stream or sys.stdin
     output = output_stream or sys.stdout
@@ -101,6 +103,18 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
         from .capacity_setup import run_attended_commission
         run_capacity_setup = run_attended_commission
     manual_setup = run_manual_setup or activate_staged_setup
+    if run_enrollment_setup is None:
+        from .enrollment_console import connect_initial_controller
+        run_enrollment_setup=connect_initial_controller
+    if run_network_save is None:
+        from .network_profiles import save_attended_network
+        run_network_save=save_attended_network
+    if run_evidence_drain is None:
+        from .evidence_drain_target import attended_drain
+        run_evidence_drain=attended_drain
+    if run_retarget_setup is None:
+        from .retarget_console import connect_retarget
+        run_retarget_setup=connect_retarget
     from .binding import read_system_uuid, BindingError
     try:
         target_uuid = (system_uuid_reader or read_system_uuid)()
@@ -119,7 +133,7 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
                 print('New experiments blocked: current target RAM could not be measured.', file=output)
             else:
                 print('New experiments blocked: evidence partition is too small for current target RAM.', file=output)
-        print('Controller pairing: automated pairing deferred; staged manual setup below', file=output)
+        print('Controller pairing: use Connect to controller for initial pairing, or staged manual setup.', file=output)
         if commissioned_here:
             print('Commissioning complete. Reboot the target to continue recovery.', file=output)
         available = verified and ram_profiles
@@ -129,6 +143,14 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
               + (' (already commissioned)' if verified else ''), file=output)
         print('4) Activate staged initial controller configuration'
               + ('' if verified else ' (waiting for verified recovery)'), file=output)
+        print('5) Connect to controller'
+              + ('' if verified else ' (waiting for verified recovery)'),file=output)
+        print('6) Save selected network connections for this target'
+              + ('' if verified and ram_profiles else ' (waiting for verified recovery and RAM profile storage)'),file=output)
+        print('7) Review or drain original evidence with explicit controller approval'
+              + ('' if verified else ' (waiting for verified recovery)'),file=output)
+        print('8) Explicitly retarget enrolled media to this hardware'
+              + ('' if verified else ' (waiting for verified recovery)'),file=output)
         print('Network changes here are temporary until explicitly saved during setup.', file=output)
         print('Selection: ', end='', file=output, flush=True)
         try:
@@ -181,8 +203,49 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
                 print('Manual setup blocked: ' + str(exc), file=output, flush=True)
             except KeyboardInterrupt:
                 print('Manual setup interrupted; inspect status before retrying.', file=output, flush=True)
+        elif choice.strip()=='5':
+            if not verified:
+                print('Pairing is blocked until recovery identity and evidence are verified.',file=output,flush=True)
+                continue
+            try:
+                run_enrollment_setup(input_stream=source,output_stream=output)
+            except SetupUnavailable as exc:
+                print(str(exc),file=output,flush=True)
+            except (OSError,ValueError,RuntimeError,subprocess.TimeoutExpired):
+                print('Pairing blocked. Check endpoint, full fingerprint, code expiry, clock and setup prerequisites; retained request/key remain available.',file=output,flush=True)
+            except KeyboardInterrupt:
+                print('Pairing interrupted; retry the same endpoint, fingerprint and code ID. Private request/key retained.',file=output,flush=True)
+        elif choice.strip()=='6':
+            if not verified or not ram_profiles:
+                print('Saving connections requires verified recovery and private RAM profile storage.',file=output,flush=True)
+                continue
+            try:
+                run_network_save(input_stream=source,output_stream=output)
+            except (OSError,ValueError,RuntimeError):
+                print('Network selection blocked. Complete initial pairing/manual setup, verify target binding and review the selected RAM connections.',file=output,flush=True)
+            except KeyboardInterrupt:
+                print('Network selection interrupted; review or repeat the same selection.',file=output,flush=True)
+        elif choice.strip()=='7':
+            if not verified:
+                print('Original evidence maintenance requires verified recovery and private evidence storage.',file=output,flush=True)
+                continue
+            try:run_evidence_drain(input_stream=source,output_stream=output)
+            except (OSError,ValueError,RuntimeError,subprocess.TimeoutExpired):
+                print('Original evidence drain blocked. Reconcile old controller work, verify the original binding, and stage an exact private grant. Retained evidence remains available.',file=output,flush=True)
+            except KeyboardInterrupt:
+                print('Original evidence drain interrupted. Retry the same retained plan and grant; pending evidence/result remain retained.',file=output,flush=True)
+        elif choice.strip()=='8':
+            if not verified:
+                print('Retarget requires verified recovery and private evidence storage.',file=output,flush=True)
+                continue
+            try:run_retarget_setup(input_stream=source,output_stream=output)
+            except SetupUnavailable as exc:print(str(exc),file=output,flush=True)
+            except (OSError,ValueError,RuntimeError,subprocess.TimeoutExpired):
+                print('Retarget blocked. Verify exact original revocation/reconciliation, actual new UUID and invitation trust. Partial maintenance stays paused; retry its retained local request.',file=output,flush=True)
+            except KeyboardInterrupt:
+                print('Retarget interrupted. Partial maintenance stays paused; resume the same local request and controller invitation.',file=output,flush=True)
         elif choice.strip() != '2':
-            print('Choose 1, 2, 3 or 4.', file=output, flush=True)
+            print('Choose 1, 2, 3, 4, 5, 6, 7 or 8.', file=output, flush=True)
 
 
 def main() -> int:

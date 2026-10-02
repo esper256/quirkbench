@@ -51,7 +51,7 @@ def test_setup_selects_private_default_state_and_is_idempotent(tmp_path):
     assert data["state_root"] == str(root)
     assert data["service_management"] == "pending" and not data["background_work_ready"]
     assert root.stat().st_mode & 0o077 == 0
-    assert not (root / "controller.sqlite").exists()
+    assert (root / "controller.sqlite").is_file()
     selection = config / "quirkbench/controller.json"
     original = selection.read_bytes()
     assert selection.stat().st_mode & 0o077 == 0
@@ -68,9 +68,12 @@ def test_setup_requires_explicit_selection_for_legacy_state(tmp_path):
     legacy = cwd / ".quirkbench"
     legacy.mkdir(parents=True, mode=0o700)
     blocked = _command(config, cwd, "setup-state", state_home=tmp_path / "state-home")
-    assert blocked.returncode == 2
-    assert "explicit --state" in blocked.stderr
-    assert not (config / "quirkbench/controller.json").exists()
+    assert blocked.returncode == 0
+    assert json.loads(blocked.stdout)['state_root'] == str(tmp_path / 'state-home/quirkbench')
+    assert (legacy / 'controller.sqlite').exists() is False
+    # Explicit legacy selection remains supported in an independent configuration;
+    # an established home-state selection cannot silently switch to it.
+    config = tmp_path / 'legacy-config'
     chosen = _command(config, cwd, "--state", str(legacy), "setup-state", state_home=tmp_path / "state-home")
     assert chosen.returncode == 0, chosen.stderr
     assert json.loads(chosen.stdout)["state_root"] == str(legacy)
@@ -136,7 +139,8 @@ def test_explicit_state_overrides_invalid_config_and_preserves_legacy_path(tmp_p
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["data"]["id"] == row["id"]
     assert not (elsewhere / ".quirkbench").exists()
-    assert discover_state_root(config_home=tmp_path / "absent") == Path(".quirkbench")
+    from quirkbench.state_config import default_state_root
+    assert discover_state_root(config_home=tmp_path / "absent") == default_state_root()
 
 
 @pytest.mark.parametrize("raw", [

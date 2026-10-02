@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quirkbench.local/schemas/target-status.v2.schema.json",
+  "title": "Recorded target readiness and authenticated contact facts v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_type",
+    "target",
+    "device_id",
+    "enrollment",
+    "recovery",
+    "execution_authorized",
+    "unattended_eligible",
+    "candidate_preparation"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 2
+    },
+    "record_type": {
+      "const": "target-status"
+    },
+    "target": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "device_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "enrollment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "credential_generation",
+        "credentials_live",
+        "expires_at"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "NOT_RECORDED",
+            "ACTIVE",
+            "REDEEMED",
+            "BOUND",
+            "COMPLETE",
+            "REVOKED",
+            "EXPIRED"
+          ]
+        },
+        "credential_generation": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "credentials_live": {
+          "type": "boolean"
+        },
+        "expires_at": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 4102444800
+        }
+      }
+    },
+    "recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "report_available",
+        "boot_id",
+        "reported_mode",
+        "contact_current",
+        "binding_matches",
+        "last_authenticated_contact_at"
+      ],
+      "properties": {
+        "report_available": {
+          "type": "boolean"
+        },
+        "boot_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reported_mode": {
+          "enum": [
+            null,
+            "recovery",
+            "experiment",
+            "simulation"
+          ]
+        },
+        "contact_current": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "binding_matches": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "last_authenticated_contact_at": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 4102444800
+        }
+      }
+    },
+    "execution_authorized": {
+      "const": false,
+      "type": "boolean"
+    },
+    "unattended_eligible": {
+      "type": "null"
+    },
+    "candidate_preparation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recorded_inputs_ready",
+        "blocking_reasons"
+      ],
+      "properties": {
+        "recorded_inputs_ready": {
+          "type": "boolean"
+        },
+        "blocking_reasons": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "string",
+            "maxLength": 256
+          }
+        }
+      }
+    }
+  }
+}

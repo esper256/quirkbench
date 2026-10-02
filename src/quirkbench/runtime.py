@@ -16,7 +16,7 @@ import sys
 import time
 
 from .binding import BindingError, verify_binding
-from .boot import RecoveryConfig, parse_cmdline, arm_once, reboot_candidate, _verify_stage_identity
+from .boot import RecoveryConfig, parse_cmdline, arm_once, reboot_candidate, clear_once, _verify_stage_identity
 from .commission import BootIdentity, verify_boot_identity
 from .contracts import CapabilityReport, ContractError, Outcome, canonical, identifier
 from .inventory import InventoryCollector, InventoryLimits, validate_inventory
@@ -150,14 +150,9 @@ class UsbBootControl:
 
     def recover(self):
         if self.mode == 'recovery':
-            _verify_stage_identity(self.config, data_mount=BASE/'experiments', state_mount=Path('/boot/quirkbench-state'))
-            env = Path('/boot/quirkbench-state/quirkbench/next.env')
-            self.runner(['grub2-editenv', str(env), 'unset', 'next_entry', 'candidate_id', 'target_uuid'])
-            with env.open('rb') as stream:
-                os.fsync(stream.fileno())
-            from .boot import _read_env
-            if any(_read_env(env, self.runner).get(key) for key in ('next_entry', 'candidate_id', 'target_uuid')):
-                raise ContractError('cannot disarm uncertain boot selection')
+            self.verify_storage()
+            clear_once(self.config, runner=self.runner)
+            self.verify_storage()
             return
         try:
             self.verify_storage()
@@ -358,6 +353,8 @@ def _main(argv=None, *, locks):
                         fd=os.open(CONTROL/'runtime-config.lock',os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
                         configuration_lock=locks.enter_context(os.fdopen(fd,'r+b'))
                         fcntl.flock(configuration_lock.fileno(),fcntl.LOCK_SH|fcntl.LOCK_NB)
+                    from .retarget_local import require_runtime_available
+                    require_runtime_available(CONTROL)
                     provision = load_provisioning(CONTROL/'runtime.json')
                     verify_binding(provision.get('target_binding'))
                     supervisor.needs_human = False

@@ -41,8 +41,13 @@ Then use the returned canonical runtime_root/bin/quirkbench --help.
 Python 3.11+ must already be installed. No virtualenv, pip installation or
 source checkout is needed for the controller CLI.
 
-Run bin/quirkbench setup-state to select private persistent state, then
-bin/quirkbench setup-check to inspect service prerequisites. Install lib/quirkbench/quirkbench-controller.service with canonical paths and
+Run bin/quirkbench setup to journal private persistent state and resource choices,
+then bin/quirkbench status to inspect independent readiness. Setup remains partial.
+Use setup --start-service for private TLS/native service setup and, with a signed
+installed release, setup --builder-archive /absolute/builder.tar for durable builder
+preparation. Shipped production publisher trust and enrollment remain pending.
+The legacy setup-state/setup-check commands remain available.
+Install lib/quirkbench/quirkbench-controller.service with canonical paths and
 provision private/controller-service.json as described in
 lib/quirkbench/guide/controller-installation.md. Extraction does
 not start a service, change lingering or install any host package.
@@ -59,7 +64,8 @@ bin/quirkbench-worker is the fixed rootfs stage executable for configured system
 worker services. It accepts only an existing live controller claim; it is not
 a general shell/build launcher. Stage completion is private and does not finish
 an image operation. The configured controller consumes and validates stopped worker output.
-bin/quirkbench-job-worker handles only fixed build/compose stages.
+bin/quirkbench-job-worker handles fixed build/compose, builder preparation and
+signed recovery acquisition stages on the same controller lifecycle.
 
 controller-manifest.json records the included file hashes and originating wheel.
 This is provenance, not a cryptographic signature or a release qualification.
@@ -68,6 +74,8 @@ JOB_LAUNCHER = LAUNCHER.replace(b'from quirkbench.cli import main', b'from quirk
 SERVICE_LAUNCHER = LAUNCHER.replace(b'from quirkbench.cli import main', b'from quirkbench.controller_service import main')
 WORKER_LAUNCHER = LAUNCHER.replace(b'from quirkbench.cli import main',
                                  b'from quirkbench.recovery_worker import main')
+INSTALL_LAUNCHER = LAUNCHER.replace(b'parents[1] / "lib"', b'parent / "lib"').replace(
+    b'raise SystemExit(main())', b'raise SystemExit(main(["release-install", *sys.argv[1:]]))')
 
 
 def build_controller_archive(wheel: Path, output: Path) -> dict:
@@ -119,7 +127,7 @@ def build_controller_archive(wheel: Path, output: Path) -> dict:
                 'guide/build-and-boot.md')
     if any('lib/quirkbench/' + name not in files for name in required):
         raise ValueError('controller wheel is missing installed resources')
-    files.update({'bin/quirkbench': LAUNCHER, 'bin/quirkbench-worker': WORKER_LAUNCHER,
+    files.update({'install': INSTALL_LAUNCHER, 'bin/quirkbench': LAUNCHER, 'bin/quirkbench-worker': WORKER_LAUNCHER,
                   'bin/quirkbench-job-worker': JOB_LAUNCHER, 'bin/quirkbench-controller-service': SERVICE_LAUNCHER,
                   'INSTALL.txt': INSTRUCTIONS})
     manifest = {'schema_version': 1, 'version': version, 'requires_python': '>=3.11',
@@ -135,7 +143,7 @@ def build_controller_archive(wheel: Path, output: Path) -> dict:
                 for name, data in sorted(files.items()):
                     entry = tarfile.TarInfo(root + '/' + name)
                     entry.size = len(data)
-                    entry.mode = 0o755 if name.startswith('bin/') else 0o644
+                    entry.mode = 0o755 if name == 'install' or name.startswith('bin/') else 0o644
                     archive.addfile(entry, io.BytesIO(data))
             stream.flush()
             os.fsync(stream.fileno())

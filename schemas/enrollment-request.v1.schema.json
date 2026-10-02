@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "enrollment-request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "request_id",
+    "code_id",
+    "media_instance_id",
+    "public_key",
+    "target_binding"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "code_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "media_instance_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "public_key": {
+      "type": "string",
+      "minLength": 60,
+      "maxLength": 60,
+      "pattern": "^[A-Za-z0-9+/]{59}=$"
+    },
+    "target_binding": {
+      "title": "Quirkbench TargetBinding v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "system_uuid"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "type": "integer"
+        },
+        "system_uuid": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$",
+          "not": {
+            "enum": [
+              "00000000-0000-0000-0000-000000000000",
+              "ffffffff-ffff-ffff-ffff-ffffffffffff"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

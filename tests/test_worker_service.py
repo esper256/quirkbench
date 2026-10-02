@@ -80,7 +80,7 @@ def test_transient_user_unit_launch_uses_fenced_installed_program(tmp_path):
     service, fake, _ = manager(tmp_path)
     with c.lifecycle() as owner:
         operation = c.admit_operation('request', 'image_prepare', {})
-        claimed = owner.dispatch(operation['id'], stage='build', deadline=c.clock() + 60,
+        claimed = owner.dispatch(operation['id'], stage='recovery_rootfs', deadline=c.clock() + 60,
                                  services=service)
         argv = fake.calls[0][0]
         assert argv[0] == 'systemd-run'
@@ -98,6 +98,20 @@ def test_transient_user_unit_launch_uses_fenced_installed_program(tmp_path):
         assert claimed['worker_boot_id'] == BOOT
 
 
+def test_recovery_launch_native_timeout_stays_bounded_after_wall_clock_rollback(tmp_path):
+    c = controller(tmp_path)
+    service, fake, _ = manager(tmp_path)
+    with c.lifecycle() as owner:
+        operation = c.admit_operation('download', 'recovery_download', {})
+        deadline = c.clock() + 3599
+        claimed = owner.claim(operation['id'], stage='recovery_download', deadline=deadline)
+        service.clock = lambda: deadline - 7200
+        service.launch(claimed, c.root)
+        argv = fake.calls[0][0]
+        assert '--property=RuntimeMaxSec=3600s' in argv
+        assert claimed['deadline'] == deadline
+
+
 @pytest.mark.parametrize('name,value', [
     ('cpu.max', 'max 100000\n'),
     ('memory.max', 'max\n'),
@@ -111,7 +125,7 @@ def test_unenforced_worker_limit_keeps_launch_ambiguous(tmp_path, name, value):
     with c.lifecycle() as owner:
         operation = c.admit_operation('request', 'image_prepare', {})
         with pytest.raises(WorkerServiceError, match='resource limits'):
-            owner.dispatch(operation['id'], stage='build', deadline=c.clock() + 60,
+            owner.dispatch(operation['id'], stage='recovery_rootfs', deadline=c.clock() + 60,
                            services=service)
         status = c.operation_status(operation['id'])['data']
         assert status['state'] == 'INTERRUPTED'
@@ -125,17 +139,17 @@ def test_ambiguous_launch_retains_unit_and_blocks_replacement(tmp_path):
     with c.lifecycle() as owner:
         old = c.admit_operation('old', 'image_prepare', {})
         with pytest.raises(WorkerServiceError, match='uncertain'):
-            owner.dispatch(old['id'], stage='build', deadline=c.clock() + 60,
+            owner.dispatch(old['id'], stage='recovery_rootfs', deadline=c.clock() + 60,
                            services=service)
         status = c.operation_status(old['id'])['data']
         assert status['state'] == 'INTERRUPTED'
         assert status['worker_unit'] is not None
         newer = c.admit_operation('new', 'image_prepare', {})
         with pytest.raises(Conflict, match='termination'):
-            owner.claim(newer['id'], stage='build', deadline=c.clock() + 60)
+            owner.claim(newer['id'], stage='recovery_rootfs', deadline=c.clock() + 60)
         fake.timeout_on = None
         assert owner.reconcile_units(service) == [old['id']]
-        assert owner.claim(newer['id'], stage='build', deadline=c.clock() + 60)['state'] == 'RUNNING'
+        assert owner.claim(newer['id'], stage='recovery_rootfs', deadline=c.clock() + 60)['state'] == 'RUNNING'
 
 
 def test_collected_unit_after_confirmed_stop_can_clear_fence(tmp_path):
@@ -144,7 +158,7 @@ def test_collected_unit_after_confirmed_stop_can_clear_fence(tmp_path):
     fake.collect_on_stop = True
     with c.lifecycle() as owner:
         old = c.admit_operation('old', 'image_prepare', {})
-        claim = owner.claim(old['id'], stage='build', deadline=c.clock() + 60)
+        claim = owner.claim(old['id'], stage='recovery_rootfs', deadline=c.clock() + 60)
         c._publish_operation(old['id'], claim['worker_epoch'], claim['worker_generation'],
                              state='SUCCEEDED', result={'public_artifacts': [], 'private_deliverable': None})
         assert owner.reconcile_units(service) == [old['id']]
@@ -157,11 +171,11 @@ def test_definite_preflight_error_does_not_reserve_a_worker(tmp_path):
     with c.lifecycle() as owner:
         old = c.admit_operation('old', 'image_prepare', {})
         with pytest.raises(WorkerServiceError, match='not configured'):
-            owner.dispatch(old['id'], stage='build', deadline=c.clock() + 60,
+            owner.dispatch(old['id'], stage='recovery_rootfs', deadline=c.clock() + 60,
                            services=service)
         service.worker_program = tmp_path / 'worker-program'
         with pytest.raises(WorkerServiceError, match='deadline'):
-            owner.dispatch(old['id'], stage='build', deadline=c.clock() + 90000,
+            owner.dispatch(old['id'], stage='recovery_rootfs', deadline=c.clock() + 90000,
                            services=service)
         row = c.operation_status(old['id'])['data']
         assert row['state'] == 'QUEUED' and row['worker_unit'] is None
@@ -180,13 +194,13 @@ def test_definite_error_after_claim_clears_unlaunched_unit(tmp_path):
     with c.lifecycle() as owner:
         old = c.admit_operation('old', 'image_prepare', {})
         with pytest.raises(WorkerServiceError, match='disappeared'):
-            owner.dispatch(old['id'], stage='build', deadline=c.clock() + 60,
+            owner.dispatch(old['id'], stage='recovery_rootfs', deadline=c.clock() + 60,
                            services=RejectedService())
         row = c.operation_status(old['id'])['data']
         assert row['state'] == 'FAILED' and row['worker_unit'] is None
         assert row['error_digest'] is not None
         newer = c.admit_operation('new', 'image_prepare', {})
-        assert owner.claim(newer['id'], stage='build', deadline=c.clock() + 60)['state'] == 'RUNNING'
+        assert owner.claim(newer['id'], stage='recovery_rootfs', deadline=c.clock() + 60)['state'] == 'RUNNING'
 
 
 def test_terminal_result_waits_for_descendant_cgroup_to_empty(tmp_path):
@@ -194,19 +208,19 @@ def test_terminal_result_waits_for_descendant_cgroup_to_empty(tmp_path):
     service, fake, cgroup = manager(tmp_path)
     with c.lifecycle() as owner:
         old = c.admit_operation('old', 'image_prepare', {})
-        claimed = owner.claim(old['id'], stage='build', deadline=c.clock() + 60)
+        claimed = owner.claim(old['id'], stage='recovery_rootfs', deadline=c.clock() + 60)
         c._publish_operation(old['id'], claimed['worker_epoch'], claimed['worker_generation'],
                              state='SUCCEEDED', result={'public_artifacts': [], 'private_deliverable': None})
         newer = c.admit_operation('new', 'image_prepare', {})
         with pytest.raises(Conflict, match='termination'):
-            owner.claim(newer['id'], stage='build', deadline=c.clock() + 60)
+            owner.claim(newer['id'], stage='recovery_rootfs', deadline=c.clock() + 60)
         cgroup.joinpath('cgroup.events').write_text('populated 1\nfrozen 0\n')
         with pytest.raises(WorkerServiceError, match='descendants'):
             owner.reconcile_units(service)
         assert c.operation_status(old['id'])['data']['worker_unit'] is not None
         cgroup.joinpath('cgroup.events').write_text('populated 0\nfrozen 0\n')
         assert owner.reconcile_units(service) == [old['id']]
-        assert owner.claim(newer['id'], stage='build', deadline=c.clock() + 60)['state'] == 'RUNNING'
+        assert owner.claim(newer['id'], stage='recovery_rootfs', deadline=c.clock() + 60)['state'] == 'RUNNING'
 
 
 @pytest.mark.parametrize('populated', ['0', '1'])
@@ -217,7 +231,7 @@ def test_already_failed_unit_reconciles_only_when_cgroup_empty(tmp_path, populat
     cgroup.joinpath('cgroup.events').write_text(f'populated {populated}\nfrozen 0\n')
     with c.lifecycle() as owner:
         old = c.admit_operation('old', 'image_prepare', {})
-        claim = owner.claim(old['id'], stage='build', deadline=c.clock() + 60)
+        claim = owner.claim(old['id'], stage='recovery_rootfs', deadline=c.clock() + 60)
         c._publish_operation(old['id'], claim['worker_epoch'], claim['worker_generation'],
                              state='FAILED', error={'code': 'BUILD_FAILED', 'message': 'failed', 'retryable': False})
         if populated == '0':
@@ -234,7 +248,7 @@ def test_same_boot_unverified_stop_keeps_worker_fence(tmp_path, failure):
     service, fake, cgroup = manager(tmp_path)
     with c.lifecycle() as owner:
         old = c.admit_operation('old', 'image_prepare', {})
-        owner.claim(old['id'], stage='build', deadline=c.clock() + 60)
+        owner.claim(old['id'], stage='recovery_rootfs', deadline=c.clock() + 60)
         # An active unit must be interrupted before replacement cleanup.
         with c.transaction() as db:
             db.execute("UPDATE operations SET state='INTERRUPTED',worker_epoch=NULL WHERE id=?", (old['id'],))
@@ -254,7 +268,7 @@ def test_old_controller_boot_clears_unit_without_signalling_new_boot(tmp_path):
     service, fake, _ = manager(tmp_path, boot_id=NEXT_BOOT)
     with c.lifecycle() as owner:
         old = c.admit_operation('old', 'image_prepare', {})
-        owner.claim(old['id'], stage='build', deadline=c.clock() + 60)
+        owner.claim(old['id'], stage='recovery_rootfs', deadline=c.clock() + 60)
         with c.transaction() as db:
             db.execute("UPDATE operations SET state='INTERRUPTED',worker_epoch=NULL WHERE id=?", (old['id'],))
         assert owner.reconcile_units(service) == [old['id']]
@@ -272,7 +286,7 @@ def test_reconciliation_result_after_epoch_change_cannot_clear_identity(tmp_path
 
     with c.lifecycle() as owner:
         old = c.admit_operation('old', 'image_prepare', {})
-        claim = owner.claim(old['id'], stage='build', deadline=c.clock() + 60)
+        claim = owner.claim(old['id'], stage='recovery_rootfs', deadline=c.clock() + 60)
         c._publish_operation(old['id'], claim['worker_epoch'], claim['worker_generation'],
                              state='SUCCEEDED', result={'public_artifacts': [], 'private_deliverable': None})
         with pytest.raises(Conflict, match='changed during reconciliation'):
@@ -300,7 +314,7 @@ def test_restore_clears_terminal_unit_from_source_controller(tmp_path):
     c = controller(tmp_path)
     with c.lifecycle() as owner:
         operation = c.admit_operation('request', 'image_prepare', {})
-        claim = owner.claim(operation['id'], stage='build', deadline=c.clock() + 60)
+        claim = owner.claim(operation['id'], stage='recovery_rootfs', deadline=c.clock() + 60)
         c._publish_operation(operation['id'], claim['worker_epoch'], claim['worker_generation'],
                              state='SUCCEEDED', result={'public_artifacts': [], 'private_deliverable': None})
     backup = tmp_path / 'backup'

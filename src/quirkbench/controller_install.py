@@ -63,11 +63,14 @@ def _lock(path):
         os.close(fd)
 
 
-def _verified_archive(archive):
+def _verified_archive(archive, *, expected_archive_sha256=None, expected_version=None):
     path = Path(archive)
     if path.is_symlink() or not path.is_file() or path.stat().st_size > LIMIT:
         raise ContractError('controller archive must be a bounded regular file')
-    raw = path.read_bytes()
+    raw = read_file(path.parent, path.name, limit=LIMIT)
+    archive_digest = hashlib.sha256(raw).hexdigest()
+    if expected_archive_sha256 is not None and archive_digest != expected_archive_sha256:
+        raise ContractError('controller archive changed or differs from authenticated release identity')
     files = {}; modes = {}; total = 0; prefix = None
     with tarfile.open(fileobj=io.BytesIO(raw), mode='r:gz') as source:
         for member in source:
@@ -101,16 +104,22 @@ def _verified_archive(archive):
                 'bin/quirkbench-worker','lib/quirkbench/quirkbench-controller.service'}
     if not required <= files.keys():
         raise ContractError('archive lacks fixed runtime/service launchers')
+    if expected_version is not None and manifest['version'] != expected_version:
+        raise ContractError('controller archive changed or differs from authenticated release version')
     for name, expected in manifest['files'].items():
         if hashlib.sha256(files[name]).hexdigest() != expected:
             raise ContractError('controller archive checksum mismatch')
-        if modes[name] != (0o755 if name.startswith('bin/') else 0o644):
+        if modes[name] != (0o755 if name == 'install' or name.startswith('bin/') else 0o644):
             raise ContractError('unexpected controller archive file mode')
-    return manifest, files, hashlib.sha256(raw).hexdigest()
+    return manifest, files, archive_digest
 
 
-def install(archive, *, data_home=None):
-    manifest, files, archive_digest = _verified_archive(archive)
+def install(archive, *, data_home=None, expected_archive_sha256=None, expected_version=None):
+    manifest, files, archive_digest = _verified_archive(archive,
+        expected_archive_sha256=expected_archive_sha256, expected_version=expected_version)
+    if ((expected_archive_sha256 is not None and archive_digest != expected_archive_sha256)
+            or (expected_version is not None and manifest['version'] != expected_version)):
+        raise ContractError('controller archive changed or differs from authenticated release identity')
     base = _managed(_home(data_home, 'XDG_DATA_HOME', '.local/share') / 'quirkbench/controller')
     base.mkdir(parents=True, exist_ok=True, mode=0o700)
     runtime = base / (manifest['version'] + '-' + archive_digest)
@@ -127,7 +136,7 @@ def install(archive, *, data_home=None):
                     target = stage / name
                     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
                     atomic_write(target, raw)
-                    target.chmod(0o755 if name.startswith('bin/') else 0o644)
+                    target.chmod(0o755 if name == 'install' or name.startswith('bin/') else 0o644)
                 os.rename(stage, runtime)
                 sync_directory(base)
             finally:
@@ -150,6 +159,8 @@ def verify_installation(runtime, expected_files=None):
             or runtime.name != record['version'] + '-' + record['archive_sha256']):
         raise ContractError('invalid installed software identity')
     names = set(manifest['files']) | {'controller-manifest.json','installation.json'}
+    if expected_files is not None and names != set(expected_files):
+        raise ContractError('installation contents differ from authenticated archive')
     actual = set()
     for directory, dirs, entries in os.walk(runtime, followlinks=False):
         for name in dirs:
@@ -162,7 +173,7 @@ def verify_installation(runtime, expected_files=None):
     for name in names:
         raw = read_file(runtime, name, limit=LIMIT)
         mode = stat.S_IMODE((runtime/name).stat().st_mode)
-        if mode != (0o755 if name.startswith('bin/') else 0o644):
+        if mode != (0o755 if name == 'install' or name.startswith('bin/') else 0o644):
             raise ContractError('installation file mode differs')
         if name in manifest['files'] and hashlib.sha256(raw).hexdigest() != manifest['files'][name]:
             raise ContractError('installation bytes differ; refusing replacement')

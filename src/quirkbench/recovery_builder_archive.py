@@ -17,7 +17,7 @@ MAX_ARCHIVE_BYTES = 8 * 1024**3
 MAX_JSON_BYTES = 1024 * 1024
 
 
-def inspect_builder_archive(stream, expected_config: str) -> None:
+def inspect_builder_archive(stream, expected_config: str, *, require_no_entrypoint=False) -> None:
     """Require the locked archive to contain exactly the expected OCI image.
 
     Layers are hashed as stored; the archive is never extracted or executed.
@@ -136,6 +136,9 @@ def inspect_builder_archive(stream, expected_config: str) -> None:
                     or any(not isinstance(value, str) or not BLOB.fullmatch(value)
                            for value in config['rootfs']['diff_ids'])):
                 raise BuildError('builder OCI archive config platform or layer count differs')
+            if require_no_entrypoint and (not isinstance(config.get('config', {}), dict)
+                    or config.get('config', {}).get('Entrypoint') not in (None, [])):
+                raise BuildError('supported setup builder must have no OCI Entrypoint')
             for layer in manifest['layers']:
                 if (not isinstance(layer, dict) or layer.get('mediaType') not in (
                         'application/vnd.oci.image.layer.v1.tar',

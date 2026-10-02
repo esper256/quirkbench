@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quirkbench.invalid/schemas/controller-setup-progress.v1.schema.json",
+  "title": "Controller setup progress v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "setup_id",
+    "request_id",
+    "request_digest",
+    "intent",
+    "completed_steps"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "setup_id": {
+      "type": "string",
+      "pattern": "^setup-[0-9a-f]{32}$"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "request_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state_root",
+        "runtime_root",
+        "cache_gib",
+        "reserve_gib",
+        "host",
+        "port",
+        "allow_lan",
+        "logout_policy",
+        "runtime_archive_sha256",
+        "runtime_manifest_sha256"
+      ],
+      "properties": {
+        "state_root": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 4096,
+          "pattern": "^/(?!$)(?!.*(?:/\\.\\.?(/|$)|//))[^\\x00]*[^/]$"
+        },
+        "runtime_root": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 4096,
+              "pattern": "^/(?!$)(?!.*(?:/\\.\\.?(/|$)|//))[^\\x00]*[^/]$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cache_gib": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "reserve_gib": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "host": {
+          "type": "string",
+          "maxLength": 45,
+          "anyOf": [
+            {
+              "format": "ipv4"
+            },
+            {
+              "format": "ipv6"
+            }
+          ]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "allow_lan": {
+          "type": "boolean"
+        },
+        "logout_policy": {
+          "enum": [
+            "session",
+            "existing_linger"
+          ]
+        },
+        "runtime_archive_sha256": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          ]
+        },
+        "runtime_manifest_sha256": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "runtime_root": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "runtime_archive_sha256": {
+                "type": "null"
+              },
+              "runtime_manifest_sha256": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "runtime_archive_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "runtime_manifest_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "allow_lan": {
+                "const": false
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "host": {
+                "anyOf": [
+                  {
+                    "pattern": "^127\\."
+                  },
+                  {
+                    "const": "::1"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "completed_steps": {
+      "enum": [
+        [],
+        [
+          "state_selected"
+        ],
+        [
+          "state_selected",
+          "database_initialized"
+        ],
+        [
+          "state_selected",
+          "database_initialized",
+          "preferences_recorded"
+        ]
+      ]
+    }
+  }
+}

@@ -12,13 +12,60 @@ from .controller import Controller
 from .state_config import configure_state_root, discover_state_root
 
 
+class CommandParser(argparse.ArgumentParser):
+    def parse_args(self,args=None,namespace=None):
+        value=super().parse_args(args,namespace)
+        if value.command=='target':
+            client=('url','ca','token_file','report')
+            if value.action is None:
+                if value.name is not None or any(getattr(value,key) is None for key in client):
+                    self.error('target client requires --url, --ca, --token-file and --report')
+                if value.json or value.request_id or value.ttl_seconds is not None or value.status_version is not None:
+                    self.error('enrollment options require target administration')
+            else:
+                if value.name is None:self.error('target '+value.action+' requires NAME or TARGET')
+                if any(getattr(value,key) is not None for key in client) or value.once or value.interval!=5:
+                    self.error('target administration cannot include target client options')
+                if value.action=='show' and (value.request_id or value.ttl_seconds is not None):
+                    self.error('target show is read-only')
+                if value.action!='show' and value.status_version is not None:self.error('--status-version requires target show')
+                if value.action not in ('add','drain-approve','retarget-code') and value.ttl_seconds is not None:self.error('--ttl-seconds requires target add, drain-approve or retarget-code')
+            if value.action not in ('revoke','retarget-code') and value.generation is not None:self.error('--generation requires target revoke or retarget-code')
+            if value.action=='retarget-code':
+                if any(getattr(value,key) is None for key in ('generation','new_name','new_uuid','request_id')):
+                    self.error('target retarget-code requires --generation, --new-name, --new-uuid and --request-id')
+            elif value.new_name is not None or value.new_uuid is not None:self.error('--new-name and --new-uuid require target retarget-code')
+            if value.action=='drain-approve':
+                if value.file is None:self.error('target drain-approve requires --file with an exact evidence plan')
+            elif value.file is not None:self.error('--file requires target drain-approve')
+            if value.action=='drain-revoke':
+                if value.grant is None:self.error('target drain-revoke requires --grant')
+            elif value.grant is not None:self.error('--grant requires target drain-revoke')
+        return value
+
+
 def parser():
-    result = argparse.ArgumentParser(prog='quirkbench', description=__doc__)
+    result = CommandParser(prog='quirkbench', description=__doc__)
     result.add_argument('--state', type=Path, help='explicit controller state root; overrides configured selection')
     result.add_argument('--reserve-gib', type=float, default=20)
     result.add_argument('--repositories', type=Path, help='JSON mapping of configured OSTree repository aliases to absolute directories')
     commands = result.add_subparsers(dest='command', required=True)
     commands.add_parser('setup-state', help='select private controller state for manual service setup')
+    setup = commands.add_parser('setup', help='resume initial controller setup and optional native service startup')
+    setup.add_argument('--request-id', help='durable retry identity; required with --json')
+    setup.add_argument('--runtime', type=Path, help='verified immutable installed runtime root')
+    setup.add_argument('--cache-gib', type=int)
+    setup.add_argument('--reserve-gib', type=float, dest='setup_reserve_gib')
+    setup.add_argument('--host', help='record the literal controller bind IP')
+    setup.add_argument('--port', type=int)
+    setup.add_argument('--allow-lan', action='store_true', default=None)
+    setup.add_argument('--logout-policy', choices=['session', 'existing_linger'])
+    setup.add_argument('--start-service', action='store_true', help='create private local TLS and enable/start the existing controller user unit')
+    setup.add_argument('--builder-archive', type=Path, help='admit signed OCI capture/import to the existing worker')
+    setup.add_argument('--builder-request-id', help='builder retry identity; defaults to the setup request ID plus -builder')
+    setup.add_argument('--json', action='store_true')
+    status = commands.add_parser('status', help='read independent controller readiness; never initializes state')
+    status.add_argument('--json', action='store_true')
     preferences = commands.add_parser('settings', help='show or configure local retention preferences')
     preferences.add_argument('action', choices=['show','set'])
     preferences.add_argument('key', nargs='?'); preferences.add_argument('value', type=int, nargs='?')
@@ -28,6 +75,24 @@ def parser():
     install.add_argument('--activate', action='store_true')
     install.add_argument('--rollback', action='store_true')
     install.add_argument('--json', action='store_true')
+    install.add_argument('--release-statement', type=Path)
+    install.add_argument('--release-signature', type=Path)
+    install.add_argument('--release-key', type=Path, help='independently trusted publisher public key')
+    install.add_argument('--release-fingerprint', help='full independently trusted publisher fingerprint')
+    install.add_argument('--release-recovery', type=Path)
+    install.add_argument('--release-builder', type=Path)
+    install.add_argument('--release-catalog', type=Path)
+    install.add_argument('--release-recovery-manifest', type=Path)
+    install.add_argument('--release-recovery-candidate', type=Path)
+    release = commands.add_parser('release-install', help='acquire and verify a signed controller; unavailable without independent publisher trust')
+    release.add_argument('version')
+    release.add_argument('--request-id', help='required with --json; human retries use release-VERSION')
+    release.add_argument('--trust-bundle', type=Path, help='independently provisioned production trust bundle')
+    release.add_argument('--json', action='store_true')
+    recovery_download=commands.add_parser('recovery',help='acquire the factory image matching the signed installed controller')
+    recovery_download.add_argument('action',choices=['download'])
+    recovery_download.add_argument('--request-id');recovery_download.add_argument('--trust-bundle',type=Path)
+    recovery_download.add_argument('--json',action='store_true')
     monitor = commands.add_parser('monitor', help='manually opened, read-only progress dashboard; never opens windows')
     monitor.add_argument('--run', dest='run_id'); monitor.add_argument('--once', action='store_true')
     monitor.add_argument('--json', action='store_true')
@@ -123,14 +188,27 @@ def parser():
     resolve = commands.add_parser('resolve'); resolve.add_argument('attempt_id'); resolve.add_argument('disposition', choices=['retry','abandon']); resolve.add_argument('--note', required=True)
     snapshot = commands.add_parser('snapshot'); snapshot.add_argument('campaign_id'); snapshot.add_argument('--source', type=Path, required=True); snapshot.add_argument('files', nargs='+')
     agent = commands.add_parser('agent-step'); agent.add_argument('campaign_id'); agent.add_argument('argv', nargs=argparse.REMAINDER)
-    serve = commands.add_parser('serve'); serve.add_argument('--host', default='127.0.0.1', help='controller service bind address'); serve.add_argument('--port', type=int, default=8443); serve.add_argument('--allow-lan', action='store_true'); serve.add_argument('--cert', required=True); serve.add_argument('--key', required=True); serve.add_argument('--tokens-file', type=Path, required=True)
-    target = commands.add_parser('target'); target.add_argument('--url', required=True); target.add_argument('--ca', required=True); target.add_argument('--token-file', type=Path, required=True); target.add_argument('--report', type=Path, required=True); target.add_argument('--once', action='store_true'); target.add_argument('--interval', type=float, default=5)
+    serve = commands.add_parser('serve'); serve.add_argument('--host', default='127.0.0.1', help='controller service bind address'); serve.add_argument('--port', type=int, default=8443); serve.add_argument('--allow-lan', action='store_true'); serve.add_argument('--cert', required=True); serve.add_argument('--key', required=True)
+    authentication = serve.add_mutually_exclusive_group(required=True)
+    authentication.add_argument('--tokens-file', type=Path)
+    authentication.add_argument('--credential-registry', action='store_true', help='explicit registry mode; guided exchange also requires configured native repository publication')
+    target = commands.add_parser('target',help='create an invitation, read target facts, or run the legacy HTTPS target client')
+    target.add_argument('action',choices=['add','show','revoke','revoke-code','drain-approve','drain-revoke','retarget-code'],nargs='?');target.add_argument('name',nargs='?')
+    target.add_argument('--request-id');target.add_argument('--ttl-seconds',type=int);target.add_argument('--json',action='store_true')
+    target.add_argument('--status-version',type=int,choices=[1,2],help='versioned target facts; JSON defaults to v1, human output to v2')
+    target.add_argument('--generation',help='exact credential generation expected by target revoke')
+    target.add_argument('--new-name',help='new enrollment name for an explicitly scoped retarget invitation')
+    target.add_argument('--new-uuid',help='exact new SMBIOS system UUID for an explicitly scoped retarget invitation')
+    target.add_argument('--file',type=Path,help='exact original evidence manifest for explicit drain approval')
+    target.add_argument('--grant',help='exact old-evidence drain grant to revoke')
+    target.add_argument('--url'); target.add_argument('--ca'); target.add_argument('--token-file', type=Path); target.add_argument('--report', type=Path); target.add_argument('--once', action='store_true'); target.add_argument('--interval', type=float, default=5)
     watch = commands.add_parser('watch'); watch.add_argument('campaign_id'); watch.add_argument('--interval', type=float, default=2); watch.add_argument('--once', action='store_true'); watch.add_argument('--json', action='store_true'); watch.add_argument('--session', help='include human requests for this session')
     build = commands.add_parser('build',help='build pinned source manifests inside the dedicated Fedora container'); build.add_argument('manifest',type=Path); build.add_argument('--workspace',type=Path); build.add_argument('--campaign')
     image = commands.add_parser('image',help='assemble a new regular-file USB image'); image.add_argument('manifest',type=Path)
     qualify = commands.add_parser('qualify-image',help='run ten real UEFI recovery, candidate, load-failure, panic and fallback trials'); qualify.add_argument('image',type=Path); qualify.add_argument('--manifest',type=Path,required=True); qualify.add_argument('--ovmf-code',type=Path,required=True); qualify.add_argument('--ovmf-vars',type=Path,required=True); qualify.add_argument('--work',type=Path,required=True); qualify.add_argument('--timeout',type=int,default=180)
     compose = commands.add_parser('compose',help='compose and sign a complete experimental Fedora OSTree revision'); compose.add_argument('manifest',type=Path); compose.add_argument('--workspace',type=Path); compose.add_argument('--publish-repo',type=Path,required=True); compose.add_argument('--campaign')
     repo = commands.add_parser('serve-repository',help='serve read-only OSTree content with mutual TLS'); repo.add_argument('--host',default='127.0.0.1',help='controller repository service bind address'); repo.add_argument('--port',type=int,default=8444); repo.add_argument('--allow-lan',action='store_true'); repo.add_argument('--cert',required=True); repo.add_argument('--key',required=True); repo.add_argument('--client-ca',required=True)
+    repo.add_argument('--credential-registry', action='store_true', help='require live registered leaf certificate in addition to mutual TLS')
     serve.add_argument('--job-worker',type=Path,help='installed fixed build/compose worker')
     serve.add_argument('--service-runtime',type=Path,help=argparse.SUPPRESS)
     for command in (build,compose):
@@ -150,19 +228,241 @@ def parser():
 
 def _main(argv=None):
     args = parser().parse_args(argv)
+    if args.command=='recovery':
+        from .recovery_download import submit
+        from .release_trust import ReleaseUnavailable
+        from .setup_contracts import SetupUnavailable
+        from .operations import operation_response
+        from .contracts import ContractError,Conflict
+        try:
+            if args.json and not args.request_id:raise ContractError('recovery download --json requires --request-id')
+            answer=submit(discover_state_root(args.state),args.request_id,trust_bundle=args.trust_bundle)
+            if args.json:print(json.dumps(answer,sort_keys=True))
+            else:
+                print('Recovery acquisition accepted: '+answer['operation_id'])
+                print('Inspect: '+answer['data']['status_command'])
+                print('Progress: '+answer['data']['monitor_command'])
+                print('Image authentication and compatibility precede publication. Qualification and writing media require separate authorization.')
+            return 0
+        except (OSError,ValueError,sqlite3.Error) as exc:
+            code,status=(('UNAVAILABLE',4) if isinstance(exc,(ReleaseUnavailable,SetupUnavailable)) else
+                ('CONFLICT',3) if isinstance(exc,Conflict) else ('INVALID_INPUT',2) if isinstance(exc,ContractError) else ('INFRASTRUCTURE',5))
+            if args.json:print(json.dumps(operation_response(error={'code':code,'message':str(exc),'retryable':False}),sort_keys=True))
+            else:print('Recovery acquisition blocked: '+str(exc),file=sys.stderr)
+            return status
+    if args.command=='target' and args.action is not None:
+        from .target_setup import add_target,show_target
+        from .operations import operation_response
+        from .contracts import Conflict,ContractError
+        from .setup_contracts import SetupUnavailable
+        request_id=args.request_id
+        try:
+            root=discover_state_root(args.state).expanduser().absolute()
+            if args.action=='add':
+                if args.json and not request_id:raise ContractError('target add --json requires --request-id')
+                answer=add_target(root,args.name,request_id,ttl_seconds=args.ttl_seconds)
+                request_id=answer['record']['request_id']
+            elif args.action=='show':answer=show_target(root,args.name,version=args.status_version or (1 if args.json else 2))
+            elif args.action=='retarget-code':
+                from .retarget_invitation import issue
+                answer=issue(root,args.name,args.generation,args.new_name,args.new_uuid,request_id,
+                    ttl_seconds=args.ttl_seconds if args.ttl_seconds is not None else 300)
+            elif args.action=='drain-approve':
+                from .evidence_drain import approve,load,validate_plan
+                from .state_reader import read_file
+                if not request_id:raise ContractError('target drain-approve requires an explicit --request-id')
+                path=args.file.expanduser().absolute()
+                plan=validate_plan(load(read_file(path.parent,path.name,limit=65536)))
+                answer=approve(root,args.name,plan,request_id,ttl_seconds=args.ttl_seconds if args.ttl_seconds is not None else 900)
+            elif args.action=='drain-revoke':
+                from .evidence_drain import revoke
+                answer=revoke(root,args.name,args.grant)
+            else:
+                from .target_lifecycle import revoke_target
+                if args.json and not request_id:raise ContractError('target revocation --json requires --request-id')
+                answer=revoke_target(root,args.name,request_id,generation=args.generation,action=args.action)
+                request_id=answer['request_id']
+            if args.json:print(json.dumps(operation_response(data=answer),sort_keys=True))
+            elif args.action in ('add','retarget-code'):
+                record=answer['record']
+                print('Enrollment request: '+record['request_id'])
+                print('Controller: '+record['controller_url'])
+                print('Compare this full certificate SHA-256 on the recovery console: '+record['certificate_sha256'])
+                print('One-use code: '+answer['code'])
+                print('Code ID: '+record['code_id'])
+                print('Expires at Unix time: '+str(record['expires_at']))
+                print('Pairing is pending. Exact candidate and attempt approval is still required.')
+                if args.action=='retarget-code':
+                    print('Retarget invitation only. Local one-shot clearance, original evidence preservation and stopped activation remain required.')
+            elif args.action=='show':
+                print('Target: '+(answer['device_id'] or answer['target']))
+                print('Enrollment: '+answer['enrollment']['state'])
+                print('Credentials live: '+str(answer['enrollment']['credentials_live']).lower())
+                print('Recorded recovery mode: '+str(answer['recovery']['reported_mode'] or 'unavailable'))
+                contact=answer['recovery']['contact_current']
+                print('Recent authenticated contact: '+('unknown' if contact is None else 'within 30 seconds' if contact else 'not current'))
+                print('Candidate input blockers: '+', '.join(answer['candidate_preparation']['blocking_reasons']))
+                print('Exact candidate and attempt approval is still required.')
+            elif args.action=='drain-approve':
+                record=answer['record']
+                print('Old-evidence drain grant: '+record['grant_id'])
+                print('Original attempt: '+record['plan']['attempt_id'])
+                print('Private credential file: '+answer['credential_file'])
+                print('Expires at Unix time: '+str(record['expires_at']))
+                print('Only the approved original evidence may be uploaded and acknowledged. Registration, execution and completion remain blocked.')
+            elif args.action=='drain-revoke':print('Revoked old-evidence drain grant: '+answer['grant_id'])
+            else:
+                print('Revocation request: '+answer['request_id'])
+                print('Revoked: '+(answer['generation'] or answer['code_id']))
+                print('Campaigns paused at revocation: '+(', '.join(answer['paused_campaigns_at_revoke']) or 'none'))
+                print('Unresolved attempts at revocation: '+(', '.join(answer['unresolved_attempts_at_revoke']) or 'none'))
+                print('Workers pending at revocation: '+(', '.join(answer['workers_pending_at_revoke']) or 'none'))
+                if answer['work_lists_truncated']:
+                    print('Lists show the first 1000 identities. Counts at revocation: '
+                          +str(answer['paused_campaign_count_at_revoke'])+' campaigns, '
+                          +str(answer['unresolved_attempt_count_at_revoke'])+' unresolved attempts, '
+                          +str(answer['worker_count_at_revoke'])+' workers.')
+                print('Physical shutdown and one-shot clearance require local verification. Old evidence retains its original attribution; draining requires separate maintenance.')
+            return 0
+        except (OSError,ValueError,sqlite3.Error) as exc:
+            code,status=(('UNAVAILABLE',4) if isinstance(exc,SetupUnavailable) else ('CONFLICT',3) if isinstance(exc,Conflict)
+                else ('INVALID_INPUT',2) if isinstance(exc,ContractError) else ('INFRASTRUCTURE',5))
+            message=str(exc)[:512] if code!='INFRASTRUCTURE' else 'target setup unavailable; retry the retained request'
+            if args.json:print(json.dumps(operation_response(data={'request_id':request_id},error={'code':code,'message':message,'retryable':status==5}),sort_keys=True))
+            else:print(code+': '+message,file=sys.stderr)
+            return status
+    if args.command == 'release-install':
+        from .release_install import acquire_install
+        from .release_trust import ReleaseUnavailable
+        from .contracts import Conflict, ContractError
+        from .operations import operation_response
+        request_id = args.request_id or ('release-' + args.version)
+        try:
+            if args.json and not args.request_id:
+                raise ContractError('release-install --json requires --request-id')
+            answer = acquire_install(args.version, request_id, trust_bundle=args.trust_bundle)
+            if args.json:
+                print(json.dumps(operation_response(data=answer), sort_keys=True))
+            else:
+                print('Release installation request: ' + request_id)
+                print('Installed runtime: ' + answer['runtime_root'])
+                print('Setup and artifact qualification remain incomplete.')
+            return 0
+        except (OSError, ValueError) as exc:
+            code, status = (('UNAVAILABLE', 4) if isinstance(exc, ReleaseUnavailable) else
+                            ('CONFLICT', 3) if isinstance(exc, Conflict) else
+                            ('INVALID_INPUT', 2) if isinstance(exc, ContractError) else ('INFRASTRUCTURE', 5))
+            message = str(exc)[:512] if code != 'INFRASTRUCTURE' else 'release acquisition unavailable; retry recorded request'
+            if args.json:
+                print(json.dumps(operation_response(data={'request_id': request_id},
+                    error={'code': code, 'message': message, 'retryable': code == 'INFRASTRUCTURE'}), sort_keys=True))
+            else:
+                print(request_id + ': ' + code + ': ' + message, file=sys.stderr)
+            return status
+    if args.command in ('setup', 'status'):
+        from .controller_setup import setup_controller, controller_status, setup_progress
+        from .setup_contracts import SetupUnavailable
+        from .contracts import Conflict, ContractError
+        from .operations import operation_response
+        operation_id = None
+        try:
+            if args.command == 'setup':
+                if args.json and not args.request_id:
+                    raise ContractError('setup --json requires --request-id')
+                answer = setup_controller(args.state, request_id=args.request_id, runtime_root=args.runtime,
+                    cache_gib=args.cache_gib, reserve_gib=args.setup_reserve_gib, host=args.host,
+                    port=args.port, allow_lan=args.allow_lan, logout_policy=args.logout_policy)
+                if args.start_service:
+                    from .setup_service import install_service
+                    service_result = install_service()
+                    answer = {**controller_status(Path(answer['state_root'])), 'service_setup_result': service_result}
+                if args.builder_archive:
+                    from .builder_setup import prepare
+                    answer['builder_preparation'] = prepare(Path(answer['state_root']),
+                        answer['setup_progress']['intent']['runtime_root'], args.builder_archive,
+                        args.builder_request_id or answer['setup_progress']['request_id'] + '-builder')
+                elif args.builder_request_id:
+                    raise ContractError('--builder-request-id requires --builder-archive')
+            else:
+                answer = controller_status(args.state)
+            progress = answer['setup_progress']
+            operation_id = (answer['builder_preparation']['operation_id'] if answer.get('builder_preparation')
+                            else progress['setup_id'] if progress else None)
+            if args.json:
+                print(json.dumps(operation_response(operation_id=operation_id, data=answer), sort_keys=True))
+            else:
+                if progress:
+                    print('Setup request: ' + progress['request_id'])
+                print('Controller state: ' + answer['state_root'])
+                print('Setup complete: no; pending ' + ', '.join(answer['pending_integration']))
+                print('Background work ready: ' + str(answer['background_work_ready']).lower())
+                print('Targets: ' + (str(answer['readiness']['target_count']) if answer['readiness']['target_count'] is not None else 'unknown'))
+                if answer.get('service_setup_result'):
+                    print('Controller certificate SHA256: ' + answer['service_setup_result']['certificate_sha256'])
+                if answer.get('builder_preparation'):
+                    print('Builder preparation operation: ' + answer['builder_preparation']['operation_id'])
+                for instruction in answer['instructions']:
+                    print(instruction)
+            return 0
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            code, exit_code = (('UNAVAILABLE', 4) if isinstance(exc, SetupUnavailable) else
+                               ('CONFLICT', 3) if isinstance(exc, Conflict) else
+                               ('INVALID_INPUT', 2) if isinstance(exc, ContractError) else ('INFRASTRUCTURE', 5))
+            try:
+                progress = setup_progress()
+                operation_id = progress['setup_id'] if progress else None
+            except (OSError, ValueError):
+                progress = None
+            message = str(exc)[:512] if code != 'INFRASTRUCTURE' else 'setup/status unavailable; recorded intent retained'
+            if args.json:
+                print(json.dumps(operation_response(operation_id=operation_id,
+                    data={'request_id': progress['request_id']} if progress else None,
+                    error={'code': code, 'message': message, 'retryable': code == 'INFRASTRUCTURE'}), sort_keys=True))
+            else:
+                if progress:
+                    print('Setup request: ' + progress['request_id'], file=sys.stderr)
+                print(code + ': ' + message, file=sys.stderr)
+            return exit_code
     explicit_state = args.state is not None
     if args.command == 'controller-install':
         from .controller_install import install, activate, rollback
         from .contracts import Conflict, ContractError
         from .operations import operation_response
         try:
+            release_inputs = (args.release_statement, args.release_signature, args.release_key, args.release_fingerprint)
+            asset_inputs = (args.release_recovery, args.release_builder, args.release_catalog)
+            sidecars = (args.release_recovery_manifest, args.release_recovery_candidate)
+            assets = None
+            if any(value is not None for value in (*asset_inputs, *sidecars)):
+                if not all(value is not None for value in (*release_inputs, *asset_inputs)):
+                    raise ContractError('release assets require complete signed release inputs and all three asset paths')
+                assets = dict(zip(('recovery_image', 'builder_archive', 'baseline_catalog'), asset_inputs))
+                if any(value is not None for value in sidecars):
+                    if not all(value is not None for value in sidecars):
+                        raise ContractError('release recovery compatibility requires both manifest and candidate')
+                    assets.update(zip(('recovery_manifest', 'recovery_candidate'), sidecars))
+            authenticated = None
+            if any(value is not None for value in release_inputs):
+                if not all(value is not None for value in release_inputs) or args.rollback or args.archive is None:
+                    raise ContractError('release verification requires archive, statement, signature, independent key and fingerprint')
+                from .controller_release import bounded_file, verify_release
+                parameters = {'assets': assets} if assets is not None else {}
+                authenticated = verify_release(args.archive, bounded_file(args.release_statement, 16384),
+                    bounded_file(args.release_signature, 65536), args.release_key, args.release_fingerprint, **parameters)
             if args.rollback:
                 if args.archive or args.activate: raise ContractError('--rollback takes no archive or --activate')
                 answer = rollback(discover_state_root(args.state))
             else:
                 if args.archive is None: raise ContractError('controller-install requires ARCHIVE')
-                answer = install(args.archive)
+                if authenticated is None:
+                    answer = install(args.archive)
+                else:
+                    statement = authenticated['statement']
+                    answer = install(args.archive, expected_archive_sha256=statement['controller_archive_sha256'],
+                                     expected_version=statement['controller_version'])
                 if args.activate: answer = activate(answer, discover_state_root(args.state))
+                if authenticated is not None:
+                    answer = {**answer, 'distribution_verification': authenticated}
             print(json.dumps(operation_response(data=answer), sort_keys=True))
             return 0
         except (OSError, ValueError, sqlite3.Error) as exc:
@@ -442,7 +742,9 @@ def _main(argv=None):
             from .repository_http import make_repository_server
             if not repository_paths: raise ValueError('serve-repository requires configured repositories')
             if args.host not in ('localhost','127.0.0.1','::1') and not args.allow_lan: raise ValueError('LAN binding requires --allow-lan')
-            server = make_repository_server((args.host,args.port),repository_paths,args.cert,args.key,args.client_ca)
+            from .credential_registry import CredentialRegistry
+            registry = CredentialRegistry(args.state) if args.credential_registry else None
+            server = make_repository_server((args.host,args.port),repository_paths,args.cert,args.key,args.client_ca, credential_registry=registry)
             print('OSTree repository service ready; mutual TLS required.',flush=True)
             try: server.serve_forever()
             finally: server.server_close()
@@ -629,7 +931,9 @@ def _main(argv=None):
                 answer = run_decision(controller, args.campaign_id, CommandAgent(args.argv))
             elif args.command == 'serve':
                 from .transport import make_server
-                tokens = json.loads(args.tokens_file.read_bytes())
+                from .credential_registry import CredentialRegistry
+                registry = CredentialRegistry(controller.root) if args.credential_registry else None
+                tokens = None if registry is not None else json.loads(args.tokens_file.read_bytes())
                 with controller.lifecycle() as owner:
                     coordinator=None
                     if args.recovery_worker is not None:
@@ -648,32 +952,35 @@ def _main(argv=None):
                         services=SystemdUserWorkerServices(worker_program=args.job_worker.resolve(),development=True)
                         owner.reconcile_units(services)
                         jobs=JobCoordinator(owner,services)
-                    server = make_server(controller, host=args.host, port=args.port, certfile=args.cert, keyfile=args.key, device_tokens=tokens, allow_lan=args.allow_lan)
-                    try:
-                        if coordinator is None and jobs is None:
-                            server.service_actions=owner.housekeep_requested
-                            server.serve_forever()
-                        else:
-                            import threading
-                            thread=threading.Thread(target=server.serve_forever,daemon=True); thread.start()
-                            try:
-                                from contextlib import nullcontext
-                                from .controller_service import readiness_heartbeat
-                                heartbeat=(readiness_heartbeat(owner,args.service_runtime)
-                                           if jobs is not None and args.service_runtime is not None else nullcontext([]))
-                                with heartbeat as failures:
-                                    while True:
-                                        if failures: raise failures[0]
-                                        result=coordinator.tick() if coordinator is not None else None
-                                        if result is not None: print('RECOVERY_IMAGE '+json.dumps(result,sort_keys=True),flush=True)
-                                        result=jobs.tick() if jobs is not None else None
-                                        if result is not None: print('JOB '+json.dumps(result,sort_keys=True),flush=True)
-                                        owner.housekeep_requested()
-                                        time.sleep(2)
-                            finally:
-                                server.shutdown(); thread.join(5)
-                    finally:
-                        server.server_close()
+                    from .enrollment_runtime import publication_runtime
+                    with publication_runtime(controller,registry=registry,service_runtime=args.service_runtime,
+                            host=args.host,port=args.port,certfile=args.cert,keyfile=args.key,allow_lan=args.allow_lan) as publication:
+                        server = make_server(controller, host=args.host, port=args.port, certfile=args.cert, keyfile=args.key, device_tokens=tokens, credential_registry=registry, allow_lan=args.allow_lan, enrollment_service=publication.application,tls_context=publication.tls_context)
+                        try:
+                            if coordinator is None and jobs is None:
+                                server.service_actions=owner.housekeep_requested
+                                server.serve_forever()
+                            else:
+                                import threading
+                                thread=threading.Thread(target=server.serve_forever,daemon=True); thread.start()
+                                try:
+                                    from contextlib import nullcontext
+                                    from .controller_service import readiness_heartbeat
+                                    heartbeat=(readiness_heartbeat(owner,args.service_runtime,capabilities=publication.capabilities)
+                                               if jobs is not None and args.service_runtime is not None else nullcontext([]))
+                                    with heartbeat as failures:
+                                        while True:
+                                            if failures: raise failures[0]
+                                            result=coordinator.tick() if coordinator is not None else None
+                                            if result is not None: print('RECOVERY_IMAGE '+json.dumps(result,sort_keys=True),flush=True)
+                                            result=jobs.tick() if jobs is not None else None
+                                            if result is not None: print('JOB '+json.dumps(result,sort_keys=True),flush=True)
+                                            owner.housekeep_requested()
+                                            time.sleep(2)
+                                finally:
+                                    server.shutdown(); thread.join(5)
+                        finally:
+                            server.server_close()
                 answer = {'stopped': True}
             else:
                 raise ValueError('unknown command')
@@ -702,14 +1009,14 @@ def _main(argv=None):
 def main(argv=None):
     """A publication barrier, not a scheduler; read-only commands do no housekeeping."""
     args=parser().parse_args(argv)
-    readonly=(args.command in ('build','compose','monitor','watch','target-inventory','operation','doctor','setup-check','recovery-images',
+    readonly=(args.command in ('build','compose','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
                                'target','target-service','serve-repository') or
               (args.command=='campaign' and args.action=='status') or
               (args.command=='settings' and args.action=='show') or
               (args.command=='maintenance' and args.action in ('status','prune')) or
               (args.command=='session' and args.action in ('observations','observation')) or
               (args.command=='build-cache' and args.action=='list'))
-    if readonly or args.command in ('setup-state','serve','controller-install'): return _main(argv)
+    if readonly or args.command in ('setup-state','setup','serve','controller-install','release-install'): return _main(argv)
     try:
         root=discover_state_root(args.state).expanduser().absolute()
         if not (root/'controller.sqlite').is_file(): return _main(argv)

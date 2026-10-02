@@ -1,0 +1,104 @@
+{
+  "schema_version": 4,
+  "cases": [
+    {
+      "argv": [
+        "target",
+        "add",
+        "lab",
+        "--request-id",
+        "pair-1",
+        "--ttl-seconds",
+        "300",
+        "--json"
+      ],
+      "expected": {
+        "action": "add",
+        "name": "lab",
+        "request_id": "pair-1",
+        "ttl_seconds": 300,
+        "json": true
+      }
+    },
+    {
+      "argv": [
+        "target",
+        "show",
+        "lab",
+        "--json"
+      ],
+      "expected": {
+        "action": "show",
+        "name": "lab",
+        "json": true
+      }
+    },
+    {
+      "argv": [
+        "target",
+        "--url",
+        "https://192.0.2.1:8443",
+        "--ca",
+        "ca.pem",
+        "--token-file",
+        "token",
+        "--report",
+        "report",
+        "--once"
+      ],
+      "expected": {
+        "action": null,
+        "url": "https://192.0.2.1:8443",
+        "once": true
+      }
+    },
+    {
+      "argv": [
+        "target",
+        "show",
+        "lab",
+        "--status-version",
+        "2",
+        "--json"
+      ],
+      "expected": {
+        "action": "show",
+        "name": "lab",
+        "status_version": 2,
+        "json": true
+      }
+    },
+    {
+      "argv": [
+        "target",
+        "revoke",
+        "lab",
+        "--generation",
+        "generation-1",
+        "--request-id",
+        "revoke-1",
+        "--json"
+      ],
+      "expected": {
+        "action": "revoke",
+        "name": "lab",
+        "generation": "generation-1",
+        "request_id": "revoke-1",
+        "json": true
+      }
+    },
+    {
+      "argv": [
+        "target",
+        "revoke-code",
+        "code-1"
+      ],
+      "expected": {
+        "action": "revoke-code",
+        "name": "code-1",
+        "request_id": null,
+        "json": false
+      }
+    }
+  ]
+}

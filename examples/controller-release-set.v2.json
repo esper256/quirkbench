@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "record_type": "controller-release-set",
+  "controller_version": "0.1.0",
+  "architecture": "x86_64",
+  "controller_api": 1,
+  "target_api": 1,
+  "requires_python": ">=3.11",
+  "qualification_status": "unqualified",
+  "issued_at": 1,
+  "expires_at": 4102444800,
+  "controller_archive_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "recovery_image_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "builder_archive_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "baseline_catalog_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "interfaces": {
+    "image_layout": 2,
+    "recovery_config": 2,
+    "recovery_candidate": 2,
+    "baseline_catalog": 1,
+    "device_protocol": 1,
+    "target_binding": 1
+  },
+  "builder_image_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "builder_config_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "recovery_manifest_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "recovery_candidate_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+}

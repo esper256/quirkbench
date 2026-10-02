@@ -8,15 +8,53 @@ import multiprocessing
 import os
 from pathlib import Path
 import signal
+import stat
 import tempfile
 import time
 from typing import Callable, Protocol
 import uuid
 
-from .contracts import CapabilityReport, Experiment, Outcome, Progress, Result, canonical, digest, identifier, sha256
+from .contracts import CapabilityReport, ContractError, Experiment, Outcome, Progress, Result, canonical, digest, identifier, sha256
 
 
 from .deployment import BootControl, DeploymentBackend, DeploymentManifest, PreparedDeployment
+
+
+def read_sealed_evidence(root,value,size, *,verify,deadline=None,clock=time.monotonic,collect=True):
+    """Capture a private regular spool object through no-follow descriptors."""
+    import hashlib
+    sha256(value)
+    if type(size) is not int or not 0<=size<=128*1024**2:raise ContractError('sealed evidence exceeds stream bound')
+    verify();root=Path(root)
+    fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    try:
+        blobs=os.open('blobs',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd)
+        try:
+            source=os.open(value,os.O_RDONLY|os.O_NONBLOCK|os.O_NOFOLLOW,dir_fd=blobs)
+            with os.fdopen(source,'rb') as stream:
+                before=os.fstat(stream.fileno());expected_device=root.parent.stat().st_dev
+                if (not stat.S_ISREG(before.st_mode) or before.st_dev!=expected_device or before.st_uid!=os.geteuid()
+                        or stat.S_IMODE(before.st_mode)!=0o600 or before.st_nlink!=1 or before.st_size!=size):
+                    raise ContractError('sealed evidence must be private original regular bytes')
+                checksum=hashlib.sha256();raw=bytearray() if collect else None;total=0
+                while True:
+                    verify()
+                    if deadline is not None and clock()>=deadline:raise TimeoutError('bounded sealed evidence capture window elapsed')
+                    chunk=stream.read(min(1024**2,size-total+1))
+                    if deadline is not None and clock()>=deadline:raise TimeoutError('bounded sealed evidence capture window elapsed')
+                    if not chunk:break
+                    total+=len(chunk)
+                    if total>size:raise ContractError('sealed evidence grew during capture')
+                    checksum.update(chunk)
+                    if collect:raw.extend(chunk)
+                after=os.fstat(stream.fileno());linked=os.stat(value,dir_fd=blobs,follow_symlinks=False)
+                signature=lambda info:(info.st_dev,info.st_ino,info.st_mode,info.st_size,info.st_mtime_ns,info.st_ctime_ns,info.st_nlink)
+                verify()
+                if signature(before)!=signature(after) or signature(before)!=signature(linked) or total!=size or checksum.hexdigest()!=value:
+                    raise ContractError('sealed evidence changed or differs from original digest')
+                return bytes(raw) if collect else None
+        finally:os.close(blobs)
+    finally:os.close(fd)
 
 
 @dataclass(frozen=True)
@@ -237,7 +275,7 @@ class TargetAgent:
             limitations=["Execution was not repeated after a target restart."],
         ))
 
-    def _drain(self, pending: dict, *, finish=True, deadline=None) -> None:
+    def _drain(self, pending: dict, *, finish=True, deadline=None,evidence_scope=None,clock=None) -> None:
         identifier(pending['attempt_id']); identifier(pending['boot_id'])
         records=pending.get('evidence')
         if not isinstance(records,list) or len(records)>8192:
@@ -251,11 +289,15 @@ class TargetAgent:
                     or type(record['uploaded_offset']) is not int or not 0<=record['uploaded_offset']<=record['size']
                     or type(record['evidence_acked']) is not bool):
                 raise ValueError('invalid evidence record identity or acknowledgement')
+        if evidence_scope is not None:
+            if (finish is not False or not isinstance(evidence_scope,frozenset) or not 1<=len(evidence_scope)<=128
+                    or not evidence_scope<={tuple(record[key] for key in ('stream','sequence','sha256','size')) for record in records}):
+                raise ValueError('scoped evidence draining requires an exact retained subset without completion')
         attempt_id = pending["attempt_id"]
         token = pending["token"]
         boot_id = pending["boot_id"]
         def check_budget():
-            if deadline is not None and time.monotonic() >= deadline:
+            if deadline is not None and (clock or time.monotonic)() >= deadline:
                 raise TimeoutError("bounded upload window elapsed")
             if self.supervisor:
                 self.supervisor.pulse(waiting=True,
@@ -263,7 +305,9 @@ class TargetAgent:
                     acknowledged_bytes=sum(r["size"] for r in pending["evidence"] if r["evidence_acked"]))
         for record in pending["evidence"]:
             check_budget()
-            if not finish and record["evidence_acked"]:
+            if evidence_scope is not None and tuple(record[key] for key in ('stream','sequence','sha256','size')) not in evidence_scope:
+                continue
+            if not finish and evidence_scope is None and record["evidence_acked"]:
                 continue
             self._check_storage()
             blob=self.blob_dir/record['sha256']
@@ -271,7 +315,8 @@ class TargetAgent:
                 raise ValueError('recognized evidence blob is on a different storage device')
             if blob.is_symlink() or blob.resolve()!=blob or not blob.is_file() or blob.stat().st_size!=record['size']:
                 raise ValueError('recognized evidence must be a direct sealed blob')
-            raw = blob.read_bytes()
+            raw = (blob.read_bytes() if evidence_scope is None else read_sealed_evidence(self.state_dir,record['sha256'],record['size'],
+                verify=self._check_storage,deadline=deadline,clock=clock or time.monotonic))
             if digest(raw) != record["sha256"] or len(raw) != record["size"]:
                 raise ValueError("spooled evidence corrupted")
             upload_id = f"{attempt_id}.{record['sequence']}"

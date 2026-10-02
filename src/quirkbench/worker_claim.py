@@ -78,7 +78,7 @@ def read_active_worker_claim(state_root, operation_id, epoch, generation, stage_
             or not OPERATION.fullmatch(operation_id)
             or type(epoch) is not int or epoch < 1
             or type(generation) is not int or generation < 1
-            or expected_stage not in {'recovery_rootfs','job_inputs','kernel_build','os_compose'}):
+            or expected_stage not in {stage for _,stage in STAGES}):
         raise WorkerClaimError('invalid rootless worker identity')
     root = Path(state_root)
     stage = Path(stage_dir)

@@ -44,8 +44,12 @@ def require_ready(root,*,runner=subprocess.run,clock=time.time):
         raise Conflict('Background work unavailable: install/configure quirkbench-controller.service, start it, and run quirkbench setup-check. '+str(exc)) from exc
 
 
-def advertise(owner,runtime):
+def advertise(owner,runtime,capabilities=None):
     c=owner.controller
+    feature=capabilities() if capabilities is not None else None
+    if feature is not None:
+        from .enrollment_runtime import validate_capabilities
+        validate_capabilities(feature)
     if not any(line.startswith('0::') and line.endswith('/'+UNIT) for line in Path('/proc/self/cgroup').read_text().splitlines()):
         raise Conflict('background ownership advertisement requires the configured controller user unit')
     with c.transaction() as db:
@@ -54,17 +58,22 @@ def advertise(owner,runtime):
             raise Conflict('controller service ownership ended')
         db.execute('INSERT OR REPLACE INTO controller_job_service VALUES(1,?,?,?,?,?,?)',
             (owner.epoch,controller_boot_id(),UNIT,str(runtime),os.getpid(),c.clock()))
+        if feature is None:db.execute('DELETE FROM controller_service_capabilities')
+        else:
+            from .contracts import canonical
+            db.execute('INSERT OR REPLACE INTO controller_service_capabilities VALUES(1,?,?,?,?,?,?)',
+                (owner.epoch,controller_boot_id(),os.getpid(),feature['configuration_sha256'],canonical(feature).decode(),c.clock()))
 
 
 
 @contextmanager
-def readiness_heartbeat(owner,runtime,*,event_factory=threading.Event):
+def readiness_heartbeat(owner,runtime,*,event_factory=threading.Event,capabilities=None):
     """Advisory service presence, independent of job progress and execution."""
-    advertise(owner,runtime)
+    advertise(owner,runtime,capabilities)
     stop=event_factory(); failures=[]
     def pulse():
         while not stop.wait(2):
-            try: advertise(owner,runtime)
+            try: advertise(owner,runtime,capabilities)
             except Exception as exc:
                 failures.append(exc);return
     thread=threading.Thread(target=pulse,name='controller-readiness',daemon=True)
@@ -80,10 +89,21 @@ def configuration(root):
     if path.is_symlink() or path.resolve()!=path or path.stat().st_uid!=os.geteuid() or stat.S_IMODE(path.stat().st_mode)&0o077:
         raise ContractError('controller-service.json must be canonical, user-owned and private')
     config=json.loads(read_file(Path(root),'private/controller-service.json',limit=65536))
-    allowed={'runtime','job_worker','host','port','cert','key','tokens_file','allow_lan','builder_image_digest','builder_config_digest','builder_archive_sha256','repositories','composition_signing','recovery_worker','recovery_signing_home','recovery_public_key','recovery_fingerprint'}
-    if not isinstance(config,dict) or set(config)-allowed or not {'runtime','job_worker','cert','key','tokens_file'}<=set(config):
+    return validate_configuration(root, config)
+
+
+def validate_configuration(root, config):
+    """Validate the existing service contract without publishing configuration."""
+    allowed={'reserve_gib','credential_registry','runtime','job_worker','host','port','cert','key','tokens_file','allow_lan','builder_image_digest','builder_config_digest','builder_archive_sha256','repositories','repository_endpoint','composition_signing','recovery_worker','recovery_signing_home','recovery_public_key','recovery_fingerprint'}
+    if not isinstance(config,dict) or set(config)-allowed or not {'runtime','job_worker','cert','key'}<=set(config):
         raise ContractError('incomplete or unknown controller service configuration')
-    for name in ('runtime','job_worker','cert','key','tokens_file'):
+    registry = config.get('credential_registry', False)
+    if type(registry) is not bool or (registry and 'tokens_file' in config) or (not registry and 'tokens_file' not in config):
+        raise ContractError('select exactly one authentication mode: registry or static tokens_file')
+    reserve = config.get('reserve_gib', 20)
+    if type(reserve) not in (int,float) or not 0 <= reserve <= 1048576:
+        raise ContractError('invalid controller service reserve_gib')
+    for name in ('runtime','job_worker','cert','key') + (() if registry else ('tokens_file',)):
         path=Path(config[name])
         if not path.is_absolute() or path.resolve()!=path or path.is_symlink() or not path.is_file():
             raise ContractError('canonical service input required: '+name)
@@ -110,9 +130,11 @@ def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--state',required=True,type=Path)
     a=p.parse_args(argv);config=configuration(a.state)
     from .cli import main as cli
-    args=['--state',str(a.state),'serve','--host',config.get('host','127.0.0.1'),'--port',str(config.get('port',8443)),
-          '--cert',config['cert'],'--key',config['key'],'--tokens-file',config['tokens_file'],
+    args=['--state',str(a.state),'--reserve-gib',str(config.get('reserve_gib',20)),'serve','--host',config.get('host','127.0.0.1'),'--port',str(config.get('port',8443)),
+          '--cert',config['cert'],'--key',config['key'],
           '--job-worker',config['job_worker'],'--service-runtime',config['runtime']]
+    if config.get('credential_registry'): args.append('--credential-registry')
+    else: args += ['--tokens-file', config['tokens_file']]
     if config.get('allow_lan'): args.append('--allow-lan')
     for key in ('recovery_worker','recovery_signing_home','recovery_public_key','recovery_fingerprint'):
         if key in config: args+=['--'+key.replace('_','-'),config[key]]

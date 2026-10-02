@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "record_type": "controller-tls-intent",
+  "host": "127.0.0.1",
+  "request_id": "initial-setup"
+}
