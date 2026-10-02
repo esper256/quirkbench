@@ -226,6 +226,12 @@ Current C2 extension: no working-directory state fallback and no popup viewer.
 `monitor`, operation queries and existing read-only campaign/inventory/observation
 commands read existing state without migrations or lifecycle startup. Queries are
 bounded; oversized legacy summaries fail explicitly rather than hiding records.
+SQLite queries retain normal locking and current committed WAL visibility. Read-only
+means no application database mutations, initialization, migrations or execution
+authority. SQLite itself may create or update its `controller.sqlite-wal` and
+`controller.sqlite-shm` bookkeeping when a stopped WAL database is opened. These
+auxiliary files are not application artifacts or evidence of submitted work. Queries
+must not delete them, switch journal mode or mark live state immutable to avoid them.
 Advisory worker activity and heartbeat reports use the existing owner's exact claim
 fences; they change no deadline, attempt authority or immutable operation outcome.
 
