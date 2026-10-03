@@ -1812,6 +1812,8 @@ class Controller(OperatorApprovals):
         backup = Path(backup); destination = Path(destination)
         if destination.exists():
             raise Conflict('restore destination must be new')
+        from .backup_coverage import require_stopped_cut
+        require_stopped_cut(backup)
         manifest = json.loads((backup / 'manifest.json').read_bytes())
         db = sqlite3.connect(f'file:{backup / "controller.sqlite"}?mode=ro&immutable=1', uri=True)
         try:

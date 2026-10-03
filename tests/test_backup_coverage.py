@@ -173,6 +173,18 @@ def test_legacy_positional_and_guided_aliases_preserve_restore_checks_and_show_u
         command=['--state',str(c.root),'--reserve-gib','0','backup']+(['--output'] if guided else [])+[str(destination)]
         assert cli.main(command)==0;answer=json.loads(capsys.readouterr().out)
         assert answer['backup']==str(destination) and (('coverage' in answer)==guided)
-        assert coverage.verify_if_present(destination)['contents']['controller_complete']
+        assert (coverage.verify_if_present(destination) is not None)==guided
     with pytest.raises(SystemExit):cli.parser().parse_args(['backup',str(legacy),'--output',str(tmp_path/'bad')])
     with pytest.raises(SystemExit):cli.parser().parse_args(['restore'])
+
+
+@pytest.mark.parametrize('sidecar',['-wal','-shm','-journal'])
+def test_legacy_backup_rejects_unmanifested_journals_before_native_restoration(tmp_path,monkeypatch,sidecar):
+    repository=Repository();c,_,experiment=deployment_setup(tmp_path,repository);c.submit('campaign',experiment)
+    backup=tmp_path/'backup';c.backup(backup)
+    assert not (backup/coverage.NAME).exists()
+    (backup/('controller.sqlite'+sidecar)).write_bytes(b'not part of the stopped cut')
+    monkeypatch.setattr(repository,'restore',lambda *_:pytest.fail('native action before stopped cut validation'))
+    with pytest.raises(ContractError,match='journal'):
+        Controller.restore(backup,tmp_path/'restored',reserve_bytes=0,deployment_repository=repository)
+    assert not (tmp_path/'restored').exists()

@@ -106,15 +106,20 @@ def source_coverage(root,db,refs):
     return sources
 
 
-def derive(root,manifest, *,manifest_sha=None):
-    """Only the stopped copied DB and its verified public closure determine facts."""
-    root=Path(root).absolute()
+def require_stopped_cut(root):
+    root=Path(root).expanduser().absolute()
     # A backup is a stopped SQLite copy, not a live WAL database. Ignoring a
     # later WAL here then copying it into restored state would attest one cut
     # while opening another. No auxiliary journal is part of the manifest.
     for suffix in ('-wal','-shm','-journal'):
         if (root/('controller.sqlite'+suffix)).exists() or (root/('controller.sqlite'+suffix)).is_symlink():
             raise ContractError('backup database has a live or unmanifested journal')
+
+
+def derive(root,manifest, *,manifest_sha=None):
+    """Only the stopped copied DB and its verified public closure determine facts."""
+    root=Path(root).absolute()
+    require_stopped_cut(root)
     refs=set(manifest['artifacts'])
     db=sqlite3.connect((root/'controller.sqlite').as_uri()+'?mode=ro&immutable=1',uri=True)
     db.row_factory=sqlite3.Row
@@ -154,6 +159,7 @@ def derive(root,manifest, *,manifest_sha=None):
 def verify_if_present(root):
     """Legacy absence is unknown; a present new companion must match its exact cut."""
     root=Path(root).expanduser().absolute()
+    require_stopped_cut(root)
     try:raw=read_file(root,NAME,limit=1024**2)
     except FileNotFoundError:return None
     value=load(raw)

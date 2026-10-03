@@ -10,7 +10,7 @@ quirkbench --state /new/controller/state restore --input /backup/quirkbench-cut
 ```
 
 `backup DESTINATION` and `restore BACKUP` preserve their answer formats. New CLI
-backups also include `coverage.v1.json`; the Python `Controller.backup(destination)`
+backups using `--output` also include `coverage.v1.json`; the Python `Controller.backup(destination)`
 API keeps its legacy format unless `coverage=True` is requested. A backup's success
 marker is `manifest.json`, published only after SQLite, referenced CAS, native
 OSTree export and requested coverage checks succeed. An interrupted `.pending-*`
@@ -63,7 +63,9 @@ session promise. Public patch/report exports are not backups.
 
 Restore verifies the existing database/CAS/OSTree closure and, when present, the
 coverage companion against its cut before native restoration. Legacy backups without
-a companion retain existing validation and report coverage as unknown. A present
+a companion retain existing validation and report coverage as unknown. All supported
+backup versions reject unmanifested SQLite journals before opening the stopped cut;
+unchecked WAL bytes cannot enter restored state. A present
 invalid companion is an error, not a reason to fall back to legacy unknown coverage.
 
 The restored controller stays paused; running operations become interrupted and

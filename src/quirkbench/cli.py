@@ -1144,7 +1144,7 @@ def _main(argv=None):
                     answer = controller.decide_attempt(args.attempt_id,
                         'approved' if args.action == 'approve' else 'rejected', request_id=args.request_id)
             elif args.command == 'backup':
-                answer = {'backup': controller.backup(args.destination,coverage=True)}
+                answer = {'backup': controller.backup(args.destination,coverage=bool(args.output))}
                 if args.output:
                     from .backup_coverage import load_summary
                     answer['coverage']=load_summary(args.destination)
