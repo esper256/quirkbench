@@ -66,6 +66,9 @@ def execute(root, args, *, ready=None):
     from .source_prepare_operation import submit
     from .source_workspace import handoff, release
     root = Path(root).expanduser().absolute()
+    if args.action in ('propose','proposals'):
+        from .external_proposals import execute as proposal
+        return proposal(root,args)
     if args.action in ('start','brief','baseline','prepare-distribution'):
         from .investigations import execute as investigation
         return investigation(root,args,ready=ready)

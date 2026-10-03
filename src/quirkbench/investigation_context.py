@@ -136,6 +136,9 @@ def context(reader,name):
             (SELECT count(*) FROM attempts a JOIN jobs j ON j.id=a.job WHERE j.campaign=?) AS attempt_count''',(name,name)).fetchone()
     data['summary']={**dict(campaign),**dict(counts)}
     data['history']=history(reader,name,limit=5)
+    from .external_proposals import context_receipt,usage
+    data['proposal_scope']=context_receipt(reader,name)
+    data['proposal_usage']=usage(reader,name)
     return bounded(data)
 
 
@@ -175,12 +178,16 @@ def recipes(reader,name):
 
 def proposal_schema(reader,name):
     investigation(reader,name)
-    path=Path(resources()['product_schema'])
+    from .package_resources import schemas_dir
+    from .external_proposals import context_receipt
+    path=schemas_dir()/'agent-proposal.v2.schema.json'
     raw=read_file(path.parent,path.name,limit=QUERY_BYTES)
-    schema=json.loads(raw);schema['$ref']='#/$defs/agent-proposal'
+    schema=json.loads(raw)
     return bounded({'investigation_id':name,'schema':schema,'schema_path':str(path),'schema_sha256':digest(raw),
-        'admission_available':False,'execution_authorized':False,
-        'limitations':'Existing proposal v1 validates documents only; base_revision is a digest, not a Git OID. Durable proposal admission is pending #33.'})
+        'admission_available':True,'execution_authorized':False,'proposal_scope':context_receipt(reader,name),
+        'source_free_scope':context_receipt(reader,name,include_source=False),
+        'legacy_schema_path':resources()['product_schema'],
+        'limitations':'Admission requires v2. Legacy v1 remains validation-only; base_revision keeps its digest meaning. input_context_digest hashes the immutable proposal-scope receipt, not the mutable context view. Execution awaits the external loop; no attempt approval.'})
 
 
 @contextmanager

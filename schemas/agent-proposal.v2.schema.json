@@ -1,0 +1,378 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quirkbench:schema:agent-proposal:v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_type",
+    "decision_id",
+    "campaign_id",
+    "input_context_digest",
+    "input_context",
+    "action",
+    "hypothesis",
+    "summary",
+    "rejected_approaches",
+    "workspace_id",
+    "base_oid",
+    "change_intent",
+    "source",
+    "experiment",
+    "usage"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 2
+    },
+    "record_type": {
+      "const": "agent-proposal"
+    },
+    "decision_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "campaign_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "input_context_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "input_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_type",
+        "investigation_id",
+        "investigation_sha256",
+        "baseline_sha256",
+        "source"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "type": "integer"
+        },
+        "record_type": {
+          "const": "proposal-context"
+        },
+        "investigation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "investigation_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "baseline_sha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "workspace_sha256",
+                "capture_operation_id",
+                "capture_sha256"
+              ],
+              "properties": {
+                "workspace_sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "capture_operation_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+                },
+                "capture_sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "action": {
+      "enum": [
+        "experiment",
+        "needs_human",
+        "conclude"
+      ]
+    },
+    "hypothesis": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "\\S"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "\\S"
+    },
+    "rejected_approaches": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024,
+        "pattern": "\\S"
+      }
+    },
+    "workspace_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "base_oid": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "change_intent": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "\\S"
+    },
+    "source": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "capture_operation_id",
+            "capture_sha256"
+          ],
+          "properties": {
+            "kind": {
+              "const": "completed_capture"
+            },
+            "capture_operation_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+            },
+            "capture_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "experiment": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "baseline_sha256",
+            "build_recipe_id",
+            "build_recipe_sha256",
+            "target_recipe_id",
+            "target_recipe_sha256",
+            "parameters",
+            "repetitions",
+            "deadline_s"
+          ],
+          "properties": {
+            "baseline_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "build_recipe_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+            },
+            "build_recipe_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "target_recipe_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+            },
+            "target_recipe_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "parameters": {
+              "type": "object",
+              "maxProperties": 32,
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+              },
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "maxLength": 128
+                  }
+                ]
+              }
+            },
+            "repetitions": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "deadline_s": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "usage": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "input_tokens",
+            "output_tokens"
+          ],
+          "properties": {
+            "input_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "output_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "experiment"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "source": {
+            "type": "object"
+          },
+          "experiment": {
+            "type": "object"
+          },
+          "base_oid": {
+            "type": "string"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "experiment": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "source": {
+            "type": "null"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "base_oid": {
+            "type": "null"
+          },
+          "input_context": {
+            "properties": {
+              "source": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "base_oid": {
+            "type": "string"
+          },
+          "input_context": {
+            "properties": {
+              "source": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
