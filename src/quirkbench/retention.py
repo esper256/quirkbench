@@ -97,16 +97,20 @@ def register(root,kind,values=(),*,owner=None,paths=(),state='SUCCEEDED',stop_pr
     return owner
 
 
+def pin_db(db,owner,note=None):
+    """Shared primitive; caller owns the transaction/collector serialization."""
+    if note is None:
+        db.execute('DELETE FROM storage_pins WHERE owner=?',(owner,))
+    else:
+        known=db.execute('SELECT 1 FROM refs WHERE owner=? UNION SELECT 1 FROM storage_groups WHERE owner=?', (owner,owner)).fetchone()
+        if not known: raise ContractError('unknown retention owner; use maintenance status')
+        if db.execute('SELECT 1 FROM storage_retired WHERE owner=?',(owner,)).fetchone():
+            raise ContractError('retired bytes cannot be restored by pinning')
+        db.execute('INSERT OR REPLACE INTO storage_pins VALUES(?,?)',(owner,note))
+
+
 def pin(root,owner,note=None):
-    with connection(root) as db:
-        if note is None:
-            db.execute('DELETE FROM storage_pins WHERE owner=?',(owner,))
-        else:
-            known=db.execute('SELECT 1 FROM refs WHERE owner=? UNION SELECT 1 FROM storage_groups WHERE owner=?', (owner,owner)).fetchone()
-            if not known: raise ContractError('unknown retention owner; use maintenance status')
-            if db.execute('SELECT 1 FROM storage_retired WHERE owner=?',(owner,)).fetchone():
-                raise ContractError('retired bytes cannot be restored by pinning')
-            db.execute('INSERT OR REPLACE INTO storage_pins VALUES(?,?)',(owner,note))
+    with connection(root) as db:pin_db(db,owner,note)
 
 
 def status(root):

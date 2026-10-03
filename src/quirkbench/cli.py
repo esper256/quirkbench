@@ -120,6 +120,15 @@ def parser():
             command.add_argument('--file',type=Path,help='existing typed observation response; required for machine input')
             command.add_argument('--request-id',required=True,help='durable answer retry identity')
             command.add_argument('--operator',help='operator identity for attended input')
+    report=investigation_actions.add_parser('report',help='read attributable comparison facts; execution is not reproduction')
+    report.add_argument('name');report.add_argument('--json',action='store_true')
+    report.add_argument('--comparison',type=Path,help='versioned declarations mapping exact experiments to comparison roles')
+    report.add_argument('--after',type=int,default=0);report.add_argument('--limit',type=int,default=5)
+    report.add_argument('--experiment',help='select one exact experiment in this investigation')
+    report.add_argument('--attempt-after',type=int,default=0);report.add_argument('--attempt-limit',type=int,default=5)
+    retain=investigation_actions.add_parser('report-retain',help='pin currently recorded report owners; cannot restore expired bytes')
+    retain.add_argument('--request-id',help='durable retry identity; required with --json, new ID for a later selection')
+    retain.add_argument('name');retain.add_argument('--note',required=True);retain.add_argument('--json',action='store_true')
     propose=investigation_actions.add_parser('propose',help='durably admit an external v2 proposal; grants no attempt approval')
     propose.add_argument('name');propose.add_argument('--file',type=Path,required=True)
     propose.add_argument('--request-id',required=True);propose.add_argument('--json',action='store_true')
@@ -1318,7 +1327,7 @@ def main(argv=None):
                                'target','endpoint','target-service','serve-repository','release-check') or
               (args.command=='campaign' and args.action=='status') or
               (args.command=='attempt' and args.action in ('status','show')) or
-              (args.command=='investigation' and args.action in ('status','source','brief','baseline','context','history','recipes','proposal-schema','proposals','observations','observation')) or args.command=='evidence' or
+              (args.command=='investigation' and args.action in ('status','source','brief','baseline','context','history','recipes','proposal-schema','proposals','observations','observation','report')) or args.command=='evidence' or
               (args.command=='settings' and args.action=='show') or
               (args.command=='maintenance' and args.action in ('status','prune')) or
               (args.command=='session' and args.action in ('observations','observation')) or

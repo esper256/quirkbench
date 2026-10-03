@@ -1,0 +1,1002 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quirkbench.invalid/schemas/investigation-report.v1.schema.json",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/comparison"
+    },
+    {
+      "$ref": "#/$defs/report"
+    },
+    {
+      "$ref": "#/$defs/retention"
+    }
+  ],
+  "$defs": {
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "experiment_id"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "baseline",
+            "diagnostic",
+            "patched",
+            "regression",
+            "revert"
+          ]
+        },
+        "experiment_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        }
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_type",
+        "investigation_id",
+        "roles"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "record_type": {
+          "const": "investigation-comparison"
+        },
+        "investigation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "roles": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/role"
+          }
+        }
+      }
+    },
+    "presence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sha256",
+        "bytes_present",
+        "bytes_verified"
+      ],
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "bytes_present": {
+          "type": "boolean"
+        },
+        "bytes_verified": {
+          "const": false
+        }
+      }
+    },
+    "evidence_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sha256",
+        "bytes_present",
+        "bytes_verified",
+        "acknowledged"
+      ],
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "bytes_present": {
+          "type": "boolean"
+        },
+        "bytes_verified": {
+          "const": false
+        },
+        "acknowledged": {
+          "type": "boolean"
+        }
+      }
+    },
+    "observation_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "kind",
+        "recipe_step_id",
+        "prompt",
+        "answer",
+        "late"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "kind": {
+          "enum": [
+            "pre_test_readiness",
+            "live_observation",
+            "post_test_interpretation"
+          ]
+        },
+        "recipe_step_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "prompt": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "answer": {
+          "anyOf": [
+            {
+              "enum": [
+                "observed",
+                "not_observed",
+                "uncertain",
+                "declined"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "late": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "observations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total",
+        "pending",
+        "items",
+        "truncated",
+        "problem_reproduced"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pending": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/observation_item"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "problem_reproduced": {
+          "type": "null"
+        }
+      }
+    },
+    "identities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_capture_sha256",
+        "base_capture_sha256",
+        "deployment_sha256",
+        "recipe_manifest_sha256",
+        "base_oid",
+        "candidate_operation_id",
+        "build_operation_id"
+      ],
+      "properties": {
+        "base_capture_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "base_oid": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        },
+        "baseline_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "build_input_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "build_operation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "candidate_operation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "composition_input_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "composition_link_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "composition_operation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "composition_output_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "deployment_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "dispatch_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "proposal_operation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "proposal_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "recipe_manifest_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "source_capture_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "attribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_object_count",
+        "required_objects_truncated",
+        "state",
+        "reason",
+        "input_sha256",
+        "input_type",
+        "identities",
+        "metadata_verified",
+        "source_bytes_verified",
+        "deployment_revision",
+        "recipe_version",
+        "stimulus_sha256",
+        "required_objects"
+      ],
+      "properties": {
+        "required_object_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "required_objects_truncated": {
+          "type": "boolean"
+        },
+        "state": {
+          "enum": [
+            "available",
+            "unavailable"
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 512
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input_sha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input_type": {
+          "anyOf": [
+            {
+              "enum": [
+                "attended-baseline-input",
+                "proposal-experiment-input"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "identities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/identities"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metadata_verified": {
+          "type": "boolean"
+        },
+        "source_bytes_verified": {
+          "const": false
+        },
+        "deployment_revision": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recipe_version": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stimulus_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "required_objects": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/presence"
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "declaration_known",
+        "declared_count",
+        "acknowledged_count",
+        "receipt_chunks",
+        "bytes_verified",
+        "items"
+      ],
+      "properties": {
+        "declaration_known": {
+          "type": "boolean"
+        },
+        "declared_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "acknowledged_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "receipt_chunks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes_verified": {
+          "const": false
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/evidence_item"
+          }
+        }
+      }
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cursor",
+        "attempt_id",
+        "experiment_id",
+        "repetition",
+        "device_id",
+        "boot_id",
+        "generation",
+        "state",
+        "candidate_requested",
+        "attempt_started",
+        "handoff_revision",
+        "exact_candidate_adoption",
+        "recovery_returned",
+        "execution_outcome",
+        "limitations",
+        "limitations_truncated",
+        "observations",
+        "evidence",
+        "missing",
+        "problem_reproduced",
+        "causal_claim",
+        "native_qualification"
+      ],
+      "properties": {
+        "cursor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempt_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "experiment_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "repetition": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "device_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "boot_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "state": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "candidate_requested": {
+          "type": "boolean"
+        },
+        "attempt_started": {
+          "type": "boolean"
+        },
+        "handoff_revision": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exact_candidate_adoption": {
+          "type": "boolean"
+        },
+        "recovery_returned": {
+          "type": "boolean"
+        },
+        "execution_outcome": {
+          "anyOf": [
+            {
+              "enum": [
+                "PASS",
+                "FAIL",
+                "INCONCLUSIVE",
+                "INFRA_FAILURE",
+                "NEEDS_HUMAN"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limitations": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "limitations_truncated": {
+          "type": "boolean"
+        },
+        "observations": {
+          "$ref": "#/$defs/observations"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence"
+        },
+        "missing": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "problem_reproduced": {
+          "type": "null"
+        },
+        "causal_claim": {
+          "type": "null"
+        },
+        "native_qualification": {
+          "const": false
+        }
+      }
+    },
+    "exposure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempts",
+        "started_attempts",
+        "terminal_results",
+        "recovery_returns",
+        "jobs",
+        "completed_jobs",
+        "planned_repetitions",
+        "stimulus_exposures",
+        "physical_reproduction_count",
+        "scope"
+      ],
+      "properties": {
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "started_attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "terminal_results": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recovery_returns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "jobs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completed_jobs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "planned_repetitions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stimulus_exposures": {
+          "type": "null"
+        },
+        "physical_reproduction_count": {
+          "type": "null"
+        },
+        "scope": {
+          "const": "all_recorded_attempts_for_experiment"
+        }
+      }
+    },
+    "baseline_comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "experiment_id",
+        "state",
+        "different_identities",
+        "conditions_equivalent",
+        "reproduction_delta"
+      ],
+      "properties": {
+        "experiment_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "enum": [
+            "metadata_unavailable",
+            "metadata_compared"
+          ]
+        },
+        "different_identities": {
+          "type": "array",
+          "maxItems": 7,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "conditions_equivalent": {
+          "type": "null"
+        },
+        "reproduction_delta": {
+          "type": "null"
+        }
+      }
+    },
+    "experiment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cursor",
+        "experiment_id",
+        "experiment_sha256",
+        "comparison_role",
+        "role_origin",
+        "recipe_id",
+        "baseline_id",
+        "attribution",
+        "exposure",
+        "attempts",
+        "next_attempt_cursor",
+        "confounders",
+        "problem_reproduced",
+        "causal_claim",
+        "baseline_comparison"
+      ],
+      "properties": {
+        "cursor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "experiment_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "experiment_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "comparison_role": {
+          "enum": [
+            "baseline",
+            "diagnostic",
+            "patched",
+            "regression",
+            "revert",
+            "unclassified"
+          ]
+        },
+        "role_origin": {
+          "enum": [
+            "declared",
+            "retained_baseline_input",
+            "unknown"
+          ]
+        },
+        "recipe_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "baseline_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attribution": {
+          "$ref": "#/$defs/attribution"
+        },
+        "exposure": {
+          "$ref": "#/$defs/exposure"
+        },
+        "attempts": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/attempt"
+          }
+        },
+        "next_attempt_cursor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confounders": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "problem_reproduced": {
+          "type": "null"
+        },
+        "causal_claim": {
+          "type": "null"
+        },
+        "baseline_comparison": {
+          "$ref": "#/$defs/baseline_comparison"
+        }
+      }
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_type",
+        "investigation_id",
+        "investigation_sha256",
+        "device_id",
+        "comparison_sha256",
+        "comparison_roles",
+        "experiment_count",
+        "items",
+        "next_cursor",
+        "session_observations",
+        "conclusion",
+        "problem_reproduced",
+        "causal_claim",
+        "native_qualification",
+        "execution_authorized",
+        "limitations",
+        "retention"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "record_type": {
+          "const": "investigation-report"
+        },
+        "investigation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "investigation_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "device_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "comparison_sha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comparison_roles": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/role"
+          }
+        },
+        "experiment_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/experiment"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_observations": {
+          "$ref": "#/$defs/observations"
+        },
+        "conclusion": {
+          "const": "inconclusive"
+        },
+        "problem_reproduced": {
+          "type": "null"
+        },
+        "causal_claim": {
+          "type": "null"
+        },
+        "native_qualification": {
+          "const": false
+        },
+        "execution_authorized": {
+          "const": false
+        },
+        "limitations": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "retention": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "automatic_pin",
+            "retain_command"
+          ],
+          "properties": {
+            "automatic_pin": {
+              "const": false
+            },
+            "retain_command": {
+              "type": "string",
+              "maxLength": 512
+            }
+          }
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_type",
+        "investigation_id",
+        "request_id",
+        "pinned_owners",
+        "unavailable",
+        "restored_bytes",
+        "payload_bytes_verified",
+        "missing_object_count",
+        "missing_objects",
+        "missing_objects_truncated",
+        "scope"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "record_type": {
+          "const": "investigation-report-retention"
+        },
+        "investigation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "pinned_owners": {
+          "type": "array",
+          "maxItems": 1101,
+          "items": {
+            "type": "string",
+            "maxLength": 150
+          }
+        },
+        "unavailable": {
+          "type": "array",
+          "maxItems": 1101,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "owner",
+              "reason"
+            ],
+            "properties": {
+              "owner": {
+                "type": "string",
+                "maxLength": 150
+              },
+              "reason": {
+                "type": "string",
+                "maxLength": 512
+              }
+            }
+          }
+        },
+        "restored_bytes": {
+          "const": false
+        },
+        "payload_bytes_verified": {
+          "const": false
+        },
+        "missing_object_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missing_objects": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "missing_objects_truncated": {
+          "type": "boolean"
+        },
+        "scope": {
+          "type": "string",
+          "maxLength": 512
+        }
+      }
+    }
+  }
+}
