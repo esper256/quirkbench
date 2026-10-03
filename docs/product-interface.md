@@ -210,6 +210,7 @@ assert current trust. Missing or inconsistent retained objects are unavailable.
 | `investigation context/recipes/proposal-schema INVESTIGATION --json` | Bounded context, eligible installed recipes and exact supported proposal schema. |
 | `investigation propose INVESTIGATION --file FILE --request-id ID` | Accept proposal durably; source validation/freezing and dispatch use C3. |
 | `investigation capture-source INVESTIGATION --request-id ID` | Explicit exclusive-writer handoff; return capture operation, not immediate snapshot completion. |
+| `investigation submit-baseline INVESTIGATION --compose OPERATION --request-id ID` | Admit one stopped published unmodified baseline to existing jobs; grants no boot/approval authority. |
 | `experiment list --investigation INVESTIGATION --json`, `experiment review EXPERIMENT`, `attempt show ATTEMPT --json` | Keep experiment and physical attempt distinct; review exact source/candidate/recipe/risks. Retain current `attempt status`. |
 | `attempt approve ATTEMPT` | Human facade supplies durable retry identity; keep existing explicit `--request-id` form and exact approval semantics. |
 | `evidence read DIGEST --investigation INVESTIGATION --offset N --length N` | Authorized bounded reads, never private configuration. |

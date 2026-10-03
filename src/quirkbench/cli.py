@@ -117,6 +117,15 @@ def parser():
     proposals=investigation_actions.add_parser('proposals',help='page retained proposals and dispatch intents; never invokes an agent')
     proposals.add_argument('name');proposals.add_argument('--after',type=int,default=0)
     proposals.add_argument('--limit',type=int,default=20);proposals.add_argument('--json',action='store_true')
+    baseline_submit=investigation_actions.add_parser('submit-baseline',help='admit one published unmodified baseline to existing jobs; separate exact attempt approval required')
+    baseline_submit.add_argument('name');baseline_submit.add_argument('--compose',required=True,help='completed joined composition operation ID')
+    baseline_submit.add_argument('--request-id',help='stable retry identity; required with --json')
+    baseline_submit.add_argument('--json',action='store_true')
+    experiment=commands.add_parser('experiment',help='read immutable experiment identities; queues nothing')
+    experiment_actions=experiment.add_subparsers(dest='action',required=True)
+    listing=experiment_actions.add_parser('list');listing.add_argument('--investigation',required=True)
+    listing.add_argument('--after',type=int,default=0);listing.add_argument('--limit',type=int,default=20);listing.add_argument('--json',action='store_true')
+    review=experiment_actions.add_parser('review');review.add_argument('experiment_id');review.add_argument('--json',action='store_true')
     evidence=commands.add_parser('evidence',help='read public investigation evidence without private CAS access')
     evidence_actions=evidence.add_subparsers(dest='action',required=True)
     read=evidence_actions.add_parser('read')
@@ -264,11 +273,14 @@ def parser():
     recovery_images.add_argument('--before',type=int,default=0,help='older image-operation cursor from the preceding page')
     attempt = commands.add_parser('attempt', help='local operator authorization for an exact physical attempt')
     attempt_actions = attempt.add_subparsers(dest='action', required=True)
-    inspect = attempt_actions.add_parser('status'); inspect.add_argument('attempt_id')
+    for name in ('status','show'):
+        inspect = attempt_actions.add_parser(name);inspect.add_argument('attempt_id');inspect.add_argument('--json',action='store_true')
     for name in ('approve', 'reject'):
         decision = attempt_actions.add_parser(name)
         decision.add_argument('attempt_id')
-        decision.add_argument('--request-id', required=True, help='durable unique decision ID for replay')
+        decision.add_argument('--request-id',help='durable unique decision ID; human omission derives it from the complete exact binding; required with --json')
+        decision.add_argument('--operator',help='local operator attribution; default current UID')
+        decision.add_argument('--json',action='store_true')
     backup = commands.add_parser('backup'); backup.add_argument('destination', type=Path)
     restore = commands.add_parser('restore'); restore.add_argument('backup', type=Path)
     resolve = commands.add_parser('resolve'); resolve.add_argument('attempt_id'); resolve.add_argument('disposition', choices=['retry','abandon']); resolve.add_argument('--note', required=True)
@@ -318,6 +330,31 @@ def parser():
 
 def _main(argv=None):
     args = parser().parse_args(argv)
+    if args.command in ('experiment','attempt'):
+        from .attended_views import ApprovalReader,experiments,review,attempt,decide
+        from .contracts import Conflict,ContractError
+        from .operations import operation_response
+        from .state_reader import safe_text
+        try:
+            root=discover_state_root(args.state)
+            reader=ApprovalReader(root)
+            if args.command=='experiment':
+                answer=experiments(reader,args.investigation,after=args.after,limit=args.limit) if args.action=='list' else review(reader,args.experiment_id)
+            elif args.action in ('show','status'):
+                answer=attempt(reader,args.attempt_id,legacy=args.action=='status' and not args.json)
+            else:answer=decide(root,args)
+            if args.json:print(json.dumps(answer,sort_keys=True))
+            elif args.command=='attempt' and args.action=='status':print(json.dumps(answer,indent=2,sort_keys=True))
+            elif args.command=='attempt' and args.action in ('approve','reject') and args.request_id:
+                print(json.dumps(answer['data']['decision'],indent=2,sort_keys=True))
+            else:print(safe_text(json.dumps(answer['data'],indent=2,sort_keys=True)))
+            return 0
+        except (OSError,ValueError,sqlite3.Error) as exc:
+            code,status=(('CONFLICT',3) if isinstance(exc,Conflict) else ('INVALID_INPUT',2) if isinstance(exc,ContractError) else ('INFRASTRUCTURE',5))
+            message=str(exc)[:512] if status!=5 else 'attended state unavailable; inspect retained state and controller readiness'
+            if args.json:print(json.dumps(operation_response(error={'code':code,'message':message,'retryable':status==5}),sort_keys=True))
+            else:print(code+': '+message,file=sys.stderr)
+            return status
     if args.command in ('investigation','evidence'):
         if args.command=='evidence':args.name=args.investigation;args.action='evidence'
         from .investigation_sources import execute
@@ -1166,9 +1203,10 @@ def _main(argv=None):
 def main(argv=None):
     """A publication barrier, not a scheduler; read-only commands do no housekeeping."""
     args=parser().parse_args(argv)
-    readonly=(args.command in ('build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
+    readonly=(args.command in ('experiment','build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
                                'target','endpoint','target-service','serve-repository') or
               (args.command=='campaign' and args.action=='status') or
+              (args.command=='attempt' and args.action in ('status','show')) or
               (args.command=='investigation' and args.action in ('status','source','brief','baseline','context','history','recipes','proposal-schema','proposals','observations','observation')) or args.command=='evidence' or
               (args.command=='settings' and args.action=='show') or
               (args.command=='maintenance' and args.action in ('status','prune')) or

@@ -631,6 +631,15 @@ class TargetAgent:
             # adopts the boot. Reconcile identity before delivering uncertainty.
             for remote in reconciliation.get("attempts", []):
                 if remote["id"] == pending["attempt_id"]:
+                    if (pending.get('stage')=='awaiting_approval' and remote.get('handoff_revision')
+                            and remote['state'] in ('BOOT_PENDING','UNCERTAIN')):
+                        if remote['handoff_revision']!=pending.get('revision'):
+                            raise ValueError('reconciled handoff differs from prepared candidate')
+                        # The handoff reply may have been lost before the local
+                        # arming journal write. Reconcile through the existing
+                        # uncertain-arming path, which clears selection and never
+                        # reissues arm_once or authorizes another physical attempt.
+                        pending['stage']='arming'
                     pending["boot_id"] = remote["boot"]
                     self._save()
                     break

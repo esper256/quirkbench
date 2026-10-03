@@ -68,6 +68,40 @@ not need an audio peripheral. `proposal-schema` returns the installed admission-
 schema, immutable source/baseline scope receipts and the legacy schema path. The
 legacy v1 `base_revision` digest meaning remains unchanged.
 
+## Attend the baseline round trip
+
+Complete distribution preparation, source capture, candidate preparation, joined
+build and joined composition through the installed investigation commands first.
+`operation status COMPOSE_ID --json` must report a stopped successful composition.
+Keep the captured source unmodified for this baseline observation:
+
+```sh
+quirkbench investigation submit-baseline INVESTIGATION --compose COMPOSE_ID --request-id BASELINE_REQUEST --json
+quirkbench experiment list --investigation INVESTIGATION --json
+quirkbench experiment review EXPERIMENT_ID --json
+quirkbench investigation resume INVESTIGATION
+quirkbench attempt show ATTEMPT_ID --json
+quirkbench attempt approve ATTEMPT_ID
+```
+
+Admission creates one existing queued job and returns its experiment identity;
+it never claims or boots a target. Resume is explicit, and an independently running
+target in recovery claims the job and waits for approval. Review the immutable
+experiment, exact deployment revision, source/base and recipe before approving the
+claimed attempt. Human approval prints a retry ID derived from the complete exact
+binding and operator; keep it for retries. Machine calls require an explicit
+`--request-id ID --json`. Existing explicit request-ID approval/rejection forms
+remain supported. `attempt reject ATTEMPT_ID` records a denial without a boot.
+
+`attempt show` separates recorded approval from its current effect, candidate
+handoff/start, terminal result, recovery arrival and acknowledged evidence. Queries
+never expire attempts or recover the controller. Evidence presence is metadata,
+not a whole-byte verification; `evidence read` remains the bounded public read path.
+A PASS baseline observation does not establish problem reproduction or native
+qualification. Missing evidence or recovery remains unresolved. Lost handoff replies,
+expired/stale approval and controller restart do not authorize another physical
+attempt; use the existing explicit recovery/reconciliation rules.
+
 ## Submit an external proposal
 
 Stop every writer, then complete `investigation capture-source INVESTIGATION

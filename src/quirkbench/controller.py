@@ -108,6 +108,8 @@ from .investigations import MIGRATION as INVESTIGATION_MIGRATION
 MIGRATIONS.append(INVESTIGATION_MIGRATION)
 from .external_proposals import MIGRATION as EXTERNAL_PROPOSAL_MIGRATION
 MIGRATIONS.append(EXTERNAL_PROPOSAL_MIGRATION)
+from .attended_baseline import MIGRATION as ATTENDED_BASELINE_MIGRATION
+MIGRATIONS.append(ATTENDED_BASELINE_MIGRATION)
 
 def uid():
     return uuid.uuid4().hex
@@ -744,6 +746,8 @@ class Controller(OperatorApprovals):
                 db.execute('INSERT OR IGNORE INTO refs(owner,digest) VALUES(?,?)',(previous['id'],value))
                 db.execute('INSERT OR IGNORE INTO operation_refs(operation,role,digest) VALUES(?,"input",?)',(previous['id'],value))
             return self._operation_status(db, previous['id'])
+        from .attended_baseline import check_request
+        check_request(db,request_id,'operations')
         if campaign_id is not None:
             campaign = self._campaign(db, campaign_id)
             if device_id is not None and device_id != campaign['device']:
@@ -1184,10 +1188,14 @@ class Controller(OperatorApprovals):
 
     def submit_attended(self, campaign_id, experiment: Experiment):
         """Current external-agent entry point; legacy submit remains replay-compatible."""
+        self._require_attended_experiment(experiment)
+        return self.submit(campaign_id, experiment)
+
+    @staticmethod
+    def _require_attended_experiment(experiment):
         from .operator_approval import CAPABILITY
         if 'deployment' in experiment.artifacts and CAPABILITY not in experiment.required_capabilities:
             raise ContractError('physical proposals must require operator-approval.v1')
-        return self.submit(campaign_id, experiment)
 
     def submit(self, campaign_id, experiment: Experiment):
         spec = canonical(experiment.to_dict()).decode()
@@ -1197,18 +1205,27 @@ class Controller(OperatorApprovals):
         deployment = self._deployment_manifest(experiment.artifacts["deployment"]) if "deployment" in experiment.artifacts else None
         build_evidence = self._deployment_evidence(deployment) if deployment is not None else None
         with self.transaction() as db:
-            self._campaign(db, campaign_id)
-            previous = db.execute('SELECT spec FROM experiments WHERE id=?', (experiment.experiment_id,)).fetchone()
-            if previous and previous['spec'] != spec:
-                raise Conflict('experiment ID already has a different immutable specification')
-            db.execute('DELETE FROM storage_retired WHERE owner=?',('experiment:'+experiment.experiment_id,))
-            db.execute('INSERT OR IGNORE INTO experiments VALUES(?,?)', (experiment.experiment_id, spec))
-            for value in set(experiment.artifacts.values()) | library_values:
-                db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)', ('experiment:' + experiment.experiment_id, value))
-            if deployment is not None:
-                self._retain_deployment(db, "experiment:" + experiment.experiment_id, experiment.artifacts["deployment"], deployment, build_evidence)
-            for repetition in range(experiment.repetitions):
-                db.execute("INSERT OR IGNORE INTO jobs(campaign,experiment,repetition,state) VALUES(?,?,?,'QUEUED')", (campaign_id, experiment.experiment_id, repetition))
+            self._submit_db(db,campaign_id,experiment,spec,library_values,deployment,build_evidence)
+
+    def _submit_db(self,db,campaign_id,experiment,spec,library_values,deployment,build_evidence, *,fence=None):
+        """Shared atomic insertion after the caller's independently validated inputs.
+
+        Legacy submit retains its full verification. The attended adapter admits
+        only stopped published joins and fences those bindings after native pins.
+        """
+        self._campaign(db, campaign_id)
+        previous = db.execute('SELECT spec FROM experiments WHERE id=?', (experiment.experiment_id,)).fetchone()
+        if previous and previous['spec'] != spec:
+            raise Conflict('experiment ID already has a different immutable specification')
+        db.execute('DELETE FROM storage_retired WHERE owner=?',('experiment:'+experiment.experiment_id,))
+        db.execute('INSERT OR IGNORE INTO experiments VALUES(?,?)', (experiment.experiment_id, spec))
+        for value in set(experiment.artifacts.values()) | library_values:
+            db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)', ('experiment:' + experiment.experiment_id, value))
+        if deployment is not None:
+            self._retain_deployment(db, "experiment:" + experiment.experiment_id, experiment.artifacts["deployment"], deployment, build_evidence)
+        if fence is not None:fence()
+        for repetition in range(experiment.repetitions):
+            db.execute("INSERT OR IGNORE INTO jobs(campaign,experiment,repetition,state) VALUES(?,?,?,'QUEUED')", (campaign_id, experiment.experiment_id, repetition))
 
     def _pause(self, db, campaign_id, reason):
         active = db.execute("SELECT 1 FROM attempts a JOIN jobs j ON a.job=j.id WHERE j.campaign=? AND a.state IN ('CLAIMED','RUNNING','BOOT_PENDING')", (campaign_id,)).fetchone()
@@ -1601,6 +1618,18 @@ class Controller(OperatorApprovals):
 
     def _deployment_evidence(self, manifest):
         """Validate the explicit build-evidence closure; ordinary payload hashes are not refs."""
+        evidence=self._deployment_evidence_shape(manifest)
+        for value in evidence.values():self.store.verify(value)
+        if self.store.path(evidence['build_provenance']).stat().st_size > 1024 * 1024:
+            raise ContractError('build provenance exceeds size limit')
+        try:build=json.loads(self.store.get(evidence['build_provenance']))
+        except (ValueError,TypeError) as exc:
+            raise ContractError('build evidence does not match deployment provenance') from exc
+        self._validate_deployment_build(manifest,evidence,build)
+        return evidence
+
+    @staticmethod
+    def _deployment_evidence_shape(manifest):
         from .contracts import sha256
         closure = manifest.provenance.get('build_evidence')
         required = {'build_provenance', 'vmlinux', 'system_map', 'kernel_source',
@@ -1612,11 +1641,12 @@ class Controller(OperatorApprovals):
         evidence = closure['artifacts']
         for role, value in evidence.items():
             identifier(role)
-            self.store.verify(sha256(value))
-        if self.store.path(evidence['build_provenance']).stat().st_size > 1024 * 1024:
-            raise ContractError('build provenance exceeds size limit')
+            sha256(value)
+        return evidence
+
+    @staticmethod
+    def _validate_deployment_build(manifest,evidence,build):
         try:
-            build = json.loads(self.store.get(evidence['build_provenance']))
             if (type(build.get('schema')) is not int or build['schema'] != 1
                     or not isinstance(build.get('kernel_release'), str) or not build['kernel_release']
                     or build['kernel_release'] != manifest.provenance['kernel_release']):
@@ -1636,7 +1666,6 @@ class Controller(OperatorApprovals):
                     raise ValueError('payload and evidence differ')
         except (ValueError, TypeError, KeyError, AttributeError) as exc:
             raise ContractError('build evidence does not match deployment provenance') from exc
-        return evidence
 
     def _retain_deployment(self, db, owner, value, manifest, evidence):
         if self.deployment_repository is None:
@@ -1980,6 +2009,9 @@ class Controller(OperatorApprovals):
                                 (command_request_id,)).fetchone()
             if replay and (replay['request'] != request_id or replay['document'] != document):
                 raise Conflict('response command request ID was reused with different content')
+            if replay is None:
+                from .attended_baseline import check_request
+                check_request(db,command_request_id,'observation_response_commands')
             question = db.execute('SELECT session,campaign,issued_at,deadline_at FROM observation_requests WHERE id=?',
                                   (request_id,)).fetchone()
             if question is None or question['session'] != session_id or (campaign_id is not None and question['campaign'] != identifier(campaign_id)):

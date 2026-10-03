@@ -85,6 +85,8 @@ def start(controller,name,target,request_id, *,problem=b'',workspace=None,second
             if previous['id'] != name or previous['request_id'] != request_id or previous['request_digest'] != requested:
                 raise Conflict('investigation identity or original request differs')
             return record(controller,name,db)
+        from .attended_baseline import check_request
+        check_request(db,request_id,'investigations')
         if db.execute('SELECT 1 FROM campaigns WHERE id=?',(name,)).fetchone():raise Conflict('existing legacy campaign needs an explicit migration')
         row = db.execute('SELECT * FROM devices WHERE id=?',(target,)).fetchone()
         if row is None:raise ContractError('register the enrolled target in recovery first')
@@ -119,6 +121,7 @@ def start(controller,name,target,request_id, *,problem=b'',workspace=None,second
             if previous['id']!=name or previous['request_id']!=request_id or previous['request_digest']!=requested:
                 raise Conflict('investigation identity or original request differs')
             return record(controller,name,db)
+        check_request(db,request_id,'investigations')
         current = db.execute('SELECT * FROM devices WHERE id=?',(target,)).fetchone()
         if current is None or dict(current)!=observed_device:raise Conflict('target registration changed during investigation selection')
         require_execution_credentials(db,target,controller.clock())
