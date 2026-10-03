@@ -117,3 +117,14 @@ def test_pairing_candidate_refuses_unknown_repository_id(tmp_path):
     repository=tmp_path/'retained.repo';repository.write_text('[retained-stock]\nbaseurl=file:///exact\n')
     with pytest.raises(BuildError,match='ID missing'):
         stock_candidate_spec('fedora44-pairing-v1',repository,['unknown'])
+
+
+def test_candidate_spec_repository_ancestor_loop_is_command_error(tmp_path, capsys):
+    from quirkbench.cli import main
+    loop=tmp_path/'loop';loop.symlink_to('loop')
+    assert main(['--state',str(tmp_path/'unused-state'),'recovery-inputs','candidate-spec',
+                 '--candidate','fedora44-pairing-v1','--repository',str(loop/'selected.repo'),
+                 '--repository-id','selected']) == 2
+    output=capsys.readouterr()
+    assert output.out == '' and 'stock specification unavailable:' in output.err
+    assert not (tmp_path/'unused-state').exists()

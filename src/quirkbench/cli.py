@@ -417,7 +417,7 @@ def _main(argv=None):
             answer = stock_candidate_spec(args.candidate, args.repository, args.repository_id)
             print(json.dumps(answer, indent=2, sort_keys=True))
             return 0
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, RuntimeError) as exc:
             print('stock specification unavailable: '+str(exc), file=sys.stderr)
             return 2
     if args.command in ('experiment','attempt'):
