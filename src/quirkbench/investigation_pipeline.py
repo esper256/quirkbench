@@ -80,12 +80,13 @@ def binding(intent):
     return args
 
 
-def retained(controller,db,op,kind, *,campaign=None,workspace=None):
+def retained(controller,db,op,kind, *,campaign=None,workspace=None,owned_refs=()):
     row=db.execute('SELECT id,kind,state,campaign,device,input_digest,final_output_digest,prepared_digest,worker_unit FROM operations WHERE id=?',(identifier(op),)).fetchone()
     if row is None or row['kind']!=kind or row['state']!='SUCCEEDED' or row['worker_unit'] is not None or row['final_output_digest'] is None:
         raise Conflict('requires completed stopped '+kind+' operation')
     if campaign is not None and row['campaign']!=campaign:raise Conflict('operation belongs to another investigation')
     refs={r[0] for r in db.execute('SELECT digest FROM operation_refs WHERE operation=?',(op,))}
+    refs.update(owned_refs)
     if workspace is not None:
         refs|={r[0] for r in db.execute('SELECT digest FROM refs WHERE owner=?',('workspace:'+identifier(workspace),))}
     if row['final_output_digest'] not in refs:raise Conflict('operation output was retired')
@@ -106,7 +107,7 @@ def baseline(store,identity):
     return entry
 
 
-def graph(controller,name,source,candidate,db):
+def graph(controller,name,source,candidate,db, *,proposal=None):
     from .investigations import record
     from .source_operation import binding as source_binding
     from .source_capture import validate_capture
@@ -117,8 +118,22 @@ def graph(controller,name,source,candidate,db):
     inv=record(controller,name,db)
     if inv is None or inv['baseline_sha256'] is None:raise Conflict('investigation has no supported immutable baseline')
     entry=baseline(controller.store,inv['baseline_sha256'])
-    source_row,refs=retained(controller,db,source,'source_capture',campaign=name)
-    candidate_row,candidate_refs=retained(controller,db,candidate,'candidate_prepare');refs|=candidate_refs
+    owned=set()
+    if proposal is not None:
+        from .proposal_dispatch import admitted
+        row,value,owned=admitted(controller,name,proposal,db)
+        if value['action']!='experiment' or value['source']['capture_operation_id']!=source:
+            raise Conflict('proposal does not select this immutable capture')
+        # A completed baseline/comparison can still retain candidate preparation
+        # after that preparation's own count-based owner has expired. Reuse only
+        # closure retained by experiments in this investigation; exact candidate,
+        # baseline/builder/source identities are independently reconciled below.
+        historical=db.execute('''SELECT DISTINCT r.digest FROM refs r JOIN jobs j ON r.owner='experiment:'||j.experiment
+            WHERE j.campaign=? LIMIT 32769''',(name,)).fetchall()
+        if len(historical)>32768:raise ContractError('investigation input closure exceeds metadata bound')
+        owned|={r[0] for r in historical}
+    source_row,refs=retained(controller,db,source,'source_capture',campaign=name,owned_refs=owned)
+    candidate_row,candidate_refs=retained(controller,db,candidate,'candidate_prepare',owned_refs=owned);refs|=candidate_refs
     source_intent=document(controller.store,source_row['input_digest']);scope=source_binding(source_intent)
     workspace=workspace_record(document(controller.store,scope['workspace_sha256']))
     capture=validate_capture(document(controller.store,source_row['final_output_digest']))
@@ -127,7 +142,7 @@ def graph(controller,name,source,candidate,db):
         raise Conflict('captured source differs from investigation workspace')
     prepared=db.execute('SELECT operation FROM source_preparations WHERE workspace_id=? AND campaign=?',(workspace['workspace_id'],name)).fetchone()
     if prepared is None:raise Conflict('supported distribution preparation required')
-    prep_row,prep_refs=retained(controller,db,prepared['operation'],'source_prepare',campaign=name,workspace=workspace['workspace_id']);refs|=prep_refs
+    prep_row,prep_refs=retained(controller,db,prepared['operation'],'source_prepare',campaign=name,workspace=workspace['workspace_id'],owned_refs=owned);refs|=prep_refs
     if prep_row['input_digest'] not in prep_refs:
         raise Conflict('expired preparation metadata; start a fresh investigation and source preparation')
     prep_intent=document(controller.store,prep_row['input_digest'])
@@ -162,7 +177,7 @@ def available(controller,refs):
             raise ContractError('joined input bytes are linked, foreign or special')
 
 
-def submit(controller,name,kind,request_id, *,source=None,candidate=None,build=None,repository=None,ready=None):
+def submit(controller,name,kind,request_id, *,source=None,candidate=None,build=None,repository=None,ready=None,_proposal=None,_commit=None):
     from .controller_service import require_ready,configuration
     from .operations import operation_intent
     from .job_operations import envelope
@@ -179,12 +194,13 @@ def submit(controller,name,kind,request_id, *,source=None,candidate=None,build=N
             old_request={'name':saved['investigation_id'],'kind':old['kind'],'source':saved.get('source_capture_operation_id'),
                 'candidate':saved.get('candidate_operation_id'),'build':saved.get('build_operation_id'),'repository':saved.get('repository')}
             if request!=old_request:raise Conflict('joined request identity was reused with different input')
+            if _commit is not None:_commit(db,dict(old))
             return envelope(controller.root,controller._operation_status(db,old['id']),request_id)
     try:(ready or require_ready)(controller.root)
     except Conflict as exc:raise PipelineBlocked(str(exc)) from exc
     publication=None
     with controller.transaction() as db:
-        if kind=='build':value,refs,parents=graph(controller,name,source,candidate,db)
+        if kind=='build':value,refs,parents=graph(controller,name,source,candidate,db,proposal=_proposal)
         elif kind=='compose':
             row,refs=retained(controller,db,build,'build',campaign=name);parents=[row]
             previous=binding(document(controller.store,row['input_digest']))
@@ -217,13 +233,14 @@ def submit(controller,name,kind,request_id, *,source=None,candidate=None,build=N
             workspace=None
             if parent['kind']=='source_prepare':
                 workspace=db.execute('SELECT workspace_id FROM source_preparations WHERE operation=?',(parent['id'],)).fetchone()[0]
-            fresh,_=retained(controller,db,parent['id'],parent['kind'],campaign=parent['campaign'],workspace=workspace)
+            fresh,_=retained(controller,db,parent['id'],parent['kind'],campaign=parent['campaign'],workspace=workspace,owned_refs=refs if _proposal else ())
             if fresh!=parent:raise Conflict('joined parent changed during admission')
         # Retention shares this lock: pin the complete parent closure atomically.
         for parent in parents:
             current_refs={r[0] for r in db.execute('SELECT digest FROM operation_refs WHERE operation=?',(parent['id'],))}
             if not current_refs<=refs:raise Conflict('joined parent references changed')
         row=controller._admit_operation_db(db,request_id,kind,intent,request_digest,input_artifact.sha256,refs,campaign_id=name,device_id=device)
+        if _commit is not None:_commit(db,row)
     return envelope(controller.root,row,request_id)
 
 

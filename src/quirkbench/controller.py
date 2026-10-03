@@ -110,6 +110,8 @@ from .external_proposals import MIGRATION as EXTERNAL_PROPOSAL_MIGRATION
 MIGRATIONS.append(EXTERNAL_PROPOSAL_MIGRATION)
 from .attended_baseline import MIGRATION as ATTENDED_BASELINE_MIGRATION
 MIGRATIONS.append(ATTENDED_BASELINE_MIGRATION)
+from .proposal_dispatch import MIGRATION as PROPOSAL_DISPATCH_MIGRATION
+MIGRATIONS.append(PROPOSAL_DISPATCH_MIGRATION)
 
 def uid():
     return uuid.uuid4().hex
@@ -184,6 +186,8 @@ class _LifecycleOwner:
                 raise ContractError('unknown operation')
             if row['state'] != 'QUEUED' or row['queued_epoch'] != self.epoch:
                 raise Conflict('operation is not queued in the current lifecycle')
+            from .proposal_dispatch import guard_child
+            guard_child(self,db,row)
             from .job_operations import STAGES
             if (row['kind'],stage) not in STAGES:
                 raise Conflict('worker kind/stage is not allowed')
@@ -635,7 +639,7 @@ class Controller(OperatorApprovals):
     def _startup_db(self, db, *, restored=False):
         self._uncertain(db, '1=1', (), 'controller restarted; reconcile before resume')
         db.execute("UPDATE campaigns SET state='PAUSED',reason='controller restarted; explicit resume required'")
-        db.execute("UPDATE operations SET state='INTERRUPTED',worker_epoch=NULL,updated=? WHERE state='QUEUED' AND kind IN ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare','candidate_prepare')",(self.clock(),))
+        db.execute("UPDATE operations SET state='INTERRUPTED',worker_epoch=NULL,updated=? WHERE state='QUEUED' AND kind IN ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare','candidate_prepare','external_proposal')",(self.clock(),))
         db.execute("UPDATE operations SET queued_epoch=(SELECT epoch FROM controller_lifecycle WHERE id=1) WHERE state='QUEUED' AND kind='operation_resume'")
         # A live owner's unit names are evidence needed to stop complete cgroups.
         # Copied unit names in a restored backup refer to another controller.

@@ -10,6 +10,7 @@ from .contracts import Conflict,ContractError,canonical,sha256
 from .job_operations import binding,current,adopt_inputs,resume
 from .job_worker import document,input_files
 from .state_reader import read_file
+from .build import BuildError
 
 
 def repository_tree(path):
@@ -39,6 +40,9 @@ class JobCoordinator:
     def tick(self):
         owner=self.owner;c=owner.controller
         if owner.closed or c._lifecycle_owner is not owner: raise Conflict('controller ownership ended')
+        from .proposal_dispatch import tick as proposals
+        submitted=proposals(owner)
+        if submitted is not None:return submitted
         with c.transaction() as db:
             active=[dict(r) for r in db.execute('SELECT * FROM operations WHERE worker_unit IS NOT NULL')]
             queued=[dict(r) for r in db.execute("SELECT * FROM operations WHERE state='QUEUED' AND kind IN ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare','candidate_prepare','operation_resume') AND queued_epoch=? ORDER BY created",(owner.epoch,))]
@@ -69,6 +73,10 @@ class JobCoordinator:
         if physical: return None
         for row in queued:
             if row['kind']=='operation_resume': return self.resume_request(row)
+            from .proposal_dispatch import guard_child
+            with c.transaction() as db:
+                try:guard_child(owner,db,row)
+                except (OSError,ValueError,BuildError):continue
             if row['campaign']:
                 with c.transaction() as db:
                     if c._campaign(db,row['campaign'])['state']!='RUNNING': continue

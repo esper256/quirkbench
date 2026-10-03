@@ -32,6 +32,13 @@ def manifest(kind, raw):
 
 
 def binding(intent, *, executable=False):
+    if intent.get('kind')=='external_proposal':
+        args=intent.get('arguments')
+        if (not isinstance(args,dict) or set(args)!={'schema_version','proposal_sha256','context_sha256'} or
+                type(args['schema_version']) is not int or args['schema_version']!=1):
+            raise ContractError('invalid external proposal intent')
+        for key in ('proposal_sha256','context_sha256'):sha256(args[key])
+        return args
     if intent.get('kind')=='candidate_prepare':
         from .candidate_rootfs_operation import binding as candidate_binding
         return candidate_binding(intent)
@@ -179,13 +186,17 @@ def request_resume(controller,operation,request_id):
     operation=identifier(operation)
     with controller.transaction() as db:
         row=db.execute('SELECT kind,state FROM operations WHERE id=?',(operation,)).fetchone()
-        if row is None or row['kind'] not in KINDS: raise ContractError('resume requires a fixed build, compose, builder preparation or recovery acquisition job')
+        if row is None or row['kind'] not in KINDS|{'external_proposal'}: raise ContractError('resume requires an existing fixed job or external proposal')
     request=controller.admit_operation(request_id,'operation_resume',{'operation_id':operation})
     return envelope(controller.root,request,request_id)
 
 
 def resume(owner,operation):
     controller=owner.controller
+    with controller.transaction() as db:kind=db.execute('SELECT kind FROM operations WHERE id=?',(operation,)).fetchone()
+    if kind and kind[0]=='external_proposal':
+        from .proposal_dispatch import resume as proposal_resume
+        return proposal_resume(owner,operation)
     with controller.transaction() as db:
         row=db.execute('SELECT * FROM operations WHERE id=?',(operation,)).fetchone()
         eligible=row is not None and (row['state']=='INTERRUPTED' or (row['kind']=='source_prepare' and row['state']=='FAILED'))
