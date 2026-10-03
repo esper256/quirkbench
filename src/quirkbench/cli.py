@@ -291,6 +291,9 @@ def parser():
     respond.add_argument('--file', type=Path, required=True); respond.add_argument('--request-id', required=True)
     recovery = commands.add_parser('recovery-inputs', help='exact stock package acquisition plan and v2 retained inputs')
     recovery_actions = recovery.add_subparsers(dest='action', required=True)
+    replay = recovery_actions.add_parser('replay-check', help='report missing or changed exact RPM inputs in a retained repository; read-only')
+    replay.add_argument('--spec', type=Path, required=True)
+    replay.add_argument('--directory', type=Path, required=True)
     acquire = recovery_actions.add_parser('acquire-plan', help='prepare recorded acquisition and print exact command; does not download')
     acquire.add_argument('directory',type=Path)
     acquire.add_argument('--spec',type=Path,help='immutable acquisition specification with pinned repository bytes and RPM trust')
@@ -407,6 +410,19 @@ def _main(argv=None):
             if args.json:print(json.dumps(operation_response(error={'code':code,'message':message,'retryable':status_code==5}),sort_keys=True))
             else:print(code+': '+message,file=sys.stderr)
             return status_code
+    if args.command == 'recovery-inputs' and args.action == 'replay-check':
+        from .recovery_replay import check_replay
+        from .recovery_acquisition import load_spec, MAX_SPEC
+        from .state_reader import read_file
+        try:
+            path = args.spec.expanduser().absolute()
+            selected = load_spec(read_file(path.parent.resolve(strict=True), path.name, limit=MAX_SPEC))
+            answer = check_replay(selected, args.directory)
+            print(json.dumps(answer, indent=2, sort_keys=True))
+            return 0 if answer['selected_inputs_available'] else 4
+        except (OSError, ValueError, RuntimeError) as exc:
+            print('RPM replay inventory unavailable: '+str(exc), file=sys.stderr)
+            return 2
     if args.command in ('experiment','attempt'):
         from .attended_views import ApprovalReader,experiments,review,attempt,decide
         from .contracts import Conflict,ContractError
@@ -1332,7 +1348,7 @@ def _main(argv=None):
 def main(argv=None):
     """A publication barrier, not a scheduler; read-only commands do no housekeeping."""
     args=parser().parse_args(argv)
-    readonly=(args.command in ('storage','experiment','build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
+    readonly=((args.command=='recovery-inputs' and args.action=='replay-check') or args.command in ('storage','experiment','build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
                                'target','endpoint','target-service','serve-repository','release-check') or
               (args.command=='campaign' and args.action=='status') or
               (args.command=='attempt' and args.action in ('status','show')) or
