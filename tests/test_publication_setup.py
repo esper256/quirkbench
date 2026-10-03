@@ -129,6 +129,54 @@ def test_exact_cli_success_calls_same_service(installed,monkeypatch,capsys):
     assert cli.main(args)==0 and json.loads(capsys.readouterr().out)['data']==result
 
 
+@pytest.mark.parametrize('stage',['configuration_written','configuration_published'])
+def test_restored_old_config_after_write_never_acknowledges_success(installed,stage):
+    root=installed[0];original=(root/'private/controller-service.json').read_bytes()
+    def change(current):
+        if current==stage:(root/'private/controller-service.json').write_bytes(original)
+    with pytest.raises(Conflict,match='configuration changed'):setup(installed,fault_hook=change)
+    assert (root/'private/controller-service.json').read_bytes()==original
+
+
+def test_final_native_service_callback_cannot_overwrite_unrelated_maintenance(installed):
+    root,services,signing,options,calls=installed;count=0
+    def run(argv,**kwargs):
+        nonlocal count
+        result=services(argv,**kwargs)
+        if '--property=FragmentPath' in argv:
+            count+=1
+            # First discover how many native barriers reach the final key export;
+            # the injected export below marks the exact final callback boundary.
+            if final[0]:
+                config=configuration(root);config['port']=8445
+                (root/'private/controller-service.json').write_bytes(canonical(config))
+        return result
+    native=options['run'];exports=0;final=[False]
+    def key(argv,**kwargs):
+        nonlocal exports
+        result=native(argv,**kwargs)
+        if argv[0]=='gpg' and '--export' in argv:
+            exports+=1
+            if exports==2:final[0]=True
+        return result
+    with pytest.raises(Conflict,match='configuration changed'):setup(installed,runner=run,run=key)
+    assert final[0] and configuration(root)['port']==8445 and 'repository_endpoint' not in configuration(root)
+
+
+def test_final_key_callback_repository_symlink_blocks_publication(installed):
+    root,services,signing,options,calls=installed;native=options['run'];exports=0
+    outside=root/'other';outside.write_bytes(b'unselected bytes')
+    def changed(argv,**kwargs):
+        nonlocal exports
+        result=native(argv,**kwargs)
+        if argv[0]=='gpg' and '--export' in argv:
+            exports+=1
+            if exports==2:(root/'repositories/lab/escape').symlink_to(outside)
+        return result
+    with pytest.raises((ValueError,ContractError)):setup(installed,run=changed)
+    assert 'repository_endpoint' not in configuration(root)
+
+
 def test_setup_replay_cannot_accept_unjournaled_additional_settings(installed,tmp_path):
     root,services,signing,options,calls=installed
     config=configuration(root);config['repositories']={'lab':str(root/'repositories/lab')}

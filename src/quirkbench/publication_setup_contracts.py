@@ -11,7 +11,7 @@ LIMIT=16384
 
 
 def validate(value):
-    if (not isinstance(value,dict) or set(value)!={'schema_version','record_type','request_id','request_digest','intent','completed_steps'}
+    if (not isinstance(value,dict) or set(value)!={'schema_version','record_type','request_id','request_digest','intent','completed_steps','repository_configuration_sha256'}
             or type(value['schema_version']) is not int or value['schema_version']!=1 or value['record_type']!='publication-setup'):
         raise ContractError('invalid publication setup journal')
     identifier(value['request_id']);sha256(value['request_digest'])
@@ -34,6 +34,8 @@ def validate(value):
         raise ContractError('publication request digest differs')
     if value['completed_steps'] not in [list(STEPS[:n]) for n in range(len(STEPS)+1)]:
         raise ContractError('publication setup steps differ')
+    if len(value['completed_steps'])>=2:sha256(value['repository_configuration_sha256'])
+    elif value['repository_configuration_sha256'] is not None:raise ContractError('repository configuration requires completed initialization')
     if len(canonical(value))>LIMIT:raise ContractError('publication setup exceeds byte limit')
     return value
 

@@ -8,7 +8,8 @@
     "request_id",
     "request_digest",
     "intent",
-    "completed_steps"
+    "completed_steps",
+    "repository_configuration_sha256"
   ],
   "properties": {
     "schema_version": {
@@ -113,6 +114,13 @@
           "configuration_published"
         ]
       ]
+    },
+    "repository_configuration_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
     }
   }
 }

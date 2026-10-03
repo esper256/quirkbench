@@ -1274,7 +1274,7 @@ def main(argv=None):
               (args.command=='maintenance' and args.action in ('status','prune')) or
               (args.command=='session' and args.action in ('observations','observation')) or
               (args.command=='build-cache' and args.action=='list'))
-    if readonly or args.command in ('setup-state','setup','serve','controller-install','release-install'): return _main(argv)
+    if readonly or args.command in ('setup-state','setup','publication','serve','controller-install','release-install'): return _main(argv)
     try:
         root=discover_state_root(args.state).expanduser().absolute()
         if not (root/'controller.sqlite').is_file(): return _main(argv)

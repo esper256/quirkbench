@@ -16,5 +16,6 @@
     "controller_tls_identity_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
     "controller_certificate_sha256": "5555555555555555555555555555555555555555555555555555555555555555"
   },
-  "completed_steps": []
+  "completed_steps": [],
+  "repository_configuration_sha256": null
 }

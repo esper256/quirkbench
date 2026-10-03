@@ -38,6 +38,11 @@ def history(root):
     if (digest(identity_raw)!=intent['controller_tls_identity_sha256'] or
             any(digest(tls_read(tls_directory,name))!=identity['files'][name] for name in TLS_FILES)):
         raise Conflict('publication setup original TLS bytes changed')
+    if 'repository_initialized' in saved['completed_steps']:
+        retained=_strict_read(directory,'repository-config')
+        if (digest(retained)!=saved['repository_configuration_sha256'] or
+                retained!=read_file(root/'repositories'/intent['repository_alias'],'config',limit=65536)):
+            raise Conflict('publication setup repository configuration changed')
     return saved,captured,old,new
 
 
@@ -120,16 +125,14 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
         runtime=Path(old['runtime']).parent.parent
         tls_directory=Path(old['cert']).parent
         tls_material={name:tls_read(tls_directory,name) for name in (*TLS_FILES,'identity.json')}
-        def guard():
+        def pure_fence(expected=None):
             _idle(root)
             for path,fd in ((root/'command.lock',command_fd),(root/'coordinator.lock',owner_fd)):
                 held=os.fstat(fd);named=path.lstat()
                 if (held.st_dev,held.st_ino)!=(named.st_dev,named.st_ino):raise Conflict('publication setup lock identity changed')
             fresh=_strict_read(root/'private','controller-service.json')
-            if fresh not in (captured['source_configuration_sha256'],captured['destination_configuration_sha256']):
+            if (fresh!=expected if expected is not None else fresh not in (captured['source_configuration_sha256'],captured['destination_configuration_sha256'])):
                 raise Conflict('controller configuration changed during publication setup')
-            if _service_state(runner)!='stopped':raise Conflict('stop the existing controller user service before publication setup')
-            _effective_unit(runner,unit,runtime,root)
             # No initial trust replacement after an invitation or target was issued.
             with StateReader(root).connection() as db:
                 if any(db.execute('SELECT 1 FROM '+table+' LIMIT 1').fetchone() for table in ('devices','enrollment_codes','enrollment_requests','credential_generations')):
@@ -137,6 +140,11 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
             validate_configuration(root,new)
             if any(tls_read(tls_directory,name)!=raw for name,raw in tls_material.items()):
                 raise Conflict('original controller TLS changed during publication setup')
+        def guard(expected=None):
+            pure_fence(expected)
+            if _service_state(runner)!='stopped':raise Conflict('stop the existing controller user service before publication setup')
+            _effective_unit(runner,unit,runtime,root)
+            pure_fence(expected)
         guard()
         snapshot=_snapshot(root,tls_inspector=tls_inspector);guard()
         public_key=export_public_key(new['composition_signing'],run=run).encode('ascii');guard()
@@ -149,17 +157,19 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
                 'signing_fingerprint':fingerprint,'unit':str(unit),**{key:digest(raw) for key,raw in captured.items()},
                 'controller_tls_identity_sha256':digest(tls_material['identity.json']),'controller_certificate_sha256':snapshot['certificate_sha256']}
             saved=validate({'schema_version':1,'record_type':'publication-setup','request_id':request_id,
-                'request_digest':digest(canonical({'kind':'publication-setup','arguments':intent})),'intent':intent,'completed_steps':[]})
+                'request_digest':digest(canonical({'kind':'publication-setup','arguments':intent})),'intent':intent,'completed_steps':[],
+                'repository_configuration_sha256':None})
             _durable_directory(_private_path(directory))
             for key,name in FILES.items():
                 path=directory/name
                 if path.exists() and _strict_read(directory,name)!=captured[key]:raise Conflict('uncommitted publication inputs differ')
                 atomic_write(path,captured[key])
             atomic_write(directory/'journal.json',canonical(saved))
-        def completed(step):
-            guard()
+        def completed(step,repository_sha=None):
+            guard(captured['destination_configuration_sha256'] if step=='configuration_published' else None)
             if history(root)[0]!=saved:raise Conflict('publication journal changed before completion')
             if step not in saved['completed_steps']:
+                if repository_sha is not None:saved['repository_configuration_sha256']=repository_sha
                 saved['completed_steps'].append(step);validate(saved);atomic_write(directory/'journal.json',canonical(saved))
             fault(step)
         completed('inputs_retained')
@@ -181,14 +191,18 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
         if retained.exists():
             if _strict_read(directory,'repository-config')!=repo_raw:raise Conflict('initialized repository configuration changed')
         else:atomic_write(retained,repo_raw)
-        completed('repository_initialized')
+        completed('repository_initialized',digest(repo_raw))
         if export_public_key(new['composition_signing'],run=run).encode('ascii')!=public_key:
             raise Conflict('repository key changed before configuration publication')
         guard()
         if history(root)[0]!=saved:raise Conflict('publication journal changed before configuration publication')
+        repository_tree(repo)
         if _strict_read(directory,'repository-config')!=read_file(repo,'config',limit=65536):
             raise Conflict('repository configuration changed before publication')
         atomic_write(root/'private/controller-service.json',captured['destination_configuration_sha256'])
         fault('configuration_written')
         completed('configuration_published')
+        guard(captured['destination_configuration_sha256'])
+        repository_tree(repo)
+        if history(root)[0]!=saved:raise Conflict('publication journal changed before acknowledgment')
         return response(saved)
