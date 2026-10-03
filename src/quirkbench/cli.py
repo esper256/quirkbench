@@ -68,6 +68,12 @@ def parser():
     commands = result.add_subparsers(dest='command', required=True)
     investigation = commands.add_parser('investigation', help='attended external investigation, source preparation and lifecycle')
     investigation_actions = investigation.add_subparsers(dest='action', required=True)
+    export=investigation_actions.add_parser('export',help='atomic public source/patch/report/evidence tar; no private backup or execution grant')
+    export.add_argument('name');export.add_argument('--output',type=Path,required=True)
+    export.add_argument('--capture',help='completed stopped source capture operation; default current handed-off capture')
+    export.add_argument('--author',help='explicit Name <email> for an export representation of dirty captured changes')
+    export.add_argument('--comparison',type=Path);export.add_argument('--timeout',type=int,default=300)
+    export.add_argument('--json',action='store_true')
     dispatch=investigation_actions.add_parser('dispatch-proposal',help='bind one admitted proposal to explicit candidate/repository choices; existing service advances it')
     dispatch.add_argument('name');dispatch.add_argument('--proposal',required=True);dispatch.add_argument('--candidate')
     dispatch.add_argument('--repository');dispatch.add_argument('--request-id');dispatch.add_argument('--json',action='store_true')
@@ -432,6 +438,7 @@ def _main(argv=None):
         from .contracts import Conflict, ContractError
         from .operations import operation_response
         from .store import StoragePressure
+        from .build import BuildError
         try:
             answer = execute(discover_state_root(args.state), args)
             if args.json:
@@ -453,7 +460,7 @@ def _main(argv=None):
                 from .state_reader import safe_text
                 print(safe_text(json.dumps(answer['data'], indent=2, sort_keys=True)))
             return 0
-        except (OSError, ValueError, sqlite3.Error, StoragePressure) as exc:
+        except (OSError, ValueError, sqlite3.Error, StoragePressure, BuildError) as exc:
             from .investigation_pipeline import PipelineBlocked
             from .candidate_rootfs_operation import CandidateBlocked
             code = 'BLOCKED' if isinstance(exc,(PipelineBlocked,CandidateBlocked,StoragePressure)) else 'CONFLICT' if isinstance(exc, Conflict) else 'INVALID_INPUT' if isinstance(exc, ContractError) else 'INFRASTRUCTURE'
@@ -1329,7 +1336,7 @@ def main(argv=None):
                                'target','endpoint','target-service','serve-repository','release-check') or
               (args.command=='campaign' and args.action=='status') or
               (args.command=='attempt' and args.action in ('status','show')) or
-              (args.command=='investigation' and args.action in ('status','source','brief','baseline','context','history','recipes','proposal-schema','proposals','observations','observation','report')) or args.command=='evidence' or
+              (args.command=='investigation' and args.action in ('status','source','brief','baseline','context','history','recipes','proposal-schema','proposals','observations','observation','report','export')) or args.command=='evidence' or
               (args.command=='settings' and args.action=='show') or
               (args.command=='maintenance' and args.action in ('status','prune')) or
               (args.command=='session' and args.action in ('observations','observation')) or

@@ -1,0 +1,286 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quirkbench.invalid/schemas/investigation-export.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_type",
+    "investigation_id",
+    "complete",
+    "capture_operation_id",
+    "capture_sha256",
+    "source",
+    "tested_source_attempts",
+    "validation_status",
+    "conclusion",
+    "native_qualification",
+    "execution_authorized",
+    "evidence",
+    "symbols",
+    "missing",
+    "limitations",
+    "files"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "investigation-export"
+    },
+    "investigation_id": {
+      "type": "string",
+      "maxLength": 128,
+      "minLength": 1
+    },
+    "complete": {
+      "const": true
+    },
+    "capture_operation_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 128,
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "capture_sha256": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "source": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "base_oid",
+            "export_commit_oid",
+            "patch_sha256",
+            "author",
+            "authorship",
+            "reconstruction_verified",
+            "empty_changes",
+            "extra_modes",
+            "upstream_ancestry",
+            "base_bundle_sha256"
+          ],
+          "properties": {
+            "base_oid": {
+              "type": "string",
+              "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"
+            },
+            "export_commit_oid": {
+              "type": "string",
+              "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"
+            },
+            "patch_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "author": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "authorship": {
+              "const": "explicit operator-supplied export representation; historical authorship not inferred"
+            },
+            "reconstruction_verified": {
+              "const": true
+            },
+            "empty_changes": {
+              "type": "boolean"
+            },
+            "extra_modes": {
+              "const": "reproduce/tree.jsonl"
+            },
+            "upstream_ancestry": {
+              "const": "unknown unless separately recorded; distribution base is not an upstream claim"
+            },
+            "base_bundle_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tested_source_attempts": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "type": "string",
+        "maxLength": 128,
+        "minLength": 1
+      }
+    },
+    "validation_status": {
+      "enum": [
+        "unvalidated",
+        "tested-source-match"
+      ]
+    },
+    "conclusion": {
+      "const": "inconclusive"
+    },
+    "native_qualification": {
+      "const": false
+    },
+    "execution_authorized": {
+      "const": false
+    },
+    "evidence": {
+      "type": "array",
+      "maxItems": 16384,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "attempt_id",
+          "experiment_id",
+          "sha256",
+          "acknowledged",
+          "bytes_exported"
+        ],
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1
+          },
+          "experiment_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "acknowledged": {
+            "type": "boolean"
+          },
+          "bytes_exported": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "symbols": {
+      "type": "array",
+      "maxItems": 300,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "experiment_id",
+          "role",
+          "sha256",
+          "bytes_exported"
+        ],
+        "properties": {
+          "experiment_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1
+          },
+          "role": {
+            "enum": [
+              "vmlinux",
+              "system_map",
+              "modules"
+            ]
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "bytes_exported": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "missing": {
+      "type": "array",
+      "maxItems": 16384,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sha256",
+          "role",
+          "reason"
+        ],
+        "properties": {
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "role": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "reason": {
+            "enum": [
+              "missing_corrupt_unsafe_or_outside_bounds",
+              "unacknowledged_or_original_attempt_owner_unavailable"
+            ]
+          }
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "string",
+        "maxLength": 1024
+      }
+    },
+    "files": {
+      "type": "array",
+      "maxItems": 16384,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "sha256",
+          "size_bytes"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 4096,
+            "pattern": "^(README\\.md|report\\.md|(patches|reproduce|experiments|evidence)/[^/]+)$"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 17179869184
+          }
+        }
+      }
+    }
+  }
+}

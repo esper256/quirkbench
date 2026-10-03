@@ -72,3 +72,6 @@ collection. Pin only the evidence you intend to keep.
 
 Native/physical qualification remains a separate attended operator gate. A report
 cannot authorize a boot, shutdown, publication, release or unattended operation.
+
+[Public export](investigation-export.md) consumes these same facts under one snapshot,
+rehashes retained public bytes and verifies captured patch reconstruction separately.

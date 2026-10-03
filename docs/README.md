@@ -28,3 +28,4 @@ record readers remain supported where the code requires them; removing old prose
 does not authorize dropping compatibility or reinterpreting stored evidence.
 
 - [Attributable investigation reports and retention](investigation-reports.md)
+- [Public patches and investigation export](investigation-export.md)

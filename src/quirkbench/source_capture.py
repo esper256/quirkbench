@@ -52,8 +52,11 @@ def _path(name):
     return path
 
 
-def _git(root,arguments,verify, *,local_fetch=False,timeout_s=60,import_epoch=None,before_launch=None):
+def _git(root,arguments,verify, *,local_fetch=False,local_bundle=False,timeout_s=60,import_epoch=None,before_launch=None,input_data=None):
     if type(timeout_s) is not int or not 1<=timeout_s<=3600:raise ContractError('bounded Git timeout required')
+    if input_data is not None and (not isinstance(input_data,bytes) or len(input_data)>MAX_LIST
+            or arguments not in (['hash-object','-w','--no-filters','--stdin-paths'],['update-index','-z','--index-info'])):
+        raise ContractError('bounded export-only Git index input required')
     if local_fetch:
         if (not isinstance(arguments,list) or len(arguments)!=8
                 or arguments[:6]!=['fetch','--quiet','--no-tags','--no-recurse-submodules','--depth=1','--']
@@ -61,10 +64,18 @@ def _git(root,arguments,verify, *,local_fetch=False,timeout_s=60,import_epoch=No
                 or str(Path(arguments[6]).resolve())!=arguments[6] or not Path(arguments[6]).is_dir()
                 or not isinstance(arguments[7],str) or not OID.fullmatch(arguments[7])):
             raise ContractError('local transport is restricted to an exact pinned workspace fetch')
+    if local_bundle:
+        if (local_fetch or not isinstance(arguments,list) or len(arguments)!=7
+                or arguments[:5]!=['fetch','--quiet','--no-tags','--no-recurse-submodules','--update-shallow']
+                or not isinstance(arguments[5],str) or not Path(arguments[5]).is_absolute()
+                or str(Path(arguments[5]).resolve())!=arguments[5]
+                or not stat.S_ISREG(Path(arguments[5]).lstat().st_mode)
+                or Path(arguments[5]).lstat().st_nlink!=1 or arguments[6]!='refs/heads/base'):
+            raise ContractError('bundle transport requires an export-owned regular base bundle')
     verify()
     env={key:value for key,value in os.environ.items() if not key.startswith('GIT_')}
     env.update(GIT_CONFIG_NOSYSTEM='1',GIT_CONFIG_GLOBAL='/dev/null',GIT_TERMINAL_PROMPT='0',
-        GIT_NO_LAZY_FETCH='1',GIT_ALLOW_PROTOCOL='file' if local_fetch else '',GIT_NO_REPLACE_OBJECTS='1')
+        GIT_NO_LAZY_FETCH='1',GIT_ALLOW_PROTOCOL='file' if local_fetch or local_bundle else '',GIT_NO_REPLACE_OBJECTS='1')
     if import_epoch is not None:
         if (type(import_epoch) is not int or not 0 <= import_epoch <= 2**31-1
                 or arguments != ['commit','--quiet','--no-gpg-sign','-m','Quirkbench imported distribution source baseline']):
@@ -75,15 +86,26 @@ def _git(root,arguments,verify, *,local_fetch=False,timeout_s=60,import_epoch=No
     from .retention import launch
     if before_launch is not None: before_launch()
     process=launch(['git','--no-optional-locks','-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false','-C',str(root),*arguments],
-        env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
+        env=env,stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
     selector=selectors.DefaultSelector();deadline=time.monotonic()+timeout_s
     selector.register(process.stdout,selectors.EVENT_READ,'stdout');selector.register(process.stderr,selectors.EVENT_READ,'stderr')
+    position=0
+    if input_data:
+        os.set_blocking(process.stdin.fileno(),False)
+        selector.register(process.stdin,selectors.EVENT_WRITE,'stdin')
+    elif process.stdin is not None:process.stdin.close()
     output=bytearray();errors=0
     try:
         while selector.get_map() or process.poll() is None:
             verify()
             if time.monotonic()>=deadline:raise Conflict('Git source metadata deadline exceeded')
             for key,_ in selector.select(timeout=0.2):
+                if key.data=='stdin':
+                    try:position+=os.write(key.fileobj.fileno(),input_data[position:position+65536])
+                    except BrokenPipeError as exc:raise ContractError('Git rejected bounded export index input') from exc
+                    if position==len(input_data):selector.unregister(key.fileobj);key.fileobj.close()
+                    continue
                 block=os.read(key.fileobj.fileno(),65536)
                 if not block:selector.unregister(key.fileobj);continue
                 if key.data=='stdout':
@@ -101,6 +123,7 @@ def _git(root,arguments,verify, *,local_fetch=False,timeout_s=60,import_epoch=No
         if process.poll() is None:
             os.killpg(process.pid,signal.SIGKILL);process.wait(timeout=10)
         selector.close();process.stdout.close();process.stderr.close()
+        if process.stdin is not None and not process.stdin.closed:process.stdin.close()
 
 
 def _scope(root,base,allowed,verify):

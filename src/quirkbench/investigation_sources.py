@@ -66,6 +66,11 @@ def execute(root, args, *, ready=None):
     from .source_prepare_operation import submit
     from .source_workspace import handoff, release
     root = Path(root).expanduser().absolute()
+    if args.action=='export':
+        from .investigation_export import export
+        from .investigation_report import load_comparison
+        return operation_response(data=export(root,args.name,args.output,capture_id=args.capture,author=args.author,
+            plan=load_comparison(args.comparison,args.name),timeout_s=args.timeout))
     if args.action in ('report','report-retain'):
         from .investigation_report import execute as report
         return report(root,args)

@@ -137,7 +137,8 @@
       "tests/test_controller_deployments.py",
       "tests/test_investigation_monitor.py",
       "tests/test_monitor.py",
-      "tests/test_investigation_report.py"
+      "tests/test_investigation_report.py",
+      "tests/test_investigation_export.py"
     ]
   },
   "filesystem": {
