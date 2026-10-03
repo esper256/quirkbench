@@ -227,6 +227,7 @@ def pending(reader,name, *,after=0,limit=20):
     from .state_reader import bounded_items,QUERY_BYTES
     if type(after) is not int or after<0 or type(limit) is not int or not 1<=limit<=100:raise ContractError('invalid proposal cursor')
     with reader.connection() as db:
+        db.execute('BEGIN')
         scope(reader,name,db)
         if not tables_available(db):
             return {'investigation_id':name,'items':[],'next_cursor':None,'migration_required':True,
@@ -234,12 +235,18 @@ def pending(reader,name, *,after=0,limit=20):
         rows=db.execute('''SELECT p.rowid AS cursor,p.decision_id,p.operation AS operation_id,p.proposal_digest,p.context_digest,
             p.input_tokens,p.output_tokens,q.action,o.state FROM external_proposals p JOIN proposal_outbox q ON q.operation=p.operation
             JOIN operations o ON o.id=p.operation WHERE p.campaign=? AND p.rowid>? ORDER BY p.rowid LIMIT ?''',(name,after,limit+1)).fetchall()
-    items=bounded_items([dict(row) for row in rows[:limit]],QUERY_BYTES-2048)
-    with reader.connection() as db:
+        items=[dict(row) for row in rows[:limit]]
         if db.execute("SELECT 1 FROM sqlite_master WHERE name='proposal_dispatch_commands'").fetchone():
             for item in items:
-                binding=db.execute('SELECT build_operation,composition_operation,experiment FROM proposal_dispatch_commands WHERE operation=?',(item['operation_id'],)).fetchone()
-                item['dispatch']=dict(binding) if binding else None
+                binding=db.execute('''SELECT
+                    CASE WHEN length(CAST(build_operation AS BLOB))<=128 THEN build_operation ELSE NULL END AS build_operation,
+                    CASE WHEN length(CAST(composition_operation AS BLOB))<=128 THEN composition_operation ELSE NULL END AS composition_operation,
+                    CASE WHEN length(CAST(experiment AS BLOB))<=128 THEN experiment ELSE NULL END AS experiment,
+                    length(CAST(build_operation AS BLOB))>128 OR length(CAST(composition_operation AS BLOB))>128 OR length(CAST(experiment AS BLOB))>128 AS oversized
+                    FROM proposal_dispatch_commands WHERE operation=?''',(item['operation_id'],)).fetchone()
+                if binding and binding['oversized']:raise ContractError('proposal child identity exceeds query bound')
+                item['dispatch']={k:binding[k] for k in ('build_operation','composition_operation','experiment')} if binding else None
+    items=bounded_items(items,QUERY_BYTES-2048)
     return {'investigation_id':name,'items':items,'next_cursor':items[-1]['cursor'] if items and len(rows)>len(items) else None,
         'migration_required':False,'dispatch_connected':any(item.get('dispatch') is not None for item in items),'execution_authorized':False}
 

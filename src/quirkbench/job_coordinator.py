@@ -10,6 +10,7 @@ from .contracts import Conflict,ContractError,canonical,sha256
 from .job_operations import binding,current,adopt_inputs,resume
 from .job_worker import document,input_files
 from .state_reader import read_file
+from .build import BuildError
 
 
 def repository_tree(path):
@@ -72,6 +73,10 @@ class JobCoordinator:
         if physical: return None
         for row in queued:
             if row['kind']=='operation_resume': return self.resume_request(row)
+            from .proposal_dispatch import guard_child
+            with c.transaction() as db:
+                try:guard_child(owner,db,row)
+                except (OSError,ValueError,BuildError):continue
             if row['campaign']:
                 with c.transaction() as db:
                     if c._campaign(db,row['campaign'])['state']!='RUNNING': continue

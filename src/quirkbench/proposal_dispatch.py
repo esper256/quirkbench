@@ -5,12 +5,15 @@ coordination state; jobs/attempts own execution. No agent is invoked here.
 """
 import json
 from pathlib import Path
+import subprocess
 
 from .contracts import ContractError,Conflict,Experiment,canonical,digest,identifier
 from .external_proposals import document,availability,recipe_scope
 from .proposal_contracts import validate as proposal_record
 from .proposal_dispatch_contracts import validate
 from .operations import operation_response
+from .store import StoragePressure
+from .build import BuildError
 
 MIGRATION='''
 CREATE TABLE proposal_dispatch_commands(
@@ -75,6 +78,53 @@ def replay(db,request,request_digest):
     return None
 
 
+def checked_binding(controller,parent,db):
+    row,proposal,refs=admitted(controller,parent['campaign'],parent['id'],db)
+    command=db.execute('SELECT * FROM proposal_dispatch_commands WHERE operation=?',(parent['id'],)).fetchone()
+    if command is None or command['input_digest']!=parent['prepared_digest'] or command['input_digest'] not in refs:
+        raise Conflict('proposal dispatch ownership changed')
+    value=validate(document(controller.store,command['input_digest']))
+    admission=db.execute('SELECT proposal_digest,context_digest FROM external_proposals WHERE operation=?',(parent['id'],)).fetchone()
+    if (value['proposal_operation_id']!=parent['id'] or value['investigation_id']!=parent['campaign'] or
+            value['proposal_sha256']!=admission[0] or value['context_sha256']!=admission[1] or value['action']!=proposal['action']):
+        raise Conflict('dispatch differs from admitted proposal/context')
+    return proposal,refs,value,dict(command)
+
+
+def child_intent(controller,parent,child,phase,db,proposal,dispatch,command):
+    from . import investigation_pipeline as pipeline
+    if child['kind']!=phase or child['campaign']!=parent['campaign'] or child['device']!=parent['device']:
+        raise Conflict('proposal child belongs to another scope')
+    intent=document(controller.store,child['input_digest']);args=pipeline.binding(intent)
+    join=pipeline.validate(document(controller.store,args['join_input_sha256']))
+    if phase=='build':
+        expected,_,_=pipeline.graph(controller,parent['campaign'],proposal['source']['capture_operation_id'],dispatch['candidate_operation_id'],db,proposal=parent['id'])
+        if join!=expected:raise Conflict('child build differs from frozen proposal/candidate inputs')
+    else:
+        build,refs=pipeline.retained(controller,db,command['build_operation'],'build',campaign=parent['campaign'])
+        build_args=pipeline.binding(document(controller.store,build['input_digest']))
+        if (join['record_type']!='investigation-compose-input' or join['investigation_id']!=parent['campaign'] or
+                join['build_operation_id']!=build['id'] or join['build_input_sha256']!=build_args['join_input_sha256'] or
+                join['build_outputs_index_sha256']!=build['final_output_digest'] or join['repository']!=dispatch['repository'] or
+                join['signing_fingerprint']!=dispatch['signing_fingerprint']):
+            raise Conflict('child composition differs from frozen build/publication choices')
+
+
+def guard_child(owner,db,child):
+    """The authoritative next-stage gate; already claimed workers may drain."""
+    c=owner.controller
+    links=db.execute('SELECT * FROM proposal_dispatch_commands WHERE build_operation=? OR composition_operation=?',(child['id'],child['id'])).fetchall()
+    if not links:return
+    if len(links)!=1:raise Conflict('child has ambiguous proposal ownership')
+    command=links[0];parent=db.execute('SELECT * FROM operations WHERE id=?',(command['operation'],)).fetchone()
+    phase='build' if command['build_operation']==child['id'] else 'compose'
+    if parent is None or parent['state']!='WAITING' or parent['stage']!='proposal-'+phase:
+        raise Conflict('proposal requires explicit reconciliation before its next child stage')
+    parent=dict(parent);fence(owner,db,parent)
+    proposal,refs,value,saved=checked_binding(c,parent,db)
+    child_intent(c,parent,child,phase,db,proposal,value,saved)
+
+
 def declare(controller,name,operation,request, *,candidate=None,repository=None,ready=None):
     from . import investigation_pipeline as pipeline
     from .controller_service import require_ready,configuration
@@ -116,7 +166,8 @@ def declare(controller,name,operation,request, *,candidate=None,repository=None,
             if fresh_graph!=graph or not fresh_refs<=refs:raise Conflict('candidate/source changed during dispatch declaration')
         result=operation_response(operation_id=operation,data={'accepted':True,'request_id':request,'investigation_id':name,
             'dispatch_sha256':artifact.sha256,'dispatch_connected':True,'approval_required':proposal['action']=='experiment',
-            'boot_authorized':False,'status_command':'quirkbench operation status '+operation})
+            'boot_authorized':False,'status_command':'quirkbench operation status '+operation,
+            'monitor_command':'quirkbench monitor '+name})
         db.execute('INSERT INTO proposal_dispatch_commands VALUES(?,?,?,?,?,NULL,NULL,NULL)',(request,request_digest,operation,artifact.sha256,canonical(result).decode()))
         for identity in refs|{artifact.sha256}:
             db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)',(operation,identity))
@@ -143,6 +194,8 @@ def fence(owner,db,parent, *,physical=True):
 
 def link(owner,parent,phase,child,db):
     fence(owner,db,parent)
+    proposal,refs,dispatch,command=checked_binding(owner.controller,parent,db)
+    child_intent(owner.controller,parent,child,phase,db,proposal,dispatch,command)
     column='build_operation' if phase=='build' else 'composition_operation'
     old=db.execute('SELECT '+column+' FROM proposal_dispatch_commands WHERE operation=?',(parent['id'],)).fetchone()[0]
     if old is not None and old!=child['id']:raise Conflict('proposal child identity changed')
@@ -157,9 +210,17 @@ def link(owner,parent,phase,child,db):
 
 
 def finish(owner,parent,value,refs, *,experiment=None,inputs=None):
-    c=owner.controller;artifact=c.store.put(canonical(value))
+    c=owner.controller
+    with c.transaction() as db:original_proposal,original_refs,original_dispatch,original_command=checked_binding(c,parent,db)
+    artifact=c.store.put(canonical(value))
     with c.transaction() as db:
-        fence(owner,db,parent,physical=experiment is not None)
+        def common_fence():
+            fence(owner,db,parent,physical=experiment is not None)
+            fresh,owned,dispatch,command=checked_binding(c,parent,db)
+            if (fresh!=original_proposal or dispatch!=original_dispatch or command!=original_command or not original_refs<=owned):
+                raise Conflict('proposal dispatch or retained ownership changed before publication')
+            if document(c.store,artifact.sha256)!=value:raise Conflict('proposal result changed before publication')
+        common_fence()
         if document(c.store,artifact.sha256)!=value:raise Conflict('proposal result changed before commit')
         if experiment is not None:
             proposal,dispatch,dispatch_sha,composition=inputs
@@ -172,7 +233,7 @@ def finish(owner,parent,value,refs, *,experiment=None,inputs=None):
             refs|=closure
             frozen_spec=canonical(experiment.to_dict()).decode()
             def final_fence():
-                fence(owner,db,parent)
+                common_fence()
                 _,fresh_proposal,_=admitted(c,parent['campaign'],parent['id'],db)
                 if fresh_proposal!=proposal or canonical(experiment.to_dict()).decode()!=frozen_spec:
                     raise Conflict('proposal or experiment specification changed after native retention')
@@ -203,7 +264,7 @@ def advance(owner,parent):
         command=db.execute('SELECT * FROM proposal_dispatch_commands WHERE operation=?',(parent['id'],)).fetchone()
         if command is None:return None
         dispatch=validate(document(c.store,command['input_digest']))
-        historical,proposal,refs=admitted(c,parent['campaign'],parent['id'],db)
+        proposal,refs,dispatch,command=checked_binding(c,parent,db)
         fence(owner,db,parent,physical=proposal['action']=='experiment')
         if command['input_digest']!=parent['prepared_digest'] or dispatch['proposal_operation_id']!=parent['id']:
             raise Conflict('dispatch record differs from original proposal')
@@ -247,20 +308,35 @@ def advance(owner,parent):
 def tick(owner):
     c=owner.controller
     with c.transaction() as db:
-        rows=[dict(r) for r in db.execute("SELECT * FROM operations WHERE kind='external_proposal' AND prepared_digest IS NOT NULL AND state IN ('QUEUED','WAITING') ORDER BY created LIMIT 100")]
+        rows=[dict(r) for r in db.execute('''SELECT o.* FROM operations o JOIN campaigns c ON c.id=o.campaign
+            JOIN proposal_outbox q ON q.operation=o.id LEFT JOIN proposal_dispatch_commands d ON d.operation=o.id
+            LEFT JOIN operations b ON b.id=d.build_operation LEFT JOIN operations p ON p.id=d.composition_operation
+            WHERE o.kind='external_proposal' AND o.prepared_digest IS NOT NULL
+            AND c.state='RUNNING' AND ((o.state='QUEUED' AND o.queued_epoch=?) OR (o.state='WAITING' AND o.worker_epoch=?))
+            AND (o.state='QUEUED' OR (d.composition_operation IS NULL AND (b.id IS NULL OR b.state IN ('SUCCEEDED','FAILED')))
+                OR (d.composition_operation IS NOT NULL AND (p.id IS NULL OR p.state IN ('SUCCEEDED','FAILED'))))
+            AND (q.action!='experiment' OR NOT EXISTS(SELECT 1 FROM attempts WHERE state IN ('CLAIMED','BOOT_PENDING','RUNNING','UNCERTAIN')
+                OR (handoff_revision IS NOT NULL AND recovery_returned IS NULL))) ORDER BY o.created,o.id LIMIT 100''',(owner.epoch,owner.epoch))]
     for row in rows:
         try:
             result=advance(owner,row)
             if result is not None:return result
-        except (OSError,ValueError) as exc:
+        except (OSError,ValueError,subprocess.SubprocessError,StoragePressure,BuildError) as exc:
             # Changed owner/pause/physical fences must never publish a failure.
-            state='FAILED' if isinstance(exc,ContractError) and not isinstance(exc,Conflict) else 'INTERRUPTED'
-            error=c.store.put(canonical({'code':'PROPOSAL_DISPATCH_BLOCKED','message':str(exc)[:512],'retryable':state=='INTERRUPTED'}))
             with c.transaction() as db:
                 try:fence(owner,db,row)
                 except Conflict:continue
-                db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)',(row['id'],error.sha256))
-                db.execute("UPDATE operations SET state=?,error_digest=?,wait_event='explicit-reconciliation-required',updated=? WHERE id=?",(state,error.sha256,c.clock(),row['id']))
+            state='FAILED' if isinstance(exc,ContractError) and not isinstance(exc,Conflict) else 'INTERRUPTED'
+            message=str(exc)[:512] if isinstance(exc,ContractError) else 'Proposal publication or resources unavailable; inspect retained diagnostics and reconcile before explicit resume.'
+            error_value={'code':'PROPOSAL_DISPATCH_BLOCKED','message':message,'retryable':state=='INTERRUPTED'}
+            error=None if isinstance(exc,StoragePressure) else c.store.put(canonical(error_value))
+            with c.transaction() as db:
+                try:fence(owner,db,row)
+                except Conflict:continue
+                if error is not None and document(c.store,error.sha256)!=error_value:raise Conflict('dispatch failure bytes changed before publication')
+                if error is not None:db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)',(row['id'],error.sha256))
+                reason='insufficient-storage; explicit-resume-required' if isinstance(exc,StoragePressure) else 'explicit-reconciliation-required'
+                db.execute("UPDATE operations SET state=?,error_digest=?,wait_event=?,updated=? WHERE id=?",(state,error.sha256 if error else None,reason,c.clock(),row['id']))
                 return {'id':row['id'],'state':state}
     return None
 
@@ -275,12 +351,20 @@ def resume(owner,operation):
         if owner.closed or c._lifecycle_owner is not owner or db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]!=owner.epoch:
             raise Conflict('proposal resume owner changed')
         db.execute("UPDATE operations SET state='QUEUED',queued_epoch=?,worker_epoch=NULL,updated=? WHERE id=?",(owner.epoch,c.clock(),operation))
+        command=db.execute('SELECT * FROM proposal_dispatch_commands WHERE operation=?',(operation,)).fetchone()
+        if command and (command['build_operation'] or command['composition_operation']):
+            phase='compose' if command['composition_operation'] else 'build'
+            child=command['composition_operation'] or command['build_operation']
+            db.execute("UPDATE operations SET state='WAITING',worker_epoch=?,worker_generation=worker_generation+1,stage=?,wait_event=? WHERE id=?",
+                (owner.epoch,'proposal-'+phase,phase+':'+child,operation))
 
 
 def execute(root,args, *,ready=None):
     from .controller import Controller
     from .state_reader import StateReader
     reader=StateReader(root)
+    import math
+    if not math.isfinite(args.reserve_gib) or args.reserve_gib<0:raise ContractError('reserve must be finite and nonnegative')
     request=args.request_id
     if request is None:
         if args.json:raise ContractError('--request-id required with --json')

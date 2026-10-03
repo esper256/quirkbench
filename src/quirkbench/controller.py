@@ -186,6 +186,8 @@ class _LifecycleOwner:
                 raise ContractError('unknown operation')
             if row['state'] != 'QUEUED' or row['queued_epoch'] != self.epoch:
                 raise Conflict('operation is not queued in the current lifecycle')
+            from .proposal_dispatch import guard_child
+            guard_child(self,db,row)
             from .job_operations import STAGES
             if (row['kind'],stage) not in STAGES:
                 raise Conflict('worker kind/stage is not allowed')

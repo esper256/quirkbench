@@ -401,6 +401,8 @@ def _main(argv=None):
                 print('Progress: ' + answer['data']['monitor_command'])
                 if args.action=='propose':
                     print('Proposal retained; bind it with dispatch-proposal. Acceptance grants no attempt approval.')
+                elif args.action=='dispatch-proposal':
+                    print('Dispatch bound; the existing controller service advances linked work. Each physical attempt still requires exact operator approval.')
                 else:
                     print('Preparation/capture completion requires the existing controller service. Resume the investigation explicitly if paused.')
             else:
