@@ -46,6 +46,47 @@ def execute(control,request='shutdown',**kwargs):
         clearer=kwargs.pop('clearer',lambda config:None),**kwargs)
 
 
+def test_ordinary_shutdown_state_preserves_permissions_and_blocks_writers(tmp_path):
+    control=tmp_path/'control';control.mkdir();control.chmod(0o755)
+    client=LocalDeviceClient(None,'target')
+    report=CapabilityReport('target','original-boot',[],mode='recovery')
+    assert local.pending(control) is None
+    agent=TargetAgent(client,control/'agent',report)
+    directory=control/'shutdown';directory.mkdir();directory.chmod(0o755)
+    value={'schema_version':1,'record_type':'recovery-shutdown','request_id':'shutdown',
+        'control_root':str(control),'boot_id':'original-boot','boot_config_sha256':'a'*64,
+        'source_sha256':{},'controller_intent':None,'local_attended':True,
+        'completed_steps':['retained'],'preparation':None}
+    path=directory/'active.json';path.write_bytes(canonical(value));path.chmod(0o644)
+    modes={p:p.stat().st_mode for p in (control,directory,path)}
+    journal=agent.journal_path.read_bytes()
+    assert local.pending(control)==value
+    with pytest.raises(Conflict,match='latched'):agent._save()
+    with pytest.raises(Conflict,match='latched'):TargetAgent(client,control/'agent',report)
+    assert agent.journal_path.read_bytes()==journal
+    assert {p:p.stat().st_mode for p in modes}==modes
+
+
+@pytest.mark.parametrize('change',['symlink','directory-link','oversized','invalid','wrong-root'])
+def test_shutdown_lookup_rejects_unusable_or_misattributed_fence(tmp_path,change):
+    control=tmp_path/'control';control.mkdir()
+    directory=control/'shutdown';directory.mkdir()
+    value={'schema_version':1,'record_type':'recovery-shutdown','request_id':'shutdown',
+        'control_root':str(control),'boot_id':'original-boot','boot_config_sha256':'a'*64,
+        'source_sha256':{},'controller_intent':None,'local_attended':True,
+        'completed_steps':['retained'],'preparation':None}
+    path=directory/'active.json';path.write_bytes(canonical(value))
+    if change=='symlink':
+        other=tmp_path/'other.json';path.rename(other);path.symlink_to(other)
+    elif change=='directory-link':
+        other=tmp_path/'other';directory.rename(other);directory.symlink_to(other,target_is_directory=True)
+    elif change=='oversized':path.write_bytes(b' '*(local.LIMIT+1))
+    elif change=='invalid':path.write_bytes(b'{}')
+    else:path.write_bytes(canonical(value|{'control_root':str(tmp_path)}))
+    with pytest.raises((ContractError,OSError)):
+        local.require_available(control)
+
+
 @pytest.fixture
 def spool(original_spool):
     # Existing drain fixtures deliberately retain arbitrary historical results.
