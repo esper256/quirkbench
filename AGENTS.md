@@ -38,6 +38,24 @@ Continue independent ready work if safe; otherwise ask the owner. Missing requir
 review, production credentials/publication and physical execution are explicit gates.
 See the [cloud worker prompt](docs/cloud-worker-prompt.md) for a reusable work loop.
 
+## Single-user scope
+
+One user installs a per-user instance and uses it exclusively. Multi-user/shared
+installations, accounts, roles, tenants and collaboration features are out of scope.
+Do not anticipate them with extra architecture or permission enforcement. Components
+and concurrent workers act for the same user; process coordination and authenticated
+target communication remain necessary. See the [single-user contract](docs/implementation-contracts.md#single-user-installation).
+
+## File permissions
+
+Apply the owner-approved [file-access policy](docs/implementation-contracts.md#file-access-and-permission-policy)
+tracked in [#66](https://github.com/esper256/quirkbench/issues/66). Ordinary user data
+must not be rejected merely for group/other bits or non-0600/0700 modes. Keep private
+creation defaults for secrets and preserve real storage, integrity and worker
+coordination requirements. Existing checks/tests are not their own justification.
+The earlier blanket privacy rule is superseded; implementation review should use
+this revised contract rather than ask the owner to approve the same decision again.
+
 ## Preserve the boundaries
 
 - Keep existing wire names (`device_id`), CLI options (`--device`, network `--host`)

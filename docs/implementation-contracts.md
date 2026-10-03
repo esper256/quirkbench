@@ -6,7 +6,7 @@ attended external-agent investigation through patch export. Exact experiment app
 remains explicit. Managed decisions and unattended grants are optional later modes.
 The [acceptance guide](installation-to-patch.md) defines delivery evidence; existing manual
 configuration remains supported. Existing wire schemas
-and implemented validation remain unchanged. The
+remain compatible; permission validation is revised by the file-access policy below. The
 [architecture storage policy](architecture.md#storage-protection-policy) governs
 recovery separately from candidate restrictions.
 
@@ -16,6 +16,82 @@ take precedence where the roadmap was less specific. Do not change the frozen
 Experiment/Result envelopes or weaken storage protection to implement these rules.
 Use [GitHub tracker #29](https://github.com/esper256/quirkbench/issues/29) and its
 child issues for task boundaries, dependencies and current implementation status.
+
+## Single-user installation
+
+Quirkbench is exclusively a single-user application. One person installs a
+per-user instance and uses it exclusively. A shared installation, multiple
+application users, tenants, accounts, roles, delegated administration, shared
+workspaces and collaboration/access-control features are out of scope, not
+requirements to anticipate.
+
+Controller, builder, target and coding agent are components acting for that one
+user, not separate application users. Multiple worker processes, investigations
+or targets do not imply multi-user support. Worker ownership means coordination
+and restart fencing within the user's installation, not isolation between users.
+
+Rely on the host OS for the user's account boundary. Do not design against other
+local users or the installation owner as adversaries to justify application-wide
+permission enforcement. Keep ordinary secret hygiene, authenticated controller/
+target communication, explicit experiment approval, and prevention of accidental
+data loss or unintended writes. These serve the single user's workflow; they do
+not establish a multi-user authorization model.
+
+## File access and permission policy
+
+Owner-approved product decision: [#66](https://github.com/esper256/quirkbench/issues/66).
+This policy supersedes blanket mode requirements in earlier contracts, audit
+conclusions and issue instructions. Implementation migration is tracked in #66;
+this documentation does not claim that existing checks have already been removed.
+
+Quirkbench is a user-installed application. Ordinary controller data, databases,
+source workspaces, reports and exports follow normal user-owned filesystem
+semantics. Respect usable user-selected permissions. Group/other permission bits
+alone are not grounds to reject ordinary data, and every descendant of a protected
+root need not independently have mode 0600 or 0700. For example, ordinary 0644
+files and 0755 directories inside a private 0700 root are acceptable. Report actual
+read/write/traversal failures with actionable errors.
+
+Create actual secrets (authentication tokens, signing/private keys and saved
+network credentials) and dedicated secret stores with private defaults, normally
+0600 files and 0700 directories. An enclosing private directory can provide the
+access boundary; exact leaf-mode equality is not itself the product requirement.
+Do not broaden existing secret permissions during migration. Honor native tools'
+documented functional requirements, such as those of a signing-key store. Mixed
+stores containing secrets need secret-appropriate protection until separated;
+this does not make all application data inherently secret.
+
+The target's boot-media control store is distinct from the controller user's home
+and contains credentials; provision it with appropriate private defaults. Ordinary
+target evidence is not required to have exact 0600 modes merely to prove its
+identity or durability. Keep secrets out of public artifacts and exports.
+
+Do not chmod pre-existing user content or recursively normalize permissions to
+make an operation pass. Private defaults for newly created app-owned state are
+allowed, but they are not an admission rule for all existing ordinary data.
+Routine operation must not require users to change their umask or home policy.
+
+Every retained permission-based rejection must name the protected resource, actor
+and harmful access, or the concrete functional/native-tool requirement. A reference
+to an existing helper or test is insufficient. Prefer a small number of explicit
+secret boundaries; do not build a general ACL/ancestor-analysis framework or
+repeatedly prove every ordinary path private.
+
+Keep filesystem access separate from logical ownership and integrity. Modes do
+not fence same-UID workers, sandbox the trusted local coding agent, prove evidence
+bytes unchanged, or contain an experimental kernel. Preserve authenticated approval,
+worker generation/locking and stop-before-reuse, correct storage device and write
+confinement, atomic publication/durability, source consistency, and prevention of
+unintended writes through links. Source/image executable semantics and genuinely
+functional mode bits remain meaningful. Preserve existing capture formats and
+historical evidence; changing this policy does not authorize silently rewriting
+stored manifests, digests or source metadata.
+
+In other sections, "private" work/staging means app-managed scope and a suitable
+creation default, not an independent exact-mode rejection requirement. Actual
+credentials remain confidential. Boundary review uses this policy when simplifying
+implementation; removing an obsolete blanket check does not itself require another
+product decision.
 
 ## C0 — Shared contract and authority rules
 
@@ -412,7 +488,8 @@ controller/repository endpoints, pinned CA/OSTree verification key and scoped pr
 and repository credentials. Enrollment does not create a campaign or grant a boot.
 Controller authentication configuration must be durable before returning success.
 
-Publish private generations under evidence/control with files 0600/directories 0700:
+Publish credential generations under evidence/control with private creation defaults
+(normally files 0600/directories 0700), applying the file-access policy above:
 validate bounded strict records and fixed filenames, reject symlinks/traversal, verify
 all files, fsync the staging directory, rename to an immutable generation, fsync the
 parent, then atomically publish runtime.json last. Identical retry reuses verified
