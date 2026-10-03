@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from stat_fixtures import stat_with
+import stat
 
 import pytest
 
@@ -209,7 +211,11 @@ def test_candidate_storage_failure_requests_recovery(tmp_path, monkeypatch):
 def test_control_symlink_is_rejected_before_chmod_or_agent_creation(tmp_path, monkeypatch):
     context = setup_main(tmp_path, monkeypatch, 'experiment', configured=False)
     other = tmp_path / 'other'
-    other.mkdir(mode=0o755)
+    other.mkdir()
+    # A deliberately non-private target makes an illicit chmod(0700) observable
+    # even under umask 077. This is fixture setup, not a host permission policy.
+    other.chmod(0o755)
+    assert other.stat().st_mode & 0o777 == 0o755
     original_mode = other.stat().st_mode
     context.control.rmdir()
     context.control.symlink_to(other, target_is_directory=True)
@@ -381,10 +387,13 @@ def test_evidence_destination_requires_mounted_p6_and_rejects_replacement(tmp_pa
     node=tmp_path/'p6'; node.write_bytes(b'fake block')
     layout=SimpleNamespace(partitions=[None]*5+[SimpleNamespace(path=node)])
     original=runtime.os.stat
-    def stat(path,*args,**kwargs):
-        if Path(path)==node: return SimpleNamespace(st_rdev=original(evidence).st_dev)
-        return original(path,*args,**kwargs)
-    monkeypatch.setattr(runtime.os,'stat',stat)
+    def node_stat(path,*args,**kwargs):
+        info = original(path,*args,**kwargs)
+        if not isinstance(path, int) and Path(path)==node:
+            return stat_with(info, st_mode=stat.S_IFBLK | stat.S_IMODE(info.st_mode),
+                             st_rdev=original(evidence).st_dev)
+        return info
+    monkeypatch.setattr(runtime.os,'stat',node_stat)
     monkeypatch.setattr(runtime.os.path,'ismount',lambda path: path==evidence)
     runtime.verify_evidence_destination(layout,control)
     monkeypatch.setattr(runtime.os.path,'ismount',lambda path:False)

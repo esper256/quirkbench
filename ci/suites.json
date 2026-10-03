@@ -18,5 +18,9 @@
   "ci-tooling": {
     "paths": ["ci/*", ".github/*", "Makefile", "tests/test_ci_*"],
     "tests": ["tests/test_ci_tools.py", "tests/test_ci_diagnostics.py"]
+  },
+  "filesystem": {
+    "paths": ["tests/stat_fixtures.py", "src/quirkbench/build.py", "src/quirkbench/runtime.py", "src/quirkbench/recovery_storage.py", "src/quirkbench/controller_setup.py"],
+    "tests": ["tests/test_build_storage.py", "tests/test_recovery_storage.py", "tests/test_runtime.py", "tests/test_target_lifecycle.py", "tests/test_resumable_setup.py", "tests/test_sqlite_lifetime.py", "tests/test_recovery_listing.py"]
   }
 }

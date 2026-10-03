@@ -296,3 +296,18 @@ gates. Preserve successful evidence and failed-run diagnostics. Diagnose with
 focused checks, then repeat only invalidated gates on a stable candidate. Clearly
 distinguish historical qualification, current software tests and pending release
 qualification. Quota savings never justify silently reusing mismatched evidence.
+
+## Assert requirements, not incidental implementation details
+
+For each new assertion, identify the behavior or contract it protects and a real
+defect it should reject. Preserve privacy, exact attribution/identity, mutation
+rejection, ownership and ordering where those implement a documented boundary.
+Make fault preconditions explicit: prove a permission change actually changes the
+relevant bit, and snapshot preserved values instead of assuming an ambient umask.
+Use complete native API results when overriding individual metadata fields; compare
+unordered directory membership as such. Read-only SQLite allows its exact WAL/SHM
+bookkeeping while forbidding application/schema/authority changes. Prefer stable
+error categories and actionable fragments to freezing entire diagnostic prose.
+See the [first assertion audit](test-assertion-audit.md) for reviewed examples and
+retained safety coverage; boundary-sensitive test changes still require AGENTS.md's
+higher-reasoning review.
