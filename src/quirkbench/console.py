@@ -93,7 +93,7 @@ def activate_staged_setup(*, run=subprocess.run):
 def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
                 output_stream=None, run_nmtui=None, profiles_ready=None,
                 run_capacity_setup=None, run_manual_setup=None, system_uuid_reader=None,
-                run_enrollment_setup=None,run_network_save=None,run_evidence_drain=None,run_retarget_setup=None,run_endpoint_setup=None) -> int:
+                run_enrollment_setup=None,run_network_save=None,run_evidence_drain=None,run_retarget_setup=None,run_endpoint_setup=None,run_shutdown=None) -> int:
     """Show the local status even without a cable, controller or enrollment."""
     source = input_stream or sys.stdin
     output = output_stream or sys.stdout
@@ -118,6 +118,9 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
     if run_endpoint_setup is None:
         from .endpoint_console import connect_endpoint
         run_endpoint_setup=connect_endpoint
+    if run_shutdown is None:
+        from .shutdown_local import attended
+        run_shutdown=attended
     from .binding import read_system_uuid, BindingError
     try:
         target_uuid = (system_uuid_reader or read_system_uuid)()
@@ -157,6 +160,7 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
         print('9) Repair or restore this target\'s controller endpoint'
               + ('' if verified else ' (waiting for verified recovery)'),file=output)
         print('Network changes here are temporary until explicitly saved during setup.', file=output)
+        print('10) Shut down locally or reconcile an interrupted shutdown'+('' if verified else ' (waiting for verified recovery)'),file=output)
         print('Selection: ', end='', file=output, flush=True)
         try:
             choice = source.readline()
@@ -165,6 +169,18 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
             continue
         if choice == '':
             return 0
+        if choice.strip()=='10':
+            if not verified:
+                print('Shutdown blocked until recovery identity/evidence are verified.',file=output);continue
+            try:
+                answer=run_shutdown(input_stream=source,output_stream=output)
+                if answer.get('poweroff_requested'):
+                    print('Orderly poweroff requested. Confirm physical poweroff locally before removing media; upload backlog may remain.',file=output)
+                    return 0
+                print(answer.get('next_action','Shutdown cancelled; no poweroff was requested.'),file=output)
+            except (OSError,ValueError,RuntimeError) as exc:
+                print('Shutdown blocked; retained state remains available: '+str(exc),file=output)
+            continue
         if choice.strip() == '1':
             if not verified:
                 print('Network setup is blocked until recovery identity and evidence are verified.', file=output, flush=True)

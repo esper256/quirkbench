@@ -317,6 +317,9 @@ hardware is blocked. Native commissioning and fresh runtime image checks remain 
 
 ## Retarget invitation prerequisite
 
+See [attended safe shutdown](#attended-safe-shutdown) before moving or disconnecting
+media. Retargeting and shutdown remain separate explicit transactions.
+
 After explicit original-generation revocation and reconciliation/whole-worker stops,
 the controller can issue `quirkbench target retarget-code OLD --generation EXACT
 --new-name NAME --new-uuid ACTUAL_NEW_UUID --request-id ID`. It retains original
@@ -345,3 +348,90 @@ member explicitly.
 Original evidence uses its original target/generation/attempt attribution and
 explicit scoped grant; new work and one-shot state remain unchanged. Native image
 commissioning is still required for the changed recovery inputs.
+
+## Attended safe shutdown
+
+On the controller, explicitly request shutdown of the enrolled, registered target:
+
+```sh
+quirkbench target poweroff TARGET --request-id shutdown-1
+quirkbench target poweroff-status TARGET --json
+quirkbench monitor INVESTIGATION --once
+```
+
+The first command atomically pauses all target campaigns and fences new attempts
+and resume. Existing target evidence/recovery exchanges remain available so current
+work can drain. Remaining attempts, worker units and library maintenance block
+execution. The immutable intent binds target, current credential generation, media,
+hardware UUID and the exact reported boot. Only supported recovery on that same boot
+can accept it through the existing authenticated controller service and lifecycle
+owner. A candidate must return and reconcile first; its changed recovery boot needs
+an explicit replacement request, never an automatic grant:
+
+```sh
+quirkbench target poweroff TARGET --request-id shutdown-2 --replace shutdown-1
+```
+
+An exact request retry returns its original receipt, even after credentials or
+readiness change. Use `poweroff-status` for current observations. It reports REQUESTED,
+DELIVERED or PREPARED, with admission, unresolved work, remaining workers, boot match,
+sealed local evidence and upload backlog separately. PREPARED means the controller
+accepted preparation; physical poweroff and safe removal remain unverified.
+A disconnected or stopped controller cannot prove either outcome.
+
+Verified recovery console choice **10 — Prepare attended safe shutdown** supplies
+independent local authority when offline. Type `poweroff FULL_BOOT_DISK_GUID` to
+confirm the displayed boot device. A failed remote exchange never supplies that
+confirmation implicitly. Local shutdown needs no controller acknowledgment of
+uploads and preserves their original journal, result, keys, sealed bytes and upload
+offsets. Unpaired/manual recovery retains this local path. Private runtime inputs
+must remain beneath evidence/control; ambiguous identity, nested mounts, unsafe
+files, unknown claim replies, running recipes or unreconciled arming block shutdown.
+
+Both paths use the existing supervisor and configuration/agent ownership. The remote
+path verifies the current native supervisor PID/cgroup, releases its shared runtime
+configuration ownership and takes exclusive locks; it does not stop its own unit.
+The local path stops that unit and verifies whole-group shutdown before taking the
+same locks. Every explicit retry freshly verifies recovery storage, clears and reads
+back the USB one-shot boot selection, verifies and fsyncs each sealed evidence object
+and its journal, and rechecks the original source and lock identities. Ordinary
+`systemctl poweroff` owns final orderly unmount and watchdog handling. There is no
+forced/lazy unmount, forced poweroff, new service or direct watchdog manipulation.
+
+A durable local shutdown fence blocks runtime startup before credentials/watchdog
+activation and blocks configuration/network maintenance and new target work. An
+atomic `shutdown/active.json` stores the complete authoritative continuation;
+per-request history is written afterward, so a failed history write cannot release
+restart admission. Native stopped-unit checks include empty descendant cgroups.
+Self-owned native calls have ten-second timeouts and feed the existing service
+heartbeat between calls, within the installed thirty-second watchdog interval.
+Original ordered result declarations must exactly match the verified sealed inventory.
+An interrupted preparation never automatically executes after reboot. On the same boot,
+choose console 10 and explicitly retry the exact request. A changed boot requires
+explicit local cancellation/reconciliation first. Type `cancel REQUEST_ID` at that
+console to remove only the local fence, retaining its history and evidence. Same-boot
+cancellation refuses a poweroff request that may already be queued. The supervisor
+is not automatically restarted. Reconcile controller state separately before
+explicitly starting the supervisor or resuming an investigation.
+
+For an unprepared remote request, cancel its controller admission fence explicitly:
+
+```sh
+quirkbench target poweroff-cancel TARGET --request-id shutdown-1
+```
+
+This does not clear any local fence or resume investigations. A PREPARED request
+cannot be cancelled remotely because poweroff may already be queued; confirm locally
+and use a reconciled changed-boot replacement. Cancelled request identities cannot
+be reactivated; use a new explicit request. Version 1 intent, preparation, receipt,
+status, cancellation and private continuation records have strict
+[schemas](../schemas/shutdown.v1.schema.json) and [examples](../examples/shutdown.json).
+The additive `target-shutdown.v1` capability and registration `shutdown_protocol: 1`
+negotiate the routes; legacy/static clients keep their existing protocol and use
+attended local shutdown.
+
+Software regressions inject native service/GPT boundaries. They establish neither
+native shutdown nor watchdog qualification. Before removing media, confirm actual
+physical poweroff locally. Pending uploads can remain durable on the USB and are
+never described as acknowledged. Native acceptance remains the separately authorized
+operator gate [#43](https://github.com/esper256/quirkbench/issues/43).

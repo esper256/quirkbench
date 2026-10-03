@@ -34,6 +34,8 @@ def _paused_source(control,config,request_id, *,verify_target,binding_reader,cle
     recover=recovery_verifier or (lambda config:_verify_state_identity(config,Path('/boot/quirkbench-state')))
     recover(config);control,storage=_storage(control,verify_target);directory=_location(control,request_id)
     with private_lock(control/'runtime-config.lock') as config_fd,ExitStack() as ownership:
+        from .shutdown_local import require_available
+        require_available(control)
         archived=directory/'archive/agent'
         agent=_private_path(archived if (directory/'activation.json').exists() and archived.exists() else control/'agent')
         if not agent.is_dir():raise Conflict('original retarget spool unavailable; no new initialization permitted')

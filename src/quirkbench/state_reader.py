@@ -97,6 +97,20 @@ class StateReader:
 
     transaction = connection
 
+    def on_connection(self,db):
+        """Borrow an existing query-only snapshot without closing its owner's handle."""
+        if db.execute('PRAGMA query_only').fetchone()[0]!=1:raise ContractError('read-only snapshot required')
+        import copy
+        reader=copy.copy(self)
+        class Borrowed:
+            def __getattr__(self,name):return getattr(db,name)
+            def close(self):pass
+        @contextmanager
+        def connection():yield db
+        reader.connection=reader.transaction=connection
+        reader._connect=lambda:Borrowed()
+        return reader
+
     # These existing query/render methods only perform SELECTs; supplying a
     # query-only connection preserves their formats without Controller.__init__.
     from .controller import Controller as _Queries
@@ -197,13 +211,23 @@ class StateReader:
         return operation_response(operation_id=operation_id, data={'sha256': artifact_digest, 'offset': offset,
             'length': len(raw), 'total_bytes': before.st_size, 'content_base64': base64.b64encode(raw).decode('ascii')})
 
-    def snapshot(self):
+    def snapshot(self, investigation=None):
         with self.connection() as db:
+            if investigation is not None:
+                from .investigations import record
+                if record(self,investigation,db) is None:
+                    raise ContractError('existing investigation record required')
+            where='WHERE campaign=? ' if investigation is not None else ''
+            arguments=(investigation,) if investigation is not None else ()
             operations = [dict(row) for row in db.execute(
-                "SELECT id,kind,state,stage,started,deadline,heartbeat,progress,wait_event,updated FROM operations "
-                "ORDER BY CASE WHEN state IN ('RUNNING','WAITING','QUEUED','INTERRUPTED') THEN 0 ELSE 1 END,updated DESC LIMIT 60")]
-            campaigns = [dict(row) for row in db.execute('SELECT id,state,reason,device FROM campaigns ORDER BY rowid DESC LIMIT 30')]
-        return {'sampled_at': time.time(), 'operations': bounded_items(operations,48*1024),
+                "SELECT id,kind,state,stage,started,deadline,heartbeat,"
+                "CASE WHEN length(CAST(progress AS BLOB))<=8192 THEN progress ELSE NULL END AS progress,"
+                "CASE WHEN length(CAST(wait_event AS BLOB))<=1024 THEN wait_event ELSE NULL END AS wait_event,"
+                "(length(CAST(progress AS BLOB))>8192 OR length(CAST(wait_event AS BLOB))>1024) AS details_truncated,updated FROM operations "
+                +where+"ORDER BY CASE WHEN state IN ('RUNNING','WAITING','QUEUED','INTERRUPTED') THEN 0 ELSE 1 END,updated DESC LIMIT 60",arguments)]
+            campaigns = [dict(row) for row in db.execute('SELECT id,state,substr(reason,1,512) AS reason,device FROM campaigns '
+                +('WHERE id=? ' if investigation is not None else '')+'ORDER BY rowid DESC LIMIT 30',arguments)]
+        return {'sampled_at': time.time(), 'operations': bounded_items(operations,(16 if investigation else 48)*1024),
                 'investigations': bounded_items(campaigns,12*1024)}
 
     def investigation_detail(self, campaign_id):

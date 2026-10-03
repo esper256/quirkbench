@@ -112,6 +112,8 @@ from .attended_baseline import MIGRATION as ATTENDED_BASELINE_MIGRATION
 MIGRATIONS.append(ATTENDED_BASELINE_MIGRATION)
 from .proposal_dispatch import MIGRATION as PROPOSAL_DISPATCH_MIGRATION
 MIGRATIONS.append(PROPOSAL_DISPATCH_MIGRATION)
+from .target_shutdown import MIGRATION as SHUTDOWN_MIGRATION
+MIGRATIONS.append(SHUTDOWN_MIGRATION)
 
 def uid():
     return uuid.uuid4().hex
@@ -202,6 +204,8 @@ class _LifecycleOwner:
                 if campaign['state'] != 'RUNNING':
                     raise Conflict('campaign pause blocks the next operation stage')
             if row['device'] is not None:
+                from .target_shutdown import fenced
+                if fenced(db,row['device']):raise Conflict('target shutdown blocks new worker claims')
                 from .credential_registry import require_execution_credentials
                 require_execution_credentials(db,row['device'],controller.clock())
             generation = row['worker_generation'] + 1
@@ -1246,6 +1250,8 @@ class Controller(OperatorApprovals):
         self.store.check_space()
         with self.transaction() as db:
             campaign = self._campaign(db, campaign_id)
+            from .target_shutdown import fenced
+            if fenced(db,campaign['device']):raise Conflict('target shutdown remains fenced; reconcile its exact request and local state')
             from .investigations import enforce_resume
             enforce_resume(db,campaign)
             from .credential_registry import require_execution_credentials
@@ -1343,6 +1349,8 @@ class Controller(OperatorApprovals):
             old = db.execute('SELECT attempt FROM claims WHERE device=? AND boot=? AND request=?', (device_id, boot_id, request_id)).fetchone()
             if old:
                 return self._claim_reply(db, self._attempt(db, old['attempt'])) if old['attempt'] else None
+            from .target_shutdown import fenced
+            if fenced(db,device_id):return None
             if db.execute("SELECT 1 FROM attempts WHERE device=? AND (state IN ('CLAIMED','RUNNING','BOOT_PENDING','UNCERTAIN') OR (handoff_revision IS NOT NULL AND recovery_returned IS NULL))", (device_id,)).fetchone():
                 return None
             report = json.loads(device['report'])

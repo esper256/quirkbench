@@ -54,6 +54,8 @@ def owned(control,config,request_id, *,verify_target,binding_reader=read_system_
     agent=_private_path(control/'agent')
     if not agent.is_dir():raise Conflict('original endpoint spool required; no initialization permitted')
     with private_lock(control/'runtime-config.lock') as config_fd,private_lock(agent/'agent.lock') as agent_fd:
+        from .shutdown_local import require_available
+        require_available(control)
         intent=pending(control)
         if intent is None or intent['request_id']!=request_id or intent['boot_config_sha256']!=digest(canonical(config.to_dict())):
             raise Conflict('exact prepared endpoint/boot selection required')

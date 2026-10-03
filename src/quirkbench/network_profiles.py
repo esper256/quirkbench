@@ -114,6 +114,8 @@ def save_selected(control,selected, *, verify_target,profiles=PROFILES,profiles_
     control,verify=_storage(control,verify_target);profiles=Path(profiles);_ready(profiles,profiles_ready,selected)
     fault_hook=fault_hook or (lambda _:None)
     with private_lock(control/'runtime-config.lock'):
+        from .shutdown_local import require_available
+        require_available(control)
         verify();identity=_identity(control,binding_reader)
         files={name:validate_profile(_read(profiles,name)) for name in sorted(selected)}
         if sum(map(len,files.values()))>MAX_TOTAL:raise ContractError('selected network profiles exceed total byte limit')
@@ -156,6 +158,8 @@ def replay_selected(control, *, verify_target,profiles=PROFILES,profiles_ready=N
     """Validate active binding before reading profile secrets, copy only into RAM."""
     control,verify=_storage(control,verify_target);profiles=Path(profiles);_ready(profiles,profiles_ready)
     with private_lock(control/'runtime-config.lock'):
+        from .shutdown_local import require_available
+        require_available(control)
         verify()
         from .retarget_local import require_runtime_available
         require_runtime_available(control)

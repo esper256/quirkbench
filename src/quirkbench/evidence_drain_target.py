@@ -144,6 +144,8 @@ def _locked(control,verify_target,binding_reader):
     if not agent.is_dir():raise Conflict('original target spool unavailable')
     with private_lock(control/'runtime-config.lock'):
         with private_lock(agent/'agent.lock'):
+            from .shutdown_local import require_available
+            require_available(control)
             verify()
             from .endpoint_local import require_available
             require_available(control,binding_reader=binding_reader)

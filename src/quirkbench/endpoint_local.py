@@ -127,6 +127,8 @@ def prepare(control,config,request_id,confirmed_device_id,expected_runtime_sha25
     recover(config);control,storage=_storage(control,verify_target);agent=_private_path(control/'agent')
     if not agent.is_dir():raise Conflict('existing enrolled spool required; no initialization permitted')
     with private_lock(control/'runtime-config.lock') as config_fd,private_lock(agent/'agent.lock') as agent_fd:
+        from .shutdown_local import require_available
+        require_available(control)
         raw=_strict_read(control,'runtime.json');runtime=_document(raw)
         if digest(raw)!=expected_runtime_sha256 or not isinstance(runtime,dict) or runtime.get('device_id')!=confirmed_device_id:
             raise Conflict('confirm the exact current target runtime before endpoint maintenance')

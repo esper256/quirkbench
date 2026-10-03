@@ -1,0 +1,619 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quirkbench.invalid/schemas/shutdown.v1.schema.json",
+  "title": "Attended shutdown version 1 records",
+  "$defs": {
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_type",
+        "request_id",
+        "device_id",
+        "credential_generation",
+        "media_instance_id",
+        "boot_id",
+        "target_binding"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "record_type": {
+          "const": "target-shutdown-intent"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "device_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "credential_generation": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "media_instance_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "boot_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "target_binding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema_version",
+            "system_uuid"
+          ],
+          "properties": {
+            "schema_version": {
+              "const": 1
+            },
+            "system_uuid": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "not": {
+                "enum": [
+                  "00000000-0000-0000-0000-000000000000",
+                  "ffffffff-ffff-ffff-ffff-ffffffffffff"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "preparation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_type",
+        "request_id",
+        "intent_sha256",
+        "boot_id",
+        "journal_sha256",
+        "one_shot_cleared",
+        "local_evidence_durable",
+        "sealed_records",
+        "pending_upload_records",
+        "pending_upload_bytes",
+        "physical_poweroff_verified",
+        "safe_removal_verified"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "record_type": {
+          "const": "target-shutdown-preparation"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "intent_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "boot_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "journal_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "one_shot_cleared": {
+          "const": true
+        },
+        "local_evidence_durable": {
+          "const": true
+        },
+        "sealed_records": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8192
+        },
+        "pending_upload_records": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8192
+        },
+        "pending_upload_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1099511627776
+        },
+        "physical_poweroff_verified": {
+          "const": false
+        },
+        "safe_removal_verified": {
+          "const": false
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "pending_upload_records": {
+                "const": 0
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "pending_upload_bytes": {
+                "const": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_type",
+        "request_id",
+        "intent",
+        "admission_stopped",
+        "target_work_unresolved",
+        "worker_units_remaining",
+        "maintenance_active",
+        "physical_poweroff_verified",
+        "safe_removal_verified",
+        "paused_campaign_count",
+        "next_command"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "record_type": {
+          "const": "target-shutdown-request"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "intent": {
+          "$ref": "#/$defs/intent"
+        },
+        "admission_stopped": {
+          "const": true
+        },
+        "target_work_unresolved": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "worker_units_remaining": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "maintenance_active": {
+          "type": "boolean"
+        },
+        "physical_poweroff_verified": {
+          "const": false
+        },
+        "safe_removal_verified": {
+          "const": false
+        },
+        "paused_campaign_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "next_command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_type",
+        "request_id",
+        "intent",
+        "admission_stopped",
+        "target_work_unresolved",
+        "worker_units_remaining",
+        "maintenance_active",
+        "physical_poweroff_verified",
+        "safe_removal_verified",
+        "state",
+        "execution_boot_matches",
+        "preparation",
+        "next_action"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "record_type": {
+          "const": "target-shutdown-status"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "intent": {
+          "$ref": "#/$defs/intent"
+        },
+        "admission_stopped": {
+          "type": "boolean"
+        },
+        "target_work_unresolved": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "worker_units_remaining": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "maintenance_active": {
+          "type": "boolean"
+        },
+        "physical_poweroff_verified": {
+          "const": false
+        },
+        "safe_removal_verified": {
+          "const": false
+        },
+        "state": {
+          "enum": [
+            "REQUESTED",
+            "DELIVERED",
+            "PREPARED",
+            "SUPERSEDED"
+          ]
+        },
+        "execution_boot_matches": {
+          "type": "boolean"
+        },
+        "preparation": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/preparation"
+            }
+          ]
+        },
+        "next_action": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "PREPARED"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "preparation": {
+                "$ref": "#/$defs/preparation"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "REQUESTED",
+                  "DELIVERED"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "preparation": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "SUPERSEDED"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "admission_stopped": {
+                "const": false
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "admission_stopped": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "cancellation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_type",
+        "request_id",
+        "physical_poweroff_verified",
+        "safe_removal_verified",
+        "admission_stopped",
+        "investigations_resumed",
+        "local_shutdown_fence_cleared",
+        "next_action"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "record_type": {
+          "const": "target-shutdown-cancellation"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "physical_poweroff_verified": {
+          "const": false
+        },
+        "safe_removal_verified": {
+          "const": false
+        },
+        "admission_stopped": {
+          "type": "boolean"
+        },
+        "investigations_resumed": {
+          "const": false
+        },
+        "local_shutdown_fence_cleared": {
+          "const": false
+        },
+        "next_action": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    },
+    "continuation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_type",
+        "request_id",
+        "control_root",
+        "boot_id",
+        "boot_config_sha256",
+        "source_sha256",
+        "controller_intent",
+        "local_attended",
+        "completed_steps",
+        "preparation"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "record_type": {
+          "const": "recovery-shutdown"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "control_root": {
+          "type": "string",
+          "pattern": "^/(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$)).*[^/]$",
+          "maxLength": 4096
+        },
+        "boot_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "boot_config_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "source_sha256": {
+          "type": "object",
+          "maxProperties": 39,
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$)).*[^/]$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "controller_intent": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/intent"
+            }
+          ]
+        },
+        "local_attended": {
+          "type": "boolean"
+        },
+        "completed_steps": {
+          "enum": [
+            [
+              "retained"
+            ],
+            [
+              "retained",
+              "one_shot_cleared"
+            ],
+            [
+              "retained",
+              "one_shot_cleared",
+              "evidence_sealed"
+            ],
+            [
+              "retained",
+              "one_shot_cleared",
+              "evidence_sealed",
+              "poweroff_requested"
+            ]
+          ]
+        },
+        "preparation": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/preparation"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "completed_steps": {
+                "maxItems": 2
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "preparation": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "preparation": {
+                "$ref": "#/$defs/preparation"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "controller_intent": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "local_attended": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "local_cancellation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_type",
+        "request_id",
+        "cancelled_on_boot",
+        "original_shutdown_sha256",
+        "controller_admission_released",
+        "physical_poweroff_verified"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "record_type": {
+          "const": "recovery-shutdown-cancellation"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "cancelled_on_boot": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "original_shutdown_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "controller_admission_released": {
+          "const": false
+        },
+        "physical_poweroff_verified": {
+          "const": false
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/intent"
+    },
+    {
+      "$ref": "#/$defs/preparation"
+    },
+    {
+      "$ref": "#/$defs/request"
+    },
+    {
+      "$ref": "#/$defs/status"
+    },
+    {
+      "$ref": "#/$defs/cancellation"
+    },
+    {
+      "$ref": "#/$defs/continuation"
+    },
+    {
+      "$ref": "#/$defs/local_cancellation"
+    }
+  ]
+}

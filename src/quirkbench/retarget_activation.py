@@ -233,6 +233,8 @@ def activate(control,config,request_id,controller_url,approved_certificate_pem,a
     recover=recovery_verifier or (lambda config:_verify_state_identity(config,Path('/boot/quirkbench-state')))
     recover(config);control,storage=_storage(control,verify_target)
     with private_lock(control/'runtime-config.lock') as config_fd:
+        from .shutdown_local import require_available
+        require_available(control)
         pointer=_document(_read(control/'retarget','active.json'))
         if pointer.get('schema_version')==2:
             if pointer.get('request_id')!=request_id:raise Conflict('another completed retarget request is selected')

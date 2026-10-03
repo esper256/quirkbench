@@ -53,6 +53,12 @@ def _add_target(root,name,request_id, *, ttl_seconds,ready,tls_inspector,clock,f
 def resolve_target_identity(db,target):
     """Bounded SQL-only alias/binding resolution; independent of readiness artifacts."""
     identifier(target)
+    # Preflight opaque legacy TEXT before helpers materialize or parse it. Alias
+    # resolution can visit multiple invitations; all share this held DB snapshot.
+    for table,column,limit in (('devices','report',512*1024),('enrollment_codes','document',16384),
+            ('enrollment_requests','document',16384)):
+        if db.execute('SELECT 1 FROM '+table+' WHERE length(CAST('+column+' AS BLOB))>? LIMIT 1',(limit,)).fetchone():
+            raise ContractError('target identity metadata exceeds bounded query input')
     from .enrollment_proof import row_request
     from .credential_registry import _document as generation_document
     def linked(db,code,bound):
@@ -103,12 +109,12 @@ def resolve_target_identity(db,target):
     return device_id,selected,device,generation
 
 
-def show_target(root,target, *, clock=time.time,version=1):
+def show_target(root,target, *, clock=time.time,version=1,reader=None):
     """Names derive only from invitations; a recorded boot is not live contact."""
     if type(version) is not int or version not in (1,2):raise ContractError('unsupported target status version')
-    identifier(target);now=_now(clock);reader=StateReader(root)
+    identifier(target);now=_now(clock);reader=reader or StateReader(root)
     with reader.connection() as db:
-        db.execute('BEGIN')
+        if not db.in_transaction:db.execute('BEGIN')
         if now<db.execute('SELECT last_seen FROM enrollment_clock WHERE id=1').fetchone()[0]:
             raise Conflict('controller enrollment clock moved backwards; correct it before pairing')
         device_id,selected,device,generation=resolve_target_identity(db,target)

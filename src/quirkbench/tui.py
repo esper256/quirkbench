@@ -42,6 +42,9 @@ def summary_lines(snapshot):
         lines.append(f"Operation {row['id']} {row['kind']} {row['state']} {row.get('stage') or ''}")
     for row in snapshot.get('investigations', []):
         lines.append(f"Investigation {row['id']} {row['state']} | {row.get('reason') or 'no pause reason'}")
+    if snapshot.get('investigation_facts'):
+        from .investigation_monitor import lines as fact_lines
+        lines+=fact_lines(snapshot['investigation_facts'])
     if snapshot.get('run'):
         row = snapshot['run']
         lines.extend([f"Development run {row['run_id']} {row['state']}",
@@ -52,13 +55,20 @@ def summary_lines(snapshot):
     return lines
 
 
-def snapshot(reader, run_id=None):
+def snapshot(reader, run_id=None, investigation=None):
     root = reader.root
+    if run_id and investigation:raise ContractError('choose investigation or development run filtering')
     if run_id:
         answer = {'sampled_at': time.time(), 'operations': [], 'investigations': [],
                   'run': development_run(root, run_id)}
     else:
-        answer = reader.snapshot()
+        with reader.connection() as db:
+            db.execute('BEGIN')
+            view=reader.on_connection(db)
+            answer = view.snapshot(investigation)
+            if investigation is not None:
+                from .investigation_monitor import facts
+                answer['investigation_facts']=facts(view,investigation)
     answer['state_root'] = str(root)
     from .retention_settings import settings
     answer['storage'] = {'free_gib': shutil.disk_usage(root).free / 1024**3, 'cache_gib':settings(root)['cache_gib']}
@@ -71,10 +81,10 @@ def snapshot(reader, run_id=None):
     return answer
 
 
-def monitor(root, *, run_id=None, once=False, json_output=False):
+def monitor(root, *, run_id=None, investigation=None, once=False, json_output=False):
     reader = StateReader(root)
     if once or json_output:
-        data = snapshot(reader, run_id)
+        data = snapshot(reader, run_id, investigation)
         print(json.dumps(operation_response(data=data), sort_keys=True) if json_output else '\n'.join(safe_text(line) for line in summary_lines(data)))
         return 0
     if not sys.stdin.isatty() or not sys.stdout.isatty():
@@ -95,7 +105,7 @@ def monitor(root, *, run_id=None, once=False, json_output=False):
             now = time.time()
             if now >= next_refresh:
                 try:
-                    data = snapshot(reader, run_id)
+                    data = snapshot(reader, run_id, investigation)
                     rows = ([('run', data['run'])] if run_id else
                             [('operation', row) for row in data['operations']] +
                             [('investigation', row) for row in data['investigations']])

@@ -173,7 +173,7 @@ def verify_evidence_destination(layout, control=CONTROL):
         raise ContractError('target control storage is not on the mounted boot evidence partition')
 
 
-def boot_context(path=Path('/run/quirkbench-boot.json'), *, allow_library_maintenance=False):
+def boot_context(path=Path('/run/quirkbench-boot.json'), *, allow_library_maintenance=False,native_runner=None):
     path = Path(path)
     if not path.is_absolute() or path.resolve() != path or not path.is_file() or path.stat().st_size > 1024**2:
         raise ContractError('invalid verified boot context')
@@ -188,7 +188,8 @@ def boot_context(path=Path('/run/quirkbench-boot.json'), *, allow_library_mainte
                            config.state_partuuid, config.data_partuuid,
                            config.library_partuuid, config.evidence_partuuid))
     def verify():
-        layout=verify_boot_identity(expected, allow_data_mounted=True, mode=boot['quirkbench.mode'], allow_library_maintenance=allow_library_maintenance)
+        layout=verify_boot_identity(expected, allow_data_mounted=True, mode=boot['quirkbench.mode'], allow_library_maintenance=allow_library_maintenance,
+            **({'runner':native_runner} if native_runner is not None else {}))
         verify_evidence_destination(layout)
         return True
     verify()
@@ -284,12 +285,15 @@ def create_agent(config, boot, verify, provision, supervisor, *, recovery_only=F
                                 reserve_bytes=2*1024**3)
         capabilities.extend(['deployment.ostree.v1', 'operator-approval.v1'])
     report = CapabilityReport(provision['device_id'], Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
-                              capabilities, mode, inventory)
+                              capabilities+['target-shutdown.v1'], mode, inventory)
     client = HTTPSDeviceClient(provision['controller_url'], report.device_id,
                                provision['token_file'].read_text().strip(), str(provision['ca']), timeout=5)
+    from .shutdown_local import retain as retain_shutdown
     target = TargetAgent(client, CONTROL/'agent', report, recipe_registry=registry,
                         boot_control=UsbBootControl(config, mode, verify_storage=verify), deployment_backend=backend,
-                        supervisor=supervisor, library_store=library, recovery_only=recovery_only, verify_storage=verify)
+                        supervisor=supervisor, library_store=library, recovery_only=recovery_only, verify_storage=verify,
+                        shutdown_retain=lambda intent:retain_shutdown(
+                            CONTROL,config,intent['request_id'],verify_target=verify,controller_intent=intent))
     if library is not None:
         def library_progress(**record):
             supervisor.pulse(advanced=True)
@@ -332,6 +336,10 @@ def _main(argv=None, *, locks):
     except (OSError, ContractError):
         recover('Target control storage unavailable.', mode=mode)
         return 1
+    from .shutdown_local import pending as shutdown_pending
+    if shutdown_pending(CONTROL) is not None:
+        print('QUIRKBENCH shutdown fence retained; inspect and explicitly retry/cancel in local recovery. No automatic poweroff or new target work.',flush=True)
+        return 0
     supervisor = SupervisorMonitor()
     supervisor.ready()
     target = None
@@ -353,6 +361,9 @@ def _main(argv=None, *, locks):
                         fd=os.open(CONTROL/'runtime-config.lock',os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
                         configuration_lock=locks.enter_context(os.fdopen(fd,'r+b'))
                         fcntl.flock(configuration_lock.fileno(),fcntl.LOCK_SH|fcntl.LOCK_NB)
+                    if shutdown_pending(CONTROL) is not None:
+                        print('QUIRKBENCH shutdown fence retained; no credential/watchdog activation or target work.',flush=True)
+                        return 0
                     from .retarget_local import require_runtime_available
                     require_runtime_available(CONTROL)
                     provision = load_provisioning(CONTROL/'runtime.json')
@@ -370,6 +381,35 @@ def _main(argv=None, *, locks):
             if target is not None:
                 result = target.step()
                 print('QUIRKBENCH '+result, flush=True)
+                if result=='shutdown_pending':return 0
+                if result=='shutdown_requested':
+                    if mode!='recovery':raise ContractError('shutdown requires actual recovery')
+                    from .shutdown_local import execute
+                    saved=shutdown_pending(CONTROL)
+                    # The common executor takes exclusive configuration ownership;
+                    # this native supervisor remains the self-owned process.
+                    if configuration_lock is not None:
+                        configuration_lock.close();configuration_lock=None
+                    supervisor.begin('shutdown-preparation',800)
+                    try:
+                        def shutdown_command(argv):
+                            supervisor.pulse(waiting=True)
+                            try:
+                                result=subprocess.run(argv,check=True,capture_output=True,text=True,timeout=10)
+                                return result.stdout
+                            finally:supervisor.pulse(waiting=True)
+                        checked_config,checked_boot,checked_verify=boot_context(native_runner=shutdown_command)
+                        if checked_config!=config or checked_boot['quirkbench.mode']!='recovery':
+                            raise ContractError('shutdown current native recovery differs')
+                        def shutdown_verify():
+                            checked_verify();supervisor.pulse(waiting=True)
+                        execute(CONTROL,config,saved['request_id'],verify_target=shutdown_verify,self_owned=True,
+                            pulse=lambda:supervisor.pulse(waiting=True),
+                            acknowledge=lambda proof:target.client.shutdown_prepared(target.report.boot_id,proof))
+                    except Exception as exc:
+                        print('QUIRKBENCH shutdown blocked; retained local fence: '+type(exc).__name__,file=sys.stderr,flush=True)
+                        return 0
+                    return 0
                 if result in {'candidate_requested', 'recovery_requested'}:
                     # Do not start another step while a system reboot is pending.
                     return 0
