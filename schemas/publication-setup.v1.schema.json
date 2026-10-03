@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_type",
+    "request_id",
+    "request_digest",
+    "intent",
+    "completed_steps"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "record_type": {
+      "const": "publication-setup"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "request_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state_root",
+        "repository_alias",
+        "repository_url",
+        "signing_home",
+        "signing_fingerprint",
+        "source_configuration_sha256",
+        "destination_configuration_sha256",
+        "public_key_sha256",
+        "unit"
+      ],
+      "properties": {
+        "state_root": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/(?!$)(?!.*(?:/\\.\\.?(/|$)|//))[^\\x00]*[^/]$"
+        },
+        "repository_alias": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "repository_url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^https://"
+        },
+        "signing_home": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/(?!$)(?!.*(?:/\\.\\.?(/|$)|//))[^\\x00]*[^/]$"
+        },
+        "signing_fingerprint": {
+          "type": "string",
+          "pattern": "^([A-F0-9]{40}|[A-F0-9]{64})$"
+        },
+        "source_configuration_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "destination_configuration_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "public_key_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/(?!$)(?!.*(?:/\\.\\.?(/|$)|//))[^\\x00]*[^/]$"
+        }
+      }
+    },
+    "completed_steps": {
+      "enum": [
+        [],
+        [
+          "inputs_retained"
+        ],
+        [
+          "inputs_retained",
+          "repository_initialized"
+        ],
+        [
+          "inputs_retained",
+          "repository_initialized",
+          "configuration_published"
+        ]
+      ]
+    }
+  }
+}
