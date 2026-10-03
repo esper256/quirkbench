@@ -256,13 +256,13 @@ def _drain_locked(control,verify,request_id,grant_id, *,client_factory=HTTPSDrai
     deadline=clock()+timeout_s if deadline is None else deadline
     saved,directory,result,journal=_prepare(control,request_id,verify,fault,deadline,clock,source_reader=source_reader,agent_root=agent_root)
     staged=_managed_path(control/'setup')/(grant_id+'.json');verify()
-    credential=read_credential(staged)
+    credential=read_credential(staged,stores=(control,control.parent))
     if credential['record']['grant_id']!=grant_id or canonical(credential['record']['plan'])!=canonical(saved['plan']):
         raise Conflict('staged grant differs from exact original evidence plan')
     verify();client=client_factory(result['controller_url'],{'record':credential['record'],'token':credential['token']},str(directory/'ca.pem'))
     fault('drain_client_prepared')
     latest,current,ca,source=source_reader(verify)
-    if source!=saved['source_sha256'] or digest(ca)!=saved['ca_sha256'] or read_credential(staged)!=credential:
+    if source!=saved['source_sha256'] or digest(ca)!=saved['ca_sha256'] or read_credential(staged,stores=(control,control.parent))!=credential:
         raise Conflict('original source or staged drain credential changed before exchange')
     scope=_selected(saved['plan'],current,latest)
     if isinstance(client,HTTPSDrainClient):
@@ -273,7 +273,7 @@ def _drain_locked(control,verify,request_id,grant_id, *,client_factory=HTTPSDrai
         if (source!=saved['source_sha256'] or digest(ca)!=saved['ca_sha256']
                 or _journal_digest(current,scope)!=saved['journal_sha256']
                 or _read(directory,'ca.pem')!=ca or _read(directory,'plan.json')!=canonical(saved['plan'])
-                or read_credential(staged)!=credential):raise Conflict('original drain source changed before request or journal write')
+                or read_credential(staged,stores=(control,control.parent))!=credential):raise Conflict('original drain source changed before request or journal write')
         if clock()>=deadline:raise TimeoutError('bounded old-evidence drain window elapsed')
     class GuardedClient:
         device_id=client.device_id

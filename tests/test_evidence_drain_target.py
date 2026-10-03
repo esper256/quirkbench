@@ -80,6 +80,8 @@ def test_export_interruption_and_retry_preserve_exact_plan_without_secrets(spool
 
 def test_scoped_batch_preserves_original_pending_result_and_repairs_lost_ack(spool):
     c,control,result,attempt,agent=spool;plan,credential,grant=staged(spool)
+    (control/'setup').chmod(0o755)
+    credential_path=control/'setup'/(grant+'.json');credential_path.chmod(0o644)
     before=json.loads(agent.journal_path.read_bytes());runtime=(control/'runtime.json').read_bytes()
     with c.lifecycle() as owner:
         answer,clients=drain(spool,grant,owner)
@@ -93,6 +95,7 @@ def test_scoped_batch_preserves_original_pending_result_and_repairs_lost_ack(spo
         with c.transaction() as db:db.execute('DELETE FROM evidence WHERE attempt=?',(attempt['attempt_id'],))
         again,clients=drain(spool,grant,owner);assert again==answer and len(clients[0].calls)==4
         with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM evidence WHERE attempt=?',(attempt['attempt_id'],)).fetchone()[0]==2
+    assert credential_path.stat().st_mode & 0o777==0o644
 
 
 @pytest.mark.parametrize('change',['missing-journal','wrong-device','wrong-boot','wrong-result','wrong-runtime','wrong-media','corrupt-blob','linked-blob','moved-binding','nested-mount'])

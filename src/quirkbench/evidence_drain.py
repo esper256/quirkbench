@@ -139,11 +139,13 @@ def _private_credential(value,intent):
     return value
 
 
-def read_credential(path):
+def read_credential(path, *, stores=()):
     from .controller_setup import _managed_path
     from .controller_tls import _secret_read
     path=Path(path);_managed_path(path.parent)
-    value=load(_secret_read(path.parent,path.name,limit=MAX_BYTES))
+    directory=path.parent
+    managed=(directory.parent,directory.parent.parent,directory.parent.parent.parent) if directory.parent.name=='evidence-drain' else ()
+    value=load(_secret_read(directory,path.name,limit=MAX_BYTES,stores=(*managed,*stores)))
     if not isinstance(value,dict) or not isinstance(value.get('intent'),dict):raise ContractError('private drain intent is missing')
     return _private_credential(value,value['intent'])
 

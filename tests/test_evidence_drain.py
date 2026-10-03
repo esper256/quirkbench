@@ -84,6 +84,18 @@ def test_grant_replay_never_extends_expired_or_revoked_authority(reconciled):
     with pytest.raises(Conflict):approve(reconciled,ttl_seconds=60)
 
 
+def test_managed_drain_credential_accepts_its_enclosing_secret_store(reconciled):
+    answer,saved=approve(reconciled)
+    path=Path(answer['credential_file'])
+    path.chmod(0o644);path.parent.chmod(0o755)
+    assert drain.read_credential(path)==saved
+    assert path.stat().st_mode & 0o777==0o644
+    for store in (path.parent.parent,path.parent.parent.parent,path.parent.parent.parent.parent):
+        store.chmod(0o755)
+    with pytest.raises(ContractError,match='credential requires'):
+        drain.read_credential(path)
+
+
 def test_exact_drain_preserves_attribution_and_attempt_result_state(reconciled):
     c,now,attempt,raw,plan=reconciled;answer,saved=approve(reconciled)
     with c.lifecycle() as owner:
