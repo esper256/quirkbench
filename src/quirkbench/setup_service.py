@@ -58,6 +58,10 @@ def _same_file(path, raw):
         if path.name in ('controller-service.json', 'installation.json') and info.st_mode & 0o077:
             raise ContractError('private setup configuration has exposed permissions')
         if read_file(path.parent, path.name, limit=65536) != raw:
+            if path.name=='controller-service.json':
+                from .publication_setup import verified_successor
+                if verified_successor(path.parent.parent,raw,read_file(path.parent,path.name,limit=65536)):
+                    return True
             raise Conflict('existing setup/service bytes differ; use guarded activation or explicit maintenance')
         return True
     return False

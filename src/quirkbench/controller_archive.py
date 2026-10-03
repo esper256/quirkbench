@@ -45,11 +45,14 @@ Run bin/quirkbench setup to journal private persistent state and resource choice
 then bin/quirkbench status to inspect independent readiness. Setup remains partial.
 Use setup --start-service for private TLS/native service setup and, with a signed
 installed release, setup --builder-archive /absolute/builder.tar for durable builder
-preparation. Shipped production publisher trust and enrollment remain pending.
+preparation. Shipped production publisher trust remains pending.
 The legacy setup-state/setup-check commands remain available.
-Install lib/quirkbench/quirkbench-controller.service with canonical paths and
-provision private/controller-service.json as described in
-lib/quirkbench/guide/controller-installation.md. Extraction does
+For first registry publication, stop the installed service and use publication setup
+with an explicit fresh repository alias, HTTPS endpoint and existing operator
+GnuPG home/full signing fingerprint. Then explicitly start the native service
+and use target add for an attended invitation. Follow
+lib/quirkbench/guide/controller-installation.md; no handwritten private configuration
+is required for this initial path. Extraction does
 not start a service, change lingering or install any host package.
 
 Run setup-check from the native controller shell to inspect native services.

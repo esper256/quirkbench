@@ -401,14 +401,72 @@ comparison; private key bytes never appear in output. Native generation/systemd
 commissioning has not been run on this development host; focused fixtures exercise
 the boundaries without changing its live installation. Full M1 remains open.
 
-Guided exchange requires explicit `repository_endpoint: {"url": "https://IP:PORT"}`
-in the private controller service configuration, initialized `repositories` beneath
-the controller state and existing `composition_signing` home/full fingerprint.
-There is no implicit repository or signing identity. Restarting the configured
-native service publishes its repository and enrollment listeners under the existing
+For a fresh empty-registry installation, explicitly provision an existing private
+operator GnuPG home and composition signing key, then configure its first repository:
+
+```sh
+systemctl --user stop quirkbench-controller.service
+quirkbench publication setup --repository SELECTED_ALIAS \
+  --url https://CONTROLLER_IP:REPOSITORY_PORT \
+  --signing-home /absolute/private/operator-gnupg \
+  --fingerprint FULL_UPPERCASE_SIGNING_FINGERPRINT --request-id PUBLICATION_SETUP --json
+systemctl --user start quirkbench-controller.service
+quirkbench status --json
+quirkbench target add SELECTED_NAME --request-id INVITATION --json
+```
+
+Use the specific IP already covered by the controller certificate and a separate
+repository port. Choose a fresh alias; its repository lives beneath the selected
+controller state. This command creates no keys, selects no implicit signing identity,
+changes no existing publication/trust, and neither starts the service nor issues a
+target credential. Missing OSTree/GPG/native service prerequisites remain actionable
+errors; package installation and signing-key provisioning are explicit operator work.
+
+Keep the same request ID and choices after interruption. Private original/new
+configuration, public signing-key bytes, TLS identities and repository initialization
+progress are retained. Replay accepts only that exact successor configuration;
+unrelated maintenance, existing invitations/credentials, changed keys/TLS, unsafe
+repository contents or a foreign effective unit block continuation. An interrupted
+native initialization without a config must have an empty, unmounted directory;
+other partial contents require reconciliation, never automatic deletion. Completed
+replay returns the historical acknowledgment and does not establish current readiness.
+Ordinary `setup --start-service` retries accept the verified journaled successor.
+Existing manually configured publication and endpoint maintenance remain supported.
+
+Starting the configured native service publishes its repository and enrollment listeners under the existing
 owner; the repository uses mutual TLS plus exact registered leaf lookup. Setup
 status observes a separate, current owner/configuration/TLS capability. Missing
 publication remains unavailable. Use `quirkbench target add NAME` to display the
 short-lived invitation, endpoint, code ID and full certificate SHA-256; machine
 add supplies `--request-id ID --json`. `target show NAME` reads public recorded facts
 and does not establish current connectivity or authorize experiments.
+
+### Connected-target software journey
+
+With a compatible authenticated release-set v2 installation, use
+`quirkbench recovery download --request-id RECOVERY_ACQUISITION --json` to acquire
+the exact factory image/metadata through the existing service. Explicit independently
+provisioned publisher trust uses `--trust-bundle /absolute/TRUST_BUNDLE`; the default
+production bundle/assets are still a [publisher delivery gate](https://github.com/esper256/quirkbench/issues/41).
+Changed or missing pinned bytes are blockers, not permission to substitute a moving
+release or rebuild a recovery image. Acquisition reports unqualified retained assets;
+it never authorizes flashing. Use a standard image writer only under separate physical
+authorization, with the exact externally selected device and acquired image identity.
+
+On supported x86-64/UEFI/USB recovery, explicitly confirm the displayed external disk
+GUID/capacity before commissioning; a wrong confirmation or changed/insufficient
+capacity leaves storage blocked. See [recovery operations](recovery-operations.md)
+for the existing attended screen and resumable journal. Choose **Network**, then
+**Connect to controller**. Compare/type the full certificate SHA-256 before entering
+the one-use invitation. Lost replies retry the retained request/key. After activation,
+**Save selected network connections** retains only explicit private selections, which
+later boot restores only for the original target/media/configuration. A changed target
+requires explicit retarget maintenance; revocation and endpoint repair retain their
+existing commands and authority boundaries.
+
+`target show NAME` and `status` keep recorded enrollment, current owner availability,
+recovery reports, candidate readiness and execution approval separate. Successful
+pairing or a completed capacity journal establishes none of the other facts. The
+installed software journey is tested with disposable trust, synthetic media and native
+adapters; real publication, native service survival, recovery boot and hardware behavior
+remain [attended commissioning work](https://github.com/esper256/quirkbench/issues/43).

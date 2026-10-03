@@ -154,6 +154,15 @@ def parser():
     endpoint.add_argument('--public-certificate',action='store_true',help='show only the selected public PEM certificate')
     endpoint.add_argument('--json',action='store_true')
     commands.add_parser('setup-state', help='select private controller state for manual service setup')
+    publication=commands.add_parser('publication',help='configure first repository publication using existing operator signing trust and a stopped controller service')
+    publication.add_argument('action',choices=['setup'])
+    publication.add_argument('--repository',required=True,help='fresh explicit repository alias beneath controller state')
+    publication.add_argument('--url',required=True,help='HTTPS controller certificate host with a separate repository port')
+    publication.add_argument('--signing-home',required=True,type=Path,help='existing private operator-provisioned GnuPG home; no keys are created')
+    publication.add_argument('--fingerprint',required=True,help='full uppercase fingerprint of the explicit composition signing key')
+    publication.add_argument('--request-id',required=True,help='retain this identity and exact choices for retry')
+    publication.add_argument('--unit',type=Path,help='existing native controller user unit; defaults to the configured home')
+    publication.add_argument('--json',action='store_true')
     setup = commands.add_parser('setup', help='resume initial controller setup and optional native service startup')
     setup.add_argument('--request-id', help='durable retry identity; required with --json')
     setup.add_argument('--runtime', type=Path, help='verified immutable installed runtime root')
@@ -342,6 +351,23 @@ def parser():
 
 def _main(argv=None):
     args = parser().parse_args(argv)
+    if args.command=='publication':
+        from .publication_setup import configure
+        from .setup_contracts import SetupUnavailable
+        from .contracts import Conflict,ContractError
+        from .operations import operation_response
+        from .state_reader import safe_text
+        try:
+            value=configure(discover_state_root(args.state),args.repository,args.url,args.signing_home,args.fingerprint,args.request_id,unit=args.unit)
+            answer=operation_response(data=value)
+            print(json.dumps(answer,sort_keys=True) if args.json else safe_text(json.dumps(value,indent=2,sort_keys=True)))
+            return 0
+        except (OSError,ValueError,sqlite3.Error) as exc:
+            code,status=('UNAVAILABLE',4) if isinstance(exc,SetupUnavailable) else ('CONFLICT',3) if isinstance(exc,Conflict) else ('INVALID_INPUT',2) if isinstance(exc,ContractError) else ('INFRASTRUCTURE',5)
+            message=str(exc)[:512] if status!=5 else 'publication setup unavailable; inspect the retained request and native prerequisites'
+            if args.json:print(json.dumps(operation_response(error={'code':code,'message':message,'retryable':status in (4,5)}),sort_keys=True))
+            else:print(code+': '+message,file=sys.stderr)
+            return status
     if args.command=='storage':
         from .storage_view import status
         from .contracts import ContractError
@@ -1253,7 +1279,7 @@ def main(argv=None):
               (args.command=='maintenance' and args.action in ('status','prune')) or
               (args.command=='session' and args.action in ('observations','observation')) or
               (args.command=='build-cache' and args.action=='list'))
-    if readonly or args.command in ('setup-state','setup','serve','controller-install','release-install'): return _main(argv)
+    if readonly or args.command in ('setup-state','setup','publication','serve','controller-install','release-install'): return _main(argv)
     try:
         root=discover_state_root(args.state).expanduser().absolute()
         if not (root/'controller.sqlite').is_file(): return _main(argv)
