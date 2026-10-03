@@ -116,7 +116,9 @@
       "src/quirkbench/investigation_report.py",
       "schemas/investigation-report.v1.schema.json",
       "examples/investigation-comparison.json",
-      "tests/test_investigation_report.py"
+      "tests/test_investigation_report.py",
+      "tests/test_installed_journey.py",
+      "tests/installed_journey_scenario.py"
     ],
     "tests": [
       "tests/test_investigation_pipeline.py",
@@ -138,7 +140,8 @@
       "tests/test_investigation_monitor.py",
       "tests/test_monitor.py",
       "tests/test_investigation_report.py",
-      "tests/test_investigation_export.py"
+      "tests/test_investigation_export.py",
+      "tests/test_installed_journey.py"
     ]
   },
   "filesystem": {
