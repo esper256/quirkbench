@@ -197,18 +197,8 @@ def execute(root,args, *,ready=None):
     if value is None:raise ContractError('legacy campaign has no investigation record; source commands remain available')
     if args.action=='baseline':return operation_response(data=baseline_status(reader,value))
     if args.action=='brief':
-        workspace = value['session']['workspace_id']
-        with reader.connection() as db:
-            exists = db.execute('SELECT 1 FROM source_workspaces WHERE id=? UNION SELECT 1 FROM source_preparations WHERE workspace_id=?',(workspace,workspace)).fetchone()
-        source = source_status(reader,args.name,workspace) if exists else None
-        from .recovery_podman import _metadata_object
-        problem = _metadata_object(reader.root/'artifacts',value['session']['problem_digest'],1024**2)
-        data = {'investigation':value,'problem_excerpt':problem.decode()[:4096],'source':source,
-                'problem_excerpt_complete':len(problem.decode())<=4096,
-                'baseline':baseline_status(reader,value),'driver':'external','execution_authorized':False,
-                'instructions':'Edit only the granted private workspace. Stop every writer before capture-source --quiesced. Source preparation and capture grant no physical execution authority; approve the exact candidate/attempt before arming.'}
-        if len(canonical(data))>QUERY_BYTES:raise ContractError('brief exceeds query budget')
-        return operation_response(data=data)
+        from .investigation_context import brief
+        return operation_response(data=brief(reader,args.name))
     if args.action=='prepare-distribution':
         from .controller_service import configuration
         if value['baseline_sha256'] is None:raise Conflict('no supported baseline; inspect investigation baseline')
@@ -239,5 +229,7 @@ def render_brief(data):
     else:lines.append('Workspace pending: quirkbench investigation prepare-distribution '+session['session_id'])
     lines.append('Baseline: '+(baseline['baseline_id'] or 'unsupported/unavailable'))
     for item in baseline['missing_inputs']:lines.append('Missing '+item['role']+': '+item['sha256'])
+    for key,path in data['resources'].items():lines.append(key+': '+path)
+    lines += list(data['commands'].values())
     lines += [data['instructions'],'Capture: quirkbench investigation capture-source '+session['session_id']+' --request-id NEW_ID --quiesced']
     return safe_text('\n'.join(lines))
