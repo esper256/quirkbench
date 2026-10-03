@@ -143,7 +143,14 @@
       "src/quirkbench/storage_view.py",
       "tests/test_backup_*",
       "tests/test_storage_view.py",
-      "examples/backup-coverage.json"
+      "examples/backup-coverage.json",
+      "src/quirkbench/publication_setup*",
+      "src/quirkbench/setup_service*",
+      "src/quirkbench/controller_archive.py",
+      "src/quirkbench/enrollment_credentials.py",
+      "tests/test_publication_setup*",
+      "tests/test_setup_service.py",
+      "examples/publication-setup.json"
     ],
     "tests": [
       "tests/test_build_storage.py",
@@ -156,7 +163,12 @@
       "tests/test_backup_contracts.py",
       "tests/test_backup_coverage.py",
       "tests/test_storage_view.py",
-      "tests/test_controller.py"
+      "tests/test_controller.py",
+      "tests/test_publication_setup_contracts.py",
+      "tests/test_publication_setup.py",
+      "tests/test_setup_service.py",
+      "tests/test_controller_install.py",
+      "tests/test_enrollment_credentials.py"
     ]
   }
 }

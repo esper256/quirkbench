@@ -37,6 +37,16 @@ image boot or release-qualification run.
 
 ## Persistent services and state
 
+Initial registry-mode installations can explicitly run `publication setup --repository
+ALIAS --url HTTPS_URL --signing-home EXISTING_PRIVATE_HOME --fingerprint FULL_FINGERPRINT
+--request-id ID [--unit PATH] [--json]` with the existing native controller service
+stopped and no issued target trust. It initializes a fresh state-owned repository
+using existing operator signing trust and preserves an exact private, versioned setup
+continuation. It never creates keys, starts services or rotates existing publication.
+An exact completed replay is a historical acknowledgment, separate from current
+enrollment availability and target/boot authority. See the
+[installed sequence](controller-installation.md#initial-native-user-service-setup).
+
 The controller's systemd user service manager owns the coordinator and rootless
 container workers. Distrobox is an optional development/agent environment; its disposable
 filesystem is not the authority for persistence. Stable private configuration,
@@ -238,6 +248,7 @@ Each packet freezes its mechanical schema and failure fixtures before adapters.
 | Setup progress | Selected state/runtime, completed configuration steps, operation/request identity, prerequisites and separate readiness facts | New versioned journal; resume and reconcile existing configuration without merging another state root |
 | Credential lookup generation | Target/media/generation/system UUID, token digest, exact repository leaf fingerprint and expiry; terminal revocation | Additive controller migration; registry mode opt-in and exclusive with legacy static authentication; no enrollment/attempt authority |
 | Controller TLS identity and service continuation | Private local CA/server file identities, exact initial setup intent and verified service publication stages | New v1 records; no target credentials, publisher identity or second execution owner |
+| First-publication setup continuation | Exact original/successor configuration, operator public signing key and original controller TLS digests; repository initialization progress | New private publication-setup v1 record; exact setup retry only, no existing trust rotation or live readiness claim |
 | Controller release-set statement | Authenticated archive/version, platform/API/Python constraints, expiry and exact recovery/builder/catalog references | Versioned v1/v2 verifier and independent trust loader; v2 structural reader checks stay separate from runtime readiness and qualification |
 | Target revocation | Exact terminal generation/invitation decision and immutable bounded work observations | Additive command receipts and admitted attempt generation references in the existing database; no physical completion or drain authorization |
 | Released recovery acquisition | Exact installed publisher statement, verified factory image/metadata and retained unqualified asset references | New v1 index in existing operation/CAS records; preserve RPM acquisition specifications and all readiness/approval boundaries |

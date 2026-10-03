@@ -182,6 +182,13 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
             if config_path.exists():
                 from .job_coordinator import repository_tree
                 repository_tree(repo)
+            else:
+                from .maintenance import nested_mounts
+                # Before native init, an unconfigured continuation must still be
+                # empty and unmounted. Unknown partial contents need operator
+                # reconciliation; init must never follow or overwrite them.
+                if nested_mounts(repo) or any(repo.iterdir()):
+                    raise Conflict('unconfigured publication repository is not empty or is mounted; reconcile retained setup state')
             try:
                 result=run(['ostree','--repo='+str(repo),'init','--mode=archive'],capture_output=True,check=False,timeout=30,stdin=subprocess.DEVNULL)
             except (OSError,subprocess.TimeoutExpired) as exc:raise SetupUnavailable('native OSTree repository initialization unavailable') from exc

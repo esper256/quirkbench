@@ -122,5 +122,30 @@
       ],
       "pattern": "^[0-9a-f]{64}$"
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "completed_steps": {
+            "minItems": 2
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "repository_configuration_sha256": {
+            "type": "string"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "repository_configuration_sha256": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
 }
