@@ -12,10 +12,11 @@ from .boot import clear_once
 from .contracts import Conflict,ContractError,Result,canonical,digest,identifier,sha256
 from .controller_setup import _private_path,_durable_directory
 from .controller_tls import _read
-from .enrollment import _document
+from .enrollment import LIMIT,_document
 from .enrollment_target import _storage
 from .maintenance import private_lock
 from .state_reader import read_file
+from .state_config import outside_checkout
 from .store import atomic_write,sync_directory
 from .target import read_sealed_evidence
 from .target_shutdown import validate_intent,validate_preparation
@@ -121,11 +122,15 @@ def validate_cancelled(value):
 
 
 def pending(control):
-    control=_private_path(Path(control));pointer=control/'shutdown/active.json'
+    # Availability is a state lookup, not admission to a private setup store.
+    control=Path(control).expanduser().absolute()
+    if control.resolve()!=control or control==Path('/'):
+        raise ContractError('shutdown needs a canonical control directory')
+    control=outside_checkout(control);pointer=control/'shutdown/active.json'
     if not pointer.exists() and not pointer.is_symlink():return None
     # The complete continuation is itself the atomic authoritative writer fence.
     # Optional history publication can fail without releasing restart admission.
-    saved=validate_record(_document(_read(pointer.parent,pointer.name)))
+    saved=validate_record(_document(read_file(control,'shutdown/active.json',limit=LIMIT)))
     if saved['control_root']!=str(control):raise Conflict('shutdown fence identity differs')
     return saved
 
