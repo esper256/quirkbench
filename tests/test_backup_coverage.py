@@ -14,6 +14,7 @@ from test_builder_setup import Workers
 from test_controller import lab
 from test_controller_deployments import Repository,setup as deployment_setup
 from test_source_prepare_operation import setup,dispatched
+from test_source_capture import repository
 from test_source_operation import worker
 
 
@@ -126,7 +127,7 @@ def test_copied_database_cut_and_shared_barrier_allow_live_target_publication(tm
     report=coverage.verify_if_present(backup)
     assert [t['device_id'] for t in report['targets']]==['target']
     assert report['contents']['checkpoint_count']==1
-    assert len(c.target_inventory()['targets'])==2
+    with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM devices').fetchone()[0]==2
 
 
 @pytest.mark.parametrize('failure',['export','coverage'])
