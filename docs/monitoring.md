@@ -15,6 +15,17 @@ agent is launched; exiting has no execution effect. `--once` prints a snapshot;
 `--json` returns the existing C2 envelope. `--run RUN_ID` views a recorded ad hoc
 bounded development build. Development output alone is not measured compile progress.
 
+Use `quirkbench monitor INVESTIGATION` to restrict operation and campaign queries to
+one recorded investigation before applying the display limits. `--once` and `--json`
+retain that filter; it cannot be combined with `--run`. The view reports admission,
+remaining worker units, unresolved target work, recent authenticated recovery contact,
+pending human requests and their pagination command separately. A recorded shutdown
+preparation adds target-local durability and the unacknowledged upload inventory;
+an absent preparation remains unknown. Read-only monitoring works while the controller
+service is stopped. It does not initialize, migrate, reconcile or clean the database.
+See [attended shutdown](recovery-operations.md#attended-safe-shutdown) for the commands
+and the local physical confirmation required before removing media.
+
 Queries open an existing database read-only, without controller construction,
 migrations, startup reconciliation or ownership changes. Missing setup, incompatible
 schemas and unavailable services are reported. The display separates phase advancement,

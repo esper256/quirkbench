@@ -200,27 +200,7 @@ class SystemdUserWorkerServices:
             raise WorkerServiceError('worker cgroup resource limits are not enforced')
 
     def _empty_cgroup(self, group):
-        if not group:
-            return
-        if not group.startswith('/') or '//' in group or any(part in ('.', '..') for part in group.split('/')):
-            raise WorkerServiceError('worker cgroup path is invalid')
-        root = self.cgroup_root
-        if root.is_symlink() or not root.is_dir() or not (root / 'cgroup.controllers').is_file():
-            raise WorkerServiceError('cgroup v2 hierarchy is unavailable')
-        path = root / group.lstrip('/')
-        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
-            raise WorkerServiceError('worker cgroup path escapes hierarchy')
-        if not path.exists():
-            return
-        events = path / 'cgroup.events'
-        if events.is_symlink() or not events.is_file() or events.stat().st_size > 4096:
-            raise WorkerServiceError('worker cgroup population is unreadable')
-        lines = [line.split() for line in events.read_text().splitlines()]
-        if any(len(parts) != 2 for parts in lines):
-            raise WorkerServiceError('worker cgroup population is malformed')
-        values = [parts[1] for parts in lines if len(parts) == 2 and parts[0] == 'populated']
-        if values != ['0']:
-            raise WorkerServiceError('worker cgroup may still contain descendants')
+        return verify_empty_cgroup(self.cgroup_root,group)
 
     def stop_and_verify(self, unit, recorded_boot_id):
         """Return proof only after user-manager stop and empty descendant cgroup."""
@@ -251,3 +231,27 @@ class SystemdUserWorkerServices:
         if validate_boot_id(self.boot_id_reader()) != recorded:
             return 'previous_boot'
         return 'stopped'
+
+def verify_empty_cgroup(root, group):
+    """Shared native stop proof, including all descendants in a cgroup v2 unit."""
+    if not group:
+        return
+    if not group.startswith('/') or '//' in group or any(part in ('.', '..') for part in group.split('/')):
+        raise WorkerServiceError('worker cgroup path is invalid')
+    root = Path(root)
+    if root.is_symlink() or not root.is_dir() or not (root / 'cgroup.controllers').is_file():
+        raise WorkerServiceError('cgroup v2 hierarchy is unavailable')
+    path = root / group.lstrip('/')
+    if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
+        raise WorkerServiceError('worker cgroup path escapes hierarchy')
+    if not path.exists():
+        return
+    events = path / 'cgroup.events'
+    if events.is_symlink() or not events.is_file() or events.stat().st_size > 4096:
+        raise WorkerServiceError('worker cgroup population is unreadable')
+    lines = [line.split() for line in events.read_text().splitlines()]
+    if any(len(parts) != 2 for parts in lines):
+        raise WorkerServiceError('worker cgroup population is malformed')
+    values = [parts[1] for parts in lines if len(parts) == 2 and parts[0] == 'populated']
+    if values != ['0']:
+        raise WorkerServiceError('worker cgroup may still contain descendants')

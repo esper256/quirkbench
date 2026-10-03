@@ -49,6 +49,8 @@ def run_retarget(control,config, *,verify_target,input_stream=None,output_stream
         recover=recovery_verifier or (lambda config:_verify_state_identity(config,Path('/boot/quirkbench-state')))
         recover(config)
         with private_lock(control/'runtime-config.lock') as config_fd,private_lock(control/'agent/agent.lock') as agent_fd:
+            from .shutdown_local import require_available
+            require_available(control)
             verify();recover(config)
             for path,fd in ((control/'runtime-config.lock',config_fd),(control/'agent/agent.lock',agent_fd)):
                 held=os.fstat(fd);named=path.lstat()

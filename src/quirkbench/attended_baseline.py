@@ -158,7 +158,8 @@ def replay(db,request_id,request_digest):
 def check_request(db,request_id,namespace):
     """New mutations share retry identity while preserving historical exact replay."""
     for table,column in (('operations','request_id'),('observation_response_commands','id'),('investigations','request_id'),
-            ('attended_baseline_commands','request_id'),('attempt_approval_commands','request'),('proposal_dispatch_commands','request_id')):
+            ('attended_baseline_commands','request_id'),('attempt_approval_commands','request'),('proposal_dispatch_commands','request_id'),
+            ('target_shutdown_requests','request_id')):
         if table==namespace:continue
         if db.execute('SELECT 1 FROM '+table+' WHERE '+column+'=?',(request_id,)).fetchone():
             raise Conflict('request ID belongs to another command')

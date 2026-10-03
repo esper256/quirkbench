@@ -31,6 +31,7 @@ class CommandParser(argparse.ArgumentParser):
             if value.action=='wizard' and value.json:self.error('endpoint wizard requires attended input; use explicit actions with --json')
             if value.public_certificate and value.json:self.error('--public-certificate cannot include --json')
         if value.command=='target':
+            if value.replace is not None and value.action!='poweroff':self.error('--replace requires target poweroff')
             client=('url','ca','token_file','report')
             if value.action is None:
                 if value.name is not None or any(getattr(value,key) is None for key in client):
@@ -41,8 +42,8 @@ class CommandParser(argparse.ArgumentParser):
                 if value.name is None:self.error('target '+value.action+' requires NAME or TARGET')
                 if any(getattr(value,key) is not None for key in client) or value.once or value.interval!=5:
                     self.error('target administration cannot include target client options')
-                if value.action=='show' and (value.request_id or value.ttl_seconds is not None):
-                    self.error('target show is read-only')
+                if value.action in ('show','poweroff-status') and (value.request_id or value.ttl_seconds is not None):
+                    self.error('target '+value.action+' is read-only')
                 if value.action!='show' and value.status_version is not None:self.error('--status-version requires target show')
                 if value.action not in ('add','drain-approve','retarget-code') and value.ttl_seconds is not None:self.error('--ttl-seconds requires target add, drain-approve or retarget-code')
             if value.action not in ('revoke','retarget-code') and value.generation is not None:self.error('--generation requires target revoke or retarget-code')
@@ -214,6 +215,7 @@ def parser():
     recovery_download.add_argument('--request-id');recovery_download.add_argument('--trust-bundle',type=Path)
     recovery_download.add_argument('--json',action='store_true')
     monitor = commands.add_parser('monitor', help='manually opened, read-only progress dashboard; never opens windows')
+    monitor.add_argument('investigation',nargs='?',help='filter existing investigation facts and actionable waits')
     monitor.add_argument('--run', dest='run_id'); monitor.add_argument('--once', action='store_true')
     monitor.add_argument('--json', action='store_true')
     housekeeping = commands.add_parser('maintenance', help='prune proven-stopped staging and optional caches')
@@ -320,7 +322,7 @@ def parser():
     authentication.add_argument('--tokens-file', type=Path)
     authentication.add_argument('--credential-registry', action='store_true', help='explicit registry mode; guided exchange also requires configured native repository publication')
     target = commands.add_parser('target',help='create an invitation, read target facts, or run the legacy HTTPS target client')
-    target.add_argument('action',choices=['add','show','revoke','revoke-code','drain-approve','drain-revoke','retarget-code'],nargs='?');target.add_argument('name',nargs='?')
+    target.add_argument('action',choices=['add','show','revoke','revoke-code','drain-approve','drain-revoke','retarget-code','poweroff','poweroff-status','poweroff-cancel'],nargs='?');target.add_argument('name',nargs='?')
     target.add_argument('--request-id');target.add_argument('--ttl-seconds',type=int);target.add_argument('--json',action='store_true')
     target.add_argument('--status-version',type=int,choices=[1,2],help='versioned target facts; JSON defaults to v1, human output to v2')
     target.add_argument('--generation',help='exact credential generation expected by target revoke')
@@ -328,6 +330,7 @@ def parser():
     target.add_argument('--new-uuid',help='exact new SMBIOS system UUID for an explicitly scoped retarget invitation')
     target.add_argument('--file',type=Path,help='exact original evidence manifest for explicit drain approval')
     target.add_argument('--grant',help='exact old-evidence drain grant to revoke')
+    target.add_argument('--replace',help='explicit prior shutdown request to replace only after a reconciled changed boot')
     target.add_argument('--url'); target.add_argument('--ca'); target.add_argument('--token-file', type=Path); target.add_argument('--report', type=Path); target.add_argument('--once', action='store_true'); target.add_argument('--interval', type=float, default=5)
     watch = commands.add_parser('watch'); watch.add_argument('campaign_id'); watch.add_argument('--interval', type=float, default=2); watch.add_argument('--once', action='store_true'); watch.add_argument('--json', action='store_true'); watch.add_argument('--session', help='include human requests for this session')
     build = commands.add_parser('build',help='build pinned source manifests inside the dedicated Fedora container'); build.add_argument('manifest',type=Path); build.add_argument('--workspace',type=Path); build.add_argument('--campaign')
@@ -520,6 +523,17 @@ def _main(argv=None):
                 answer=add_target(root,args.name,request_id,ttl_seconds=args.ttl_seconds)
                 request_id=answer['record']['request_id']
             elif args.action=='show':answer=show_target(root,args.name,version=args.status_version or (1 if args.json else 2))
+            elif args.action=='poweroff':
+                from .target_shutdown import request
+                if not request_id:raise ContractError('target poweroff requires an explicit --request-id')
+                answer=request(root,args.name,request_id,replace=args.replace)
+            elif args.action=='poweroff-status':
+                from .target_shutdown import status
+                answer=status(root,args.name)
+            elif args.action=='poweroff-cancel':
+                from .target_shutdown import cancel
+                if not request_id:raise ContractError('target poweroff-cancel requires the exact --request-id')
+                answer=cancel(root,args.name,request_id)
             elif args.action=='retarget-code':
                 from .retarget_invitation import issue
                 answer=issue(root,args.name,args.generation,args.new_name,args.new_uuid,request_id,
@@ -568,6 +582,15 @@ def _main(argv=None):
                 print('Expires at Unix time: '+str(record['expires_at']))
                 print('Only the approved original evidence may be uploaded and acknowledged. Registration, execution and completion remain blocked.')
             elif args.action=='drain-revoke':print('Revoked old-evidence drain grant: '+answer['grant_id'])
+            elif args.action in ('poweroff','poweroff-status'):
+                print('Shutdown request: '+answer['request_id'])
+                print('Admission stopped: '+str(answer['admission_stopped']).lower()+'; unresolved target work: '+str(answer['target_work_unresolved']))
+                print('Worker units remaining: '+str(answer['worker_units_remaining']))
+                print('Physical poweroff/removal remain unverified. Confirm locally before disconnecting media.')
+                print(answer.get('next_command',answer.get('next_action','')))
+            elif args.action=='poweroff-cancel':
+                print('Controller shutdown fence cancelled: '+answer['request_id']+'; investigations remain paused.')
+                print(answer['next_action'])
             else:
                 print('Revocation request: '+answer['request_id'])
                 print('Revoked: '+(answer['generation'] or answer['code_id']))
@@ -774,7 +797,7 @@ def _main(argv=None):
             root = discover_state_root(args.state).expanduser().absolute()
             if args.command == 'monitor':
                 from .tui import monitor
-                return monitor(root, run_id=args.run_id, once=args.once, json_output=args.json)
+                return monitor(root, run_id=args.run_id, investigation=args.investigation,once=args.once, json_output=args.json)
             from .maintenance import prune
             if args.action in ('status','pin','unpin','abandon','abandon-upload'):
                 from .retention import status,pin,abandon

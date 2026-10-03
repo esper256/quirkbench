@@ -210,6 +210,8 @@ def make_server(
                     if report.device_id != device_id:
                         raise PermissionError("device mismatch")
                     answer = controller.register(report)
+                    if credential_registry is not None and 'target-shutdown.v1' in report.capabilities:
+                        answer={**answer,'shutdown_protocol':1}
                 elif path == "/v1/claim":
                     _body(data, {"boot_id", "request_id"})
                     answer = controller.claim(device_id, identifier(data["boot_id"]), identifier(data["request_id"]))
@@ -219,6 +221,14 @@ def make_server(
                 elif path == "/v1/reconcile":
                     _body(data, {"boot_id"})
                     answer = controller.reconcile(device_id, identifier(data["boot_id"]))
+                elif path in ('/v1/shutdown','/v1/shutdown-prepared'):
+                    if credential_registry is None:raise PermissionError('bound shutdown requires registry authentication')
+                    from .target_shutdown import delivery,prepared
+                    _body(data,{'boot_id'}|({'preparation'} if path.endswith('-prepared') else set()))
+                    boot_id=identifier(data['boot_id'])
+                    token=self.headers['Authorization'][7:]
+                    answer=(prepared(controller,device_id,boot_id,data['preparation'],token) if path.endswith('-prepared')
+                        else delivery(controller,device_id,boot_id,token))
                 elif path in {"/v1/attempt-approval", "/v1/start", "/v1/heartbeat", "/v1/evidence", "/v1/complete", "/v1/upload", "/v1/progress", "/v1/handoff", "/v1/candidate-started", "/v1/recovery-returned"}:
                     answer = self._attempt_action(path, device_id, data)
                 else:
@@ -441,6 +451,12 @@ class HTTPSDeviceClient:
 
     def reconcile(self, boot_id: str):
         return self._request("/v1/reconcile", {"boot_id": boot_id})
+
+    def shutdown(self,boot_id):
+        return self._request('/v1/shutdown',{'boot_id':boot_id})
+
+    def shutdown_prepared(self,boot_id,preparation):
+        return self._request('/v1/shutdown-prepared',{'boot_id':boot_id,'preparation':preparation})
 
     def start(self, attempt_id: str, token: str, boot_id: str):
         return self._request("/v1/start", {"attempt_id": attempt_id, "token": token, "boot_id": boot_id})

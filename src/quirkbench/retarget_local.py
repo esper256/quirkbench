@@ -265,6 +265,8 @@ def prepare_retarget(control,config,request_id,confirmed_old_device_id,new_uuid,
     if not agent.is_dir():raise Conflict('original target spool is missing; no initialization permitted')
     new_binding={'schema_version':1,'system_uuid':new_uuid};verify_binding(new_binding,reader=binding_reader)
     with private_lock(control/'runtime-config.lock') as config_fd,private_lock(agent/'agent.lock') as agent_fd:
+        from .shutdown_local import require_available
+        require_available(control)
         from .endpoint_history import history as endpoint_history,pointer as endpoint_pointer
         endpoint_path=control/'endpoint/active.json';endpoint_raw=_read(control/'endpoint','active.json') if endpoint_path.exists() or endpoint_path.is_symlink() else None
         if endpoint_raw is not None:

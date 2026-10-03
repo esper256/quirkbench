@@ -111,7 +111,8 @@
       "tests/test_attended_*",
       "examples/attended-baseline-input.json",
       "src/quirkbench/operator_approval.py",
-      "src/quirkbench/target.py"
+      "src/quirkbench/target.py",
+      "src/quirkbench/tui.py"
     ],
     "tests": [
       "tests/test_investigation_pipeline.py",
@@ -129,7 +130,9 @@
       "tests/test_attended_baseline.py",
       "tests/test_operator_approval.py",
       "tests/test_physical_handoff.py",
-      "tests/test_controller_deployments.py"
+      "tests/test_controller_deployments.py",
+      "tests/test_investigation_monitor.py",
+      "tests/test_monitor.py"
     ]
   },
   "filesystem": {
@@ -150,7 +153,11 @@
       "src/quirkbench/enrollment_credentials.py",
       "tests/test_publication_setup*",
       "tests/test_setup_service.py",
-      "examples/publication-setup.json"
+      "examples/publication-setup.json",
+      "src/quirkbench/shutdown_local.py",
+      "src/quirkbench/target_shutdown.py",
+      "tests/test_shutdown.py",
+      "examples/shutdown.json"
     ],
     "tests": [
       "tests/test_build_storage.py",
@@ -168,7 +175,19 @@
       "tests/test_publication_setup.py",
       "tests/test_setup_service.py",
       "tests/test_controller_install.py",
-      "tests/test_enrollment_credentials.py"
+      "tests/test_enrollment_credentials.py",
+      "tests/test_shutdown.py",
+      "tests/test_shutdown_contracts.py",
+      "tests/test_one_shot_clearance.py",
+      "tests/test_console.py",
+      "tests/test_target.py",
+      "tests/test_transport.py",
+      "tests/test_network_profiles.py",
+      "tests/test_enrollment_activation.py",
+      "tests/test_enrollment_target.py",
+      "tests/test_enrollment_maintenance.py",
+      "tests/test_recipe_registry.py",
+      "tests/test_manual_provisioning.py"
     ]
   }
 }

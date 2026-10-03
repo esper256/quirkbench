@@ -88,6 +88,8 @@ def activate_enrollment(control,result,approved_certificate_pem, *, verify_targe
         raise Conflict('retarget result requires explicit stopped local retarget activation')
     control,verify_target=_storage(control,verify_target);fault_hook=fault_hook or (lambda _:None)
     with private_lock(control/'runtime-config.lock'):
+        from .shutdown_local import require_available
+        require_available(control)
         verify_target();pending=_private_path(control/'enrollment/pending')
         intent=_document(_read(pending,'intent.json'));request,private=_saved(pending,intent,run=run)
         _media(control,request['media_instance_id']);verify_binding(request['target_binding'],reader=binding_reader)

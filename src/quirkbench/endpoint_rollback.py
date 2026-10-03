@@ -111,6 +111,8 @@ def rollback_stopped(control,config,request_id,expected_source_sha256, *,verify_
     recover(config);control,storage=_storage(control,verify_target);agent=_private_path(control/'agent')
     _strict_read(control,'runtime-config.lock');_strict_read(agent,'agent.lock')
     with private_lock(control/'runtime-config.lock') as config_fd,private_lock(agent/'agent.lock') as agent_fd:
+        from .shutdown_local import require_available
+        require_available(control)
         directory,intent,source,public,activation,record=_public(control,request_id)
         if source['transition']['source_runtime_sha256']!=intent['runtime_sha256'] or record['source_sha256']!=expected_source_sha256:
             raise Conflict('confirm the exact retained endpoint source before rollback')

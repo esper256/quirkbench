@@ -160,6 +160,8 @@ def activate_bundle(bundle: Path, control: Path, *, verify_target, validator=Non
     try:
         fcntl.flock(config_fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
         fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        from .shutdown_local import require_available
+        require_available(control)
         journal=agent/'journal.json'
         if journal.exists():
             current=json.loads(_read(journal),object_pairs_hook=_pairs)
