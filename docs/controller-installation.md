@@ -306,6 +306,12 @@ coordinator fields are `recovery_worker`, `recovery_signing_home`,
 LAN listening remains an explicit `allow_lan` configuration choice with existing TLS
 verification. Keep target manual trust/repository provisioning unchanged.
 
+The current service's `builder_archive_sha256` is a live retention root, including
+across controller activation and restart. Input-history expiry does not delete
+that selected archive. Removing or replacing the binding permits ordinary cleanup
+when no other owner or pin needs the old bytes. Housekeeping reports an already
+missing configured archive; it cannot regenerate or replace bytes under its digest.
+
 These are three different identities. `builder_image_digest` is the immutable
 Fedora base marker also used by existing build provenance; the fixed worker runs
 `builder_config_digest`, after verifying its retained OCI archive and layers.
