@@ -70,7 +70,7 @@ TASK_TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/quirkbench-archived-evidence.XXXXXX
   --basetemp="$TASK_TEST_ROOT/evidence" >"$TASK_TEST_ROOT/evidence.log" 2>&1)
 ```
 
-Further work for [issue #19](https://github.com/esper256/quirkbench/issues/19)
+Earlier work for [issue #19](https://github.com/esper256/quirkbench/issues/19)
 caches bounded, immutable ancestor/`.git` path layouts, while repeating the remaining
 filesystem, ownership and checkout checks. Blanket mode checks described in the
 historical measurements were subsequently removed under the file-access policy. Record reads use a fresh strict
@@ -84,11 +84,54 @@ For the two-record joined endpoint regression on Debian 13/Python 3.13, the
 profile changed from **106,561,944 to 64,409,757 calls**, with full archive
 validations reduced from **189 to 147**. A same-session unprofiled comparison
 measured test-call time at **17.11 versus 11.73 seconds**. The regression retains
-its behavior checks and budgets at most 150 reconstructions; the previous code
+its behavior checks and originally budgeted at most 150 reconstructions; the previous code
 fails that budget at 189. These measurements describe one case, not a new full
-suite result. Repeated reconstruction remains tracked in #19. Entry rejection
+suite result. Entry rejection
 and post-capture mutation tests verify that no client exchange or archived
 journal write follows a failed reader boundary.
+
+The subsequent #19 correction reconstructs archived proof at each owned operation's
+entry and exit. Between those boundaries it rereads the exact immutable bytes and
+the managed-directory, presence, reader-specific ownership/single-link and bounded
+namespace observations made by the existing semantic readers. This includes the
+transitive endpoint and retarget enrollment origins, not just the selected archive.
+Callbacks run before the pure dependency fence. The old journal remains freshly
+validated with only ACK/offset progress permitted; the immutable snapshot and new
+journal retain their stable ownership/single-link checks. Selected sealed blobs,
+scoped upload credentials, deadlines and source-identity checks remain live.
+
+Paused new-key preparation likewise reuses unchanged proof inside its ownership.
+Activation can legitimately publish records and relocate the original namespaces;
+a changed observation triggers the existing full phase reconstruction and must
+still produce the exact initially prepared source. Final reconstruction remains
+mandatory. No dependency survives its operation, no reads are served from a cache,
+and timestamps never establish validity. Ordinary file permissions remain governed
+by the existing file-access policy.
+
+On Python 3.13.5, the two-record endpoint export/drain/replay profile at `b4d248f`
+compared with the unchanged production baseline at `562b3e4` measured:
+
+| Work count | Before | After |
+| --- | ---: | ---: |
+| Full archived reconstructions | 147 | 6 |
+| All original-source captures, including preparation | 217 | 25 |
+| Endpoint selected-file reconstructions | 788 | 73 |
+| Bounded file reads | 85,234 | 32,944 |
+| Filesystem stat/lstat calls | 2,149,611 | 829,244 |
+| Profiled function calls | 64,871,349 | 28,822,374 |
+
+The unprofiled joined test took **17.57 versus 7.62 seconds** in the same cloud
+environment (test call **16.12 versus 6.09 seconds**). These are examples, not
+portable timing thresholds; the executable regression limits work counts.
+
+The joined regression budgets at most six archive reconstructions and twenty
+paused-source reconstructions (seventeen measured, versus sixty-eight previously).
+The latter allows legitimate activation phases rather than fixing their exact
+count. Shallow/deep cases retain behavior assertions and a per-operation budget.
+Fault tests require source/namespace/availability changes after client creation to
+prevent uploads and journal writes, and activation-stage changes to prevent further
+key/runtime publication. Profiling adds overhead; these counts and one journey's
+timing do not establish full-suite or native readiness.
 
 ## Validation scope
 
@@ -135,7 +178,8 @@ examples, not deadlines on arbitrary machines. Keep smoke around one second on
 that baseline (a few seconds on slower hosts); additions need representative
 coverage and measured cost. Keep long reconstruction, subprocess timeout and
 network integration scenarios in focused/full runs rather than growing smoke.
-Underlying full-suite performance is still tracked separately in issue #19.
+The #19 measurements concern the affected application journey; full-suite runtime
+must be assessed separately at an integration milestone.
 
 PR updates and pushes to `main` automatically run smoke on Python 3.11/umask 022
 and Python 3.13/umask 077. Topic-branch pushes do not duplicate PR jobs; superseded
