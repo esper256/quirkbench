@@ -22,5 +22,9 @@
   "investigation-product": {
     "paths": ["src/quirkbench/investigation*", "src/quirkbench/candidate_rootfs*", "src/quirkbench/baseline_inputs.py", "src/quirkbench/pinned_composition.py", "src/quirkbench/compose.py", "src/quirkbench/build_pipeline.py", "src/quirkbench/cli.py", "tests/test_investigation*", "tests/test_candidate_rootfs*", "tests/test_pinned_composition.py", "tests/test_compose.py", "tests/test_build_pipeline.py", "examples/investigation-*.json", "examples/fixed-build-recipe.json", "examples/pinned-composition-result.json"],
     "tests": ["tests/test_investigation_pipeline.py", "tests/test_pinned_composition.py", "tests/test_candidate_rootfs_operation.py", "tests/test_investigation_context.py", "tests/test_investigation_sources.py", "tests/test_compose.py", "tests/test_build_pipeline.py"]
+  },
+  "filesystem": {
+    "paths": ["tests/stat_fixtures.py", "src/quirkbench/build.py", "src/quirkbench/runtime.py", "src/quirkbench/recovery_storage.py", "src/quirkbench/controller_setup.py"],
+    "tests": ["tests/test_build_storage.py", "tests/test_recovery_storage.py", "tests/test_runtime.py", "tests/test_target_lifecycle.py", "tests/test_resumable_setup.py", "tests/test_sqlite_lifetime.py", "tests/test_recovery_listing.py"]
   }
 }

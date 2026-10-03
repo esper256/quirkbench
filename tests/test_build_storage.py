@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
-from types import SimpleNamespace
+import stat
+from stat_fixtures import stat_with
 
 import pytest
 
@@ -17,7 +18,7 @@ def fixture_infrastructure(tmp_path, monkeypatch):
     def infrastructure(path, *args, **kwargs):
         info = original(path, *args, **kwargs)
         if path in tmp_path.parents:
-            return SimpleNamespace(st_uid=0, st_mode=info.st_mode)
+            return stat_with(info, st_uid=0)
         return info
     monkeypatch.setattr(Path, 'lstat', infrastructure)
 
@@ -44,7 +45,11 @@ def test_existing_private_anchor_is_required(storage):
     root, volume, private = storage
     with pytest.raises(BuildError, match='private user-owned subdirectory'):
         _safe_build_path(volume / 'not-created/staging')
-    private.chmod(0o755)
+    before = stat.S_IMODE(private.stat().st_mode)
+    assert before & 0o077 == 0
+    _safe_build_path(private / 'staging')
+    private.chmod(before | stat.S_IRGRP)
+    assert stat.S_IMODE(private.stat().st_mode) == before | stat.S_IRGRP
     with pytest.raises(BuildError, match='private user-owned subdirectory'):
         _safe_build_path(private / 'staging')
 
@@ -56,7 +61,12 @@ def test_unsafe_storage_descendants_are_rejected(storage, tmp_path, monkeypatch,
     if kind == 'symlink': child.symlink_to(tmp_path)
     elif kind == 'file': child.write_text('not a directory')
     else: child.mkdir()
-    if kind == 'public-write': child.chmod(0o777)
+    if kind == 'public-write':
+        before = stat.S_IMODE(child.stat().st_mode)
+        assert before & 0o022 == 0
+        _safe_build_path(child / 'staging')
+        child.chmod(before | stat.S_IWGRP)
+        assert stat.S_IMODE(child.stat().st_mode) == before | stat.S_IWGRP
     if kind == 'nested-mount':
         # Includes same-device bind mounts; stat()/ismount() cannot establish this.
         monkeypatch.setattr(maintenance, 'nested_mounts', lambda root: [str(volume), str(child)])
@@ -64,7 +74,7 @@ def test_unsafe_storage_descendants_are_rejected(storage, tmp_path, monkeypatch,
         original = Path.lstat
         def foreign(path, *args, **kwargs):
             info = original(path, *args, **kwargs)
-            if path == child: return SimpleNamespace(st_mode=info.st_mode, st_uid=os.geteuid() + 1)
+            if path == child: return stat_with(info, st_uid=os.geteuid() + 1)
             return info
         monkeypatch.setattr(Path, 'lstat', foreign)
     with pytest.raises(BuildError): _safe_build_path(child / 'staging')
@@ -97,8 +107,10 @@ def test_storage_changed_to_link_before_resolution_is_rejected(storage, monkeypa
 def test_shared_scratch_requires_sticky_parent(storage):
     root, volume, private = storage
     volume.chmod(0o777)
+    assert stat.S_IMODE(volume.stat().st_mode) == 0o777
     with pytest.raises(BuildError, match='writable by other users'): _safe_build_path(private / 'stage')
     volume.chmod(0o1777)
+    assert stat.S_IMODE(volume.stat().st_mode) == 0o1777
     _safe_build_path(private / 'stage')
 
 
@@ -113,15 +125,15 @@ def test_unmapped_root_owner_does_not_authorize_arbitrary_volume_owners(tmp_path
     def root_owner(path, *args, **kwargs):
         info = original_stat(path, *args, **kwargs)
         if path == Path('/'):
-            # Path.lstat may delegate to Path.stat(follow_symlinks=False).
-            # Keep the mode needed by the infrastructure wrapper in that path.
-            return SimpleNamespace(st_uid=overflow, st_mode=info.st_mode)
+            # Path.lstat may delegate to Path.stat(follow_symlinks=False);
+            # preserve the entire native result, changing only ownership.
+            return stat_with(info, st_uid=overflow)
         return info
     monkeypatch.setattr(Path, 'stat', root_owner)
     def mapped(path, *args, **kwargs):
         info = original_lstat(path, *args, **kwargs)
         if path == root or path in root.parents or path == volume:
-            return SimpleNamespace(st_uid=overflow, st_mode=info.st_mode)
+            return stat_with(info, st_uid=overflow)
         return info
     monkeypatch.setattr(Path, 'lstat', mapped)
     with pytest.raises(BuildError, match='owned directory'): _safe_build_path(private / 'stage')

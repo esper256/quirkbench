@@ -119,9 +119,13 @@ def test_missing_successor_pause_pointer_can_only_replay_its_exact_retained_link
     assert select(active,request_id='endpoint-2')['activated']
 
 
-def test_completed_repeated_rollback_rejects_a_tenth_unknown_record(active):
+def test_completed_repeated_rollback_rejects_an_unknown_record(active):
     first(active);second(active);select(active,request_id='endpoint-2');restore(active,request_id='endpoint-2')
-    directory=endpoint_local.location(active[0],'endpoint-2');assert len(list(directory.iterdir()))==9
+    directory=endpoint_local.location(active[0],'endpoint-2')
+    # An unchanged completed rollback must replay; its internal file count is
+    # not the contract. Adding an unapproved record must invalidate that replay.
+    assert restore(active,request_id='endpoint-2')['rolled_back']
+    assert not (directory/'unknown').exists()
     atomic_write(directory/'unknown',b'extra')
     with pytest.raises(Conflict):restore(active,request_id='endpoint-2')
 

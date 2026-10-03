@@ -34,6 +34,7 @@ Python 3.13/077. Focused checks initially use only 3.13/077 to control cost.
 | `endpoint-control` | Probe, preflight, history, generation, activation and controller endpoint |
 | `endpoint-retarget` | Joined endpoint retarget and activation |
 | `evidence` | Archived validation, retarget evidence, drain client/target and release HTTP |
+| `filesystem` | Storage admission, runtime destinations, revocation, read-only setup/SQLite lifetime and recovery listing |
 | `ci-tooling` | Selection, redaction/bounds, disposable pytest outcomes and artifact plumbing |
 
 Selectors deduplicate suites/files; separate suite jobs keep their own evidence.

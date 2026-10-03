@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import stat
 import struct
-from types import SimpleNamespace
+from stat_fixtures import stat_with
 import uuid
 import zlib
 
@@ -64,11 +64,17 @@ def test_bounded_gpt_identity_and_changed_node(tmp_path,monkeypatch):
         assert path==kw['dev']/'sda'
         fd=os.open(path,flags); opened.append(fd); return fd
     kw['opener']=opener
-    monkeypatch.setattr(os,'fstat',lambda fd: SimpleNamespace(st_mode=stat.S_IFBLK,st_rdev=os.makedev(8,0)) if fd in opened else real_fstat(fd))
+    def disk_stat(fd):
+        info = real_fstat(fd)
+        if fd in opened:
+            return stat_with(info, st_mode=stat.S_IFBLK | stat.S_IMODE(info.st_mode), st_rdev=os.makedev(8,0))
+        return info
+    monkeypatch.setattr(os,'fstat',disk_stat)
     def node_stat(path,*args,**kwargs):
-        if Path(path)==kw['dev']/'sda2' and kwargs.get('follow_symlinks') is False:
-            return SimpleNamespace(st_mode=stat.S_IFBLK,st_rdev=os.makedev(8,2))
-        return real_stat(path,*args,**kwargs)
+        info = real_stat(path,*args,**kwargs)
+        if not isinstance(path, int) and Path(path)==kw['dev']/'sda2' and kwargs.get('follow_symlinks') is False:
+            return stat_with(info, st_mode=stat.S_IFBLK | stat.S_IMODE(info.st_mode), st_rdev=os.makedev(8,2))
+        return info
     monkeypatch.setattr(os,'stat',node_stat)
     assert partition_role('sda2',**kw)==roles[1]
     kw['cmdline'].write_text(kw['cmdline'].read_text().replace(roles[1],str(uuid.uuid4())))

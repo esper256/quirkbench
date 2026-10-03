@@ -1,5 +1,6 @@
 """M1a software acceptance: actual state services, injected native observations."""
 import json
+import stat
 from pathlib import Path
 import zipfile
 
@@ -92,9 +93,9 @@ def test_preferences_changed_after_setup_are_conflict_not_repaired(tmp_path):
 
 def test_status_on_empty_home_does_not_create_anything(tmp_path, monkeypatch):
     monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state-home'))
-    before = list(tmp_path.iterdir())
+    before = set(tmp_path.iterdir())
     answer = controller_status(config_home=tmp_path / 'config', **observations())
-    assert list(tmp_path.iterdir()) == before
+    assert set(tmp_path.iterdir()) == before
     assert answer['setup_progress'] is None
     assert answer['readiness']['target_count'] is None
     assert not answer['readiness']['database_available']
@@ -110,9 +111,29 @@ def test_status_initialized_state_never_calls_mutating_adapters(tmp_path):
         def preferences(self, *args, **kwargs):
             raise AssertionError('preferences')
     root = tmp_path / 'state'
-    snapshot = {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
+    # C2 permits exactly these SQLite bookkeeping files. Preserve application
+    # bytes, schema/version and all rows (including owner epochs), not SHM locks.
+    wal = root / 'controller.sqlite-wal'
+    sidecars = {wal, root / 'controller.sqlite-shm'}
+    def snapshot():
+        with StateReader(root).connection() as db:
+            logical = (tuple(db.iterdump()), db.execute('PRAGMA user_version').fetchone()[0],
+                       db.execute('PRAGMA journal_mode').fetchone()[0])
+        files = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob('*')
+                 if p.is_file() and p not in sidecars}
+        return logical, files
+    before = snapshot()
+    wal_before = wal.read_bytes() if wal.exists() else None
     controller_status(root, config_home=tmp_path / 'config', filesystem=ReadOnly(), **observations())
-    assert snapshot == {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
+    assert snapshot() == before
+    for path in sidecars:
+        if path.exists():
+            assert stat.S_ISREG(path.lstat().st_mode)
+    if wal_before is not None:
+        assert wal.read_bytes() == wal_before
+    elif wal.exists():
+        assert wal.stat().st_size in (0, 32)  # no transaction frames added
+
 
 
 def test_busy_state_refused_before_selection_or_preferences(tmp_path):
