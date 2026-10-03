@@ -214,7 +214,7 @@ def test_real_disposable_signer_inspection_and_fresh_installed_verification(publ
     assert not installed['signed'] and not installed['qualified']
     # Verify through the real installed-release reader, with independent trust.
     observed=inspect_selected(installed['runtime_root'],config_home=arguments['config_home'],trust_bundle=trust)
-    assert observed['verification']['controller_archive_authenticated']
+    assert observed['verification']['publisher_fingerprint']==fingerprint
     assert observed['verification']['statement']['controller_archive_sha256']==statement['controller_archive_sha256']
     changed={**statement,'controller_version':'0.0.9'}
     (directory/'release.json').write_bytes(canonical(changed)+b'\n')
