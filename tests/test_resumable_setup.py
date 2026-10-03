@@ -180,7 +180,7 @@ def test_journal_symlink_and_checkout_state_refused(tmp_path):
     config = tmp_path / 'config/quirkbench'
     config.mkdir(parents=True, mode=0o700)
     (config / 'setup-progress.json').symlink_to(tmp_path / 'elsewhere')
-    with pytest.raises(ContractError, match='private'):
+    with pytest.raises(ContractError, match='user-owned regular file'):
         setup(tmp_path)
     (config / 'setup-progress.json').unlink()
     tree = tmp_path / 'checkout'
