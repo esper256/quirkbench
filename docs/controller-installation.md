@@ -333,6 +333,10 @@ not live service/containment or release qualification evidence.
 
 ## Signed release acquisition software foundation
 
+Use [publication preflight and the operator runbook](release-publication.md) to
+check the signed asset set and selected pinned baseline closure without installing
+or publishing. This software check preserves separate production/native gates.
+
 The archive includes an executable `install` beside `bin` and `lib`:
 
 ```sh

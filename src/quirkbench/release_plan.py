@@ -23,7 +23,7 @@ def inspect(directory, inputs, *, trust_bundle, baseline=None, run=subprocess.ru
     from .baseline_inputs import metadata, package_closure, verify_object
     from .recovery_rootfs import CASReader, MAX_RPM_BYTES, MAX_CLOSURE_BYTES
     from .investigation_pipeline import FIXED_RECIPE
-    from .recipe_registry import load_manifest
+    from .recipe_registry import load_manifest, reviewed_bindings
     if type(timeout_s) is not int or not 1<=timeout_s<=600:raise ContractError('publication inspection timeout must be 1..600 seconds')
     deadline=monotonic()+timeout_s
     def budget():
@@ -66,6 +66,9 @@ def inspect(directory, inputs, *, trust_bundle, baseline=None, run=subprocess.ru
             raise ContractError('bundled target recipe differs from pinned baseline: '+selected['recipe_id'])
         manifest=load_manifest(raw_recipe)
         module,callable_name=manifest['entrypoint'].split(':',1)
+        binding=reviewed_bindings().get(selected['recipe_id'])
+        if binding is None or manifest['entrypoint']!=binding.__module__+':'+binding.__name__:
+            raise ContractError('bundled recipe has no supported reviewed callable binding')
         source=files.get('lib/'+module.replace('.','/')+'.py')
         if manifest['recipe_id']!=selected['recipe_id'] or source is None or digest(source)!=manifest['code_sha256']:
             raise ContractError('bundled target recipe code differs from its reviewed manifest')

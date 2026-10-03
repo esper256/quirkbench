@@ -194,5 +194,30 @@
       "tests/test_recipe_registry.py",
       "tests/test_manual_provisioning.py"
     ]
+  },
+  "release-preparation": {
+    "paths": [
+      "src/quirkbench/release_plan.py",
+      "src/quirkbench/controller_release.py",
+      "src/quirkbench/release_trust.py",
+      "src/quirkbench/release_install.py",
+      "src/quirkbench/installed_release.py",
+      "tests/test_release_plan.py",
+      "tests/test_controller_release.py",
+      "tests/test_release_compatibility.py",
+      "tests/test_release_install.py",
+      "tests/test_installed_release.py",
+      "schemas/publication-preflight.v1.schema.json"
+    ],
+    "tests": [
+      "tests/test_release_plan.py",
+      "tests/test_controller_release.py",
+      "tests/test_release_compatibility.py",
+      "tests/test_release_install.py",
+      "tests/test_installed_release.py",
+      "tests/test_controller_install.py",
+      "tests/test_builder_setup.py",
+      "tests/test_baseline_inputs.py"
+    ]
   }
 }
