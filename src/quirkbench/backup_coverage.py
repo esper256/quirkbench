@@ -121,6 +121,10 @@ def derive(root,manifest, *,manifest_sha=None):
     root=Path(root).absolute()
     require_stopped_cut(root)
     refs=set(manifest['artifacts'])
+    copied=SnapshotStore(root)
+    for value in sorted(refs):
+        with held_parent(copied.path(value)) as (_,guard):
+            copied.verify(value);guard()
     db=sqlite3.connect((root/'controller.sqlite').as_uri()+'?mode=ro&immutable=1',uri=True)
     db.row_factory=sqlite3.Row
     try:

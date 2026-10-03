@@ -142,6 +142,19 @@ def test_interrupted_capture_has_no_backup_success_marker(tmp_path,monkeypatch,f
     assert not (pending[0]/'manifest.json').exists()
 
 
+def test_corrupt_copied_nonsource_object_never_claims_complete_backup(tmp_path):
+    repository=Repository();c,artifact,experiment=deployment_setup(tmp_path,repository);c.submit('campaign',experiment)
+    export=repository.export
+    def corrupt_copy(refs,destination):
+        export(refs,destination)
+        (destination.parent/'artifacts/objects'/artifact.sha256).write_bytes(b'bad copied bytes')
+    repository.export=corrupt_copy
+    backup=tmp_path/'backup'
+    with pytest.raises(ContractError,match='verification'):c.backup(backup,coverage=True)
+    assert not backup.exists()
+    assert not next(tmp_path.glob('backup.pending-*')).joinpath('manifest.json').exists()
+
+
 @pytest.mark.parametrize('change',['claim','database','manifest','linked-report','source'])
 def test_present_companion_and_cut_tampering_rejected_before_restore_native_actions(tmp_path,monkeypatch,change):
     repository=Repository();c,artifact,experiment=deployment_setup(tmp_path,repository);c.submit('campaign',experiment)
