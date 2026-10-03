@@ -32,6 +32,15 @@ def recorded_packages():
     return validate_snapshot(_json(path.read_bytes(),'recorded binary package candidate'))['packages']
 
 
+
+def acquisition_wrapper(root, owner):
+    """Carry this installation's interpreter/library bootstrap outside checkouts."""
+    import sys
+    bootstrap = ("import runpy,sys;sys.dont_write_bytecode=True;sys.path.insert(0,sys.argv.pop(1));"
+                 "runpy.run_module('quirkbench.recovery_inputs',run_name='__main__')")
+    return [sys.executable, '-c', bootstrap, str(Path(__file__).resolve().parent.parent),
+            '--state', str(root), '--owner', owner]
+
 def acquisition_command(destination,*,release=FEDORA_RELEASE,kernel=KERNEL_RELEASE,spec=None):
     if spec is not None:
         from .recovery_acquisition import acquisition_command as selected_command

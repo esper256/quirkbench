@@ -56,6 +56,12 @@ qualification occur simply because this metadata or adapter is edited.
 `stock-recovery-LOCK_SHA256`, derived from the verified lock. It carries no assumed
 release or issue name. Previously generated recipe IDs and bytes remain unchanged.
 
+
+When historical mirror metadata no longer serves exact dependencies, use the
+[supported retained-RPM repository replay](recovery-rpm-replay.md). It preserves
+package/kernel/trust identities, reports unavailable selected inputs precisely and
+uses the same DNF5 acquisition owner and signature lock.
+
 ## Reviewed pairing candidate
 
 `recovery-inputs candidate-spec --candidate fedora44-pairing-v1 --repository

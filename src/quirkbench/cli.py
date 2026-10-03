@@ -291,6 +291,9 @@ def parser():
     respond.add_argument('--file', type=Path, required=True); respond.add_argument('--request-id', required=True)
     recovery = commands.add_parser('recovery-inputs', help='exact stock package acquisition plan and v2 retained inputs')
     recovery_actions = recovery.add_subparsers(dest='action', required=True)
+    replay = recovery_actions.add_parser('replay-check', help='report missing or changed exact RPM inputs in a retained repository; read-only')
+    replay.add_argument('--spec', type=Path, required=True)
+    replay.add_argument('--directory', type=Path, required=True)
     candidate = recovery_actions.add_parser('candidate-spec', help='print reviewed stock inputs with explicitly supplied repository bytes; no download')
     candidate.add_argument('--candidate', choices=['fedora44-pairing-v1'], required=True)
     candidate.add_argument('--repository', type=Path, required=True, help='reviewed .repo file for the exact selected closure')
@@ -411,6 +414,19 @@ def _main(argv=None):
             if args.json:print(json.dumps(operation_response(error={'code':code,'message':message,'retryable':status_code==5}),sort_keys=True))
             else:print(code+': '+message,file=sys.stderr)
             return status_code
+    if args.command == 'recovery-inputs' and args.action == 'replay-check':
+        from .recovery_replay import check_replay
+        from .recovery_acquisition import load_spec, MAX_SPEC
+        from .state_reader import read_file
+        try:
+            path = args.spec.expanduser().absolute()
+            selected = load_spec(read_file(path.parent.resolve(strict=True), path.name, limit=MAX_SPEC))
+            answer = check_replay(selected, args.directory)
+            print(json.dumps(answer, indent=2, sort_keys=True))
+            return 0 if answer['selected_inputs_available'] else 4
+        except (OSError, ValueError, RuntimeError) as exc:
+            print('RPM replay inventory unavailable: '+str(exc), file=sys.stderr)
+            return 2
     if args.command == 'recovery-inputs' and args.action == 'candidate-spec':
         from .recovery_acquisition import stock_candidate_spec
         try:
@@ -1184,7 +1200,7 @@ def _main(argv=None):
                 register(controller.root,'input',[artifact.sha256])
                 answer=asdict(artifact)
             elif args.command == 'recovery-inputs':
-                from .recovery_inputs import acquisition_command,retain_packages,generate_recipe
+                from .recovery_inputs import acquisition_command,acquisition_wrapper,retain_packages,generate_recipe
                 if args.action=='acquire-plan':
                     from .retention import managed_path,register
                     from .recovery_acquisition import load_spec,stage_spec,freeze_legacy_spec,MAX_SPEC
@@ -1202,7 +1218,7 @@ def _main(argv=None):
                     spec_digest=controller.store.put(canonical(spec)).sha256
                     import uuid
                     owner=register(controller.root,'input',[spec_digest],owner='storage:acquisition-v1:'+spec_digest+':'+uuid.uuid4().hex,paths=(directory,),state='WAITING')
-                    answer={'argv':['python3','-m','quirkbench.recovery_inputs','--state',str(controller.root),'--owner',owner],
+                    answer={'argv':acquisition_wrapper(controller.root,owner),
                             'dnf_argv':acquisition_command(directory/'rpms',spec=spec),'spec_sha256':spec_digest,'selection':'explicit' if args.spec else 'historical-candidate-compatibility','directory':str(directory/'rpms'),'executed':False,'retention_owner':owner}
                 elif args.action=='lock':
                     from .retention import verified_acquisition,work,published
@@ -1345,7 +1361,7 @@ def _main(argv=None):
 def main(argv=None):
     """A publication barrier, not a scheduler; read-only commands do no housekeeping."""
     args=parser().parse_args(argv)
-    readonly=((args.command=='recovery-inputs' and args.action=='candidate-spec') or args.command in ('storage','experiment','build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
+    readonly=((args.command=='recovery-inputs' and args.action in ('replay-check','candidate-spec')) or args.command in ('storage','experiment','build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
                                'target','endpoint','target-service','serve-repository','release-check') or
               (args.command=='campaign' and args.action=='status') or
               (args.command=='attempt' and args.action in ('status','show')) or
