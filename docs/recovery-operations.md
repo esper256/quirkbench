@@ -15,8 +15,9 @@ before entering its code ID and one-use code. The console retains its own privat
 key/request before exchange, stops the existing supervisor for activation and
 restarts it afterward. Pairing grants no candidate or attempt approval. Missing
 native `openssl`/`gpg`, unknown clock, mismatched trust or an active configuration
-block this initial path. The current recorded stock RPM candidate needs an updated,
-exact `openssl` package input before native pairing acceptance. Staged manual setup
+block this initial path. Select `fedora44-pairing-v1` with `candidate-spec` below
+for the reviewed OpenSSL executable input. Stock staging/publication checks both
+executables; this does not establish native pairing acceptance. Staged manual setup
 remains available. After pairing/manual activation, **Save selected network connections**
 lists only RAM connection filenames; choose the numbered connections to retain
 privately. Only supported Ethernet/Wi-Fi profiles are saved. Passwords stay outside
@@ -51,6 +52,9 @@ The retained RPM/key/policy/lock objects travel in CAS and through operation bac
 Available controller commands, using its existing selected private state:
 
 ```sh
+quirkbench recovery-inputs candidate-spec --candidate fedora44-pairing-v1 \
+  --repository /absolute/reviewed.repo --repository-id SELECTED_REPO_ID \
+  > /absolute/reviewed-candidate.json
 quirkbench recovery-inputs acquire-plan /SELECTED_STATE/inputs/new-generation --spec /absolute/reviewed-candidate.json
 quirkbench recovery-inputs lock /SELECTED_STATE/inputs/new-generation/rpms \
   --public-key /absolute/fedora-signing-key \

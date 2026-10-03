@@ -21,6 +21,25 @@ def legacy_candidate():
     return json.loads(path.read_bytes())
 
 
+
+def stock_candidate_spec(candidate, repository, repository_ids):
+    """Select reviewed pairing inputs; bind explicitly supplied repository bytes."""
+    if candidate != 'fedora44-pairing-v1':
+        raise BuildError('unknown stock acquisition candidate')
+    from .state_reader import read_file
+    path = Path(repository).expanduser().absolute()
+    content = read_file(path.parent.resolve(strict=True), path.name, limit=65536).decode()
+    profile = Path(__file__).with_name('profiles')/'stock-fedora44-pairing-rpm-candidate.v1.json'
+    snapshot = validate_snapshot(json.loads(profile.read_bytes()))
+    return load_spec(canonical({
+        'schema_version':1, 'candidate_id':candidate,
+        'platform_adapter_id':'x86_64-uefi-usb-v1', 'fedora_release':'44',
+        'kernel_release':'7.2.7-200.fc44.x86_64',
+        'rpm_key_fingerprint':'36F612DCF27F7D1A48A835E4DBFCF71C6D9F90A6',
+        'packages':snapshot['packages'],
+        'repositories':[{'name':'selected.repo','content':content,
+                         'sha256':digest(content.encode()),'ids':list(repository_ids)}]}))
+
 def load_spec(raw):
     if len(raw) > MAX_SPEC: raise BuildError('acquisition specification exceeds budget')
     try:

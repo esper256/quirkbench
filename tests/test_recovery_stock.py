@@ -51,6 +51,11 @@ def stock_fixture(tmp_path):
 def install_fixture(root, release):
     (root/'etc').mkdir(parents=True)
     (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1\n')
+    for name in ('openssl', 'gpg'):
+        program = root/'usr/bin'/name
+        program.parent.mkdir(parents=True, exist_ok=True)
+        program.write_bytes(b'synthetic pairing program')
+        program.chmod(0o755)
     modules = root/'lib/modules'/release
     modules.mkdir(parents=True)
     (modules/'vmlinuz').write_bytes(b'stock kernel')
@@ -221,3 +226,16 @@ def test_signature_status_does_not_treat_cas_filename_as_error(tmp_path):
         if argv[0]=='gpg': return 'pub:::::::::\nfpr:::::::::'+lock['rpm_key_fingerprint']+':\n'
         return '/private/cas/objects/bad123: digests signatures OK\n' if '--checksig' in argv else ''
     verify_stock_rpm_signatures(lock,reader,['/private/cas/objects/bad123'],stage,runner)
+
+
+@pytest.mark.parametrize('name', ['openssl', 'gpg'])
+def test_stock_staging_rejects_missing_pairing_tool_before_cache_publication(tmp_path, name):
+    recipe,lock,reader,_=stock_fixture(tmp_path)
+    def install(catalog, passed, store, root):
+        install_fixture(root,lock['kernel_release'])
+        (root/'usr/bin'/name).unlink()
+        return root
+    with pytest.raises(BuildError,match='pairing executable.*'+name):
+        run_recovery_base_stage(recipe,None,reader,tmp_path/'stock',runner=None,
+            limits=ResourceLimits(1,4*1024**3,1),rootfs_installer=install)
+    assert not (tmp_path/'stock/artifacts').exists()

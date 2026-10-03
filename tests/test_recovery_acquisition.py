@@ -84,3 +84,47 @@ def test_additional_repository_cannot_override_pinned_enabled_id(tmp_path):
     selected=spec();stage_spec(selected,tmp_path)
     (tmp_path/'repositories/extra.repo').write_text('[reviewed-fedora]\nbaseurl=https://example.invalid/override\n')
     with pytest.raises(BuildError,match='directory differs'):acquisition_command(tmp_path/'rpms',selected)
+
+
+def test_pairing_candidate_preserves_historical_inputs_and_requests_executable(tmp_path, capsys):
+    import json
+    from quirkbench.cli import main
+    from quirkbench.recovery_acquisition import stock_candidate_spec
+    repository = tmp_path/'retained.repo'
+    repository.write_text('[retained-stock]\nbaseurl=file:///retained/exact-rpms\ngpgcheck=1\n')
+    selected = stock_candidate_spec('fedora44-pairing-v1', repository, ['retained-stock'])
+    historical = {p['name']:p for p in recorded_packages()}
+    current = {p['name']:p for p in selected['packages']}
+    assert 'openssl' not in historical
+    assert {name:p for name,p in current.items() if name != 'openssl'} == historical
+    assert current['openssl']['nevra'] == 'openssl-1:3.5.8-1.fc44.x86_64'
+    assert current['openssl-libs'] == historical['openssl-libs']
+    assert current['gnupg2'] == historical['gnupg2']
+    assert main(['--state',str(tmp_path/'unused-state'),'recovery-inputs','candidate-spec',
+                 '--candidate','fedora44-pairing-v1','--repository',str(repository),
+                 '--repository-id','retained-stock']) == 0
+    assert json.loads(capsys.readouterr().out) == selected
+    assert not (tmp_path/'unused-state').exists()
+    generation=tmp_path/'generation';generation.mkdir();stage_spec(selected,generation)
+    argv=acquisition_command(generation/'rpms',selected)
+    assert current['openssl']['nevra'] in argv
+    assert '--enablerepo=retained-stock' in argv
+    assert selected['repositories'][0]['sha256'] == digest(repository.read_bytes())
+
+
+def test_pairing_candidate_refuses_unknown_repository_id(tmp_path):
+    from quirkbench.recovery_acquisition import stock_candidate_spec
+    repository=tmp_path/'retained.repo';repository.write_text('[retained-stock]\nbaseurl=file:///exact\n')
+    with pytest.raises(BuildError,match='ID missing'):
+        stock_candidate_spec('fedora44-pairing-v1',repository,['unknown'])
+
+
+def test_candidate_spec_repository_ancestor_loop_is_command_error(tmp_path, capsys):
+    from quirkbench.cli import main
+    loop=tmp_path/'loop';loop.symlink_to('loop')
+    assert main(['--state',str(tmp_path/'unused-state'),'recovery-inputs','candidate-spec',
+                 '--candidate','fedora44-pairing-v1','--repository',str(loop/'selected.repo'),
+                 '--repository-id','selected']) == 2
+    output=capsys.readouterr()
+    assert output.out == '' and 'stock specification unavailable:' in output.err
+    assert not (tmp_path/'unused-state').exists()
