@@ -144,14 +144,13 @@ BOOT='11111111-1111-4111-8111-111111111111'
         ('test_setup_service.py',{'Services','start'}),
         ('test_resumable_setup.py',{'observations'}),
         ('test_enrollment_runtime.py',{'Repository','advertise'}),
-        ('test_commission.py',{'Lab','lab'}),
+        ('test_commission.py',{'Lab','make_lab'}),
         ('test_controller_release.py',{'fake_gpg'}),
         ('test_builder_setup.py',{'Workers'}),
         ('test_recovery_download.py',{'execute'}),
         ('test_publication_setup.py',{'initialized','installed','setup',
             'test_installed_setup_publication_pairing_lost_reply_and_private_reboot_state'})):
         adapters+='\n'+definitions(filename,names)
-    adapters+='\nlab_fixture=lab\n'
     arguments,record,payloads,_,_=signed_factory
     payloads['controller.tar.gz']=packaged_archive.read_bytes()
     statement=json.loads(payloads['release.json']);statement['controller_archive_sha256']=publication.digest(payloads['controller.tar.gz'])
@@ -248,7 +247,7 @@ def test_installed_setup_publication_pairing_lost_reply_and_private_reboot_state
     from quirkbench.provisioning import activate_bundle
     from quirkbench.transport import TransportError
     from test_enrollment_runtime import Repository,advertise
-    from test_commission import lab as lab_fixture,GUID
+    from test_commission import make_lab,GUID
     c=Controller(root,reserve_bytes=0);config=configuration(root)
     with c.lifecycle() as owner:
         with runtime.publication_runtime(c,registry=CredentialRegistry(root),service_runtime=config['runtime'],
@@ -262,7 +261,7 @@ def test_installed_setup_publication_pairing_lost_reply_and_private_reboot_state
             from dataclasses import asdict
             from quirkbench.capacity_setup import run_attended_commission
             media=tmp_path/'synthetic-media';media.mkdir()
-            lab=getattr(lab_fixture,'__wrapped__',lab_fixture)(media)
+            lab=make_lab(media)
             identity=media/'identity.json';identity.write_bytes(canonical({'schema_version':2,**asdict(lab.identity)}));identity.chmod(0o600)
             sizing={'identity_path':identity,'journal':lab.journal,'paths':lab.paths,'runner':lab.run,
                 'block_rdev':lab.rdev,'ram_reader':lambda:8,'output_stream':StringIO()}

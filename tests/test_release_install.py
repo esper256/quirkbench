@@ -11,7 +11,7 @@ from quirkbench import cli, release_install, release_trust
 from quirkbench.contracts import Conflict, ContractError, canonical, digest
 from quirkbench.release_install import acquire_install, download
 from quirkbench.release_trust import ReleaseUnavailable, load_bundle, validate_bundle
-from test_controller_install import archive as archive_fixture
+from test_controller_install import make_archive
 from test_controller_release import fake_gpg, FINGERPRINT
 
 
@@ -26,7 +26,7 @@ def journal_validator(kind):
 @pytest.fixture
 def fixture(tmp_path):
     remote = tmp_path / 'remote'; remote.mkdir()
-    archive = archive_fixture.__wrapped__(remote)
+    archive = make_archive(remote)
     statement = json.loads((Path(__file__).resolve().parents[1] / 'examples/controller-release-set.json').read_text())
     statement['controller_archive_sha256'] = digest(archive.read_bytes())
     raw = canonical(statement) + b'\n'
