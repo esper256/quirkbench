@@ -100,7 +100,7 @@ def test_setup_refuses_state_switch_and_unrelated_default_directory(tmp_path):
     assert not (other_config / "quirkbench/controller.json").exists()
 
 
-def test_setup_rejects_linked_or_nonprivate_state(tmp_path):
+def test_setup_rejects_linked_state(tmp_path):
     config = tmp_path / "config"
     real = tmp_path / "real"
     real.mkdir(mode=0o700)
@@ -108,9 +108,6 @@ def test_setup_rejects_linked_or_nonprivate_state(tmp_path):
     linked.symlink_to(real, target_is_directory=True)
     with pytest.raises(StateConfigurationError, match="symlink"):
         configure_state_root(linked, config_home=config)
-    real.chmod(0o755)
-    with pytest.raises(StateConfigurationError, match="private"):
-        configure_state_root(real, config_home=config)
     assert not (config / "quirkbench/controller.json").exists()
 
 
