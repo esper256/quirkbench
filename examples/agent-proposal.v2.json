@@ -1,0 +1,44 @@
+{
+  "schema_version": 2,
+  "record_type": "agent-proposal",
+  "decision_id": "decision",
+  "campaign_id": "investigation",
+  "input_context_digest": "6298556657600ad2d2cd2bd8d50141ade220248f627eed57aa05de0a3132e06f",
+  "input_context": {
+    "schema_version": 1,
+    "record_type": "proposal-context",
+    "investigation_id": "investigation",
+    "investigation_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "baseline_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "source": {
+      "workspace_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "capture_operation_id": "capture",
+      "capture_sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+    }
+  },
+  "action": "experiment",
+  "hypothesis": "A bounded source change removes the symptom.",
+  "summary": "Test the captured change with the approved observation recipe.",
+  "rejected_approaches": [
+    "Unbounded target shell execution."
+  ],
+  "workspace_id": "investigation-source",
+  "base_oid": "5555555555555555555555555555555555555555",
+  "change_intent": "Observe the captured source change.",
+  "source": {
+    "kind": "completed_capture",
+    "capture_operation_id": "capture",
+    "capture_sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+  },
+  "experiment": {
+    "baseline_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "build_recipe_id": "fedora-kernel-rpm-v1",
+    "build_recipe_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+    "target_recipe_id": "system-observation",
+    "target_recipe_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+    "parameters": {},
+    "repetitions": 1,
+    "deadline_s": 300
+  },
+  "usage": null
+}

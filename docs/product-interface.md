@@ -416,3 +416,38 @@ investigation-artifact-link v1 in its public outputs. This is attribution, not
 operator approval or native acceptance. Existing expired metadata remains missing;
 new workspace publication retains its original preparation intent/input so normal
 operation retirement does not destroy that join.
+
+#### Available external proposal admission
+
+`investigation propose NAME --file FILE --request-id ID [--json]` accepts strict
+agent-proposal v2. `proposal-schema` returns the installed standalone schema and
+current `proposal_scope`/`source_free_scope` receipts. `context` includes the same
+proposal scope and known usage totals with incomplete-observation counts.
+`investigation proposals NAME [--after CURSOR --limit N] --json` pages retained
+decisions and immutable dispatch intents without starting a controller or agent.
+
+V2 `base_oid` is the actual Git object ID. Existing proposal-v1 `base_revision`
+remains a digest and its reader is unchanged. `input_context_digest` hashes the
+canonical proposal-context v1 receipt supplied in `input_context`; it identifies
+the immutable investigation/baseline/capture scope, not all mutable context or the
+external agent's full prompt. The controller independently binds that scope.
+Experiment proposals require a completed stopped capture and its latest unreleased
+QUIESCED writer handoff, exact baseline/build/installed reviewed recipe identities,
+and parameters/deadline within the reviewed manifest. Target installation,
+peripheral availability and exact-attempt approval remain separate gates.
+
+Source-free `needs_human` and `conclude` proposals may describe selection or
+preparation failures; use the returned source-free receipt, null source/base and
+null experiment. Acceptance atomically retains proposal, context, source closure,
+nullable usage observation and dispatch intent in the existing database. Operation
+rows own the sole lifecycle; no second scheduler or outbox claim authority exists.
+Replay the same request ID and bytes for a lost response. Different bytes or reuse
+of a decision under another request ID conflict. Replay does not reacquire a writer,
+reread current source or duplicate usage. Unknown token observations remain null;
+known totals do not claim to meter unrelated external spending.
+
+Admission is bounded metadata work, not a full archive rehash or source scan.
+Captured bytes were verified at stopped publication and are retained for later
+independent execution validation. The operation stays QUEUED with the named
+`external_loop_pending` reason; execution wiring belongs to #35. Acceptance never
+invokes a managed agent, builds a candidate, authorizes or repeats an attempt.
