@@ -43,8 +43,7 @@ def initialized(tmp_path,packaged_archive):
     return runtime
 
 
-@pytest.fixture
-def installed(tmp_path,initialized):
+def publication_inputs(tmp_path):
     services=Services();start(tmp_path,services);services.active=False
     signing=tmp_path/'operator-signing';signing.mkdir(mode=0o700)
     commands=Commands();calls=[]
@@ -61,6 +60,11 @@ def installed(tmp_path,initialized):
     options={'unit':services.unit,'runner':services,'run':run,
         'tls_inspector':lambda directory,**kwargs:inspect_identity(directory,run=commands,**kwargs)}
     return tmp_path/'state',services,signing,options,calls
+
+@pytest.fixture
+def installed(tmp_path,initialized):
+    return publication_inputs(tmp_path)
+
 
 
 def setup(installed,**kwargs):
@@ -148,7 +152,7 @@ BOOT='11111111-1111-4111-8111-111111111111'
         ('test_controller_release.py',{'fake_gpg'}),
         ('test_builder_setup.py',{'Workers'}),
         ('test_recovery_download.py',{'execute'}),
-        ('test_publication_setup.py',{'initialized','installed','setup',
+        ('test_publication_setup.py',{'initialized','installed','publication_inputs','setup',
             'test_installed_setup_publication_pairing_lost_reply_and_private_reboot_state'})):
         adapters+='\n'+definitions(filename,names)
     arguments,record,payloads,_,_=signed_factory

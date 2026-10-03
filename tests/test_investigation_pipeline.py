@@ -99,8 +99,7 @@ def test_join_admission_replay_uses_frozen_source_and_no_native_inspection(joine
     with pytest.raises(ContractError):pipeline.submit(c,'investigation','build','other-build',source=source,candidate='missing',ready=lambda _:None)
 
 
-@pytest.fixture
-def bounded_build(monkeypatch):
+def configure_build(monkeypatch):
     """Replace native tools, retaining actual worker + BuildPipeline business logic."""
     import subprocess
     from types import SimpleNamespace
@@ -133,6 +132,11 @@ def bounded_build(monkeypatch):
         kw['verify']();return {'exit_code':result}
     monkeypatch.setattr(recovery_worker,'execute_rootfs',execute)
     return runner
+
+
+@pytest.fixture
+def bounded_build(monkeypatch):
+    return configure_build(monkeypatch)
 
 
 def complete_job(c,owner,monkeypatch, *,kind='build',after_worker=None,allow_failure=False):
@@ -171,8 +175,7 @@ def test_joined_build_runs_existing_workers_and_retains_attribution(joined,bound
     with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0]==0
 
 
-@pytest.fixture
-def bounded_compose(joined,bounded_build,monkeypatch):
+def configure_compose(joined,monkeypatch):
     """Native RPM/OSTree command injection, without replacing FedoraComposer."""
     import subprocess,shutil
     from types import SimpleNamespace
@@ -232,6 +235,11 @@ def bounded_compose(joined,bounded_build,monkeypatch):
         return native_output(argv,**kw)
     monkeypatch.setattr(subprocess,'run',owner_run);monkeypatch.setattr(subprocess,'check_output',owner_output)
     return calls
+
+
+@pytest.fixture
+def bounded_compose(joined,bounded_build,monkeypatch):
+    return configure_compose(joined,monkeypatch)
 
 
 def test_source_candidate_build_compose_retained_deployment(joined,bounded_compose,monkeypatch):

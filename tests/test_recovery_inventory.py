@@ -15,8 +15,7 @@ from test_inventory import roots
 from test_runtime import CONFIG, provision
 
 
-@pytest.fixture
-def observations(tmp_path):
+def inventory_inputs(tmp_path):
     sys_root, proc_root = roots(tmp_path/'target')
     pci = next((sys_root/'bus/pci/devices').iterdir())
     (pci/'modalias').write_text('pci:v00008086d00001234sv00001028sd00005678bc03sc00i00\n')
@@ -30,6 +29,11 @@ def observations(tmp_path):
     (sys_root/'class/dmi/id/product_serial').write_text('PRIVATE-SERIAL\n')
     (proc_root/'cpuinfo').write_text('processor : 0\nvendor_id : GenuineIntel\ncpu family : 6\nmodel : 183\nmodel name : Synthetic CPU\nstepping : 1\nflags : sse2 avx2\n\nprocessor : 1\n')
     return sys_root, proc_root
+
+
+@pytest.fixture
+def observations(tmp_path):
+    return inventory_inputs(tmp_path)
 
 
 def collect(observations, **kwargs):

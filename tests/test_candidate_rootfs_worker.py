@@ -9,8 +9,7 @@ from test_recovery_rootfs import locked_fixture,_rpm_line
 from test_recovery_podman import builder_archive,IMAGE
 
 
-@pytest.fixture
-def setup(tmp_path,monkeypatch):
+def candidate_inputs(tmp_path,monkeypatch):
     root=tmp_path/'state';root.mkdir(mode=0o700)
     catalog,lock,reader,unused,snapshot=locked_fixture(root/'retained')
     store=ArtifactStore(root/'artifacts',reserve_bytes=0)
@@ -22,6 +21,11 @@ def setup(tmp_path,monkeypatch):
     (stage/'diagnostics').mkdir(mode=0o700)
     monkeypatch.setattr(builder_setup,'reserve_bytes',lambda _:0)
     return root,stage,store,entry,value,builder,snapshot
+
+
+@pytest.fixture
+def setup(tmp_path,monkeypatch):
+    return candidate_inputs(tmp_path,monkeypatch)
 
 
 def execution(setup,commands):

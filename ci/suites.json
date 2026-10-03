@@ -116,12 +116,15 @@
       "src/quirkbench/investigation_report.py",
       "schemas/investigation-report.v1.schema.json",
       "examples/investigation-comparison.json",
-      "tests/test_investigation_report.py"
+      "tests/test_investigation_report.py",
+      "tests/test_installed_journey.py",
+      "tests/installed_journey_scenario.py"
     ],
     "tests": [
       "tests/test_investigation_pipeline.py",
       "tests/test_pinned_composition.py",
       "tests/test_candidate_rootfs_operation.py",
+      "tests/test_candidate_rootfs_worker.py",
       "tests/test_investigation_context.py",
       "tests/test_investigation_sources.py",
       "tests/test_external_proposals.py",
@@ -138,7 +141,8 @@
       "tests/test_investigation_monitor.py",
       "tests/test_monitor.py",
       "tests/test_investigation_report.py",
-      "tests/test_investigation_export.py"
+      "tests/test_investigation_export.py",
+      "tests/test_installed_journey.py"
     ]
   },
   "filesystem": {
@@ -147,6 +151,7 @@
       "src/quirkbench/build.py",
       "src/quirkbench/runtime.py",
       "src/quirkbench/recovery_storage.py",
+      "tests/test_recovery_inventory.py",
       "src/quirkbench/controller_setup.py",
       "src/quirkbench/backup_*",
       "src/quirkbench/storage_view.py",
@@ -169,6 +174,7 @@
       "tests/test_build_storage.py",
       "tests/test_recovery_storage.py",
       "tests/test_runtime.py",
+      "tests/test_recovery_inventory.py",
       "tests/test_commission.py",
       "tests/test_target_lifecycle.py",
       "tests/test_resumable_setup.py",
