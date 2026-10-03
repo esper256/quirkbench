@@ -289,3 +289,15 @@ def test_cli_unavailable_trust_and_infrastructure_are_distinct(tmp_path,monkeypa
     assert cli.main(args)==5
     error=json.loads(capsys.readouterr().out)['error']
     assert error['code']=='INFRASTRUCTURE' and error['retryable']
+
+
+@pytest.mark.parametrize('raw',[b'not a tar archive',b'\x1f\x8b\x08\x00'])
+def test_cli_authenticated_malformed_archive_has_stable_json_error(publication,monkeypatch,capsys,raw):
+    directory,store,trust,_,statement,_,resign=publication
+    (directory/'controller.tar.gz').write_bytes(raw)
+    statement['controller_archive_sha256']=digest(raw);resign()
+    original=release_plan.inspect
+    monkeypatch.setattr(release_plan,'inspect',lambda *a,**kw:original(*a,run=fake_gpg,**kw))
+    assert cli.main(['release-check',str(directory),'--inputs',str(store.root),'--trust-bundle',str(trust),'--json'])==2
+    error=json.loads(capsys.readouterr().out)['error']
+    assert error['code']=='INVALID_INPUT' and 'malformed or truncated' in error['message']

@@ -8,6 +8,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import fcntl
 import hashlib
+import gzip
 import io
 import json
 import os
@@ -19,6 +20,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
+import zlib
 
 from .contracts import Conflict, ContractError, canonical
 from .controller_archive import MAX_PACKAGE_BYTES
@@ -65,6 +67,15 @@ def _lock(path):
 
 def _verified_archive(archive, *, expected_archive_sha256=None, expected_version=None,
                       verify=lambda:None, consume=lambda size:None):
+    try:
+        return _archive_payload(archive,expected_archive_sha256=expected_archive_sha256,
+            expected_version=expected_version,verify=verify,consume=consume)
+    except (tarfile.TarError,EOFError,gzip.BadGzipFile,zlib.error) as exc:
+        raise ContractError('controller archive format is malformed or truncated') from exc
+
+
+def _archive_payload(archive, *,expected_archive_sha256=None,expected_version=None,
+                     verify=lambda:None,consume=lambda size:None):
     verify()
     path = Path(archive)
     if path.is_symlink() or not path.is_file() or path.stat().st_size > LIMIT:
