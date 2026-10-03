@@ -3,7 +3,6 @@
 This guide defines user-visible acceptance. Current work, dependencies, claims and
 completion evidence live in [tracker #29](https://github.com/esper256/quirkbench/issues/29)
 and its linked issues/PRs. Do not append progress diaries or historical test logs here.
-The [executable installed journey](installed-attended-journey.md) joins current command forms.
 The [roadmap](product-roadmap.md) sets scope; [C0–C7](implementation-contracts.md)
 and [C8](product-interface.md) define the contracts.
 

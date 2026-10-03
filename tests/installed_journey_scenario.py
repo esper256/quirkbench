@@ -4,8 +4,6 @@ Only native manager/TLS command/signing/RPM/build/OSTree/boot adapters are injec
 No real compilation, image creation, target execution or physical shutdown occurs.
 """
 import json
-import re
-import shlex
 from pathlib import Path
 import threading
 import tempfile
@@ -32,16 +30,16 @@ from quirkbench.watchdog import SupervisorMonitor
 from quirkbench.maintenance import private_lock
 
 from test_setup_service import start as start_service
-from test_publication_setup import installed as native_publication
+from test_publication_setup import publication_inputs
 from test_enrollment_runtime import Repository as NativePublicationRepository,advertise
 from test_enrollment_credentials import FPR
 from test_resumable_setup import observations as native_observations
-from test_recovery_inventory import observations as inventory_inputs,collect,report as inventory_report
+from test_recovery_inventory import inventory_inputs,collect,report as inventory_report
 from test_builder_setup import Workers,BOOT
 from test_source_operation import worker
 from test_distribution_source_worker import injected as native_source_prepare
 from test_candidate_rootfs_worker import execution as native_candidate
-from test_investigation_pipeline import complete_job,bounded_build,bounded_compose
+from test_investigation_pipeline import complete_job,configure_build,configure_compose
 from test_proposal_dispatch import capture_proposal,dispatch_and_build
 from test_operator_approval import InspectableBackend
 from test_physical_handoff import Boot
@@ -160,7 +158,7 @@ def pair(home,runtime,patch,case):
     observers=native_observations();observers.pop('installation_inspector')
     setup=controller_setup.setup_controller(root,request_id='initial',runtime_root=runtime,reserve_gib=0,config_home=home/'config',**observers)
     assert setup['readiness']['target_count']==0 and not setup['readiness']['release_verified']
-    native=native_publication.__wrapped__(home,runtime)
+    native=publication_inputs(home)
     _,services,signing,options,calls=native
     configured=publication_setup.configure(root,'lab','https://127.0.0.1:8444',signing,FPR,'publication',**options)
     assert configured['configured'] and not configured['boot_authorized']
@@ -208,7 +206,7 @@ def run(home,runtime,inputs,case):
         assert baseline_catalog.installed_catalog()==data['catalog']
         for path in Path(data['objects']).iterdir():assert c.store.put(path.read_bytes()).sha256==path.name
         value,_=baseline_inputs.input_record(c.store,entry)
-        inv_inputs=inventory_inputs.__wrapped__(home)
+        inv_inputs=inventory_inputs(home)
         observed=inventory_report(collect(inv_inputs),mode='recovery')
         observed=replace(observed,device_id=device,inventory={**observed.inventory,'target_binding':{'schema_version':1,'system_uuid':UUID},'media_instance_id':json.loads((control/'media-instance.json').read_bytes())['media_instance_id']})
         c.register(observed)
@@ -233,8 +231,8 @@ def run(home,runtime,inputs,case):
             patch.setattr(recovery_worker,'execute_rootfs',native_candidate((c.root,Path(claim['stage_dir']),c.store,entry,value,builder,snapshot),[]))
             assert worker(c,claim,patch)==0;services.done=True;assert coordinator.tick()['state']=='SUCCEEDED'
         joined=(c,entry,builder,snapshot,captured['operation_id'],candidate['operation_id'],cfg)
-        bounded_build.__wrapped__(patch)
-        bounded_compose.__wrapped__(joined,None,patch)
+        configure_build(patch)
+        configure_compose(joined,patch)
         with c.lifecycle() as owner,authenticated_transport(c,control) as client:
             built=investigation_pipeline.submit(c,'investigation','build','build',source=captured['operation_id'],candidate=candidate['operation_id'],ready=lambda _:None)
             assert investigation_pipeline.submit(c,'investigation','build','build',source=captured['operation_id'],candidate=candidate['operation_id'],ready=lambda _:None)==built
@@ -368,16 +366,5 @@ def run(home,runtime,inputs,case):
             assert [row[0] for row in db.execute('SELECT id FROM devices')]==[device]
             assert db.execute('SELECT device FROM campaigns WHERE id=?',('investigation',)).fetchone()[0]==device
         assert c.attempt_device(first)==c.attempt_device(second)==device
-        commands=[]
-        guide=runtime/'lib/quirkbench/guide/installed-attended-journey.md'
-        for block in re.findall(r'```sh\n(.*?)```',guide.read_text(),re.S):
-            for command in block.splitlines():
-                assert command.startswith('quirkbench '),command
-                argv=shlex.split(command)[1:]
-                if '--help' in argv:
-                    with pytest.raises(SystemExit) as result:cli.parser().parse_args(argv)
-                    assert result.value.code==0
-                else:commands.append(cli.parser().parse_args(argv))
-        assert len(commands)>=50
         (home/'journey-evidence.json').write_bytes(canonical({'schema_version':1,'case':case,'same_controller_state':True,'enrolled_target_id':device,
             'baseline_attempt':first,'patched_attempt':second,'export_archive_sha256':receipt['archive_sha256'],'native_qualification':False}))

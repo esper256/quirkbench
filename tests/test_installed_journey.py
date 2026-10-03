@@ -14,18 +14,35 @@ from quirkbench.investigation_pipeline import FIXED_RECIPE
 from quirkbench.recipe_registry import installed_registry
 from quirkbench.recovery_rootfs import _rpm_row
 from quirkbench.build import REQUIRED_CONFIG
-from test_candidate_rootfs_worker import setup as assembly_inputs
+from test_candidate_rootfs_worker import candidate_inputs
 from test_build_pipeline import _inputs
 from test_release_plan import archive
 
 ROOT=Path(__file__).resolve().parents[1]
+
+# Native/input helpers imported by the scenario, including their test dependencies.
+FIXTURE_MODULES="""installed_journey_scenario stat_fixtures
+    test_attended_baseline test_baseline_catalog test_boot test_build_pipeline
+    test_builder_setup test_candidate_rootfs_operation test_candidate_rootfs_worker
+    test_commission test_compose test_console test_controller_deployments
+    test_controller_install test_controller_release test_distribution_source_worker
+    test_enrollment test_enrollment_activation test_enrollment_certificate
+    test_enrollment_credentials test_enrollment_proof test_enrollment_runtime
+    test_evidence_drain_target test_inventory test_investigation_context
+    test_investigation_pipeline test_investigations test_one_shot_clearance
+    test_operator_approval test_physical_handoff test_proposal_dispatch
+    test_publication_setup test_recovery_download test_recovery_inventory
+    test_recovery_podman test_recovery_rootfs test_recovery_source_stage
+    test_recovery_stock test_release_compatibility test_release_install
+    test_resumable_setup test_runtime test_setup_service test_shutdown
+    test_source_capture test_source_operation test_worker_service tls_command_fixture""".split()
 
 
 def retained_inputs(folder):
     """Existing tiny RPM/source generators, not application/CLI success mocks."""
     folder.mkdir(mode=0o700)
     with pytest.MonkeyPatch.context() as patch:
-        root,stage,store,entry,value,builder,snapshot=assembly_inputs.__wrapped__(folder,patch)
+        root,stage,store,entry,value,builder,snapshot=candidate_inputs(folder,patch)
     entry['build_recipe']={'recipe_id':'fedora-kernel-rpm-v1','digest':store.put(canonical(FIXED_RECIPE)).sha256}
     registry=installed_registry(ROOT/'src/quirkbench/recipes',candidate=True)
     recipe=registry.records['system-observation'];store.put(recipe[2].read_bytes())
@@ -55,7 +72,8 @@ def test_complete_installed_attended_journey(tmp_path,case):
     tests=sandbox/'tests';tests.mkdir()
     # Copy input generators/native adapters only. Application imports and every
     # fixture resource path resolve into the actual installed archive, not Git.
-    for path in (ROOT/'tests').glob('*.py'):shutil.copyfile(path,tests/path.name)
+    for name in FIXTURE_MODULES:
+        shutil.copyfile(ROOT/'tests'/(name+'.py'),tests/(name+'.py'))
     (sandbox/'src').mkdir();(sandbox/'src/quirkbench').symlink_to(runtime/'lib/quirkbench',target_is_directory=True)
     for source,package in [('examples','examples'),('schemas','schemas'),('docs','guide'),('target-assets','assets')]:
         (sandbox/source).symlink_to(runtime/'lib/quirkbench'/package,target_is_directory=True)
@@ -89,5 +107,3 @@ def test_complete_installed_attended_journey(tmp_path,case):
         if args[1]=='poweroff-status':assert actual['state']=='PREPARED' and not actual['physical_poweroff_verified']
         if args[1]=='export':assert actual['source_reconstructed'] and actual['validation_status']=='tested-source-match' and not actual['native_qualification']
     verify_installation(runtime)
-    guide=runtime/'lib/quirkbench/guide/installed-attended-journey.md'
-    assert guide.is_file()

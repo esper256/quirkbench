@@ -65,7 +65,7 @@ that submits local cloud commands to a remote controller automatically.
 This route preserves the same systemd ownership and worker containment on Bazzite
 and other Linux hosts. It does not provide durable execution inside a container
 without those capabilities; [issue #4](https://github.com/esper256/quirkbench/issues/4)
-was closed as not planned; cloud development does not require that runtime support.
+continues to track that additional runtime support.
 
 ## Signing prerequisites
 
