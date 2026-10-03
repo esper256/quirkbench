@@ -197,6 +197,7 @@ def parser():
     recovery_download.add_argument('--request-id');recovery_download.add_argument('--trust-bundle',type=Path)
     recovery_download.add_argument('--json',action='store_true')
     monitor = commands.add_parser('monitor', help='manually opened, read-only progress dashboard; never opens windows')
+    monitor.add_argument('investigation',nargs='?',help='filter existing investigation facts and actionable waits')
     monitor.add_argument('--run', dest='run_id'); monitor.add_argument('--once', action='store_true')
     monitor.add_argument('--json', action='store_true')
     housekeeping = commands.add_parser('maintenance', help='prune proven-stopped staging and optional caches')
@@ -740,7 +741,7 @@ def _main(argv=None):
             root = discover_state_root(args.state).expanduser().absolute()
             if args.command == 'monitor':
                 from .tui import monitor
-                return monitor(root, run_id=args.run_id, once=args.once, json_output=args.json)
+                return monitor(root, run_id=args.run_id, investigation=args.investigation,once=args.once, json_output=args.json)
             from .maintenance import prune
             if args.action in ('status','pin','unpin','abandon','abandon-upload'):
                 from .retention import status,pin,abandon

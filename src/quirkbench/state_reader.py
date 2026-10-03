@@ -197,13 +197,20 @@ class StateReader:
         return operation_response(operation_id=operation_id, data={'sha256': artifact_digest, 'offset': offset,
             'length': len(raw), 'total_bytes': before.st_size, 'content_base64': base64.b64encode(raw).decode('ascii')})
 
-    def snapshot(self):
+    def snapshot(self, investigation=None):
         with self.connection() as db:
+            if investigation is not None:
+                from .investigations import record
+                if record(self,investigation,db) is None:
+                    raise ContractError('existing investigation record required')
+            where='WHERE campaign=? ' if investigation is not None else ''
+            arguments=(investigation,) if investigation is not None else ()
             operations = [dict(row) for row in db.execute(
                 "SELECT id,kind,state,stage,started,deadline,heartbeat,progress,wait_event,updated FROM operations "
-                "ORDER BY CASE WHEN state IN ('RUNNING','WAITING','QUEUED','INTERRUPTED') THEN 0 ELSE 1 END,updated DESC LIMIT 60")]
-            campaigns = [dict(row) for row in db.execute('SELECT id,state,reason,device FROM campaigns ORDER BY rowid DESC LIMIT 30')]
-        return {'sampled_at': time.time(), 'operations': bounded_items(operations,48*1024),
+                +where+"ORDER BY CASE WHEN state IN ('RUNNING','WAITING','QUEUED','INTERRUPTED') THEN 0 ELSE 1 END,updated DESC LIMIT 60",arguments)]
+            campaigns = [dict(row) for row in db.execute('SELECT id,state,reason,device FROM campaigns '
+                +('WHERE id=? ' if investigation is not None else '')+'ORDER BY rowid DESC LIMIT 30',arguments)]
+        return {'sampled_at': time.time(), 'operations': bounded_items(operations,(16 if investigation else 48)*1024),
                 'investigations': bounded_items(campaigns,12*1024)}
 
     def investigation_detail(self, campaign_id):
