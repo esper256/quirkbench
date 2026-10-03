@@ -207,8 +207,8 @@ def consume(coordinator, claim, intent, data):
         expected_claim=claim, clear_stopped_worker=True, final_output_digest=artifact.sha256, storage_kind='input')
 
 
-def inspect_builder(root, release, *, image_inspector=None):
-    """Current native availability and retained operation proof, no import or owner."""
+def retained_builder(root, release):
+    """Select exact stopped preparation proof; this makes no native-ready claim."""
     args = arguments(release['verification']['statement'], release['verification']['statement_sha256'])
     found = None
     with StateReader(root).connection() as db:
@@ -229,11 +229,16 @@ def inspect_builder(root, release, *, image_inspector=None):
         found = row['id']; break
     if found is None:
         raise ContractError('prepare the signed builder archive with setup --builder-archive')
+    return {'operation_id':found,**args}
+
+
+def inspect_builder(root, release, *, image_inspector=None):
+    """Current native availability and retained operation proof, no import or owner."""
+    retained=retained_builder(root,release)
     from .recovery_podman import _verify_retained_builder_archive
-    _verify_retained_builder_archive(Path(root), args['builder_archive_sha256'], args['builder_config_digest'])
-    (image_inspector or inspect_image)(args['builder_config_digest'])
-    return {'ready': True, 'operation_id': found, **args, 'qualified': False,
-            'baseline_input_closure_verified': False}
+    _verify_retained_builder_archive(Path(root), retained['builder_archive_sha256'], retained['builder_config_digest'])
+    (image_inspector or inspect_image)(retained['builder_config_digest'])
+    return {'ready':True,**retained,'qualified':False,'baseline_input_closure_verified':False}
 
 
 def inspect_image(config_digest):

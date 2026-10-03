@@ -69,6 +69,9 @@ def execute(root, args, *, ready=None):
     if args.action in ('start','brief','baseline','prepare-distribution'):
         from .investigations import execute as investigation
         return investigation(root,args,ready=ready)
+    if args.action in ('context','history','recipes','proposal-schema','observations','observation','respond','evidence'):
+        from .investigation_context import execute as context
+        return context(root,args)
     reader = StateReader(root)
     identifier(args.name)
     if args.action == 'source':

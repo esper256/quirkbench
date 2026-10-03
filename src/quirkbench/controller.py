@@ -631,7 +631,7 @@ class Controller(OperatorApprovals):
     def _startup_db(self, db, *, restored=False):
         self._uncertain(db, '1=1', (), 'controller restarted; reconcile before resume')
         db.execute("UPDATE campaigns SET state='PAUSED',reason='controller restarted; explicit resume required'")
-        db.execute("UPDATE operations SET state='INTERRUPTED',worker_epoch=NULL,updated=? WHERE state='QUEUED' AND kind IN ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare')",(self.clock(),))
+        db.execute("UPDATE operations SET state='INTERRUPTED',worker_epoch=NULL,updated=? WHERE state='QUEUED' AND kind IN ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare','candidate_prepare')",(self.clock(),))
         db.execute("UPDATE operations SET queued_epoch=(SELECT epoch FROM controller_lifecycle WHERE id=1) WHERE state='QUEUED' AND kind='operation_resume'")
         # A live owner's unit names are evidence needed to stop complete cgroups.
         # Copied unit names in a restored backup refer to another controller.
@@ -914,7 +914,7 @@ class Controller(OperatorApprovals):
     def _publish_operation(self, operation_id, worker_epoch, worker_generation, *,
                            output_refs=(), state=None, result=None, error=None, expected_claim=None, clear_stopped_worker=False,
                            storage_kind=None, final_output_digest=None, deployment=None, source_workspace=None, source_workspace_fence=None,
-                           source_provenance_refs=()):
+                           source_provenance_refs=(),candidate_rootfs_fence=None):
         """P2b worker hook: fence and reference publication share one transaction."""
         if clear_stopped_worker and (expected_claim is None or state not in ('SUCCEEDED','FAILED')):
             raise ContractError('clearing a worker requires exact stopped terminal publication')
@@ -966,6 +966,10 @@ class Controller(OperatorApprovals):
             terminal = self.store.put(canonical({'schema_version': 1, **document}))
         else:
             terminal = None
+        if candidate_rootfs_fence is not None:
+            if not callable(candidate_rootfs_fence) or storage_kind!='input' or state!='SUCCEEDED':
+                raise ContractError('candidate publication requires stopped input verification')
+            candidate_rootfs_fence()
         if source_workspace is not None:
             # Hash outside the database write lock; unrelated evidence uploads
             # retain access. The transaction then checks a fresh exact claim.
@@ -997,8 +1001,8 @@ class Controller(OperatorApprovals):
                 if not set(document['public_artifacts']) <= retained | set(outputs):
                     raise ContractError('operation result names an unpublished output')
             now = self.clock()
-            if state=='FAILED' and clear_stopped_worker and row['kind'] in ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare'):
-                failed_kind='input' if row['kind'] in ('builder_prepare','recovery_download','source_capture','source_prepare') else 'build' if row['kind']=='build' else 'deployment'
+            if state=='FAILED' and clear_stopped_worker and row['kind'] in ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare','candidate_prepare'):
+                failed_kind='input' if row['kind'] in ('builder_prepare','recovery_download','source_capture','source_prepare','candidate_prepare') else 'build' if row['kind']=='build' else 'deployment'
                 db.execute("INSERT OR REPLACE INTO storage_groups VALUES(?,?,?,?, 'FAILED',?,?)",
                            (operation_id,failed_kind,now,now,canonical([row['stage_dir']]).decode(),canonical(proof).decode()))
             if storage_kind is not None:
@@ -1006,8 +1010,12 @@ class Controller(OperatorApprovals):
                     arguments=recovery_rootfs_arguments(json.loads(self.store.get(row['input_digest'])))
                     if row['kind']!='image_prepare' or 'recipe_sha256' not in arguments:
                         raise ContractError('recovery retention requires full image intent')
-                elif (row['kind'],storage_kind) not in (('build','build'),('compose','deployment'),('builder_prepare','input'),('recovery_download','input'),('source_capture','input'),('source_prepare','input')):
+                elif (row['kind'],storage_kind) not in (('build','build'),('compose','deployment'),('builder_prepare','input'),('recovery_download','input'),('source_capture','input'),('source_prepare','input'),('candidate_prepare','input')):
                     raise ContractError('job retention kind differs')
+                if row['kind']=='candidate_prepare' and not callable(candidate_rootfs_fence):
+                    raise ContractError('candidate publication requires independent final verification')
+                if candidate_rootfs_fence is not None and row['kind']!='candidate_prepare':
+                    raise ContractError('candidate verification has another operation kind')
                 paths=[] if storage_kind=='recovery' else [row['stage_dir']]
                 stopped={key:row[key] for key in ('worker_unit','worker_boot_id','worker_generation','stage_dir','input_digest')};stopped['stop_kind']='stopped'
                 insert='INSERT OR REPLACE' if row['kind']=='source_prepare' else 'INSERT'
@@ -1942,7 +1950,7 @@ class Controller(OperatorApprovals):
                         request['issued_at'], request['deadline_at']))
         return request['request_id']
 
-    def respond_observation(self, session_id, request_id, command_request_id, raw):
+    def respond_observation(self, session_id, request_id, command_request_id, raw, *, campaign_id=None):
         """Join by exact question ID and keep a late answer on that question."""
         from datetime import datetime, timezone
         from .product_contracts import load_document
@@ -1960,9 +1968,9 @@ class Controller(OperatorApprovals):
                                 (command_request_id,)).fetchone()
             if replay and (replay['request'] != request_id or replay['document'] != document):
                 raise Conflict('response command request ID was reused with different content')
-            question = db.execute('SELECT session,issued_at,deadline_at FROM observation_requests WHERE id=?',
+            question = db.execute('SELECT session,campaign,issued_at,deadline_at FROM observation_requests WHERE id=?',
                                   (request_id,)).fetchone()
-            if question is None or question['session'] != session_id:
+            if question is None or question['session'] != session_id or (campaign_id is not None and question['campaign'] != identifier(campaign_id)):
                 raise ContractError('unknown observation request for session')
             old = db.execute('SELECT document,received_at,late FROM observation_responses WHERE request=?',
                              (request_id,)).fetchone()
@@ -1988,7 +1996,7 @@ class Controller(OperatorApprovals):
             return {'request_id': request_id, 'response': response,
                     'received_at': now, 'late': late}
 
-    def list_observations(self, session_id, *, after=0, limit=20):
+    def list_observations(self, session_id, *, after=0, limit=20, campaign_id=None):
         """Return bounded durable question/answer records for CLI and monitors."""
         from datetime import datetime, timezone
         session_id = identifier(session_id)
@@ -1998,8 +2006,8 @@ class Controller(OperatorApprovals):
         try:
             rows = db.execute('SELECT q.seq,q.document AS question,r.document AS response,r.received_at,r.late '
                               'FROM observation_requests q LEFT JOIN observation_responses r ON r.request=q.id '
-                              'WHERE q.session=? AND q.seq>? ORDER BY q.seq LIMIT ?',
-                              (session_id, after, limit + 1)).fetchall()
+                              'WHERE q.session=? AND q.seq>? AND (? IS NULL OR q.campaign=?) ORDER BY q.seq LIMIT ?',
+                              (session_id, after, campaign_id, identifier(campaign_id) if campaign_id is not None else None, limit + 1)).fetchall()
         finally:
             db.close()
         now = self.clock()
@@ -2024,7 +2032,7 @@ class Controller(OperatorApprovals):
         return {'session_id': session_id, 'items': items,
                 'next_cursor': items[-1]['cursor'] if len(rows) > len(items) else None}
 
-    def observation_detail(self, session_id, request_id):
+    def observation_detail(self, session_id, request_id, *, campaign_id=None):
         """Read the exact persisted documents for a single human request."""
         from datetime import datetime, timezone
         session_id = identifier(session_id)
@@ -2033,7 +2041,7 @@ class Controller(OperatorApprovals):
         try:
             row = db.execute('SELECT q.document AS question,r.document AS response,r.received_at,r.late '
                              'FROM observation_requests q LEFT JOIN observation_responses r ON r.request=q.id '
-                             'WHERE q.session=? AND q.id=?', (session_id, request_id)).fetchone()
+                             'WHERE q.session=? AND q.id=? AND (? IS NULL OR q.campaign=?)', (session_id, request_id, campaign_id, identifier(campaign_id) if campaign_id is not None else None)).fetchone()
         finally:
             db.close()
         if row is None:
