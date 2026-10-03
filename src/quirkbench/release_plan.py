@@ -26,8 +26,13 @@ def inspect(directory, inputs, *, trust_bundle, baseline=None, run=subprocess.ru
     from .recipe_registry import load_manifest, reviewed_bindings
     if type(timeout_s) is not int or not 1<=timeout_s<=600:raise ContractError('publication inspection timeout must be 1..600 seconds')
     deadline=monotonic()+timeout_s
+    read_bytes={'assets':0,'inputs':0}
     def budget():
         if monotonic()>=deadline:raise ContractError('publication byte verification deadline exceeded')
+        if any(value>MAX_CLOSURE_BYTES for value in read_bytes.values()):
+            raise ContractError('publication verification read budget exceeded')
+    def charge(role,size):
+        read_bytes[role]+=size;budget()
     directory=Path(directory).expanduser().absolute()
     inputs=Path(inputs).expanduser().absolute()
     if directory.resolve()!=directory or not directory.is_dir() or inputs.resolve()!=inputs:
@@ -41,11 +46,14 @@ def inspect(directory, inputs, *, trust_bundle, baseline=None, run=subprocess.ru
         answer=run(argv,**kwargs);budget();return answer
     receipt=verify_release(directory/'controller.tar.gz',statement_raw,bounded_file(directory/'release.sig',65536),
         trust['public_key'],trust['bundle']['publisher_fingerprint'],run=bounded_run,clock=clock,expected_public_key_sha256=trust['bundle']['public_key_sha256'],
-        asset_verify=budget,asset_byte_limit=MAX_CLOSURE_BYTES,assets={role:directory/name for role,name in FILES.items()})
+        asset_verify=budget,asset_byte_limit=MAX_CLOSURE_BYTES,asset_consume=lambda size:charge('assets',size),
+        assets={role:directory/name for role,name in FILES.items()})
     budget()
     archive_manifest,files,archive_sha=_verified_archive(directory/'controller.tar.gz',
-        expected_archive_sha256=statement['controller_archive_sha256'],expected_version=statement['controller_version'])
+        expected_archive_sha256=statement['controller_archive_sha256'],expected_version=statement['controller_version'],
+        verify=budget,consume=lambda size:charge('assets',size))
     raw=bounded_file(directory/FILES['baseline_catalog'],4*1024**2)
+    charge('assets',len(raw))
     if digest(raw)!=statement['baseline_catalog_sha256']:raise ContractError('catalog changed during publication inspection')
     catalog=load_catalog(raw)
     shipped=files.get('lib/quirkbench/baselines/catalog.v1.json')
@@ -81,7 +89,11 @@ def inspect(directory, inputs, *, trust_bundle, baseline=None, run=subprocess.ru
     for role,identity in direct:scope.setdefault(identity,[]).append(role)
     if store is not None:
         try:
+            # Each existing metadata read is <=1MiB; reserve its worst-case cost,
+            # even on failure, rather than allowing failed/repeated reads for free.
+            charge('inputs',2*1024**2)
             snapshot,_=package_closure(store,entry)
+            budget()
             for package in snapshot['packages']:scope.setdefault(package['sha256'],[]).append('rpm:'+package['nevra'])
         except (OSError,ValueError,BuildError) as exc:
             invalid.append({'role':'rpm_snapshot_and_lock','reason':safe_text(str(exc))[:256]})
@@ -91,11 +103,12 @@ def inspect(directory, inputs, *, trust_bundle, baseline=None, run=subprocess.ru
         if store is None or not store.path(identity).exists():
             missing.append({'sha256':identity,'roles':roles});continue
         try:
-            size=verify_object(store,identity,min(MAX_RPM_BYTES,MAX_CLOSURE_BYTES-total),verify=budget)
+            size=verify_object(store,identity,MAX_RPM_BYTES,verify=budget,consume=lambda size:charge('inputs',size))
             total+=size;verified.append(identity)
         except (OSError,ValueError,BuildError):invalid.append({'sha256':identity,'roles':roles,'reason':'pinned bytes changed, unsafe, unavailable or outside bounds'})
     if store is not None and entry['build_recipe']['digest'] in verified:
         try:
+            charge('inputs',1024**2)
             if entry['build_recipe']['recipe_id']!='fedora-kernel-rpm-v1' or metadata(store,entry['build_recipe']['digest'])!=FIXED_RECIPE:
                 raise ContractError('fixed reviewed build recipe differs')
         except (OSError,ValueError,BuildError):invalid.append({'role':'build_recipe','reason':'fixed reviewed build recipe differs or is unavailable'})
@@ -107,6 +120,7 @@ def inspect(directory, inputs, *, trust_bundle, baseline=None, run=subprocess.ru
         'inner_qualified':archive_manifest['qualified'],'qualification_status':'unqualified','asset_compatibility_checked':True,
         'baseline_id':entry['baseline_id'],'baseline_sha256':digest(canonical(entry)),
         'builder_image_digest':statement['builder_image_digest'],'builder_config_digest':statement['builder_config_digest'],
+        'builder_base_marker_verified':False,
         'target_recipes':recipe_rows,'input_object_count':len(scope),'verified_input_count':len(verified),
         'verified_input_bytes':total,'input_closure_complete':complete,'missing':missing[:20],'missing_count':len(missing),
         'missing_truncated':len(missing)>20,'invalid':invalid[:20],'invalid_count':len(invalid),'invalid_truncated':len(invalid)>20,

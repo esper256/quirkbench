@@ -620,6 +620,7 @@ def _main(argv=None):
             return status
     if args.command=='release-check':
         from .release_plan import inspect
+        from .release_trust import ReleaseUnavailable
         from .build import BuildError
         from .operations import operation_response
         from .state_reader import safe_text
@@ -630,9 +631,10 @@ def _main(argv=None):
             return 0 if value['input_closure_complete'] else 2
         except (OSError,ValueError,BuildError) as exc:
             message=safe_text(str(exc))[:512]
-            if args.json:print(json.dumps(operation_response(error={'code':'INVALID_INPUT','message':message,'retryable':False}),sort_keys=True))
+            code,status=(('UNAVAILABLE',4) if isinstance(exc,ReleaseUnavailable) else ('INVALID_INPUT',2) if isinstance(exc,ValueError) else ('INFRASTRUCTURE',5))
+            if args.json:print(json.dumps(operation_response(error={'code':code,'message':message,'retryable':status==5}),sort_keys=True))
             else:print(message,file=sys.stderr)
-            return 2
+            return status
     if args.command == 'release-install':
         from .release_install import acquire_install
         from .release_trust import ReleaseUnavailable

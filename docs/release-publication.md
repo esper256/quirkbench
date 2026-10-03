@@ -9,6 +9,8 @@ keys, sign, upload or authorize experiments. JSON uses the operation envelope;
 Exit 0 means inspected assets and selected input bytes match; exit 2 either returns
 an incomplete closure with exact missing/invalid digests or an explicit input error.
 The report observes bytes at inspection time. Consumers must verify them again.
+Unavailable independent trust is exit 4 (`UNAVAILABLE`); infrastructure I/O is
+exit 5 (`INFRASTRUCTURE`, retryable), distinct from rejected inputs.
 
 ## Release inventory and compatibility
 
@@ -38,6 +40,10 @@ archive or prove native compatibility.
 Preflight selects exactly one catalog baseline (explicit `--baseline` when multiple
 are listed). Its builder image must match the signed release. Its target recipe
 manifests and reviewed callable code must match the actual shipped controller.
+The derived builder must have no entrypoint, matching setup's launch policy. Its
+exact archive/config identities are checked; `builder_image_digest` is the Fedora
+base marker, which archive inspection cannot prove. Native builder setup separately
+verifies that marker and runtime availability (`builder_base_marker_verified:false`).
 The controller's bundled catalog must equal `catalog.json` byte for byte. Other
 baselines remain explicitly unchecked until separately inspected.
 
@@ -54,11 +60,16 @@ handoff must use the existing acquisition/storage workflow and be verified befor
 candidate preparation. Repeated `artifact put` is not a bulk closure import: its
 normal input-generation retention policy applies.
 
-Streaming limits are 8 GiB per input and 128 GiB per selected input closure, plus
-128 GiB total release assets; controller archive is capped at 64 MiB. Metadata uses
+Streaming limits are 8 GiB per input and 128 GiB total input verification work, plus
+128 GiB total asset verification work; failed hashes and nested/repeated reads count.
+Input metadata reserves its bounded worst-case allowance (2 MiB for snapshot/lock,
+1 MiB for fixed recipe), including failures. Controller archive is capped at 64 MiB
+compressed and expanded. Metadata uses
 existing bounds (catalog 4 MiB, image manifest 1 MiB, candidate 64 KiB). Wall time is
 300 seconds by default, selectable 1–600 seconds, including bounded GPG calls.
-Reports are capped at 64 KiB, with first 20 missing/invalid entries and explicit
+Deadlines are cooperative around bounded reads and nested archive chunks; this is
+not a hard interruption guarantee for a stalled filesystem syscall. Reports are
+capped at 64 KiB, with first 20 missing/invalid entries and explicit
 counts/truncation; input files remain guarded against mutation/path substitution.
 Large delivery verification may require a faster retained filesystem; limits are
 not a reason to skip checksum/trust validation.

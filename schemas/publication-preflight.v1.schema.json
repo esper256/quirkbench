@@ -35,7 +35,8 @@
     "missing",
     "invalid",
     "unchecked_baseline_ids",
-    "limitations"
+    "limitations",
+    "builder_base_marker_verified"
   ],
   "properties": {
     "schema_version": {
@@ -255,6 +256,9 @@
         "maxLength": 512
       },
       "maxItems": 20
+    },
+    "builder_base_marker_verified": {
+      "const": false
     }
   }
 }

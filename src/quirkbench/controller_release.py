@@ -87,7 +87,7 @@ def bounded_file(path, limit):
     return read_file(path.parent, path.name, limit=limit)
 
 
-def _asset_digest(path, *, inspect=None, verify=lambda:None, byte_limit=ASSET_LIMIT):
+def _asset_digest(path, *, inspect=None, verify=lambda:None, byte_limit=ASSET_LIMIT, consume=lambda size:None):
     """Stream a bounded regular asset without following links or changing it."""
     if type(byte_limit) is not int or not 1<=byte_limit<=ASSET_LIMIT:raise ContractError('invalid asset byte limit')
     verify()
@@ -112,6 +112,7 @@ def _asset_digest(path, *, inspect=None, verify=lambda:None, byte_limit=ASSET_LI
             if not chunk:
                 break
             total += len(chunk)
+            consume(len(chunk))
             if total > before.st_size:
                 raise ContractError('release asset changed during verification')
             hasher.update(chunk)
@@ -179,7 +180,7 @@ def verify_statement(statement_raw, signature_raw, trusted_public_key, fingerpri
             'publisher_fingerprint': fingerprint.upper(), 'qualification_status': 'unqualified'}
 
 
-def verify_assets(statement, assets, *, verify=lambda:None, byte_limit=ASSET_LIMIT):
+def verify_assets(statement, assets, *, verify=lambda:None, byte_limit=ASSET_LIMIT, consume=lambda size:None):
     """Authenticate supplied assets and inspect v2 using the existing native readers.
 
     Receipt paths are observations. Import/boot consumers must recheck byte identity.
@@ -199,15 +200,16 @@ def verify_assets(statement, assets, *, verify=lambda:None, byte_limit=ASSET_LIM
         verify()
         if statement['schema_version'] == 2 and name in metadata_limits:
             raw = bounded_file(path, metadata_limits[name]); captured[name] = raw
+            consume(len(raw))
             item = {'path': str(Path(path).absolute()), 'sha256': digest(raw), 'size_bytes': len(raw)}
         else:
             inspect = None
             if name == 'builder_archive' and statement['schema_version'] == 2:
                 from .recovery_builder_archive import inspect_builder_archive
-                inspect = lambda stream: inspect_builder_archive(stream, statement['builder_config_digest'])
+                inspect = lambda stream: inspect_builder_archive(stream, statement['builder_config_digest'],require_no_entrypoint=True,verify=verify,consume=consume)
             from .build import BuildError
             try:
-                item = _asset_digest(path, inspect=inspect,verify=verify,byte_limit=remaining)
+                item = _asset_digest(path, inspect=inspect,verify=verify,byte_limit=remaining,consume=consume)
             except BuildError as exc:
                 raise ContractError('release builder compatibility failed: ' + str(exc)) from exc
         verify()
@@ -270,18 +272,19 @@ def verify_recovery_assets(statement,assets):
 
 def verify_release(archive, statement_raw, signature_raw, trusted_public_key, fingerprint, *,
                    run=subprocess.run, clock=time.time, architecture=None, python_version=None, assets=None,
-                   expected_public_key_sha256=None, asset_verify=lambda:None, asset_byte_limit=ASSET_LIMIT):
+                   expected_public_key_sha256=None, asset_verify=lambda:None, asset_byte_limit=ASSET_LIMIT, asset_consume=lambda size:None):
     archive = Path(archive).expanduser().absolute()
     receipt = verify_statement(statement_raw, signature_raw, trusted_public_key, fingerprint,
         download_directory=archive.parent, run=run, clock=clock, architecture=architecture, python_version=python_version,
         expected_public_key_sha256=expected_public_key_sha256)
     statement = receipt['statement']
     raw = bounded_file(archive, 64 * 1024**2)
+    asset_consume(len(raw));asset_verify()
     if digest(raw) != statement['controller_archive_sha256']:
         raise ContractError('controller archive differs from authenticated release statement')
     verified_assets = None
     if assets is not None:
-        verified_assets = verify_assets(statement, assets,verify=asset_verify,byte_limit=asset_byte_limit)
+        verified_assets = verify_assets(statement, assets,verify=asset_verify,byte_limit=asset_byte_limit,consume=asset_consume)
     return {**receipt, 'controller_archive_authenticated': True, 'other_release_assets_verified': verified_assets is not None,
             'assets': verified_assets, 'asset_compatibility_checked': verified_assets is not None and statement['schema_version'] == 2,
             'asset_compatibility_qualified': False}

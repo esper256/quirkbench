@@ -1,6 +1,7 @@
 """Publication preparation with disposable trust and synthetic native assets.
 
-Only factory image measurement is injected (4GiB metadata, tiny placeholder).
+Factory image measurement is injected (4GiB metadata, tiny placeholder), and
+most tests inject GPG; the final test verifies with real disposable GPG.
 No image assembly, native RPM validation, import, boot or publication occurs.
 """
 import json
@@ -89,7 +90,7 @@ def test_complete_authenticated_compatible_closure_is_readonly_unqualified(publi
     assert answer['input_closure_complete'] and answer['publisher_authenticated']
     assert answer['input_object_count']==answer['verified_input_count']
     assert answer['verified_input_bytes']>sum(len(p['nevra']) for p in snapshot['packages'])
-    for field in ('inner_signed','inner_qualified','runtime_ready','execution_authorized','published','native_package_compatibility_verified'):
+    for field in ('inner_signed','inner_qualified','runtime_ready','execution_authorized','published','native_package_compatibility_verified','builder_base_marker_verified'):
         assert answer[field] is False
     assert answer['qualification_status']=='unqualified'
     assert tree(directory.parent.parent)==before
@@ -212,10 +213,79 @@ def test_real_disposable_signer_inspection_and_fresh_installed_verification(publ
     arguments=dict(trust_bundle=trust,fetch=fetch,cache_home=tmp_path/'fresh-cache',data_home=tmp_path/'fresh-data',config_home=tmp_path/'fresh-config')
     installed=acquire_install('0.1.0','fixture-first',**arguments)
     assert not installed['signed'] and not installed['qualified']
+    # Installed command/resources are usable without source-checkout PYTHONPATH.
+    env={k:v for k,v in os.environ.items() if k!='PYTHONPATH'}
+    help_run=subprocess.run([str(Path(installed['runtime_root'])/'bin/quirkbench'),'release-check','--help'],
+        env=env,cwd=tmp_path,capture_output=True,timeout=15,check=True)
+    assert b'--inputs' in help_run.stdout and b'--trust-bundle' in help_run.stdout
+    assert (Path(installed['runtime_root'])/'lib/quirkbench/guide/release-publication.md').is_file()
     # Verify through the real installed-release reader, with independent trust.
     observed=inspect_selected(installed['runtime_root'],config_home=arguments['config_home'],trust_bundle=trust)
     assert observed['verification']['publisher_fingerprint']==fingerprint
     assert observed['verification']['statement']['controller_archive_sha256']==statement['controller_archive_sha256']
     changed={**statement,'controller_version':'0.0.9'}
     (directory/'release.json').write_bytes(canonical(changed)+b'\n')
+    # Exact replay uses accepted cache; changing remote bytes cannot replace it.
+    assert acquire_install('0.1.0','fixture-first',**arguments)==installed
+    import shutil
+    shutil.rmtree(arguments['cache_home'])
+    (directory/'release.sig').unlink()
+    gpg(['--pinentry-mode','loopback','--passphrase','','--output',str(directory/'release.sig'),'--detach-sign',str(directory/'release.json')])
     with pytest.raises(ContractError):acquire_install('0.1.0','fixture-first',**arguments)
+
+
+def test_builder_entrypoint_is_rejected_even_with_resigned_matching_bytes(publication):
+    from test_recovery_podman import CONFIG,builder_archive
+    directory,_,_,_,statement,_,resign=publication
+    config=json.loads(CONFIG);config['config']={'Entrypoint':['/unreviewed']}
+    raw=canonical(config)
+    (directory/'builder.tar').write_bytes(builder_archive(config=raw))
+    statement['builder_config_digest']='sha256:'+digest(raw)
+    statement['builder_archive_sha256']=digest((directory/'builder.tar').read_bytes())
+    resign()
+    with pytest.raises(ContractError,match='entrypoint|Entrypoint'):check(publication)
+
+
+def test_failed_hashes_charge_aggregate_read_budget(publication,monkeypatch):
+    from quirkbench import baseline_inputs
+    calls=[]
+    def wrong(store,identity,limit,*,verify,consume):
+        calls.append(identity);consume(70*1024**3)
+        raise ContractError('wrong hash')
+    monkeypatch.setattr(baseline_inputs,'verify_object',wrong)
+    with pytest.raises(ContractError,match='read budget'):check(publication)
+    assert len(calls)==2
+
+
+def test_nested_builder_reader_observes_cooperative_deadline():
+    import io
+    from quirkbench.recovery_builder_archive import inspect_builder_archive
+    from test_recovery_podman import builder_archive,IMAGE,LAYER
+    timed=[False]
+    def verify():
+        if timed[0]:raise ContractError('nested deadline')
+    def consume(size):
+        if size==len(LAYER):timed[0]=True
+    with pytest.raises(ContractError,match='nested deadline'):
+        inspect_builder_archive(io.BytesIO(builder_archive()),IMAGE,verify=verify,consume=consume)
+
+
+def test_nested_controller_expansion_observes_cooperative_deadline(publication):
+    from quirkbench.controller_install import _verified_archive
+    calls=[0]
+    def verify():
+        calls[0]+=1
+        if calls[0]==6:raise ContractError('expansion deadline')
+    with pytest.raises(ContractError,match='expansion deadline'):
+        _verified_archive(publication[0]/'controller.tar.gz',verify=verify)
+
+
+def test_cli_unavailable_trust_and_infrastructure_are_distinct(tmp_path,monkeypatch,capsys):
+    args=['release-check',str(tmp_path),'--inputs',str(tmp_path),'--trust-bundle',str(tmp_path/'absent'),'--json']
+    assert cli.main(args)==4
+    assert json.loads(capsys.readouterr().out)['error']['code']=='UNAVAILABLE'
+    def fail(*a,**k):raise OSError('injected I/O failure')
+    monkeypatch.setattr(release_plan,'inspect',fail)
+    assert cli.main(args)==5
+    error=json.loads(capsys.readouterr().out)['error']
+    assert error['code']=='INFRASTRUCTURE' and error['retryable']
