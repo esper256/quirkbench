@@ -14,7 +14,7 @@ import subprocess
 from .contracts import Conflict, ContractError, canonical, digest
 from .controller_install import _idle, _link, _systemctl, _wait_ready, verify_installation
 from .controller_service import UNIT, require_ready
-from .controller_setup import (_durable_directory, _manifest_digest, _private_path,
+from .controller_setup import (_durable_directory, _manifest_digest, _managed_path,
                                _database_present, SetupFilesystem, setup_progress as initial_progress)
 from .controller_tls import create_identity, inspect_identity
 from .maintenance import private_lock
@@ -26,14 +26,14 @@ from .store import atomic_write
 
 
 def _journal(config_home):
-    return _private_path(_config_home(config_home) / 'quirkbench') / 'setup-service.json'
+    return _managed_path(_config_home(config_home) / 'quirkbench') / 'setup-service.json'
 
 
 def service_progress(*, config_home=None):
     path = _journal(config_home)
     if not path.exists() and not path.is_symlink(): return None
-    if path.is_symlink() or path.stat().st_uid != os.geteuid() or path.stat().st_mode & 0o077:
-        raise ContractError('service setup journal must be private and owned')
+    if path.is_symlink() or path.stat().st_uid != os.geteuid():
+        raise ContractError('service setup journal must be owned and unlinked')
     return load_progress(read_file(path.parent, path.name, limit=LIMIT))
 
 
@@ -53,10 +53,8 @@ def _render(runtime, root):
 def _same_file(path, raw):
     if path.exists() or path.is_symlink():
         info = path.lstat()
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022:
-            raise ContractError('published setup input must be an owned regular file without other writers')
-        if path.name in ('controller-service.json', 'installation.json') and info.st_mode & 0o077:
-            raise ContractError('private setup configuration has exposed permissions')
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
+            raise ContractError('published setup input must be an owned regular file')
         if read_file(path.parent, path.name, limit=65536) != raw:
             if path.name=='controller-service.json':
                 from .publication_setup import verified_successor
@@ -74,8 +72,8 @@ def _public_directory(path):
     outside_checkout(path)
     if path.exists():
         info = path.stat()
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022:
-            raise ContractError('service publication directory must be owned without other writers')
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+            raise ContractError('service publication directory must be owned')
     return path
 
 
@@ -130,7 +128,7 @@ def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, t
     initial = initial_progress(config_home=config_home)
     if initial is None or initial['completed_steps'] != list(INITIAL_STEPS):
         raise Conflict('complete the recorded initial setup before installing its service')
-    choice = initial['intent']; root = _private_path(choice['state_root'])
+    choice = initial['intent']; root = _managed_path(choice['state_root'])
     if (not (_config_home(config_home) / 'quirkbench/controller.json').exists()
             or discover_state_root(config_home=config_home) != root or not _database_present(root)):
         raise Conflict('service setup state selection/database differs from committed initial setup')
@@ -194,7 +192,7 @@ def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, t
                 if not exists:
                     if not publishing or step in progress['completed_steps']:
                         raise Conflict('committed service input is unavailable')
-                    directory = _private_path(path.parent) if step == 'configuration_published' else _public_directory(path.parent)
+                    directory = _managed_path(path.parent) if step == 'configuration_published' else _public_directory(path.parent)
                     _durable_directory(directory); atomic_write(path, raw)
                 completed(step)
             link = launchers / 'quirkbench'; target = runtime / 'bin/quirkbench'

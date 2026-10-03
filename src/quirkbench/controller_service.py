@@ -86,8 +86,8 @@ def readiness_heartbeat(owner,runtime,*,event_factory=threading.Event,capabiliti
 
 def configuration(root):
     path=Path(root)/'private/controller-service.json'
-    if path.is_symlink() or path.resolve()!=path or path.stat().st_uid!=os.geteuid() or stat.S_IMODE(path.stat().st_mode)&0o077:
-        raise ContractError('controller-service.json must be canonical, user-owned and private')
+    if path.is_symlink() or path.resolve()!=path or path.stat().st_uid!=os.geteuid():
+        raise ContractError('controller-service.json must be canonical and user-owned')
     config=json.loads(read_file(Path(root),'private/controller-service.json',limit=65536))
     return validate_configuration(root, config)
 

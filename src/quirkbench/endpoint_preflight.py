@@ -8,7 +8,7 @@ import time
 
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _private_path
+from .controller_setup import _managed_path
 from .controller_endpoint import _strict_read
 from .enrollment import _document
 from .enrollment_proof import validate_request
@@ -51,7 +51,7 @@ def owned(control,config,request_id, *,verify_target,binding_reader=read_system_
     identifier(request_id);deadline=monotonic()+120
     recover=recovery_verifier or (lambda cfg:_verify_state_identity(cfg,Path('/boot/quirkbench-state')))
     recover(config);control,storage=_storage(control,verify_target);directory=location(control,request_id)
-    agent=_private_path(control/'agent')
+    agent=_managed_path(control/'agent')
     if not agent.is_dir():raise Conflict('original endpoint spool required; no initialization permitted')
     with private_lock(control/'runtime-config.lock') as config_fd,private_lock(agent/'agent.lock') as agent_fd:
         from .shutdown_local import require_available

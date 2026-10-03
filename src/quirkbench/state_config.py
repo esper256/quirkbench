@@ -142,7 +142,7 @@ def discover_state_root(explicit: Path | None = None, *, config_home: Path | Non
 
 def configure_state_root(explicit: Path | None = None, *, config_home: Path | None = None,
                          state_home: Path | None = None, cwd: Path | None = None) -> dict:
-    """Select one private controller root; leave service installation for P2d."""
+    """Select one controller root; leave service installation for P2d."""
     config = outside_checkout(_config_home(config_home))
     directory = config / "quirkbench"
     if config.is_symlink() or directory.is_symlink():
@@ -183,8 +183,8 @@ def configure_state_root(explicit: Path | None = None, *, config_home: Path | No
             root.mkdir(parents=True, exist_ok=True, mode=0o700)
         outside_checkout(root)
         info = root.stat()
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
-            raise StateConfigurationError("controller state root must be owned by this user and private")
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+            raise StateConfigurationError("controller state root must be owned by this user")
         if not already_selected:
             atomic_write(selection, canonical({"schema_version": 1, "state_root": str(root)}))
         if discover_state_root(config_home=config) != root:

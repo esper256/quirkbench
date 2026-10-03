@@ -73,3 +73,18 @@ def test_tls_links_and_unavailable_tool_fail_closed(tmp_path):
     linked = tmp_path / 'linked'; linked.symlink_to(tmp_path / 'state')
     with pytest.raises(ContractError, match='symlinks'):
         create_identity(linked, '127.0.0.1', 'other')
+
+
+def test_keys_can_rely_on_private_store_without_rewriting_modes(tmp_path, native):
+    result = create_identity(tmp_path / 'state', '127.0.0.1', 'initial', run=native)
+    directory = Path(result['directory'])
+    for name in FILES:
+        (directory / name).chmod(0o644)
+    assert inspect_identity(directory, run=native) == result
+    assert all((directory / name).stat().st_mode & 0o777 == 0o644 for name in FILES)
+    directory.chmod(0o755)
+    assert inspect_identity(directory, run=native) == result
+    for store in (directory.parent, directory.parent.parent, directory.parent.parent.parent):
+        store.chmod(0o755)
+    with pytest.raises(ContractError, match='credential requires'):
+        inspect_identity(directory, run=native)

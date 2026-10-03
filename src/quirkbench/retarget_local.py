@@ -11,7 +11,7 @@ import stat
 import time
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _private_path,_durable_directory
+from .controller_setup import _managed_path,_durable_directory
 from .controller_tls import _read
 from .enrollment import _document
 from .enrollment_target import _storage,_media
@@ -44,7 +44,7 @@ def validate_intent(value):
 
 def _location(control,request_id):
     identifier(request_id)
-    return _private_path(control/'retarget/requests'/digest(request_id.encode()))
+    return _managed_path(control/'retarget/requests'/digest(request_id.encode()))
 
 
 def validate_source(value):
@@ -80,7 +80,7 @@ def _history(control,raw, *,extra=None):
     Historical links never authorize runtime or authentication on old hardware.
     """
     from .retarget_activation import _records,_completion
-    requests=_private_path(control/'retarget/requests');seen={};child=None
+    requests=_managed_path(control/'retarget/requests');seen={};child=None
     for _ in range(MAX_HISTORY):
         pointer=_pointer(raw);request=pointer['request_id'];directory=_location(control,request)
         if directory.name in seen:raise Conflict('cyclic retarget history')
@@ -110,7 +110,7 @@ def _history(control,raw, *,extra=None):
         raw=previous;child=intent
     else:raise Conflict('retarget history exceeds bounded limit')
     names=list(islice(requests.iterdir(),MAX_HISTORY+1))
-    if (len(names)>MAX_HISTORY or any(not _private_path(p).is_dir() for p in names)
+    if (len(names)>MAX_HISTORY or any(not _managed_path(p).is_dir() for p in names)
             or {p.name for p in names}!=set(seen)|({extra.name} if extra is not None else set())):
         raise Conflict('orphan or unlinked retarget request; explicit exact preparation retry required')
     return seen
@@ -122,13 +122,13 @@ def pending_intent(control, *,binding_reader=None):
     if not pointer.exists() and not pointer.is_symlink():
         base=control/'retarget'
         if base.exists() or base.is_symlink():
-            _private_path(base)
+            _managed_path(base)
             if not base.is_dir():raise ContractError('retarget maintenance directory is unavailable')
-            requests=_private_path(base/'requests')
+            requests=_managed_path(base/'requests')
             if requests.exists() and any(islice(requests.iterdir(),1)):
                 raise Conflict('retarget records remain without a pending pointer; explicit exact preparation retry required')
         return None
-    raw=_read(_private_path(control/'retarget'),'active.json');value=_pointer(raw)
+    raw=_read(_managed_path(control/'retarget'),'active.json');value=_pointer(raw)
     history=_history(control,raw);intent=history[digest(value['request_id'].encode())][1]
     if value['schema_version']==2:
         from .retarget_activation import completed
@@ -161,11 +161,10 @@ def _metadata(control,new_uuid,confirmed_old):
 
 
 def _private_journal(agent, *,name='journal.json'):
-    """Existing bounded private single-link policy, stable after native callbacks."""
-    path=_private_path(agent)/name;before=path.lstat()
-    if (not stat.S_ISREG(before.st_mode) or before.st_uid!=os.geteuid()
-            or stat.S_IMODE(before.st_mode)!=0o600 or before.st_nlink!=1):
-        raise ContractError('original retarget journal must be private, regular and single-link')
+    """Existing bounded single-link policy, stable after native callbacks."""
+    path=_managed_path(agent)/name;before=path.lstat()
+    if (not stat.S_ISREG(before.st_mode) or before.st_uid!=os.geteuid() or before.st_nlink!=1):
+        raise ContractError('original retarget journal must be owned, regular and single-link')
     raw=read_file(agent,name,limit=4*1024**2);after=path.lstat()
     signature=lambda info:(info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
     if signature(before)!=signature(after):raise Conflict('original retarget journal changed during capture')
@@ -178,18 +177,18 @@ def _capture_source(control,intent,verify, *,locations=None):
     from .enrollment_result import validate_result
     from .product_contracts import _depth,_pairs
     import json
-    def capture(directory,name):verify();return _read(_private_path(directory),name)
+    def capture(directory,name):verify();return _read(_managed_path(directory),name)
     runtime_home,pending,agent=locations or (control,control/'enrollment/pending',control/'agent')
     runtime_raw=capture(runtime_home,'runtime.json');runtime=_document(runtime_raw)
     if digest(runtime_raw)!=intent['runtime_sha256']:raise Conflict('original runtime changed during retarget preparation')
-    pending=_private_path(pending)
+    pending=_managed_path(pending)
     raws={name:capture(pending,name) for name in ('intent.json','request.json','key.pem','result.json')}
     request=validate_request(_document(raws['request.json']));result=validate_result(_document(raws['result.json']),request)
     if (result['device_id']!=intent['old_device_id'] or result['media_instance_id']!=intent['media_instance_id']
             or result['target_binding']!=intent['old_target_binding']):raise Conflict('original enrolled source differs from confirmed retarget intent')
     ca=runtime.get('ca');parts=Path(ca).parts if isinstance(ca,str) else ()
     if len(parts)!=3 or parts[0]!='generations' or parts[2]!='ca.pem':raise Conflict('exact enrolled private generation required for retarget')
-    generation=sha256(parts[1]);directory=_private_path(control/'generations'/generation)
+    generation=sha256(parts[1]);directory=_managed_path(control/'generations'/generation)
     manifest_raw=capture(directory,'generation.json');manifest=_document(manifest_raw)
     if (not isinstance(manifest,dict) or digest(manifest_raw)!=generation or not 4<=len(manifest)<=16
             or any(not isinstance(name,str) or Path(name).name!=name for name in manifest)
@@ -220,7 +219,7 @@ def _capture_source(control,intent,verify, *,locations=None):
         raise Conflict('original active trust differs from enrolled credentials')
     # Do not traverse/read blobs. The unchanged journal freezes their attribution;
     # later selected drain reads must verify each sealed blob's bytes independently.
-    agent=_private_path(agent);journal_raw=_private_journal(agent)
+    agent=_managed_path(agent);journal_raw=_private_journal(agent)
     try:
         journal=json.loads(journal_raw,object_pairs_hook=_pairs,parse_constant=lambda _:(_ for _ in ()).throw(ContractError('nonfinite original journal')));_depth(journal)
     except (ValueError,UnicodeError,RecursionError) as exc:raise ContractError('invalid original retarget journal') from exc
@@ -244,7 +243,7 @@ def _capture_source(control,intent,verify, *,locations=None):
         elif name=='agent/journal.json':root,relative=agent,'journal.json'
         elif parts[:2]==('enrollment','pending'):root,relative=pending,parts[2]
         else:root,relative=control/Path(name).parent,Path(name).name
-        retained=_private_journal(root) if name=='agent/journal.json' else _read(_private_path(root),relative)
+        retained=_private_journal(root) if name=='agent/journal.json' else _read(_managed_path(root),relative)
         if digest(retained)!=checksum:raise Conflict('original retarget source changed after native capture')
     if intent['schema_version']==3:
         from .retarget_endpoint import files as endpoint_files
@@ -261,7 +260,7 @@ def prepare_retarget(control,config,request_id,confirmed_old_device_id,new_uuid,
     identifier(request_id);fault=fault_hook or (lambda _:None);clearer=clearer or clear_once;deadline=clock()+120
     recovery_verifier=recovery_verifier or (lambda config:_verify_state_identity(config,Path('/boot/quirkbench-state')))
     recovery_verifier(config)
-    control,verify=_storage(control,verify_target);agent=_private_path(control/'agent')
+    control,verify=_storage(control,verify_target);agent=_managed_path(control/'agent')
     if not agent.is_dir():raise Conflict('original target spool is missing; no initialization permitted')
     new_binding={'schema_version':1,'system_uuid':new_uuid};verify_binding(new_binding,reader=binding_reader)
     with private_lock(control/'runtime-config.lock') as config_fd,private_lock(agent/'agent.lock') as agent_fd:

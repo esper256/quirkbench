@@ -8,7 +8,7 @@ import time
 
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _private_path,_durable_directory
+from .controller_setup import _managed_path,_durable_directory
 from .controller_tls import _read
 from .enrollment import _document,_now
 from .enrollment_result import validate_result
@@ -41,7 +41,7 @@ def validate_activation(value):
 
 
 def _private_files(directory,names):
-    directory=_private_path(directory)
+    directory=_managed_path(directory)
     return {name:_read(directory,name) for name in names}
 
 
@@ -91,11 +91,11 @@ def _records(control,directory,intent):
 
 
 def _blank_agent(path,device, *,partial=False):
-    path=_private_path(path)
+    path=_managed_path(path)
     names=set(p.name for p in path.iterdir());expected={'journal.json','blobs','agent.lock'}
     if names-expected or not partial and names!=expected:
         raise Conflict('new retarget agent is not the exact blank spool')
-    if 'blobs' in names and any(_private_path(path/'blobs').iterdir()):raise Conflict('new retarget spool cannot inherit old chunks')
+    if 'blobs' in names and any(_managed_path(path/'blobs').iterdir()):raise Conflict('new retarget spool cannot inherit old chunks')
     if 'journal.json' in names and _read(path,'journal.json')!=_blank(device):raise Conflict('new retarget spool cannot inherit old work')
     if 'agent.lock' in names and _read(path,'agent.lock')!=b'':raise Conflict('new retarget lock file changed')
 
@@ -105,7 +105,7 @@ def original_locations(control,directory,intent):
     if not _present(directory/'activation.json'):
         return control,control/'enrollment/pending',control/'agent'
     activation,source=_records(control,directory,intent);new,result,bundle,active=_new_view(directory,intent,activation)
-    archive=_private_path(directory/'archive')
+    archive=_managed_path(directory/'archive')
     if digest(_read(archive,'runtime.json'))!=intent['runtime_sha256']:
         raise Conflict('immutable original runtime snapshot changed')
     snapshot=read_file(archive,'journal.initial.json',limit=4*1024**2)
@@ -114,23 +114,23 @@ def original_locations(control,directory,intent):
         raise Conflict('root runtime is neither exact old nor exact new retarget generation')
     old_pending=archive/'enrollment-pending';root_pending=control/'enrollment/pending'
     if _present(old_pending):
-        _private_path(old_pending)
+        _managed_path(old_pending)
         if _present(root_pending) and (_private_files(root_pending,NAMES)!=new
                 or set(p.name for p in root_pending.iterdir())!=set(NAMES)):
             raise Conflict('both original and archived enrollment sources remain or root state is mixed')
     else:
-        old_pending=root_pending;_private_path(old_pending)
+        old_pending=root_pending;_managed_path(old_pending)
         if any(digest(_read(old_pending,name))!=source['files']['enrollment/pending/'+name] for name in NAMES):
             raise Conflict('original enrollment source missing before archival')
     old_agent=archive/'agent';root_agent=control/'agent';stage=directory/'new-agent'
     if _present(old_agent):
-        _private_path(old_agent)
+        _managed_path(old_agent)
         if _present(root_agent):
             _blank_agent(root_agent,result['device_id'])
             if _present(stage):raise Conflict('both staged and selected new retarget spools exist')
-    else:old_agent=_private_path(root_agent)
+    else:old_agent=_managed_path(root_agent)
     if _present(stage):_blank_agent(stage,result['device_id'],partial=True)
-    pending_stage=_private_path(directory/'new-enrollment')
+    pending_stage=_managed_path(directory/'new-enrollment')
     if _present(pending_stage):
         if _present(root_pending) and _present(archive/'enrollment-pending'):raise Conflict('both staged and selected new enrollment exist')
         names=set(p.name for p in pending_stage.iterdir())
@@ -140,7 +140,7 @@ def original_locations(control,directory,intent):
 
 
 def _generation(control,activation,bundle):
-    directory=_private_path(control/'generations'/activation['generation'])
+    directory=_managed_path(control/'generations'/activation['generation'])
     if (set(p.name for p in directory.iterdir())!=set(bundle)|{'generation.json'}
             or _private_files(directory,bundle)!=bundle
             or _read(directory,'generation.json')!=canonical(activation['bundle_files'])):
@@ -171,13 +171,13 @@ def completed(control,request_id, *,binding_reader=None,_endpoint_preparation=Fa
     runtime=_document(active)
     if set(runtime)!={'schema_version','device_id','controller_url','ca','token_file','target_binding','remotes'}:
         raise Conflict('completed retarget cannot inherit qualification or attempt grants')
-    agent=_private_path(control/'agent')
-    if not agent.is_dir() or not _private_path(agent/'blobs').is_dir():raise Conflict('completed retarget active spool is missing')
+    agent=_managed_path(control/'agent')
+    if not agent.is_dir() or not _managed_path(agent/'blobs').is_dir():raise Conflict('completed retarget active spool is missing')
     _read(agent,'agent.lock')
     from .product_contracts import _pairs,_depth
     path=agent/'journal.json';before=path.lstat()
-    if (not stat.S_ISREG(before.st_mode) or stat.S_IMODE(before.st_mode)!=0o600
-            or before.st_uid!=os.geteuid() or before.st_nlink!=1):raise ContractError('completed retarget journal must remain private and single-link')
+    if (not stat.S_ISREG(before.st_mode)
+            or before.st_uid!=os.geteuid() or before.st_nlink!=1):raise ContractError('completed retarget journal must remain owned and single-link')
     journal_raw=read_file(agent,'journal.json',limit=4*1024**2);after=path.lstat()
     signature=lambda info:(info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
     if signature(before)!=signature(after):raise Conflict('completed retarget journal changed during observation')
@@ -190,7 +190,7 @@ def completed(control,request_id, *,binding_reader=None,_endpoint_preparation=Fa
             or journal['device_id']!=result['device_id'] or journal['pending'] is not None and not isinstance(journal['pending'],dict)
             or journal['claim_request_id'] is not None and not isinstance(journal['claim_request_id'],str)):
         raise Conflict('completed retarget journal differs from selected new identity')
-    archive=_private_path(directory/'archive')
+    archive=_managed_path(directory/'archive')
     if (not (archive/'agent').is_dir() or not (archive/'enrollment-pending').is_dir()
             or digest(_read(archive,'runtime.json'))!=intent['runtime_sha256']):
         raise Conflict('completed retarget original archive is unavailable')
@@ -209,7 +209,7 @@ def _retain(directory,name,raw):
 
 
 def _rename(source,destination,verify):
-    verify();_private_path(source);_private_path(destination.parent)
+    verify();_managed_path(source);_managed_path(destination.parent)
     if _present(destination):raise Conflict('retarget rename destination already exists')
     if source.stat().st_dev!=destination.parent.stat().st_dev:raise ContractError('retarget archive must remain on original evidence filesystem')
     os.rename(source,destination);sync_directory(source.parent);sync_directory(destination.parent)
@@ -238,7 +238,7 @@ def activate(control,config,request_id,controller_url,approved_certificate_pem,a
         pointer=_document(_read(control/'retarget','active.json'))
         if pointer.get('schema_version')==2:
             if pointer.get('request_id')!=request_id:raise Conflict('another completed retarget request is selected')
-            with private_lock(_private_path(control/'agent')/'agent.lock') as agent_fd:
+            with private_lock(_managed_path(control/'agent')/'agent.lock') as agent_fd:
                 storage();recover(config)
                 for path,fd in ((control/'runtime-config.lock',config_fd),(control/'agent/agent.lock',agent_fd)):
                     held=os.fstat(fd);named=path.lstat()
@@ -280,7 +280,7 @@ def activate(control,config,request_id,controller_url,approved_certificate_pem,a
             if _private_files(directory/'enrollment/pending/activation-bundle',bundle)!=bundle:raise Conflict('new retarget bundle changed during selection')
             if not _now(clock)<result['credential_generation']['expires_at']:raise Conflict('retarget credentials expired during selection')
         def verified():guard();exact()
-        archive=_private_path(directory/'archive');verified();_durable_directory(archive)
+        archive=_managed_path(directory/'archive');verified();_durable_directory(archive)
         _retain(archive,'runtime.json',_read(locations[0],'runtime.json'))
         # Snapshot only the bounded journal, never descend through blob contents.
         journal=read_file(locations[2],'journal.json',limit=4*1024**2)
@@ -289,11 +289,11 @@ def activate(control,config,request_id,controller_url,approved_certificate_pem,a
             if read_file(archive,saved.name,limit=4*1024**2)!=journal:raise Conflict('immutable old journal snapshot changed')
         else:verified();atomic_write(saved,journal)
         verified();_retain(directory,'activation.json',canonical(activation));fault('retarget_activation_intent_retained');verified()
-        _durable_directory(_private_path(control/'generations'))
+        _durable_directory(_managed_path(control/'generations'))
         target,published,pointer=_publish_generation(bundle,control,verified,validator or load_provisioning,fault)
         if published!=generation or canonical(pointer)!=active:raise Conflict('private generation publisher changed retarget identity')
         verified();_generation(control,activation,bundle)
-        stage=_private_path(directory/'new-agent');root_agent=control/'agent'
+        stage=_managed_path(directory/'new-agent');root_agent=control/'agent'
         if not _present(archive/'agent') or not _present(root_agent):
             verified();_durable_directory(stage);_blank_agent(stage,result['device_id'],partial=True)
             _durable_directory(stage/'blobs')
@@ -308,7 +308,7 @@ def activate(control,config,request_id,controller_url,approved_certificate_pem,a
             _rename(stage,root_agent,verified);fault('retarget_new_agent_selected')
         if not _present(archive/'enrollment-pending'):
             _rename(control/'enrollment/pending',archive/'enrollment-pending',verified);fault('retarget_old_enrollment_archived')
-        pending_stage=_private_path(directory/'new-enrollment')
+        pending_stage=_managed_path(directory/'new-enrollment')
         if not _present(control/'enrollment/pending'):
             verified();_durable_directory(pending_stage)
             if set(p.name for p in pending_stage.iterdir())-set(NAMES):raise Conflict('staged new enrollment contains unknown files')

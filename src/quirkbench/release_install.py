@@ -8,7 +8,7 @@ import time
 from .contracts import Conflict, ContractError, canonical, digest, identifier
 from .controller_install import install
 from .controller_release import bounded_file, verify_statement
-from .controller_setup import _durable_directory, _private_path
+from .controller_setup import _durable_directory, _managed_path
 from .maintenance import private_lock
 from .release_trust import load_bundle
 from .state_config import _config_home, outside_checkout
@@ -33,11 +33,11 @@ def acquire_install(version, request_id, *, trust_bundle=None, cache_home=None, 
     trust = load_bundle(trust_bundle)
     bundle = trust['bundle']
     destination = outside_checkout(Path(data_home or os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share').expanduser().resolve())
-    base = _private_path(Path(cache_home or os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') /
+    base = _managed_path(Path(cache_home or os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') /
                          'quirkbench/releases')
     _durable_directory(base)
-    stage = _private_path(base / request_id); _durable_directory(stage)
-    records = _private_path(_config_home(config_home) / 'quirkbench/release-install' / request_id)
+    stage = _managed_path(base / request_id); _durable_directory(stage)
+    records = _managed_path(_config_home(config_home) / 'quirkbench/release-install' / request_id)
     _durable_directory(records)
     fault_hook = fault_hook or (lambda _: None)
     intent = {'schema_version': 1, 'version': version, 'request_id': request_id,
@@ -91,7 +91,7 @@ def acquire_install(version, request_id, *, trust_bundle=None, cache_home=None, 
         raw = bounded_file(archive, 64 * 1024**2)
         if digest(raw) != statement['controller_archive_sha256']:
             raise ContractError('controller archive differs from signed release digest')
-        retained = _private_path(destination / 'quirkbench/controller-archives')
+        retained = _managed_path(destination / 'quirkbench/controller-archives')
         _durable_directory(retained)
         authenticated_archive = retained / (statement['controller_archive_sha256'] + '.tar.gz')
         if authenticated_archive.exists() or authenticated_archive.is_symlink():

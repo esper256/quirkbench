@@ -192,7 +192,7 @@ def test_registry_only_tls_routes_deny_execution_and_old_credentials(reconciled,
         finally:server.shutdown();server.server_close();thread.join(5)
 
 
-def test_cli_returns_scope_and_private_path_without_secret(reconciled,tmp_path,capsys):
+def test_cli_returns_scope_and_managed_path_without_secret(reconciled,tmp_path,capsys):
     c,now,attempt,raw,plan=reconciled
     # CLI native time differs from the deterministic controller clock.
     path=tmp_path/'plan.json';path.write_bytes(canonical(plan))

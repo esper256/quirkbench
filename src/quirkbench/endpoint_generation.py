@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 
 from .binding import verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _private_path
+from .controller_setup import _managed_path
 from .controller_endpoint import _strict_read
 from .enrollment import _document
 from .enrollment_client import endpoint
@@ -106,7 +106,7 @@ def verify_transition(record,source_files,destination_files):
 
 def read_generation(control,generation):
     """Fixed bounded private files; caller first holds storage and binding ownership."""
-    sha256(generation);directory=_private_path(Path(control)/'generations'/generation)
+    sha256(generation);directory=_managed_path(Path(control)/'generations'/generation)
     manifest_raw=_strict_read(directory,'generation.json');manifest=_document(manifest_raw)
     if (not isinstance(manifest,dict) or not 5<=len(manifest)<=16 or manifest_raw!=canonical(manifest)
             or digest(manifest_raw)!=generation or any(not isinstance(name,str) or Path(name).name!=name for name in manifest)

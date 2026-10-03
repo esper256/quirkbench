@@ -9,7 +9,7 @@ import subprocess
 from .contracts import Conflict, ContractError, canonical, digest, identifier, sha256
 from .controller_install import _verified_archive, verify_installation
 from .controller_release import bounded_file, verify_statement
-from .controller_setup import _private_path
+from .controller_setup import _managed_path
 from .product_contracts import _depth, _pairs
 from .release_trust import load_bundle, ReleaseUnavailable
 from .state_config import _config_home
@@ -35,7 +35,7 @@ def verify_request(request_id, *, config_home=None, trust_bundle=None, run=subpr
     Explicit trust injection never updates the packaged production trust configuration.
     """
     identifier(request_id)
-    records = _private_path(_config_home(config_home) / 'quirkbench/release-install' / request_id)
+    records = _managed_path(_config_home(config_home) / 'quirkbench/release-install' / request_id)
     intent = _document(records / 'intent.json', {'schema_version','version','request_id','release_base_url',
         'trust_bundle_sha256','data_home','cache_root'}, limit=16384)
     if (type(intent['schema_version']) is not int or intent['schema_version'] != 1
@@ -69,7 +69,7 @@ def verify_request(request_id, *, config_home=None, trust_bundle=None, run=subpr
         raise ContractError('invalid signed installation result')
     installation=document['installation']
     runtime=Path(intent['data_home']) / 'quirkbench/controller' / (intent['version'] + '-' + statement['controller_archive_sha256'])
-    retained=_private_path(Path(intent['data_home']) / 'quirkbench/controller-archives')
+    retained=_managed_path(Path(intent['data_home']) / 'quirkbench/controller-archives')
     manifest, files, archive_digest=_verified_archive(retained / (statement['controller_archive_sha256'] + '.tar.gz'),
         expected_archive_sha256=statement['controller_archive_sha256'],expected_version=intent['version'])
     if archive_digest != statement['controller_archive_sha256'] or manifest['version'] != intent['version']:

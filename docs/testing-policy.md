@@ -51,7 +51,7 @@ The focused regression creates both shallow and eight-level configured paths,
 executes the original joined endpoint export/drain/replay case, prints separate
 phase counts and asserts no recursive capture inside individual source reads or
 history/completion reconstruction inside capture callbacks. Other cases retain
-late private-byte/permission/link mutations, exact attribution, later current
+late private-byte/link mutations, exact attribution, later current
 endpoint history, scoped upload authorization and original-deadline checks.
 
 Run from the checkout with the test extra installed. Every `--basetemp` below is a
@@ -71,8 +71,9 @@ TASK_TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/quirkbench-issues-7-8.XXXXXXXX")"
 ```
 
 Further work for [issue #19](https://github.com/esper256/quirkbench/issues/19)
-caches bounded, immutable ancestor/`.git` path layouts, while repeating every
-filesystem, ownership and checkout check. Record reads use a fresh strict
+caches bounded, immutable ancestor/`.git` path layouts, while repeating the remaining
+filesystem, ownership and checkout checks. Blanket mode checks described in the
+historical measurements were subsequently removed under the file-access policy. Record reads use a fresh strict
 canonical-root traversal without constructing another resolved `Path`; symlink
 loops fail with `ContractError`, and missing/inaccessible roots still fail closed.
 Drain verification removes one adjacent full reconstruction because each private

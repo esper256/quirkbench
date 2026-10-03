@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
 from .controller_release import ASSET_LIMIT,bounded_file,verify_statement,verify_recovery_assets,_recovery_compatibility
-from .controller_setup import _private_path,_database_present
+from .controller_setup import _managed_path,_database_present
 from .release_http import _response,_length,fetch_metadata
 from .release_trust import load_bundle
 from .state_config import _config_home
@@ -49,7 +49,7 @@ def submit(root,request_id=None, *, trust_bundle=None,config_home=None,ready=Non
     from .controller import Controller
     from .job_operations import envelope
     if request_id is not None:identifier(request_id)
-    root=_private_path(root)
+    root=_managed_path(root)
     if not _database_present(root):raise ContractError('complete controller setup before recovery acquisition')
     with private_lock(root/'command.lock',shared=True):
         (ready or require_ready)(root);config=configuration(root);runtime=Path(config['runtime']).parent.parent

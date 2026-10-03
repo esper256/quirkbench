@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _private_path,_durable_directory
+from .controller_setup import _managed_path,_durable_directory
 from .controller_tls import _read
 from .enrollment import _document
 from .enrollment_client import endpoint
@@ -61,13 +61,13 @@ def _initial(control,verify):
     # evidence of a previous activation, not proof that retargeting is safe.
     agent=control/'agent'
     if agent.exists() or agent.is_symlink():
-        _private_path(agent)
+        _managed_path(agent)
         if any(path.name!='agent.lock' for path in agent.iterdir()):
             raise Conflict('target work or prior identity exists; reconcile lifecycle maintenance first')
 
 
 def _capture(path,control,domain,verify,binding_reader,run,view=None):
-    _guard(control,verify,view);path=_private_path(path)
+    _guard(control,verify,view);path=_managed_path(path)
     if not path.is_dir() or {p.name for p in path.iterdir()}!=FILES:
         raise Conflict('pending enrollment must have exactly its initial intent/key/request; recover partial preparation first')
     raw={name:_read(path,name) for name in FILES}
@@ -133,7 +133,7 @@ def _exact(path,expected,control,domain,verify,binding_reader,run,view=None):
 def _bytes_exact(path,expected,control,domain,verify,binding_reader,view=None):
     """Final publication fence after all native parsing, with no external work."""
     _guard(control,verify,view);_media(control,domain['media_instance_id'])
-    verify_binding(domain['target_binding'],reader=binding_reader);path=_private_path(path)
+    verify_binding(domain['target_binding'],reader=binding_reader);path=_managed_path(path)
     if {p.name for p in path.iterdir()}!=FILES or any(digest(_read(path,name))!=value for name,value in expected['files'].items()):
         raise Conflict('initial selection files changed before publication')
 
@@ -159,7 +159,7 @@ def _choice_exact(directory,record, *, required=True,view=None):
 
 def _finish(control,record,directory, *, verify,binding_reader,run,fault,view=None):
     record=_record(record,view);base=_base(control,view);domain=record['domain']
-    pending=base/'pending';archives=_private_path(base/'archives')
+    pending=base/'pending';archives=_managed_path(base/'archives')
     source_archive=archives/record['source']['intent']['request_id']
     selected=record['selected']
     if selected is None:
@@ -183,7 +183,7 @@ def _finish(control,record,directory, *, verify,binding_reader,run,fault,view=No
         if _read(directory,'complete.json')!=canonical(record):raise Conflict('completed selection receipt changed')
         return record
     if pending.exists():
-        intent=_intent(_document(_read(_private_path(pending),'intent.json')))
+        intent=_intent(_document(_read(_managed_path(pending),'intent.json')))
         if intent==record['source']['intent']:
             if source_archive.exists() or source_archive.is_symlink():raise Conflict('ambiguous source archive; no overwrite permitted')
             _exact(selected_path,selected,control,domain,verify,binding_reader,run,view)
@@ -219,10 +219,10 @@ def reconcile_selection(control,url,pin,code_id, *, verify_target,binding_reader
     """Called by preparation with runtime-config.lock held; exact chosen replay only."""
     base=control/'enrollment';pointer=base/'selection.json'
     if not pointer.exists() and not pointer.is_symlink():return
-    value=_document(_read(_private_path(base),'selection.json'))
+    value=_document(_read(_managed_path(base),'selection.json'))
     if not isinstance(value,dict) or set(value)!={'schema_version','request_id'} or type(value['schema_version']) is not int or value['schema_version']!=1:
         raise ContractError('invalid active initial selection')
-    identifier(value['request_id']);directory=_private_path(base/'selections'/value['request_id'])
+    identifier(value['request_id']);directory=_managed_path(base/'selections'/value['request_id'])
     record=_load_record(directory)
     if record['request_id']!=value['request_id'] or record['code_id']!=code_id or record['domain']!=_domain(control,url,pin,binding_reader):
         raise Conflict('another initial invitation selection must finish first')
@@ -247,8 +247,8 @@ def select_invitation(control,url,pin,code_id,request_id, *, action,confirmed_re
 
 def _select_locked(control,url,pin,code_id,request_id, *,action,confirmed_request_id,verify,binding_reader,run,fault,view=None):
     _guard(control,verify,view);domain=_domain(control,url,pin,binding_reader)
-    base=_private_path(_base(control,view));archives=_private_path(base/'archives')
-    selections=_private_path(base/'selections');directory=_private_path(selections/request_id)
+    base=_managed_path(_base(control,view));archives=_managed_path(base/'archives')
+    selections=_managed_path(base/'selections');directory=_managed_path(selections/request_id)
     # An exact API retry must recover its original immutable request before
     # reading a potentially missing/swapped pending directory.
     if directory.exists():
@@ -310,15 +310,15 @@ def pending_choice(control,url,pin,code_id, *, verify_target,binding_reader=read
 
 
 def _pending_choice_locked(control,url,pin,code_id, *,verify,binding_reader,run,view=None):
-    base=_private_path(_base(control,view))
+    base=_managed_path(_base(control,view))
     if (base/'selection.json').exists() or (base/'selection.json').is_symlink():return None
     pending=base/'pending'
     if not pending.exists():return None
-    intent=_intent(_document(_read(_private_path(pending),'intent.json')))
+    intent=_intent(_document(_read(_managed_path(pending),'intent.json')))
     if intent['code_id']==code_id:return None
     domain=_domain(control,url,pin,binding_reader)
     intent,_=_capture(pending,control,domain,verify,binding_reader,run,view)
-    archives=_private_path(base/'archives');found=[]
+    archives=_managed_path(base/'archives');found=[]
     if archives.exists():
         if len(list(archives.iterdir()))>MAX_ARCHIVES:raise Conflict('private invitation history exceeds its bound')
         for path in archives.iterdir():

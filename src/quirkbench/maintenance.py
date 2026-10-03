@@ -58,8 +58,8 @@ def private_lock(path, *, shared=False):
     fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-            raise Conflict('maintenance lock must be private')
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+            raise Conflict('maintenance lock must be an owned regular file')
         try:
             fcntl.flock(fd, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
         except BlockingIOError as exc:

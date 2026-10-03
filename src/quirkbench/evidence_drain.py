@@ -11,7 +11,6 @@ import os
 from pathlib import Path
 import re
 import secrets
-import stat
 import time
 
 from .binding import system_uuid
@@ -141,12 +140,10 @@ def _private_credential(value,intent):
 
 
 def read_credential(path):
-    from .controller_setup import _private_path
-    from .state_reader import read_file
-    path=Path(path);_private_path(path.parent);info=path.lstat()
-    if not stat.S_ISREG(info.st_mode) or info.st_uid!=os.geteuid() or stat.S_IMODE(info.st_mode)!=0o600:
-        raise ContractError('drain credential must be a private owned regular file')
-    value=load(read_file(path.parent,path.name,limit=MAX_BYTES))
+    from .controller_setup import _managed_path
+    from .controller_tls import _secret_read
+    path=Path(path);_managed_path(path.parent)
+    value=load(_secret_read(path.parent,path.name,limit=MAX_BYTES))
     if not isinstance(value,dict) or not isinstance(value.get('intent'),dict):raise ContractError('private drain intent is missing')
     return _private_credential(value,value['intent'])
 
@@ -154,19 +151,19 @@ def read_credential(path):
 def approve(root,target,plan,request_id, *,ttl_seconds=900,clock=time.time,fault_hook=None):
     """Explicit local approval; retain private token before digest-only SQL commit."""
     from .controller import Controller
-    from .controller_setup import _private_path,_database_present,_durable_directory
+    from .controller_setup import _managed_path,_database_present,_durable_directory
     from .maintenance import private_lock
     from .setup_contracts import SetupUnavailable
     identifier(target);identifier(request_id);plan=validate_plan(load(canonical(plan)))
     if type(ttl_seconds) is not int or not 60<=ttl_seconds<=3600:raise ContractError('drain lifetime must be 60 to 3600 seconds')
-    root=_private_path(Path(root))
+    root=_managed_path(Path(root))
     if not _database_present(root):raise SetupUnavailable('complete controller setup before evidence drain approval')
     intent={'schema_version':1,'request_id':request_id,'target':target,'plan':plan,'ttl_seconds':ttl_seconds}
     fault_hook=fault_hook or (lambda _:None)
     with private_lock(root/'command.lock',shared=True):
         c=Controller(root)
-        directory=_private_path(root/'private/evidence-drain'/digest(request_id.encode()))
-        _durable_directory(_private_path(root/'private'))
+        directory=_managed_path(root/'private/evidence-drain'/digest(request_id.encode()))
+        _durable_directory(_managed_path(root/'private'))
         with private_lock(root/'private/evidence-drain.lock'):
             with c.transaction() as db:
                 now=_clock(db,clock)
@@ -211,10 +208,10 @@ def approve(root,target,plan,request_id, *,ttl_seconds=900,clock=time.time,fault
 
 def revoke(root,target,grant_id, *,clock=time.time):
     from .controller import Controller
-    from .controller_setup import _private_path,_database_present
+    from .controller_setup import _managed_path,_database_present
     from .maintenance import private_lock
     from .setup_contracts import SetupUnavailable
-    identifier(target);identifier(grant_id);root=_private_path(Path(root))
+    identifier(target);identifier(grant_id);root=_managed_path(Path(root))
     if not _database_present(root):raise SetupUnavailable('complete controller setup before drain revocation')
     with private_lock(root/'command.lock',shared=True):
         c=Controller(root)

@@ -173,8 +173,7 @@ def test_owned_context_never_runs_native_callback_after_final_private_source_fen
     assert armed[0] and not changed[0]
 
 
-@pytest.mark.parametrize('change',['chmod','hardlink'])
-def test_final_capture_rechecks_private_single_link_journal_policy(moved,monkeypatch,change):
+def test_final_capture_rechecks_single_link_journal_policy(moved,monkeypatch):
     from contextlib import contextmanager
     from quirkbench import retarget_enrollment
     import os
@@ -191,8 +190,7 @@ def test_final_capture_rechecks_private_single_link_journal_policy(moved,monkeyp
         return raw
     def recover(_):
         if armed[0] and not changed[0]:
-            if change=='chmod':(control/'agent/journal.json').chmod(0o644)
-            else:os.link(control/'agent/journal.json',control/'agent/journal-link')
+            os.link(control/'agent/journal.json',control/'agent/journal-link')
             changed[0]=True
     monkeypatch.setattr(retarget_enrollment,'_paused_source',context);monkeypatch.setattr(retarget_local,'_read',read)
     with pytest.raises((Conflict,ContractError)):
@@ -259,7 +257,7 @@ def test_repeated_retarget_after_completed_retarget_endpoint_keeps_both_origins(
     assert json.loads(Path(plan['plan_file']).read_bytes())['device_id']==moved[0][2]['device_id']
 
 
-@pytest.mark.parametrize('change',['attempt','descriptor','snapshot','snapshot-mode'])
+@pytest.mark.parametrize('change',['attempt','descriptor','snapshot'])
 def test_archived_identity_and_snapshot_are_rechecked_after_capture_callbacks(moved,monkeypatch,change):
     control=moved[0][1];prepare(moved);receipt=activate(moved);archive=Path(receipt['original_archive']);changed=[False]
     actual=retarget_evidence._capture_source
@@ -267,13 +265,11 @@ def test_archived_identity_and_snapshot_are_rechecked_after_capture_callbacks(mo
         def guarded():
             verify()
             if not changed[0]:
-                if change=='snapshot-mode':(archive/'journal.initial.json').chmod(0o644)
-                else:
-                    path=archive/('journal.initial.json' if change=='snapshot' else 'agent/journal.json')
-                    value=json.loads(path.read_bytes())
-                    if change=='descriptor':value['pending']['evidence'][0]['sha256']='f'*64
-                    else:value['pending']['attempt_id']='another-attempt'
-                    atomic_write(path,canonical(value))
+                path=archive/('journal.initial.json' if change=='snapshot' else 'agent/journal.json')
+                value=json.loads(path.read_bytes())
+                if change=='descriptor':value['pending']['evidence'][0]['sha256']='f'*64
+                else:value['pending']['attempt_id']='another-attempt'
+                atomic_write(path,canonical(value))
                 changed[0]=True
         return actual(control,intent,guarded,**kw)
     monkeypatch.setattr(retarget_evidence,'_capture_source',capture)

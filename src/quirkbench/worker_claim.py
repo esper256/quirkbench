@@ -47,9 +47,8 @@ def _private_directory(path: Path) -> None:
             or path.resolve() != path):
         raise WorkerClaimError('worker directory is not canonical')
     metadata = path.stat()
-    if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.geteuid()
-            or metadata.st_mode & 0o077):
-        raise WorkerClaimError('worker directory is not private to its user')
+    if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.geteuid()):
+        raise WorkerClaimError('worker directory is not owned by its user')
 
 
 def _own_cgroup(unit: str, reader) -> None:
@@ -90,8 +89,7 @@ def read_active_worker_claim(state_root, operation_id, epoch, generation, stage_
         raise WorkerClaimError('worker stage differs from its private claim path')
     db_path = root / 'controller.sqlite'
     if (db_path.is_symlink() or not db_path.is_file() or db_path.resolve() != db_path
-            or db_path.stat().st_uid != os.geteuid()
-            or db_path.stat().st_mode & 0o077):
+            or db_path.stat().st_uid != os.geteuid()):
         raise WorkerClaimError('controller database is unavailable')
     unit = f'quirkbench-worker-{operation_id}-{generation}.service'
     try:

@@ -128,13 +128,13 @@ def validate_reply_authority(result,request,authority):
 def create_invitation(controller,target,generation,new_name,new_uuid,request_id, *,ttl_seconds=300,
                       ready=None,tls_inspector=None,clock=time.time,fault_hook=None):
     """Explicit local operator decision, never an agent proposal or automatic revoke."""
-    from .controller_setup import _private_path
+    from .controller_setup import _managed_path
     from .enrollment import _create_code
     from .enrollment_runtime import require_enrollment
     from .maintenance import private_lock
     from .target_setup import resolve_target_identity
     for value in (target,generation,new_name,request_id):identifier(value)
-    system_uuid(new_uuid);root=_private_path(controller.root)
+    system_uuid(new_uuid);root=_managed_path(controller.root)
     with private_lock(root/'command.lock',shared=True):
         with controller.transaction() as db:
             device,_,_,_=resolve_target_identity(db,target)
@@ -152,9 +152,9 @@ def create_invitation(controller,target,generation,new_name,new_uuid,request_id,
 
 def issue(root,target,generation,new_name,new_uuid,request_id, **kwargs):
     """Configured existing-state facade; missing setup never initializes a database."""
-    from .controller_setup import _private_path,_database_present
+    from .controller_setup import _managed_path,_database_present
     from .controller import Controller
     from .setup_contracts import SetupUnavailable
-    root=_private_path(root)
+    root=_managed_path(root)
     if not _database_present(root):raise SetupUnavailable('controller setup unavailable; run quirkbench setup')
     return create_invitation(Controller(root),target,generation,new_name,new_uuid,request_id,**kwargs)

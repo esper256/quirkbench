@@ -91,8 +91,8 @@ def _snapshot(root, *, tls_inspector=None):
 def create_code(controller, name, request_id, *, ttl_seconds=300, ready=None, tls_inspector=None,
                 clock=time.time, fault_hook=None):
     from .maintenance import private_lock
-    from .controller_setup import _private_path
-    _private_path(controller.root)
+    from .controller_setup import _managed_path
+    _managed_path(controller.root)
     with private_lock(controller.root / 'command.lock', shared=True):
         return _create_code(controller,name,request_id,ttl_seconds=ttl_seconds,ready=ready,
                             tls_inspector=tls_inspector,clock=clock,fault_hook=fault_hook)
@@ -118,7 +118,7 @@ def _create_code(controller, name, request_id, *, ttl_seconds, ready, tls_inspec
     if type(ttl_seconds) is not int or not 60 <= ttl_seconds <= 900:
         raise ContractError('enrollment code lifetime must be 60 to 900 seconds')
     from .controller_service import require_ready
-    from .controller_setup import _durable_directory, _private_path
+    from .controller_setup import _durable_directory, _managed_path
     from .maintenance import private_lock
     (ready or require_ready)(controller.root)
     snapshot = _snapshot(controller.root, tls_inspector=tls_inspector)
@@ -129,7 +129,7 @@ def _create_code(controller, name, request_id, *, ttl_seconds, ready, tls_inspec
         retarget_scope=validate_scope(_document(canonical(retarget_scope)))
         intent={**intent,'kind':'retarget_enrollment_code','retarget_scope':retarget_scope}
     request_digest = digest(canonical(intent))
-    directory = _private_path(controller.root / 'private/enrollment/codes' / digest(request_id.encode()))
+    directory = _managed_path(controller.root / 'private/enrollment/codes' / digest(request_id.encode()))
     _durable_directory(directory)
     fault_hook = fault_hook or (lambda _: None)
     with private_lock(directory / 'issuance.lock'):

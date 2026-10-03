@@ -54,7 +54,7 @@ def test_clear_and_retry_require_fresh_verification_without_experiment_or_librar
     assert [call[2] for call in context.calls] == ['unset','list','unset','list']
 
 
-@pytest.mark.parametrize('change', ['absent','readonly','executable','wrong-device','subroot','wrong-fs','duplicate','nested','layout','relative','major-minor','public-mask','missing-mask','public-file-mask'])
+@pytest.mark.parametrize('change', ['absent','readonly','executable','wrong-device','subroot','wrong-fs','duplicate','nested','layout','relative','major-minor'])
 def test_bad_mounts_or_layout_never_invoke_grub(tmp_path, change):
     context=fixture(tmp_path); mounts=context.mounts
     if change=='absent': mounts=''
@@ -66,16 +66,13 @@ def test_bad_mounts_or_layout_never_invoke_grub(tmp_path, change):
     elif change=='duplicate': mounts+=mounts
     elif change=='nested': mounts+=f'2 1 0:8 / {context.env.parent} rw - ext4 {context.layout.partitions[0].path} rw\n'
     elif change=='major-minor': mounts=mounts.replace(f'{context.layout.partitions[2].major_minor[0]}:{context.layout.partitions[2].major_minor[1]}','9:9')
-    elif change=='public-mask': mounts=mounts.replace('umask=0077','umask=0022')
-    elif change=='missing-mask': mounts=mounts.replace(',umask=0077','')
-    elif change=='public-file-mask': mounts=mounts.replace('umask=0077','dmask=0077,fmask=0022')
     elif change=='layout': context.layout.partitions.pop()
     elif change=='relative': context.state=Path('relative-state')
     with pytest.raises(BootError): clear(context,mountinfo=mounts)
     assert not context.calls
 
 
-@pytest.mark.parametrize('change',['file-link','dir-link','hardlink','public-file','public-directory','short','fifo'])
+@pytest.mark.parametrize('change',['file-link','dir-link','hardlink','short','fifo'])
 def test_unsafe_state_never_mutates(tmp_path,change):
     context=fixture(tmp_path)
     if change=='file-link':
@@ -83,8 +80,6 @@ def test_unsafe_state_never_mutates(tmp_path,change):
     elif change=='dir-link':
         original=context.env.parent.with_name('original'); context.env.parent.rename(original);context.env.parent.symlink_to(original,target_is_directory=True)
     elif change=='hardlink': os.link(context.env,context.env.with_name('alias'))
-    elif change=='public-file':context.env.chmod(0o644)
-    elif change=='public-directory':context.env.parent.chmod(0o755)
     elif change=='short':context.env.write_bytes(b'bad')
     elif change=='fifo':context.env.unlink();os.mkfifo(context.env,0o600)
     with pytest.raises((BootError,OSError)):clear(context)

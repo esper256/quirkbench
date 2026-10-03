@@ -19,7 +19,6 @@ def setup(assembly_setup):
     # The adapter-only fixture creates intermediate parents with mkdir(parents).
     # A joined service fixture must explicitly satisfy the private worker-root
     # contract under either umask, rather than relying on a restrictive host.
-    (root/'workers').chmod(0o700);stage.parent.chmod(0o700)
     controller=Controller(root,reserve_bytes=0,boot_id_reader=lambda:BOOT)
     return controller,entry,value,builder,snapshot
 

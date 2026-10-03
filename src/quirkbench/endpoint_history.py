@@ -4,7 +4,7 @@ from pathlib import Path
 
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
 from .controller_endpoint import _strict_read
-from .controller_setup import _private_path
+from .controller_setup import _managed_path
 from .enrollment import _document
 
 MAX_HISTORY=32
@@ -89,8 +89,8 @@ def history(control,raw, *,extra=None,_home=None):
             raise Conflict('endpoint source predecessor reference changed')
         raw=previous;child=intent
     else:raise Conflict('endpoint selection history exceeds bounded limit')
-    requests=_private_path(home/'endpoint/requests');names=list(islice(requests.iterdir(),MAX_HISTORY+1))
-    if (len(names)>MAX_HISTORY or any(not _private_path(p).is_dir() for p in names)
+    requests=_managed_path(home/'endpoint/requests');names=list(islice(requests.iterdir(),MAX_HISTORY+1))
+    if (len(names)>MAX_HISTORY or any(not _managed_path(p).is_dir() for p in names)
             or {p.name for p in names}!=set(seen)|({extra.name} if extra is not None else set())):
         raise Conflict('ambiguous endpoint history has orphan or missing requests')
     return seen

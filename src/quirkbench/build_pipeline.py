@@ -613,9 +613,8 @@ def run_recovery_kernel_stage(build: KernelBuild, *, base_config: bytes,
         _safe_build_path(work_root)
         if (not work_root.is_dir() or work_root.is_symlink()
                 or work_root.resolve() != work_root
-                or work_root.stat().st_uid != os.getuid()
-                or work_root.stat().st_mode & 0o077):
-            raise BuildError("stable recovery Kbuild workspace must be private")
+                or work_root.stat().st_uid != os.getuid()):
+            raise BuildError("stable recovery Kbuild workspace must be owned and canonical")
     if (not stage.is_dir() or log_dir.parent != stage
             or build.source.parent != work_root or build.build_dir.parent != work_root
             or build.sysroot.parent != stage or build.output_dir.parent != stage):
@@ -1225,9 +1224,8 @@ class BuildPipeline:
                 if not self.resume_reconciled:
                     raise BuildError("uncertain experiment Kbuild workspace requires explicit worker reconciliation")
                 if (work.is_symlink() or not work.is_dir()
-                        or work.stat().st_uid != os.getuid()
-                        or work.stat().st_mode & 0o077):
-                    raise BuildError("interrupted experiment workspace is not private")
+                        or work.stat().st_uid != os.getuid()):
+                    raise BuildError("interrupted experiment workspace is linked, foreign or not a directory")
                 intent_path = work / "intent.json"
                 if (intent_path.is_symlink() or not intent_path.is_file()
                         or intent_path.stat().st_size > 64 * 1024):

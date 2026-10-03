@@ -51,12 +51,12 @@ def prepare(root, runtime, archive, request_id, *, config_home=None, release_ins
             which=None):
     """Admit promptly; the lifecycle owns hashing, retention and native import."""
     from .controller_service import require_ready, configuration
-    from .controller_setup import _database_present, _private_path
+    from .controller_setup import _database_present, _managed_path
     from .controller import Controller
     from .installed_release import inspect_selected
     from .maintenance import private_lock
     from .job_operations import envelope
-    root = _private_path(root)
+    root = _managed_path(root)
     if not _database_present(root):
         raise ContractError('complete controller setup before builder preparation')
     (ready or require_ready)(root)

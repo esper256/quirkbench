@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import tempfile
 from .contracts import Artifact, Conflict, ContractError, canonical, digest, identifier, sha256
 
@@ -23,10 +24,15 @@ def sync_directory(path: Path):
 
 def atomic_write(path: Path, data: bytes):
     path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        existing = path.lstat()
+        mode = stat.S_IMODE(existing.st_mode) if stat.S_ISREG(existing.st_mode) else 0o600
+    except FileNotFoundError:
+        mode = 0o600
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix='.pending-')
     try:
         with os.fdopen(fd, 'wb') as handle:
-            os.fchmod(handle.fileno(), 0o600)
+            os.fchmod(handle.fileno(), mode)
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
@@ -50,7 +56,6 @@ class ArtifactStore:
     def lock(self):
         fd = os.open(self.root / 'store.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, 'a+b') as handle:
-            os.fchmod(handle.fileno(),0o600)
             fcntl.flock(handle, fcntl.LOCK_EX)
             yield
 

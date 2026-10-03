@@ -3,7 +3,7 @@ from pathlib import Path
 import ssl
 
 from .contracts import Conflict,digest,identifier
-from .controller_setup import _private_path,_database_present
+from .controller_setup import _managed_path,_database_present
 from .controller_endpoint import _strict_read,stage_identity,renew_expired_identity
 from .controller_service import configuration
 from .controller_tls import load_identity
@@ -13,14 +13,14 @@ from .setup_contracts import SetupUnavailable
 
 
 def show(root,request_id=None):
-    root=_private_path(root)
+    root=_managed_path(root)
     if not _database_present(root):raise SetupUnavailable('run controller setup before endpoint maintenance')
     config_raw=_strict_read(root/'private','controller-service.json');config=configuration(root)
     if config!=_document(config_raw):raise Conflict('controller endpoint configuration changed during observation')
     if request_id is not None:
-        identifier(request_id);directory=_private_path(root/'private/controller-tls'/('endpoint-'+digest(request_id.encode())[:32]))
+        identifier(request_id);directory=_managed_path(root/'private/controller-tls'/('endpoint-'+digest(request_id.encode())[:32]))
     else:
-        directory=_private_path(Path(config['cert']).parent)
+        directory=_managed_path(Path(config['cert']).parent)
         if directory.parent!=root/'private/controller-tls' or Path(config['cert'])!=directory/'controller.crt' or Path(config['key'])!=directory/'controller.key':
             raise Conflict('endpoint maintenance requires the currently configured managed TLS identity')
     raw=_strict_read(directory,'identity.json');identity=load_identity(raw)

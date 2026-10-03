@@ -563,6 +563,12 @@ class Controller(OperatorApprovals):
         self.db_path = self.root / 'controller.sqlite'
         with (self.root / 'migration.lock').open('a+b') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                fd = os.open(self.db_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                pass
+            else:
+                os.close(fd)
             with closing(self._connect()) as db, db:
                 version = db.execute('PRAGMA user_version').fetchone()[0]
                 if version > len(MIGRATIONS):
@@ -590,7 +596,6 @@ class Controller(OperatorApprovals):
                     if upgrade_fd is not None:
                         fcntl.flock(upgrade_fd, fcntl.LOCK_UN)
                         os.close(upgrade_fd)
-        os.chmod(self.db_path, 0o600)
         sync_directory(self.root)
 
     def _connect(self):

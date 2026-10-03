@@ -332,7 +332,8 @@ def _main(argv=None, *, locks):
             raise OSError('target control directory must not traverse symlinks')
         verify()
         CONTROL.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(CONTROL, 0o700)
+        from .provisioning import require_control_access
+        require_control_access(CONTROL)
     except (OSError, ContractError):
         recover('Target control storage unavailable.', mode=mode)
         return 1

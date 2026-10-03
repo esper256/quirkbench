@@ -10,7 +10,7 @@ import time
 from .binding import read_system_uuid,verify_binding
 from .boot import clear_once
 from .contracts import Conflict,ContractError,Result,canonical,digest,identifier,sha256
-from .controller_setup import _private_path,_durable_directory
+from .controller_setup import _managed_path,_durable_directory
 from .controller_tls import _read
 from .enrollment import LIMIT,_document
 from .enrollment_target import _storage
@@ -53,10 +53,10 @@ def _source(control,binding_reader):
         if path.exists() or path.is_symlink():captured[name]=_read(path.parent,path.name)
     journal=control/'agent/journal.json'
     if journal.exists() or journal.is_symlink():
-        _private_path(journal.parent)
+        _managed_path(journal.parent)
         info=journal.lstat()
-        if not stat.S_ISREG(info.st_mode) or info.st_uid!=os.geteuid() or stat.S_IMODE(info.st_mode)!=0o600:
-            raise ContractError('shutdown journal must be a private regular file')
+        if not stat.S_ISREG(info.st_mode) or info.st_uid!=os.geteuid():
+            raise ContractError('shutdown journal must be an owned regular file')
         captured['agent/journal.json']=read_file(journal.parent,journal.name,limit=4*1024**2)
     if 'runtime.json' in captured:
         runtime=_existing_json(captured['runtime.json'])
@@ -69,7 +69,7 @@ def _source(control,binding_reader):
         for name in names:
             path=Path(name)
             if path.is_absolute() or '..' in path.parts or str(path)!=name:raise ContractError('shutdown requires private runtime inputs beneath evidence/control')
-            path=control/path;_private_path(path.parent);captured[name]=_read(path.parent,path.name)
+            path=control/path;_managed_path(path.parent);captured[name]=_read(path.parent,path.name)
         if 'media-instance.json' in captured:
             media=_document(captured['media-instance.json'])
             if not isinstance(media,dict) or set(media)!={'schema_version','media_instance_id'} or type(media['schema_version']) is not int or media['schema_version']!=1:
@@ -165,7 +165,7 @@ def retain(control,config,request, *,verify_target,binding_reader=read_system_uu
         if any(previous[key]!=value[key] for key in value if key not in ('completed_steps','preparation','local_attended')):
             raise Conflict('existing shutdown fence requires its exact request/current boot or explicit local cancellation')
         return previous
-    directory=_private_path(_path(control,request));_durable_directory(directory)
+    directory=_managed_path(_path(control,request));_durable_directory(directory)
     path=directory/'journal.json'
     if (directory/'cancelled.json').exists() or (directory/'cancelled.json').is_symlink():
         raise Conflict('shutdown request is cancelled; use a new explicit identity')
@@ -216,7 +216,7 @@ def _stop(run,cgroup_root):
 
 
 def _sealed(control,verify,deadline,clock):
-    agent=_private_path(control/'agent');path=agent/'journal.json'
+    agent=_managed_path(control/'agent');path=agent/'journal.json'
     if not path.exists() and not path.is_symlink():return digest(b''),0,0,0,{}
     raw=read_file(agent,'journal.json',limit=4*1024**2);journal=_existing_json(raw)
     if (not isinstance(journal,dict) or set(journal)!={'schema_version','device_id','pending','claim_request_id'}
@@ -281,7 +281,7 @@ def execute(control,config,request, *,verify_target,binding_reader=read_system_u
         result=native(argv,check=False,capture_output=True,text=True,timeout=15)
         if result.returncode:raise Conflict('shutdown native clearance failed')
         return result.stdout
-    agent=_private_path(control/'agent');_durable_directory(agent)
+    agent=_managed_path(control/'agent');_durable_directory(agent)
     with private_lock(control/'runtime-config.lock') as config_fd,private_lock(agent/'agent.lock') as agent_fd:
         saved=pending(control)
         if saved is None:saved=retain(control,config,request,verify_target=verify,binding_reader=binding_reader,boot_reader=boot_reader)

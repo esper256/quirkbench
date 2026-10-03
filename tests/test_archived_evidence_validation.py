@@ -53,7 +53,7 @@ def test_export_drain_replay_do_not_reconstruct_inside_individual_source_reads(m
     print('archived validation counts (export, drain, replay): '+json.dumps(phases,sort_keys=True))
 
 
-@pytest.mark.parametrize('mutation',['old-key','new-bundle','journal-mode','journal-link'])
+@pytest.mark.parametrize('mutation',['old-key','new-bundle','journal-link'])
 def test_last_native_capture_callback_cannot_change_private_source_or_current_completion(moved,monkeypatch,mutation):
     control=moved[0][1];prepare(moved);receipt=activate(moved);old=Path(receipt['original_archive'])
     directory=retarget_local._location(control,'retarget-1');source=json.loads((directory/'source.json').read_bytes())
@@ -65,7 +65,6 @@ def test_last_native_capture_callback_cannot_change_private_source_or_current_co
             if calls[0]==final and not changed[0]:
                 if mutation=='old-key':atomic_write(old/'enrollment-pending/key.pem',b'changed original key')
                 elif mutation=='new-bundle':atomic_write(directory/'enrollment/pending/activation-bundle/device.token',b'changed new credential')
-                elif mutation=='journal-mode':(old/'agent/journal.json').chmod(0o644)
                 else:os.link(old/'agent/journal.json',old/'agent/journal-alias')
                 changed[0]=True
         return native_capture(control,intent,guarded,**kw)

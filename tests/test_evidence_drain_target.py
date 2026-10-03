@@ -95,7 +95,7 @@ def test_scoped_batch_preserves_original_pending_result_and_repairs_lost_ack(spo
         with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM evidence WHERE attempt=?',(attempt['attempt_id'],)).fetchone()[0]==2
 
 
-@pytest.mark.parametrize('change',['missing-journal','wrong-device','wrong-boot','wrong-result','wrong-runtime','wrong-media','corrupt-blob','linked-blob','public-journal','moved-binding','nested-mount'])
+@pytest.mark.parametrize('change',['missing-journal','wrong-device','wrong-boot','wrong-result','wrong-runtime','wrong-media','corrupt-blob','linked-blob','moved-binding','nested-mount'])
 def test_changed_source_or_storage_never_initializes_or_uploads(spool,change,monkeypatch):
     c,control,result,attempt,agent=spool;plan,credential,grant=staged(spool);options={}
     if change=='missing-journal':agent.journal_path.unlink()
@@ -111,7 +111,6 @@ def test_changed_source_or_storage_never_initializes_or_uploads(spool,change,mon
         blob=agent.blob_dir/plan['plan']['evidence'][0]['sha256']
         if change=='corrupt-blob':blob.write_bytes(b'x'*blob.stat().st_size)
         else:blob.unlink();blob.symlink_to(agent.journal_path)
-    elif change=='public-journal':agent.journal_path.chmod(0o644)
     elif change=='moved-binding':options['binding_reader']=lambda:'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
     else:monkeypatch.setattr('quirkbench.enrollment_target.nested_mounts',lambda path:[str(control/'agent/blobs')])
     calls=[]

@@ -10,7 +10,7 @@ import time
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
 from .controller_endpoint import _strict_read
-from .controller_setup import _private_path
+from .controller_setup import _managed_path
 from .enrollment import _document
 from .enrollment_activation import _bundle
 from .enrollment_proof import validate_request
@@ -47,7 +47,7 @@ def _selection(activation):
 
 
 def _original_bundle(control,original, *,_pending=None,_reference=None):
-    pending=_private_path(_pending if _pending is not None else control/'enrollment/pending');bundle=_private_path(pending/'activation-bundle')
+    pending=_managed_path(_pending if _pending is not None else control/'enrollment/pending');bundle=_managed_path(pending/'activation-bundle')
     retained={name:_strict_read(pending,name) for name in ('request.json','result.json','key.pem')}
     request=validate_request(_document(retained['request.json']));result=validate_result(_document(retained['result.json']),request)
     enrolled=_bundle(result,request,retained['key.pem'])
@@ -182,14 +182,14 @@ def _records(control,request_id):
 
 
 def _journal(control,device_id):
-    """Existing private stable 4 MiB journal policy; no blob traversal."""
+    """Existing stable 4 MiB journal policy; no blob traversal."""
     from .product_contracts import _pairs,_depth
-    agent=_private_path(control/'agent')
-    if not agent.is_dir() or not _private_path(agent/'blobs').is_dir():raise Conflict('endpoint original spool is missing')
+    agent=_managed_path(control/'agent')
+    if not agent.is_dir() or not _managed_path(agent/'blobs').is_dir():raise Conflict('endpoint original spool is missing')
     _strict_read(agent,'agent.lock')
     path=agent/'journal.json';before=path.lstat()
-    if (not stat.S_ISREG(before.st_mode) or stat.S_IMODE(before.st_mode)!=0o600
-            or before.st_uid!=os.geteuid() or before.st_nlink!=1):raise ContractError('endpoint journal must remain private and single-link')
+    if (not stat.S_ISREG(before.st_mode)
+            or before.st_uid!=os.geteuid() or before.st_nlink!=1):raise ContractError('endpoint journal must remain owned and single-link')
     raw=read_file(agent,'journal.json',limit=4*1024**2);after=path.lstat()
     signature=lambda info:(info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
     if signature(before)!=signature(after):raise Conflict('endpoint journal changed during observation')
@@ -254,7 +254,7 @@ def activate(control,config,request_id, *,verify_target,binding_reader=read_syst
     if (control/'endpoint/active.json').exists():
         pointer=_document(_strict_read(control/'endpoint','active.json'))
         if pointer.get('schema_version')==2:
-            agent=_private_path(control/'agent');_strict_read(agent,'agent.lock');_strict_read(control,'runtime-config.lock')
+            agent=_managed_path(control/'agent');_strict_read(agent,'agent.lock');_strict_read(control,'runtime-config.lock')
             with private_lock(control/'runtime-config.lock') as config_fd,private_lock(agent/'agent.lock') as agent_fd:
                 from .shutdown_local import require_available
                 require_available(control)
