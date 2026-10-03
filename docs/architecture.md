@@ -2,6 +2,31 @@
 
 This repository is a local, evidence-first laboratory for Linux experiments. The controller owns scheduling and durable state. A booted target reports capabilities, claims one bounded attempt, runs a locally installed recipe and uploads observations. The physical runtime and OSTree boot control are implemented; actual target commissioning remains outstanding. Simulation `smoke` and physical `system-observation` recipes do not claim to reproduce an issue. The [roadmap](product-roadmap.md) specifies product scope and [GitHub tracker #29](https://github.com/esper256/quirkbench/issues/29) owns remaining integration work; planned extensions below are not current runtime guarantees.
 
+## Single-user installation
+
+Quirkbench is exclusively a single-user application. One person installs a
+per-user instance and uses it exclusively. A shared installation, multiple
+application users, tenants, accounts, roles, delegated administration, shared
+workspaces and collaboration/access-control features are out of scope, not
+requirements to anticipate.
+
+Controller, builder, target and coding agent are components acting for that one
+user, not separate application users. Multiple worker processes, investigations
+or targets do not imply multi-user support. Worker ownership means coordination
+and restart fencing within the user's installation, not isolation between users.
+
+Rely on the host OS for the user's account boundary. Do not design against other
+local users or the installation owner as adversaries to justify application-wide
+permission enforcement. Keep ordinary secret hygiene, authenticated controller/
+target communication, explicit experiment approval, and prevention of accidental
+data loss or unintended writes. These serve the single user's workflow; they do
+not establish a multi-user authorization model.
+
+The [file-access policy](implementation-contracts.md#file-access-and-permission-policy)
+defines ordinary-data permissions and secret defaults. Existing blanket mode
+checks are implementation debt tracked in [#66](https://github.com/esper256/quirkbench/issues/66),
+not an expansion of this product scope.
+
 ## Forward product boundary
 
 Use [controller, target and builder](terminology.md) as distinct roles. The core
