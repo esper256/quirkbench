@@ -31,8 +31,7 @@
       "src/quirkbench/controller_tls.py",
       "tests/test_endpoint*",
       "tests/test_controller_tls.py",
-      "tests/test_controller_endpoint.py",
-      "tests/test_controller_tls.py"
+      "tests/test_controller_endpoint.py"
     ],
     "tests": [
       "tests/test_endpoint_probe.py",
@@ -40,7 +39,8 @@
       "tests/test_endpoint_history.py",
       "tests/test_endpoint_generation.py",
       "tests/test_endpoint_activation.py",
-      "tests/test_controller_endpoint.py"
+      "tests/test_controller_endpoint.py",
+      "tests/test_controller_tls.py"
     ]
   },
   "endpoint-retarget": {
@@ -53,6 +53,8 @@
     "tests": [
       "tests/test_retarget_endpoint.py",
       "tests/test_retarget_activation.py",
+      "tests/test_retarget_enrollment.py",
+      "tests/test_retarget_local.py",
       "tests/test_endpoint_retarget.py"
     ]
   },

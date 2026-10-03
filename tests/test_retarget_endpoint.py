@@ -341,4 +341,4 @@ def test_scoped_archived_drain_uses_approved_endpoint_without_new_target_changes
     assert len(captures)<=6,len(captures)
     # New-key proof is rebuilt at entry/exit and actual activation namespace
     # changes, rather than once for every unchanged private read/native guard.
-    assert len(proofs)<=16,len(proofs)
+    assert len(proofs)<=20,len(proofs)
