@@ -17,7 +17,8 @@ MAX_ARCHIVE_BYTES = 8 * 1024**3
 MAX_JSON_BYTES = 1024 * 1024
 
 
-def inspect_builder_archive(stream, expected_config: str, *, require_no_entrypoint=False, expected_manifest=None) -> None:
+def inspect_builder_archive(stream, expected_config: str, *, require_no_entrypoint=False, expected_manifest=None,
+                            verify=lambda:None, consume=lambda size:None) -> None:
     """Require the locked archive to contain exactly the expected OCI image.
 
     Layers are hashed as stored; the archive is never extracted or executed.
@@ -32,6 +33,7 @@ def inspect_builder_archive(stream, expected_config: str, *, require_no_entrypoi
             total = 0
             count = 0
             for member in archive:
+                verify()
                 count += 1
                 if count > MAX_MEMBERS:
                     raise BuildError('builder OCI archive member count is invalid')
@@ -54,6 +56,7 @@ def inspect_builder_archive(stream, expected_config: str, *, require_no_entrypoi
                 raise BuildError('builder OCI archive member count is invalid')
 
             def content(name, limit):
+                verify()
                 member = files.get(name)
                 if member is None or member.size > limit:
                     raise BuildError('builder OCI archive is missing a bounded member')
@@ -62,6 +65,7 @@ def inspect_builder_archive(stream, expected_config: str, *, require_no_entrypoi
                     raise BuildError('builder OCI archive member is unavailable')
                 with handle:
                     raw = handle.read(limit + 1)
+                consume(len(raw));verify()
                 if len(raw) != member.size:
                     raise BuildError('builder OCI archive member is truncated')
                 return raw
@@ -91,7 +95,11 @@ def inspect_builder_archive(stream, expected_config: str, *, require_no_entrypoi
                 count = 0
                 chunks = [] if size <= MAX_JSON_BYTES else None
                 with handle:
-                    while chunk := handle.read(1024 * 1024):
+                    while True:
+                        verify()
+                        chunk=handle.read(1024 * 1024)
+                        consume(len(chunk));verify()
+                        if not chunk:break
                         count += len(chunk)
                         if count > size:
                             raise BuildError('builder OCI archive blob exceeds descriptor size')

@@ -1,5 +1,11 @@
 # Quirkbench agent guide
 
+`quirkbench release-check DIRECTORY --inputs CAS_ROOT --trust-bundle TRUST_JSON
+[--baseline ID] [--timeout SECONDS] [--json]` checks a signed v2 release and exact
+selected input bytes read-only. Follow the [publication runbook](release-publication.md)
+for filenames, independent publisher trust and remaining operator gates. Exit 2
+may include an incomplete report; success grants no native or execution readiness.
+
 ## Current implemented commands
 
 External coding agents use the same shell interface and selected controller state.

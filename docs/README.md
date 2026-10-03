@@ -12,6 +12,7 @@ read-through. Superseded plans, run logs and investigation histories live in Git
 | Product scope and acceptance | [Roadmap](product-roadmap.md), [acceptance guide](installation-to-patch.md); task status lives in GitHub |
 | Implementation rules | Relevant [C0–C7 contract](implementation-contracts.md), [C8 interface](product-interface.md) |
 | Current installation and commands | [Controller installation](controller-installation.md), [agent guide](agent-guide.md) |
+| Signed release preparation and operator gates | [Publication preflight and runbook](release-publication.md) |
 | Controller deployment from a cloud container or Distrobox | [Choosing the controller host](controller-installation.md#choosing-the-controller-host) |
 | Recovery inputs, image production and manual target setup | [Acquisition](recovery-acquisition.md), [recovery operations](recovery-operations.md) |
 | Kernel builds and deployments | [Build and boot](build-and-boot.md), [builder environment](../environments/README.md) |

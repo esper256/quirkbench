@@ -8,6 +8,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import fcntl
 import hashlib
+import gzip
 import io
 import json
 import os
@@ -19,6 +20,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
+import zlib
 
 from .contracts import Conflict, ContractError, canonical
 from .controller_archive import MAX_PACKAGE_BYTES
@@ -63,17 +65,30 @@ def _lock(path):
         os.close(fd)
 
 
-def _verified_archive(archive, *, expected_archive_sha256=None, expected_version=None):
+def _verified_archive(archive, *, expected_archive_sha256=None, expected_version=None,
+                      verify=lambda:None, consume=lambda size:None):
+    try:
+        return _archive_payload(archive,expected_archive_sha256=expected_archive_sha256,
+            expected_version=expected_version,verify=verify,consume=consume)
+    except (tarfile.TarError,EOFError,gzip.BadGzipFile,zlib.error) as exc:
+        raise ContractError('controller archive format is malformed or truncated') from exc
+
+
+def _archive_payload(archive, *,expected_archive_sha256=None,expected_version=None,
+                     verify=lambda:None,consume=lambda size:None):
+    verify()
     path = Path(archive)
     if path.is_symlink() or not path.is_file() or path.stat().st_size > LIMIT:
         raise ContractError('controller archive must be a bounded regular file')
     raw = read_file(path.parent, path.name, limit=LIMIT)
+    consume(len(raw));verify()
     archive_digest = hashlib.sha256(raw).hexdigest()
     if expected_archive_sha256 is not None and archive_digest != expected_archive_sha256:
         raise ContractError('controller archive changed or differs from authenticated release identity')
     files = {}; modes = {}; total = 0; prefix = None
     with tarfile.open(fileobj=io.BytesIO(raw), mode='r:gz') as source:
         for member in source:
+            verify()
             name = PurePosixPath(member.name)
             if (not member.isfile() or name.is_absolute() or '..' in name.parts
                     or '\\' in member.name or len(name.parts) < 2
@@ -86,7 +101,13 @@ def _verified_archive(archive, *, expected_archive_sha256=None, expected_version
             total += member.size
             if member.size < 0 or total > MAX_PACKAGE_BYTES or len(files) >= 8192:
                 raise ContractError('controller archive exceeds expanded budget')
-            files[relative] = source.extractfile(member).read()
+            chunks=[]
+            with source.extractfile(member) as handle:
+                while True:
+                    verify();block=handle.read(1024**2);consume(len(block));verify()
+                    if not block:break
+                    chunks.append(block)
+            files[relative] = b''.join(chunks)
             modes[relative] = member.mode
     manifest = _json(files.get('controller-manifest.json', b'{}'))
     fields = {'schema_version','version','requires_python','qualified','signed','wheel_sha256','files'}
@@ -107,6 +128,7 @@ def _verified_archive(archive, *, expected_archive_sha256=None, expected_version
     if expected_version is not None and manifest['version'] != expected_version:
         raise ContractError('controller archive changed or differs from authenticated release version')
     for name, expected in manifest['files'].items():
+        verify()
         if hashlib.sha256(files[name]).hexdigest() != expected:
             raise ContractError('controller archive checksum mismatch')
         if modes[name] != (0o755 if name == 'install' or name.startswith('bin/') else 0o644):

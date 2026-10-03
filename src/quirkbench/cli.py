@@ -212,6 +212,12 @@ def parser():
     install.add_argument('--release-catalog', type=Path)
     install.add_argument('--release-recovery-manifest', type=Path)
     install.add_argument('--release-recovery-candidate', type=Path)
+    release_check=commands.add_parser('release-check',help='read-only signed publication/selected input closure checks; does not install or publish')
+    release_check.add_argument('directory',type=Path);release_check.add_argument('--inputs',type=Path,required=True,help='existing CAS root containing objects/SHA256')
+    release_check.add_argument('--trust-bundle',type=Path,required=True,help='independently provisioned publisher trust')
+    release_check.add_argument('--baseline',help='one exact supported identity; required for multiple catalog entries')
+    release_check.add_argument('--timeout',type=int,default=300,help='bounded inspection seconds, at most 600')
+    release_check.add_argument('--json',action='store_true')
     release = commands.add_parser('release-install', help='acquire and verify a signed controller; unavailable without independent publisher trust')
     release.add_argument('version')
     release.add_argument('--request-id', help='required with --json; human retries use release-VERSION')
@@ -617,6 +623,23 @@ def _main(argv=None):
             message=str(exc)[:512] if code!='INFRASTRUCTURE' else 'target setup unavailable; retry the retained request'
             if args.json:print(json.dumps(operation_response(data={'request_id':request_id},error={'code':code,'message':message,'retryable':status==5}),sort_keys=True))
             else:print(code+': '+message,file=sys.stderr)
+            return status
+    if args.command=='release-check':
+        from .release_plan import inspect
+        from .release_trust import ReleaseUnavailable
+        from .build import BuildError
+        from .operations import operation_response
+        from .state_reader import safe_text
+        try:
+            value=inspect(args.directory,args.inputs,trust_bundle=args.trust_bundle,baseline=args.baseline,timeout_s=args.timeout)
+            if args.json:print(json.dumps(operation_response(data=value),sort_keys=True))
+            else:print(safe_text(json.dumps(value,indent=2,sort_keys=True)))
+            return 0 if value['input_closure_complete'] else 2
+        except (OSError,ValueError,BuildError) as exc:
+            message=safe_text(str(exc))[:512]
+            code,status=(('UNAVAILABLE',4) if isinstance(exc,ReleaseUnavailable) else ('INVALID_INPUT',2) if isinstance(exc,ValueError) else ('INFRASTRUCTURE',5))
+            if args.json:print(json.dumps(operation_response(error={'code':code,'message':message,'retryable':status==5}),sort_keys=True))
+            else:print(message,file=sys.stderr)
             return status
     if args.command == 'release-install':
         from .release_install import acquire_install
@@ -1309,7 +1332,7 @@ def main(argv=None):
     """A publication barrier, not a scheduler; read-only commands do no housekeeping."""
     args=parser().parse_args(argv)
     readonly=(args.command in ('storage','experiment','build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
-                               'target','endpoint','target-service','serve-repository') or
+                               'target','endpoint','target-service','serve-repository','release-check') or
               (args.command=='campaign' and args.action=='status') or
               (args.command=='attempt' and args.action in ('status','show')) or
               (args.command=='investigation' and args.action in ('status','source','brief','baseline','context','history','recipes','proposal-schema','proposals','observations','observation','report')) or args.command=='evidence' or
