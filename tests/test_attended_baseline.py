@@ -188,3 +188,77 @@ def test_queries_are_readonly_and_approval_json_requires_retry_id(published,monk
     # Call the adapter before Controller construction; machine calls cannot infer a retry ID.
     args=cli.parser().parse_args(['attempt','approve',attempt,'--json'])
     with pytest.raises(ContractError,match='request-id'):views.decide(c.root,args)
+
+
+@pytest.mark.parametrize('lost',['evidence','completion'])
+def test_evidence_delays_and_lost_terminal_ack_keep_identity_without_execution_retry(published,monkeypatch,tmp_path,lost):
+    c,composition=published
+    baseline.admit(c,'investigation',composition,'baseline',ready=lambda _:None)
+    _,client,step,backend,boot=attended_lab(c,tmp_path)
+    step()
+    with c.transaction() as db:attempt=db.execute('SELECT id FROM attempts').fetchone()[0]
+    c.decide_attempt(attempt,'approved',request_id='approved');assert step()=='candidate_requested'
+    native=client.upload if lost=='evidence' else client.complete
+    def delay(*a,**kw):
+        if lost=='completion':native(*a,**kw)
+        raise ConnectionError('reply unavailable')
+    monkeypatch.setattr(client,'upload' if lost=='evidence' else 'complete',delay)
+    assert step('candidate','experiment')=='recovery_requested'
+    state=views.attempt(views.ApprovalReader(c.root),attempt)['data']
+    assert state['recovery']['returned'] is False
+    assert state['execution']['terminal_result'] is None if lost=='evidence' else state['evidence']['all_declared_acknowledged'] is True
+    monkeypatch.setattr(client,'upload' if lost=='evidence' else 'complete',native)
+    assert step('recovery')=='completed'
+    state=views.attempt(views.ApprovalReader(c.root),attempt)['data']
+    assert state['recovery']['returned'] is True and state['evidence']['all_declared_acknowledged'] is True
+    assert state['execution']['terminal_result']['outcome']=='PASS' and state['problem_reproduced'] is None
+    assert backend.calls==1 and boot.armed==[attempt]
+
+
+def test_baseline_receipt_sql_failure_atomicity_and_request_namespace(published,monkeypatch):
+    import sqlite3
+    c,composition=published
+    with c.transaction() as db:db.execute("CREATE TRIGGER fail_baseline BEFORE INSERT ON attended_baseline_commands BEGIN SELECT RAISE(ABORT,'receipt unavailable'); END")
+    with pytest.raises(sqlite3.IntegrityError):baseline.admit(c,'investigation',composition,'baseline',ready=lambda _:None)
+    with c.transaction() as db:
+        assert db.execute('SELECT COUNT(*) FROM experiments').fetchone()[0]==0
+        assert db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0]==0
+        db.execute('DROP TRIGGER fail_baseline')
+    accepted=baseline.admit(c,'investigation',composition,'baseline',ready=lambda _:None)
+    assert accepted['data']['job_ids']
+    with pytest.raises(Conflict):c.admit_operation('baseline','source_capture',{})
+    with pytest.raises(Conflict):baseline.admit(c,'investigation',composition,'joined-compose',ready=lambda _:None)
+    with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0]==1
+
+
+def test_lost_baseline_response_replays_after_restart_without_native_dependencies(published,monkeypatch,capsys):
+    c,composition=published
+    response=baseline.admit(c,'investigation',composition,'baseline',ready=lambda _:None)
+    c.startup()
+    def forbidden(*a,**kw):raise AssertionError('retry consulted present dependency or writer authority')
+    monkeypatch.setattr('quirkbench.controller.Controller.__init__',forbidden)
+    monkeypatch.setattr('quirkbench.ostree_repository.OstreeRepository.__init__',forbidden)
+    monkeypatch.setattr('quirkbench.controller_service.require_ready',forbidden)
+    args=cli.parser().parse_args(['investigation','submit-baseline','investigation','--compose',composition,'--request-id','baseline','--json'])
+    assert baseline.execute(c.root,args)==response
+    with c.transaction() as db:
+        assert db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0]==1
+        assert db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0]==0
+
+
+def test_human_retry_binding_and_legacy_explicit_output(published,capsys,tmp_path):
+    c,composition=published
+    baseline.admit(c,'investigation',composition,'baseline',ready=lambda _:None)
+    _,_,step,_,boot=attended_lab(c,tmp_path);step()
+    with c.transaction() as db:attempt=db.execute('SELECT id FROM attempts').fetchone()[0]
+    argv=['--state',str(c.root),'--reserve-gib','0','attempt','approve',attempt,'--request-id','legacy-approve']
+    assert cli.main(argv)==0
+    original=json.loads(capsys.readouterr().out)
+    assert original==c.decide_attempt(attempt,'approved',request_id='legacy-approve')
+    assert cli.main(argv)==0 and json.loads(capsys.readouterr().out)==original
+    assert cli.main(argv+['--json'])==0
+    machine=json.loads(capsys.readouterr().out)
+    assert machine['data']['decision']==original and machine['data']['request_id']=='legacy-approve'
+    c.startup()
+    assert cli.main(['--state',str(c.root),'attempt','approve',attempt])==3
+    assert boot.armed==[]
