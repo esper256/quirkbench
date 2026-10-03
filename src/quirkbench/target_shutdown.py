@@ -56,6 +56,9 @@ def validate_preparation(value):
     for key in ('sealed_records','pending_upload_records','pending_upload_bytes'):
         if type(value[key]) is not int or not 0<=value[key]<=2**63-1:raise ContractError('invalid shutdown evidence count')
     if value['pending_upload_records']>value['sealed_records']:raise ContractError('upload backlog exceeds sealed evidence')
+    if (value['sealed_records']>8192 or value['pending_upload_bytes']>8192*128*1024**2
+            or value['pending_upload_records']==0 and value['pending_upload_bytes']!=0):
+        raise ContractError('shutdown evidence inventory exceeds local bounds')
     return value
 
 
@@ -84,6 +87,13 @@ def validate_public(value):
         intent=validate_intent(value['intent'])
         if intent['request_id']!=value['request_id']:raise Conflict('shutdown receipt request differs')
     if 'state' in value and value['state'] not in ('REQUESTED','DELIVERED','PREPARED','SUPERSEDED'):raise ContractError('invalid shutdown state')
+    if 'state' in value:
+        if value['admission_stopped']!=(value['state']!='SUPERSEDED'):raise Conflict('shutdown status admission differs from state')
+        if (value['state']=='PREPARED' and value['preparation'] is None
+                or value['state'] in ('REQUESTED','DELIVERED') and value['preparation'] is not None):
+            raise Conflict('shutdown status preparation differs from state')
+    if value['record_type']=='target-shutdown-request' and value['admission_stopped'] is not True:
+        raise ContractError('shutdown request must retain admission fence')
     if value.get('preparation') is not None:
         preparation=validate_preparation(value['preparation'])
         if (preparation['request_id']!=value['request_id'] or preparation['boot_id']!=value['intent']['boot_id']
@@ -111,6 +121,8 @@ def request(root,target,request_id, *,replace=None):
             if old:
                 if old['request_digest']!=digest(raw) or old['target']!=target:raise Conflict('shutdown request has different original choices')
                 return validate_public(_document(old['receipt'].encode()))
+            from .attended_baseline import check_request
+            check_request(db,request_id,'target_shutdown_requests')
             now=_now(c.clock)
             if now<db.execute('SELECT last_seen FROM enrollment_clock WHERE id=1').fetchone()[0]:raise Conflict('controller clock moved backwards')
             device,_,report_row,generation=resolve_target_identity(db,target)
@@ -188,7 +200,12 @@ def status(root,target):
     from .target_setup import resolve_target_identity
     reader=StateReader(root)
     with reader.connection() as db:
+        db.execute('BEGIN')
         device,_,report,generation=resolve_target_identity(db,identifier(target))
+        if db.execute('''SELECT 1 FROM target_shutdown_requests WHERE device=? AND
+                (length(CAST(intent AS BLOB))>16384 OR length(CAST(receipt AS BLOB))>16384
+                 OR length(CAST(preparation AS BLOB))>16384) LIMIT 1''',(device,)).fetchone():
+            raise ContractError('shutdown status exceeds bounded query input')
         row=db.execute("SELECT * FROM target_shutdown_requests WHERE device=? ORDER BY (state!='SUPERSEDED') DESC,rowid DESC LIMIT 1",(device,)).fetchone()
         if row is None:raise ContractError('no recorded shutdown request')
         intent=validate_intent(_document(row['intent'].encode()))

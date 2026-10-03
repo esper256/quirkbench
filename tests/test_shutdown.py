@@ -16,11 +16,11 @@ from quirkbench.contracts import CapabilityReport,Conflict,ContractError,Experim
 from quirkbench.credential_registry import CredentialRegistry,revoke_generation
 from quirkbench.maintenance import private_lock
 from quirkbench.store import atomic_write
-from quirkbench.target import TargetAgent
+from quirkbench.target import TargetAgent,RecipeOutput
 from quirkbench.transport import HTTPSDeviceClient,LocalDeviceClient,TransportError,make_server
 from test_boot import CONFIG
 from quirkbench.boot import BootError
-from test_evidence_drain_target import spool,received,publication,bound,args,issuer,initialized,UUID
+from test_evidence_drain_target import spool as original_spool,received,publication,bound,args,issuer,initialized,UUID
 from test_one_shot_clearance import fixture as boot_fixture,clear as boot_clear
 from test_runtime import setup_main
 
@@ -30,9 +30,11 @@ class NativeCommands:
     def __init__(self):self.calls=[];self.fail=None;self.kill_mode='control-group';self.pid='0';self.state='inactive'
     def __call__(self,argv,**kwargs):
         self.calls.append(argv)
-        assert 0<kwargs['timeout']<=45 and kwargs['check'] is False
+        assert 0<kwargs['timeout']<=45
+        assert kwargs['check'] is False or (argv[0]=='identity-readback' and kwargs['check'] is True)
         action=argv[1] if argv[0]=='systemctl' else argv[0]
-        output=f'ActiveState={self.state}\nMainPID={self.pid}\nKillMode={self.kill_mode}\n' if action=='show' else ''
+        group='/system.slice/'+local.UNIT if self.state=='active' else ''
+        output=f'LoadState=loaded\nActiveState={self.state}\nMainPID={self.pid}\nKillMode={self.kill_mode}\nControlGroup={group}\nJob=0\n' if action=='show' else ''
         return subprocess.CompletedProcess(argv,1 if action==self.fail else 0,stdout=output)
     @property
     def powered(self):return ['systemctl','poweroff'] in self.calls
@@ -42,6 +44,16 @@ def execute(control,request='shutdown',**kwargs):
     return local.execute(control,CONFIG,request,verify_target=kwargs.pop('verify_target',lambda:True),
         binding_reader=kwargs.pop('binding_reader',lambda:UUID),boot_reader=kwargs.pop('boot_reader',lambda:'original-boot'),
         clearer=kwargs.pop('clearer',lambda config:None),**kwargs)
+
+
+@pytest.fixture
+def spool(original_spool):
+    # Existing drain fixtures deliberately retain arbitrary historical results.
+    # Shutdown instead joins the actual final result producer to its sealed chunks.
+    c,control,result,attempt,agent=original_spool
+    pending=agent._journal['pending'];pending['experiment']=attempt['experiment']
+    agent._record_output(pending,RecipeOutput('INCONCLUSIVE','Original observation retained'))
+    return original_spool
 
 
 @pytest.fixture
@@ -135,7 +147,7 @@ def test_shutdown_waits_for_whole_worker_stop_and_blocks_new_device_only_claims(
         assert remote.delivery(c,report.device_id,report.boot_id,result['device_token'])['execution_authorized']
         queued=c.admit_operation('another-worker','image_prepare',{},device_id=report.device_id)
         with pytest.raises(Conflict,match='shutdown'):owner.claim(queued['id'],stage='recovery_rootfs',deadline=c.clock()+30)
-        assert c.operation_status(queued['id'])['state']=='QUEUED'
+        assert c.operation_status(queued['id'])['data']['state']=='QUEUED'
 
 
 def test_cancelled_controller_request_keeps_campaign_paused_and_never_clears_local_fence(paired):
@@ -311,14 +323,14 @@ def test_shutdown_cli_requires_exact_mutation_identity_and_readonly_status(paire
 def test_journal_publication_loss_retries_exact_intent_without_overwrite(spool,monkeypatch):
     control=spool[1];write=local.atomic_write;failed=[False]
     def lost(path,raw):
-        if path==control/'shutdown/active.json' and not failed[0]:
+        if path==local._path(control,'shutdown')/'journal.json' and not failed[0]:
             failed[0]=True;raise KeyboardInterrupt()
         return write(path,raw)
     monkeypatch.setattr(local,'atomic_write',lost)
     with pytest.raises(KeyboardInterrupt):local.retain(control,CONFIG,'shutdown',verify_target=lambda:True,
         binding_reader=lambda:UUID,boot_reader=lambda:'original-boot')
-    journal=local._path(control,'shutdown')/'journal.json';before=journal.read_bytes()
-    assert local.pending(control) is None
+    journal=control/'shutdown/active.json';before=journal.read_bytes()
+    assert local.pending(control) and spool[-1].step()=='shutdown_pending'
     answer=local.retain(control,CONFIG,'shutdown',verify_target=lambda:True,binding_reader=lambda:UUID,boot_reader=lambda:'original-boot')
     assert local.pending(control)==answer and journal.read_bytes()==before
 
@@ -326,10 +338,10 @@ def test_journal_publication_loss_retries_exact_intent_without_overwrite(spool,m
 def test_self_owned_supervisor_never_stops_its_own_unit_and_requires_native_owner(spool,monkeypatch):
     native=NativeCommands();native.state='active';native.pid=str(os.getpid());read=Path.read_text
     monkeypatch.setattr(Path,'read_text',lambda path,*a,**kw:'0::/system.slice/'+local.UNIT+'\n' if str(path)=='/proc/self/cgroup' else read(path,*a,**kw))
-    assert execute(spool[1],run=native,self_owned=True)['poweroff_requested']
+    assert execute(spool[1],run=native,self_owned=True,pulse=lambda:None)['poweroff_requested']
     assert ['systemctl','stop',local.UNIT] not in native.calls
     native.calls.clear();native.pid='1'
-    with pytest.raises(Conflict,match='owner'):execute(spool[1],run=native,self_owned=True)
+    with pytest.raises(Conflict,match='owner'):execute(spool[1],run=native,self_owned=True,pulse=lambda:None)
     assert not native.powered
 
 
@@ -357,3 +369,92 @@ def test_console_shutdown_action_is_verified_and_physical_success_stays_unknown(
     run_console(boot_record=tmp_path/'missing',input_stream=io.StringIO('10\n'),output_stream=output,profiles_ready=lambda:False,
         run_shutdown=requested,system_uuid_reader=lambda:UUID)
     assert len(calls)==1
+
+
+def test_shared_retry_namespace_refuses_both_operation_and_shutdown_collisions(paired):
+    c,control,result,report=paired
+    operation=c.admit_operation('operation-owned','image_prepare',{})
+    with pytest.raises(Conflict,match='another command'):remote.request(c.root,report.device_id,'operation-owned')
+    first=remote.request(c.root,report.device_id,'shutdown-owned')
+    with pytest.raises(Conflict,match='another command'):c.admit_operation('shutdown-owned','image_prepare',{})
+    assert remote.request(c.root,report.device_id,'shutdown-owned')==first
+    assert c.admit_operation('operation-owned','image_prepare',{})['id']==operation['id']
+
+
+@pytest.mark.parametrize('change',['missing','extra','reordered','duplicate'])
+def test_result_inventory_mismatch_never_becomes_local_durability(spool,change):
+    control=spool[1];agent=spool[-1];journal=json.loads(agent.journal_path.read_bytes());evidence=journal['pending']['result']['evidence']
+    if change=='missing':journal['pending']['evidence']=[]
+    elif change=='extra':evidence.append('f'*64)
+    elif change=='reordered':evidence.reverse()
+    else:evidence.append(evidence[0])
+    atomic_write(agent.journal_path,canonical(journal));native=NativeCommands()
+    with pytest.raises(Conflict,match='inventory'):execute(control,run=native)
+    assert not native.powered and local.pending(control)['preparation'] is None
+
+
+def test_stopped_mainpid_with_remaining_child_is_not_stop_proof(spool,tmp_path):
+    root=tmp_path/'cgroups';root.mkdir();(root/'cgroup.controllers').write_text('cpu memory')
+    group=root/'system.slice'/local.UNIT;group.mkdir(parents=True);events=group/'cgroup.events';events.write_text('populated 1\n')
+    native=NativeCommands();run=native.__call__
+    def children(argv,**kwargs):
+        answer=run(argv,**kwargs)
+        if argv[:2]==['systemctl','show']:answer.stdout=answer.stdout.replace('ControlGroup=\n','ControlGroup=/system.slice/'+local.UNIT+'\n')
+        return answer
+    with pytest.raises(RuntimeError,match='descendants'):execute(spool[1],run=children,cgroup_root=root)
+    assert not native.powered and local.pending(spool[1]) is None
+    events.write_text('populated 0\n')
+    assert execute(spool[1],run=children,cgroup_root=root)['poweroff_requested']
+
+
+def test_self_owned_slow_native_wait_times_out_before_installed_watchdog(spool,monkeypatch):
+    from quirkbench.boot import install_runtime
+    native=NativeCommands();native.state='active';native.pid=str(os.getpid());read=Path.read_text;pulses=[]
+    monkeypatch.setattr(Path,'read_text',lambda path,*a,**kw:'0::/system.slice/'+local.UNIT+'\n' if str(path)=='/proc/self/cgroup' else read(path,*a,**kw))
+    image=spool[1].parent/'runtime-image';(image/'etc').mkdir(parents=True)
+    (image/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1\n')
+    install_runtime(image,CONFIG)
+    unit=(image/'etc/systemd/system'/local.UNIT).read_text()
+    assert 'WatchdogSec=30' in unit
+    def slow(argv,**kwargs):
+        if argv==['sync']:
+            assert kwargs['timeout']<=10;raise subprocess.TimeoutExpired(argv,kwargs['timeout'])
+        return native(argv,**kwargs)
+    with pytest.raises(subprocess.TimeoutExpired):execute(spool[1],run=slow,self_owned=True,pulse=lambda:pulses.append(True))
+    assert len(pulses)>=2 and not native.powered and local.pending(spool[1])
+
+
+def test_actual_runtime_loop_hands_off_shared_lock_to_same_owned_shutdown(paired,monkeypatch):
+    from quirkbench.watchdog import SupervisorMonitor
+    c,control,result,report=paired;native=NativeCommands();native.state='active';native.pid=str(os.getpid())
+    messages=[];supervisor=SupervisorMonitor(notify=messages.append);read=Path.read_text;contexts=[]
+    monkeypatch.setattr(Path,'read_text',lambda path,*a,**kw:'0::/system.slice/'+local.UNIT+'\n' if str(path)=='/proc/self/cgroup' else read(path,*a,**kw))
+    monkeypatch.setattr(runtime,'CONTROL',control);monkeypatch.setattr(runtime,'SupervisorMonitor',lambda:supervisor)
+    monkeypatch.setattr('quirkbench.binding.read_system_uuid',lambda:UUID)
+    def boot_context(*a,**kwargs):
+        contexts.append(kwargs)
+        def verify():
+            if kwargs.get('native_runner'):kwargs['native_runner'](('identity-readback','software-fixture'))
+            return True
+        return CONFIG,{'quirkbench.mode':'recovery'},verify
+    monkeypatch.setattr(runtime,'boot_context',boot_context)
+    monkeypatch.setattr(runtime.subprocess,'run',native)
+    class Client(LocalDeviceClient):
+        def register(self,report):return super().register(report)|{'shutdown_protocol':1}
+        def shutdown(self,boot):return remote.delivery(c,report.device_id,boot,result['device_token'])
+        def shutdown_prepared(self,boot,proof):return remote.prepared(c,report.device_id,boot,proof,result['device_token'])
+    client=Client(c,report.device_id)
+    agent=TargetAgent(client,control/'agent',report,shutdown_retain=lambda intent:local.retain(control,CONFIG,
+        intent['request_id'],verify_target=lambda:True,binding_reader=lambda:UUID,boot_reader=lambda:report.boot_id,controller_intent=intent))
+    monkeypatch.setattr(runtime,'create_agent',lambda *a,**kwargs:agent)
+    actual=local.execute
+    def same_executor(control,config,request,**kwargs):
+        assert kwargs['self_owned'] and callable(kwargs['pulse'])
+        return actual(control,config,request,**kwargs,run=native,clearer=lambda _:None,
+            binding_reader=lambda:UUID,boot_reader=lambda:report.boot_id)
+    monkeypatch.setattr(local,'execute',same_executor)
+    remote.request(c.root,report.device_id,'shutdown')
+    with c.lifecycle():assert runtime.main(['--once'])==0
+    assert native.powered and ['systemctl','stop',local.UNIT] not in native.calls
+    assert contexts[1]['native_runner'] and any('WATCHDOG=1' in item for item in messages)
+    assert remote.status(c.root,report.device_id)['state']=='PREPARED'

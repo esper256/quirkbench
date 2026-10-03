@@ -5,6 +5,12 @@ from .contracts import canonical,ContractError
 
 
 def facts(reader,name):
+    with reader.connection() as db:
+        if not db.in_transaction:db.execute('BEGIN')
+        return _facts(reader.on_connection(db),name)
+
+
+def _facts(reader,name):
     from .investigation_context import investigation
     from .target_setup import show_target
     value=investigation(reader,name);target=value['session']['device_id']
@@ -13,13 +19,19 @@ def facts(reader,name):
         workers=db.execute('SELECT COUNT(*) FROM operations WHERE campaign=? AND worker_unit IS NOT NULL',(name,)).fetchone()[0]
         unresolved=db.execute("SELECT COUNT(*) FROM attempts WHERE device=? AND (state IN ('CLAIMED','RUNNING','BOOT_PENDING','UNCERTAIN') OR (handoff_revision IS NOT NULL AND recovery_returned IS NULL))",(target,)).fetchone()[0]
         upload=db.execute("SELECT COUNT(*) FROM upload_owners WHERE state IN ('PENDING','COMPLETE') AND attempt IN (SELECT a.id FROM attempts a JOIN jobs j ON j.id=a.job WHERE j.campaign=?)",(name,)).fetchone()[0]
-        shutdown=(db.execute("SELECT request_id,state,preparation FROM target_shutdown_requests WHERE device=? AND state!='SUPERSEDED'",(target,)).fetchone()
+        shutdown=(db.execute("SELECT request_id,state,CASE WHEN length(CAST(preparation AS BLOB))<=16384 THEN preparation ELSE NULL END AS preparation,length(CAST(preparation AS BLOB)) AS preparation_bytes FROM target_shutdown_requests WHERE device=? AND state!='SUPERSEDED'",(target,)).fetchone()
             if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='target_shutdown_requests'").fetchone() else None)
         if shutdown:
+            if shutdown['preparation_bytes'] is not None and shutdown['preparation_bytes']>16384:raise ContractError('shutdown preparation exceeds query budget')
             from .target_shutdown import validate_preparation
             preparation=validate_preparation(json.loads(shutdown['preparation'])) if shutdown['preparation'] else None
             shutdown={'request_id':shutdown['request_id'],'state':shutdown['state'],'preparation':preparation}
-    status=show_target(reader.root,target,version=2,clock=reader.clock)
+        oversized=db.execute('''SELECT 1 FROM (SELECT length(CAST(q.document AS BLOB)) AS question_bytes,
+            length(CAST(r.document AS BLOB)) AS response_bytes FROM observation_requests q
+            LEFT JOIN observation_responses r ON r.request=q.id WHERE q.session=? AND q.campaign=?
+            ORDER BY q.seq LIMIT 11) WHERE question_bytes>65536 OR response_bytes>65536 LIMIT 1''',(name,name)).fetchone()
+        if oversized:raise ContractError('observation summary exceeds bounded query input')
+    status=show_target(reader.root,target,version=2,clock=reader.clock,reader=reader)
     observations=reader.list_observations(name,campaign_id=name,limit=10)
     pending=[{'cursor':item['cursor'],'state':item['state'],'request':{
         key:item['request'][key] for key in ('request_id','kind','deadline_at')}|

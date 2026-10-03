@@ -173,7 +173,7 @@ def verify_evidence_destination(layout, control=CONTROL):
         raise ContractError('target control storage is not on the mounted boot evidence partition')
 
 
-def boot_context(path=Path('/run/quirkbench-boot.json'), *, allow_library_maintenance=False):
+def boot_context(path=Path('/run/quirkbench-boot.json'), *, allow_library_maintenance=False,native_runner=None):
     path = Path(path)
     if not path.is_absolute() or path.resolve() != path or not path.is_file() or path.stat().st_size > 1024**2:
         raise ContractError('invalid verified boot context')
@@ -188,7 +188,8 @@ def boot_context(path=Path('/run/quirkbench-boot.json'), *, allow_library_mainte
                            config.state_partuuid, config.data_partuuid,
                            config.library_partuuid, config.evidence_partuuid))
     def verify():
-        layout=verify_boot_identity(expected, allow_data_mounted=True, mode=boot['quirkbench.mode'], allow_library_maintenance=allow_library_maintenance)
+        layout=verify_boot_identity(expected, allow_data_mounted=True, mode=boot['quirkbench.mode'], allow_library_maintenance=allow_library_maintenance,
+            **({'runner':native_runner} if native_runner is not None else {}))
         verify_evidence_destination(layout)
         return True
     verify()
@@ -390,10 +391,20 @@ def _main(argv=None, *, locks):
                     if configuration_lock is not None:
                         configuration_lock.close();configuration_lock=None
                     supervisor.begin('shutdown-preparation',800)
-                    def shutdown_verify():
-                        verify();supervisor.pulse(waiting=True)
                     try:
+                        def shutdown_command(argv):
+                            supervisor.pulse(waiting=True)
+                            try:
+                                result=subprocess.run(argv,check=True,capture_output=True,text=True,timeout=10)
+                                return result.stdout
+                            finally:supervisor.pulse(waiting=True)
+                        checked_config,checked_boot,checked_verify=boot_context(native_runner=shutdown_command)
+                        if checked_config!=config or checked_boot['quirkbench.mode']!='recovery':
+                            raise ContractError('shutdown current native recovery differs')
+                        def shutdown_verify():
+                            checked_verify();supervisor.pulse(waiting=True)
                         execute(CONTROL,config,saved['request_id'],verify_target=shutdown_verify,self_owned=True,
+                            pulse=lambda:supervisor.pulse(waiting=True),
                             acknowledge=lambda proof:target.client.shutdown_prepared(target.report.boot_id,proof))
                     except Exception as exc:
                         print('QUIRKBENCH shutdown blocked; retained local fence: '+type(exc).__name__,file=sys.stderr,flush=True)

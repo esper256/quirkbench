@@ -92,11 +92,12 @@ def validate_record(value):
     sha256(value['boot_config_sha256'])
     if not isinstance(value['source_sha256'],dict) or len(value['source_sha256'])>39:raise ContractError('invalid shutdown runtime snapshot')
     for name,identity in value['source_sha256'].items():
-        if not isinstance(name,str) or not 0<len(name)<=256 or Path(name).is_absolute() or '..' in Path(name).parts or str(Path(name))!=name:raise ContractError('invalid shutdown input name')
+        if not isinstance(name,str) or not 0<len(name)<=256 or name=='.' or Path(name).is_absolute() or '..' in Path(name).parts or str(Path(name))!=name:raise ContractError('invalid shutdown input name')
         sha256(identity)
     if value['controller_intent'] is not None:
         intent=validate_intent(value['controller_intent'])
         if intent['request_id']!=value['request_id'] or intent['boot_id']!=value['boot_id']:raise Conflict('local shutdown differs from delivered request/boot')
+    elif value['local_attended'] is not True:raise ContractError('local shutdown requires explicit attended authority')
     if value['completed_steps'] not in [list(STAGES[:n]) for n in range(1,len(STAGES)+1)]:raise ContractError('invalid shutdown progress')
     if value['preparation'] is not None:
         preparation=validate_preparation(value['preparation'])
@@ -107,14 +108,25 @@ def validate_record(value):
     return value
 
 
+def validate_cancelled(value):
+    fields={'schema_version','record_type','request_id','cancelled_on_boot','original_shutdown_sha256',
+        'controller_admission_released','physical_poweroff_verified'}
+    if (not isinstance(value,dict) or set(value)!=fields or type(value['schema_version']) is not int
+            or value['schema_version']!=1 or value['record_type']!='recovery-shutdown-cancellation'):
+        raise ContractError('invalid local shutdown cancellation history')
+    identifier(value['request_id']);identifier(value['cancelled_on_boot']);sha256(value['original_shutdown_sha256'])
+    if value['controller_admission_released'] is not False or value['physical_poweroff_verified'] is not False:
+        raise ContractError('local cancellation cannot clear controller admission or prove poweroff')
+    return value
+
+
 def pending(control):
     control=_private_path(Path(control));pointer=control/'shutdown/active.json'
     if not pointer.exists() and not pointer.is_symlink():return None
-    raw=_read(pointer.parent,pointer.name);value=_document(raw)
-    if not isinstance(value,dict) or set(value)!={'schema_version','request_id'} or type(value['schema_version']) is not int or value['schema_version']!=1:
-        raise ContractError('invalid shutdown writer fence')
-    saved=validate_record(_document(_read(_path(control,value['request_id']),'journal.json')))
-    if saved['request_id']!=value['request_id'] or saved['control_root']!=str(control):raise Conflict('shutdown fence identity differs')
+    # The complete continuation is itself the atomic authoritative writer fence.
+    # Optional history publication can fail without releasing restart admission.
+    saved=validate_record(_document(_read(pointer.parent,pointer.name)))
+    if saved['control_root']!=str(control):raise Conflict('shutdown fence identity differs')
     return saved
 
 
@@ -152,28 +164,50 @@ def retain(control,config,request, *,verify_target,binding_reader=read_system_uu
     path=directory/'journal.json'
     if (directory/'cancelled.json').exists() or (directory/'cancelled.json').is_symlink():
         raise Conflict('shutdown request is cancelled; use a new explicit identity')
-    if path.exists() or path.is_symlink():
-        # Recover a journal committed just before its writer-fence publication.
-        # A cancelled identity is never resurrected by an acknowledgment retry.
-        previous=validate_record(_document(_read(directory,'journal.json')))
-        if previous!=value:raise Conflict('shutdown request is historical; use a new explicit identity')
+    if path.exists() or path.is_symlink():raise Conflict('shutdown request is historical; use a new explicit identity')
     verify()
     if boot_reader()!=current_boot or _source(control,binding_reader)[0]!=captured:raise Conflict('shutdown source changed before intent publication')
-    if not path.exists():atomic_write(path,canonical(validate_record(value)))
-    atomic_write(control/'shutdown/active.json',canonical({'schema_version':1,'request_id':request}))
+    raw=canonical(validate_record(value))
+    atomic_write(control/'shutdown/active.json',raw)
+    atomic_write(path,raw)
     verify();return value
 
 
-def _service(run, *,self_owned):
-    result=run(['systemctl','show',UNIT,'--property=ActiveState','--property=MainPID','--property=KillMode'],check=False,capture_output=True,text=True,timeout=10)
+def _service(run, *,self_owned,before_stop=False,cgroup_root=Path('/sys/fs/cgroup')):
+    from .worker_service import verify_empty_cgroup
+    result=run(['systemctl','show',UNIT,*['--property='+name for name in ('LoadState','ActiveState','MainPID','KillMode','ControlGroup','Job')]],check=False,capture_output=True,text=True,timeout=10)
     if result.returncode or not isinstance(result.stdout,str) or len(result.stdout)>16384:raise Conflict('native supervisor state unavailable')
-    fields=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)
+    fields={}
+    for line in result.stdout.splitlines():
+        name,separator,value=line.partition('=')
+        if not separator or name in fields:raise Conflict('ambiguous native supervisor state')
+        fields[name]=value
+    if set(fields)!={'LoadState','ActiveState','MainPID','KillMode','ControlGroup','Job'} or fields['LoadState']!='loaded':
+        raise Conflict('native supervisor unit unavailable')
     if fields.get('KillMode')!='control-group':raise Conflict('supervisor must stop its whole native control group')
+    group=fields['ControlGroup']
+    if group and (not group.startswith('/') or not group.endswith('/'+UNIT)):
+        raise Conflict('supervisor control group differs from native unit')
     if self_owned:
         if fields.get('ActiveState')!='active' or fields.get('MainPID')!=str(os.getpid()):raise Conflict('shutdown executor is not the existing supervisor owner')
         if not any(line.startswith('0::') and line.endswith('/'+UNIT) for line in Path('/proc/self/cgroup').read_text().splitlines()):
             raise Conflict('shutdown supervisor is outside its native unit')
-    elif fields.get('ActiveState') not in ('inactive','failed') or fields.get('MainPID')!='0':raise Conflict('supervisor must be stopped before local shutdown')
+        if group not in [line[3:] for line in Path('/proc/self/cgroup').read_text().splitlines() if line.startswith('0::')]:
+            raise Conflict('supervisor control group differs from current owner')
+    elif not before_stop:
+        if fields['ActiveState'] not in ('inactive','failed') or fields['MainPID']!='0' or fields['Job'] not in ('','0'):
+            raise Conflict('supervisor must be stopped before local shutdown')
+        verify_empty_cgroup(cgroup_root,group)
+    return group
+
+
+def _stop(run,cgroup_root):
+    from .worker_service import verify_empty_cgroup
+    before=_service(run,self_owned=False,before_stop=True,cgroup_root=cgroup_root)
+    stopped=run(['systemctl','stop',UNIT],check=False,capture_output=True,timeout=45)
+    if stopped.returncode:raise Conflict('could not stop existing target supervisor; shutdown blocked')
+    _service(run,self_owned=False,cgroup_root=cgroup_root)
+    verify_empty_cgroup(cgroup_root,before)
 
 
 def _sealed(control,verify,deadline,clock):
@@ -194,6 +228,8 @@ def _sealed(control,verify,deadline,clock):
         if result.attempt_id!=pending_work.get('attempt_id'):raise Conflict('shutdown result differs from pending attempt')
         records=pending_work.get('evidence')
         if not isinstance(records,list) or len(records)>8192:raise ContractError('shutdown evidence inventory exceeds bound')
+        if result.evidence!=[item.get('sha256') if isinstance(item,dict) else None for item in records]:
+            raise Conflict('original result evidence differs from ordered sealed inventory')
     count=backlog=0;identities={}
     def identity(info):return (info.st_dev,info.st_ino,info.st_mode,info.st_uid,info.st_size,info.st_mtime_ns,info.st_ctime_ns,info.st_nlink)
     for index,item in enumerate(records):
@@ -222,13 +258,24 @@ def _sealed(control,verify,deadline,clock):
 
 
 def execute(control,config,request, *,verify_target,binding_reader=read_system_uuid,boot_reader=boot_id,
-            run=subprocess.run,clearer=clear_once,self_owned=False,acknowledge=None,fault_hook=None,clock=time.monotonic):
+            run=subprocess.run,clearer=clear_once,self_owned=False,acknowledge=None,fault_hook=None,clock=time.monotonic,
+            cgroup_root=Path('/sys/fs/cgroup'),pulse=None):
     """Caller selects stopped-external or verified-self owner; no automatic boot replay."""
     control,verify=_storage(Path(control),verify_target);fault=fault_hook or (lambda _:None)
     if not self_owned:
-        stopped=run(['systemctl','stop',UNIT],check=False,capture_output=True,timeout=45)
-        if stopped.returncode:raise Conflict('could not stop existing target supervisor; shutdown blocked')
-    _service(run,self_owned=self_owned)
+        _stop(run,cgroup_root)
+    elif pulse is None:raise Conflict('self-owned shutdown needs the existing supervisor heartbeat')
+    _service(run,self_owned=self_owned,cgroup_root=cgroup_root)
+    def native(argv,**kwargs):
+        if self_owned:
+            pulse();kwargs['timeout']=min(kwargs['timeout'],10)
+        try:return run(argv,**kwargs)
+        finally:
+            if self_owned:pulse()
+    def command(argv):
+        result=native(argv,check=False,capture_output=True,text=True,timeout=15)
+        if result.returncode:raise Conflict('shutdown native clearance failed')
+        return result.stdout
     agent=_private_path(control/'agent');_durable_directory(agent)
     with private_lock(control/'runtime-config.lock') as config_fd,private_lock(agent/'agent.lock') as agent_fd:
         saved=pending(control)
@@ -252,12 +299,18 @@ def execute(control,config,request, *,verify_target,binding_reader=read_system_u
             if stage not in saved['completed_steps']:
                 saved['completed_steps'].append(stage)
                 if preparation is not None:saved['preparation']=preparation
-                atomic_write(_path(control,request)/'journal.json',canonical(validate_record(saved)))
+                raw=canonical(validate_record(saved))
+                atomic_write(control/'shutdown/active.json',raw)
+                atomic_write(_path(control,request)/'journal.json',raw)
             fault(stage);fence()
         fence();fault('retained');fence()
         # Never infer clearance from retained progress: perform fresh native
         # identity/permission/environment readback on every explicit retry.
-        clearer(config);fence();completed('one_shot_cleared')
+        if clearer is clear_once:
+            from .commission import verify_boot_identity
+            clear_once(config,runner=command,identity_verifier=lambda expected,**kwargs:verify_boot_identity(expected,runner=command,**kwargs))
+        else:clearer(config)
+        fence();completed('one_shot_cleared')
         journal_sha,sealed,backlog,backlog_bytes,evidence_identities=_sealed(control,fence,clock()+120,clock);fence()
         intent=saved['controller_intent'] or {'request_id':request,'boot_id':saved['boot_id'],'control_root':str(control),'boot_config_sha256':saved['boot_config_sha256']}
         preparation=validate_preparation({'schema_version':1,'record_type':'target-shutdown-preparation','request_id':request,
@@ -271,16 +324,16 @@ def execute(control,config,request, *,verify_target,binding_reader=read_system_u
             answer=acknowledge(preparation);fence()
             if answer!={'request_id':request,'preparation_accepted':True,'physical_poweroff_verified':False,'safe_removal_verified':False}:
                 raise Conflict('controller preparation acknowledgment differs')
-        synced=run(['sync'],check=False,capture_output=True,timeout=45);fence()
+        synced=native(['sync'],check=False,capture_output=True,timeout=45);fence()
         if synced.returncode:raise Conflict('orderly shutdown sync failed; evidence remains retained')
         completed('poweroff_requested');fence()
-        result=run(['systemctl','poweroff'],check=False,capture_output=True,timeout=45)
+        result=native(['systemctl','poweroff'],check=False,capture_output=True,timeout=45)
         if result.returncode:raise Conflict('native poweroff request failed; explicit same-boot retry required')
         return {'preparation':preparation,'poweroff_requested':True,'physical_poweroff_verified':False,'safe_removal_verified':False}
 
 
 def attended(*,control=None,config=None,verify_target=None,input_stream=None,output_stream=None,
-             run=subprocess.run,clearer=clear_once,binding_reader=read_system_uuid,boot_reader=boot_id):
+             run=subprocess.run,clearer=clear_once,binding_reader=read_system_uuid,boot_reader=boot_id,cgroup_root=Path('/sys/fs/cgroup')):
     """Separate explicit local authority works offline; never infer it from contact loss."""
     import sys
     from .runtime import CONTROL,boot_context
@@ -298,31 +351,29 @@ def attended(*,control=None,config=None,verify_target=None,input_stream=None,out
     choice=source.readline().strip()
     if choice=='cancel '+request:
         if saved is None:raise Conflict('no local shutdown fence to cancel')
-        return cancel(control,config,request,verify_target=verify_target,run=run,clearer=clearer,boot_reader=boot_reader)
+        return cancel(control,config,request,verify_target=verify_target,run=run,clearer=clearer,boot_reader=boot_reader,cgroup_root=cgroup_root)
     if choice!='poweroff '+config.disk_guid:return {'cancelled':True,'poweroff_requested':False}
     if saved is not None and not saved['local_attended']:
         # The local operator is supplying independent authority, rather than
         # interpreting a failed controller exchange as approval.
-        stopped=run(['systemctl','stop',UNIT],check=False,capture_output=True,timeout=45)
-        if stopped.returncode:raise Conflict('could not stop supervisor for local shutdown decision')
-        _service(run,self_owned=False)
+        _stop(run,cgroup_root)
         with private_lock(control/'runtime-config.lock') as config_fd,private_lock(control/'agent/agent.lock') as agent_fd:
             _lock_identity(control,config_fd,agent_fd)
             if pending(control)!=saved:raise Conflict('shutdown fence changed before local confirmation')
             verify_target()
             if boot_reader()!=saved['boot_id']:raise Conflict('shutdown boot changed; explicitly cancel the historical local fence first')
-            saved['local_attended']=True;atomic_write(_path(control,request)/'journal.json',canonical(validate_record(saved)))
+            saved['local_attended']=True;raw=canonical(validate_record(saved))
+            atomic_write(control/'shutdown/active.json',raw)
+            atomic_write(_path(control,request)/'journal.json',raw)
             _lock_identity(control,config_fd,agent_fd)
     return execute(control,config,request,verify_target=verify_target,run=run,clearer=clearer,
-        binding_reader=binding_reader,boot_reader=boot_reader)
+        binding_reader=binding_reader,boot_reader=boot_reader,cgroup_root=cgroup_root)
 
 
-def cancel(control,config,request, *,verify_target,run=subprocess.run,clearer=clear_once,boot_reader=boot_id):
+def cancel(control,config,request, *,verify_target,run=subprocess.run,clearer=clear_once,boot_reader=boot_id,cgroup_root=Path('/sys/fs/cgroup')):
     """Remove only the local writer fence, preserving journal/evidence and controller facts."""
     control,verify=_storage(Path(control),verify_target)
-    stopped=run(['systemctl','stop',UNIT],check=False,capture_output=True,timeout=45)
-    if stopped.returncode:raise Conflict('stop supervisor before cancelling local shutdown')
-    _service(run,self_owned=False)
+    _stop(run,cgroup_root)
     with private_lock(control/'runtime-config.lock') as config_fd,private_lock(control/'agent/agent.lock') as agent_fd:
         _lock_identity(control,config_fd,agent_fd)
         saved=pending(control)
@@ -333,9 +384,10 @@ def cancel(control,config,request, *,verify_target,run=subprocess.run,clearer=cl
         verify();clearer(config);verify()
         _lock_identity(control,config_fd,agent_fd)
         if pending(control)!=saved or boot_reader()!=current:raise Conflict('local shutdown fence/boot changed during cancellation')
-        atomic_write(_path(control,request)/'cancelled.json',canonical({'schema_version':1,'request_id':request,
+        atomic_write(_path(control,request)/'journal.json',canonical(saved))
+        atomic_write(_path(control,request)/'cancelled.json',canonical(validate_cancelled({'schema_version':1,'record_type':'recovery-shutdown-cancellation','request_id':request,
             'cancelled_on_boot':current,'original_shutdown_sha256':digest(canonical(saved)),
-            'controller_admission_released':False,'physical_poweroff_verified':False}))
+            'controller_admission_released':False,'physical_poweroff_verified':False})))
         (control/'shutdown/active.json').unlink();sync_directory(control/'shutdown')
         return {'local_shutdown_cancelled':True,'request_id':request,'poweroff_requested':False,
             'controller_admission_released':False,'next_action':'Reconcile controller shutdown/work separately; explicitly start the target supervisor only when ready.'}

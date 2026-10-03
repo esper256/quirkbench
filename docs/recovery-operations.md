@@ -400,7 +400,13 @@ forced/lazy unmount, forced poweroff, new service or direct watchdog manipulatio
 
 A durable local shutdown fence blocks runtime startup before credentials/watchdog
 activation and blocks configuration/network maintenance and new target work. An
-interrupted preparation never automatically executes after reboot. On the same boot,
+atomic `shutdown/active.json` stores the complete authoritative continuation;
+per-request history is written afterward, so a failed history write cannot release
+restart admission. Native stopped-unit checks include empty descendant cgroups.
+Self-owned native calls have ten-second timeouts and feed the existing service
+heartbeat between calls, within the installed thirty-second watchdog interval.
+Original ordered result declarations must exactly match the verified sealed inventory.
+An interrupted preparation never automatically executes after reboot. On the same boot,
 choose console 10 and explicitly retry the exact request. A changed boot requires
 explicit local cancellation/reconciliation first. Type `cancel REQUEST_ID` at that
 console to remove only the local fence, retaining its history and evidence. Same-boot

@@ -56,7 +56,13 @@
             },
             "system_uuid": {
               "type": "string",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "not": {
+                "enum": [
+                  "00000000-0000-0000-0000-000000000000",
+                  "ffffffff-ffff-ffff-ffff-ffffffffffff"
+                ]
+              }
             }
           }
         }
@@ -112,17 +118,17 @@
         "sealed_records": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 9223372036854775807
+          "maximum": 8192
         },
         "pending_upload_records": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 9223372036854775807
+          "maximum": 8192
         },
         "pending_upload_bytes": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 9223372036854775807
+          "maximum": 1099511627776
         },
         "physical_poweroff_verified": {
           "const": false
@@ -130,7 +136,25 @@
         "safe_removal_verified": {
           "const": false
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "pending_upload_records": {
+                "const": 0
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "pending_upload_bytes": {
+                "const": 0
+              }
+            }
+          }
+        }
+      ]
     },
     "request": {
       "type": "object",
@@ -278,7 +302,67 @@
           "minLength": 1,
           "maxLength": 512
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "PREPARED"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "preparation": {
+                "$ref": "#/$defs/preparation"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "REQUESTED",
+                  "DELIVERED"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "preparation": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "SUPERSEDED"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "admission_stopped": {
+                "const": false
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "admission_stopped": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
     },
     "cancellation": {
       "type": "object",
@@ -356,7 +440,7 @@
         },
         "control_root": {
           "type": "string",
-          "pattern": "^/[^/].*",
+          "pattern": "^/(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$)).*[^/]$",
           "maxLength": 4096
         },
         "boot_id": {
@@ -374,7 +458,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 256,
-            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+            "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$)).*[^/]$"
           },
           "additionalProperties": {
             "type": "string",
@@ -450,8 +534,63 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "controller_intent": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "local_attended": {
+                "const": true
+              }
+            }
+          }
         }
       ]
+    },
+    "local_cancellation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_type",
+        "request_id",
+        "cancelled_on_boot",
+        "original_shutdown_sha256",
+        "controller_admission_released",
+        "physical_poweroff_verified"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "record_type": {
+          "const": "recovery-shutdown-cancellation"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "cancelled_on_boot": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "original_shutdown_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "controller_admission_released": {
+          "const": false
+        },
+        "physical_poweroff_verified": {
+          "const": false
+        }
+      }
     }
   },
   "oneOf": [
@@ -472,6 +611,9 @@
     },
     {
       "$ref": "#/$defs/continuation"
+    },
+    {
+      "$ref": "#/$defs/local_cancellation"
     }
   ]
 }

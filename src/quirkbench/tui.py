@@ -62,10 +62,13 @@ def snapshot(reader, run_id=None, investigation=None):
         answer = {'sampled_at': time.time(), 'operations': [], 'investigations': [],
                   'run': development_run(root, run_id)}
     else:
-        answer = reader.snapshot(investigation)
-        if investigation is not None:
-            from .investigation_monitor import facts
-            answer['investigation_facts']=facts(reader,investigation)
+        with reader.connection() as db:
+            db.execute('BEGIN')
+            view=reader.on_connection(db)
+            answer = view.snapshot(investigation)
+            if investigation is not None:
+                from .investigation_monitor import facts
+                answer['investigation_facts']=facts(view,investigation)
     answer['state_root'] = str(root)
     from .retention_settings import settings
     answer['storage'] = {'free_gib': shutil.disk_usage(root).free / 1024**3, 'cache_gib':settings(root)['cache_gib']}

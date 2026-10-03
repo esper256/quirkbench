@@ -7,7 +7,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from quirkbench.contracts import ContractError,canonical
-from quirkbench.shutdown_local import validate_record
+from quirkbench.shutdown_local import validate_record,validate_cancelled
 from quirkbench.target_shutdown import validate_intent,validate_preparation,validate_public
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -19,7 +19,8 @@ def validate(value):
     kind=value.get('record_type')
     return (validate_intent(value) if kind=='target-shutdown-intent' else
         validate_preparation(value) if kind=='target-shutdown-preparation' else
-        validate_record(value) if kind=='recovery-shutdown' else validate_public(value))
+        validate_record(value) if kind=='recovery-shutdown' else
+        validate_cancelled(value) if kind=='recovery-shutdown-cancellation' else validate_public(value))
 
 
 @pytest.mark.parametrize('example',EXAMPLES,ids=lambda item:item['record_type'])
