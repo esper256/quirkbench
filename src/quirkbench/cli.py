@@ -87,6 +87,17 @@ def parser():
             command.add_argument('--source', type=Path, required=True, help='canonical existing user Git root; original is preserved')
             command.add_argument('--base-oid', required=True, help='full actual Git base OID, also the original HEAD')
             command.add_argument('--allow-untracked', action='append', default=[], metavar='PATH')
+    for name in ('prepare-candidate','build','compose'):
+        command=investigation_actions.add_parser(name,help='derive immutable retained inputs for the existing worker; grants no attempt approval')
+        command.add_argument('name',help='existing investigation identity')
+        command.add_argument('--request-id',required=True,help='stable identity for exact replay; use a new identity after failed work')
+        command.add_argument('--json',action='store_true')
+        if name=='build':
+            command.add_argument('--capture',required=True,help='completed source capture operation ID')
+            command.add_argument('--candidate',required=True,help='completed candidate preparation operation ID')
+        if name=='compose':
+            command.add_argument('--build',required=True,help='completed joined build operation ID')
+            command.add_argument('--repository',required=True,help='configured controller repository alias and signing policy')
     for name in ('context','history','recipes','proposal-schema','observations','observation','respond'):
         command=investigation_actions.add_parser(name,help='bounded existing-record view' if name!='respond' else 'answer a typed human request')
         command.add_argument('name',help='existing investigation identity')
@@ -306,6 +317,7 @@ def _main(argv=None):
         from .investigation_sources import execute
         from .contracts import Conflict, ContractError
         from .operations import operation_response
+        from .store import StoragePressure
         try:
             answer = execute(discover_state_root(args.state), args)
             if args.json:
@@ -314,7 +326,7 @@ def _main(argv=None):
                 from .investigations import render_brief
                 print(render_brief(answer['data']))
             elif answer.get('operation_id'):
-                print('Source operation accepted: ' + answer['operation_id'])
+                print('Investigation operation accepted: ' + answer['operation_id'])
                 print('Inspect: ' + answer['data']['status_command'])
                 print('Progress: ' + answer['data']['monitor_command'])
                 print('Preparation/capture completion requires the existing controller service. Resume the investigation explicitly if paused.')
@@ -322,14 +334,16 @@ def _main(argv=None):
                 from .state_reader import safe_text
                 print(safe_text(json.dumps(answer['data'], indent=2, sort_keys=True)))
             return 0
-        except (OSError, ValueError, sqlite3.Error) as exc:
-            code = 'CONFLICT' if isinstance(exc, Conflict) else 'INVALID_INPUT' if isinstance(exc, ContractError) else 'INFRASTRUCTURE'
+        except (OSError, ValueError, sqlite3.Error, StoragePressure) as exc:
+            from .investigation_pipeline import PipelineBlocked
+            from .candidate_rootfs_operation import CandidateBlocked
+            code = 'BLOCKED' if isinstance(exc,(PipelineBlocked,CandidateBlocked,StoragePressure)) else 'CONFLICT' if isinstance(exc, Conflict) else 'INVALID_INPUT' if isinstance(exc, ContractError) else 'INFRASTRUCTURE'
             message = str(exc)[:512] if code != 'INFRASTRUCTURE' else 'source service unavailable; inspect the retained operation and readiness'
             if args.json:
-                print(json.dumps(operation_response(error={'code': code, 'message': message, 'retryable': code == 'INFRASTRUCTURE'}), sort_keys=True))
+                print(json.dumps(operation_response(error={'code': code, 'message': message, 'retryable': code in ('BLOCKED','INFRASTRUCTURE')}), sort_keys=True))
             else:
                 print(code + ': ' + message, file=sys.stderr)
-            return {'CONFLICT': 3, 'INVALID_INPUT': 2, 'INFRASTRUCTURE': 5}[code]
+            return {'BLOCKED':4, 'CONFLICT': 3, 'INVALID_INPUT': 2, 'INFRASTRUCTURE': 5}[code]
     if args.command=='recovery':
         from .recovery_download import submit
         from .release_trust import ReleaseUnavailable

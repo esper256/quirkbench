@@ -127,6 +127,10 @@ class JobCoordinator:
             raise ValueError(record.get('error','worker did not report a complete matching stage'))
         args=binding(json.loads(c.store.get(claim['input_digest'])),executable=True)
         data=record['result']
+        if args.get('schema_version')==3:
+            from .investigation_pipeline import manifest
+            prepared=json.loads(c.store.get(claim['prepared_digest'])) if claim['prepared_digest'] else None
+            args={**args,'manifest':manifest(c.root,args,claim['kind'],prepared=prepared)}
         if claim['kind']=='candidate_prepare':
             from .candidate_rootfs_operation import consume
             return consume(self,claim,json.loads(c.store.get(claim['input_digest'])),data)
@@ -155,6 +159,9 @@ class JobCoordinator:
                 if expected[role][1] is not None and entry['sha256']!=expected[role][1]: raise ValueError('captured input digest differs: '+role)
                 artifact=self.staged(claim,entry['path'],sha256(entry['sha256']))
                 refs.append(artifact.sha256);prepared['files'][role]={'sha256':artifact.sha256,'size':artifact.size}
+            if args.get('schema_version')==3:
+                from .investigation_pipeline import validate_captured
+                validate_captured(self,claim,args,prepared)
             artifact=c.store.put(canonical(prepared));adopt_inputs(owner,claim,artifact.sha256,refs)
             return {'id':claim['id'],'state':'QUEUED','inputs_retained':True}
         owner.record_activity(claim,{'phase':'validation','state':'ACTIVE','message':'Whole worker stopped; validating private outputs before publication.'})
@@ -184,10 +191,18 @@ class JobCoordinator:
         else:
             final,values,deployment=self.publish_composition(claim,args,data)
         owner.record_activity(claim,{'phase':'publication','state':'ACTIVE','message':'Committing verified references and successful completion.'})
-        index=c.store.put(canonical(final));refs=[v.sha256 for v in values.values()]+[index.sha256]
+        index=c.store.put(canonical(final));refs=sorted({v.sha256 for v in values.values()}|{index.sha256})
+        if args.get('schema_version')==3:
+            from .investigation_pipeline import artifact_link
+            link=c.store.put(canonical(artifact_link(c.root,args,claim,index.sha256,deployment)))
+            refs.append(link.sha256)
+        joined_fence=None
+        if args.get('schema_version')==3:
+            from .investigation_pipeline import publication_fence
+            joined_fence=lambda terminal:publication_fence(self,claim,args,outputs=[*refs,terminal],index=index.sha256,link=link.sha256,deployment=deployment)
         result=c._publish_operation(claim['id'],owner.epoch,claim['worker_generation'],output_refs=refs,state='SUCCEEDED',
             result={'public_artifacts':refs,'private_deliverable':None},expected_claim=claim,clear_stopped_worker=True,
-            storage_kind='build' if claim['kind']=='build' else 'deployment',final_output_digest=index.sha256,deployment=deployment)
+            storage_kind='build' if claim['kind']=='build' else 'deployment',final_output_digest=index.sha256,deployment=deployment,joined_job_fence=joined_fence)
         return result
 
     def publish_composition(self,claim,args,data):
@@ -253,9 +268,25 @@ class JobCoordinator:
                 peer=checkout/path.relative_to(expected_runtime)
                 if peer.resolve()!=peer or not peer.is_file() or sha256_file(path)!=sha256_file(peer):
                     raise ValueError('composed candidate runtime differs')
+        if args.get('schema_version')==3:
+            from .investigation_pipeline import verify_composed
+            verify_composed(self,claim,args,manifest,values,checkout)
         self.verify(claim)
         self.owner.record_activity(claim,{'phase':'signing','state':'ACTIVE','message':'Controller signing the validated stopped worker revision.'})
         from .compose import compose_lock
+        from .state_reader import held_parent
+        parent=c.root
+        for part in destination.parent.relative_to(c.root).parts:
+            self.verify(claim);parent=parent/part
+            with held_parent(parent) as (parent_fd,parent_guard):
+                parent_guard()
+                try:os.mkdir(parent.name,0o700,dir_fd=parent_fd)
+                except FileExistsError:pass
+                info=os.stat(parent.name,dir_fd=parent_fd,follow_symlinks=False)
+                if not stat.S_ISDIR(info.st_mode) or info.st_uid!=os.geteuid():
+                    raise ContractError('repository parent is linked, foreign or special')
+                parent_guard();os.fsync(parent_fd)
+        managed_path(c.root,destination)
         with compose_lock(destination.parent/(destination.name+'.compose.lock')):
             run(['ostree',f'--repo={repo}','gpg-sign','--gpg-homedir='+publication['signing_home'],manifest.revision,publication['signing_key']])
             if not destination.exists(): run(['ostree',f'--repo={destination}','init','--mode=archive'])

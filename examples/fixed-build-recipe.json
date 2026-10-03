@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "record_type": "fixed-build-recipe",
+  "recipe_id": "fedora-kernel-rpm-v1",
+  "source": "distribution-prepared-source-v1",
+  "kernel": "bounded-kbuild-v1",
+  "userspace": "scoped-make-v1",
+  "composition": "offline-fedora-rpm-ostree-v1"
+}

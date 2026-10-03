@@ -109,3 +109,34 @@ baseline availability and planning blockers; it queues no build. Reports describ
 recovery, not the installed OS. Partial, historical or unavailable observations remain
 explicit. Driver names and sampled CPU features are data, not build commands or
 permission to relax protection. See [recovery inventory](recovery-operations.md#automatic-first-boot-hardware-report).
+
+### Build a captured investigation candidate
+
+The installed investigation facade derives immutable inputs; it does not require a
+private build manifest. Prepare the candidate sysroot from the selected baseline,
+finish the explicit source-writer handoff, then pass the completed operation IDs:
+
+```sh
+quirkbench investigation prepare-candidate NAME --request-id candidate-1 --json
+quirkbench investigation build NAME --capture SOURCE_CAPTURE_OPERATION --candidate CANDIDATE_OPERATION --request-id build-1 --json
+quirkbench investigation compose NAME --build BUILD_OPERATION --repository ALIAS --request-id compose-1 --json
+```
+
+The existing controller service owns all work. A paused investigation stays paused;
+resume explicitly when ready. Use `operation status`, `operation events`,
+`operation output` and `monitor` for persisted progress, errors and retained output.
+Retry a lost reply with the same arguments/request ID. Explicitly resume an
+interrupted operation; failed work requires a new request ID. Later live workspace
+edits never change captured build inputs. Successful composition retains an
+attributed deployment and a versioned investigation artifact link, and grants no
+physical attempt approval.
+
+The joined composer is the existing FedoraComposer with an offline pinned closure.
+It cannot add missing packages or replace stale recipes from an external repository.
+The baseline must include rpm-ostree account packages (`rpm`, `nss-altfiles`,
+`systemd`, `fedora-release`), a supported fixed build recipe descriptor and the
+exact installed target recipe bindings. Missing builder/source/closure bytes or
+expired historical preparation metadata are reported as unavailable; start a fresh
+investigation/preparation when historical metadata has expired. A coherent catalog
+and separate native/operator evidence are required for an actual target campaign.
+The legacy manual `build`/`compose` interfaces retain their existing behavior.

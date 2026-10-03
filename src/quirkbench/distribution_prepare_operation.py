@@ -5,7 +5,7 @@ import os
 import stat
 from pathlib import Path
 
-from .contracts import Conflict, ContractError, canonical, identifier, sha256
+from .contracts import Conflict, ContractError, canonical, digest, identifier, sha256
 from .source_workspace import location
 from .state_reader import StateReader,read_file
 
@@ -115,6 +115,16 @@ def retained_closure(store,value,workspace):
             or metadata['source_package_sha256'] != value['kernel_srpm_sha256'] or metadata['source_date_epoch'] != value['source_date_epoch']):
         raise Conflict('distribution workspace reconstruction differs')
     return sorted(set(references(metadata))|{provenance['distribution_patches_sha256']})
+
+
+def publication_closure(store,value,workspace,intent,input_digest):
+    from .source_prepare_operation import binding
+    binding(intent)
+    if (digest(canonical(intent)) != input_digest or
+            digest(canonical(value)) != intent['arguments']['preparation_sha256'] or
+            intent['arguments']['preparation_sha256'] not in intent['input_refs']):
+        raise ContractError('distribution preparation request differs from publication')
+    return sorted(set(retained_closure(store,value,workspace)) | set(intent['input_refs']) | {input_digest})
 
 
 def pending(root,operation_id,value):
@@ -272,7 +282,10 @@ def verify_origin(coordinator,claim,intent,value,result):
                 or info.st_mode & 0o7000):raise ContractError('distribution replay parent is linked, foreign or special')
         parent_ids[path] = (info.st_dev,info.st_ino,info.st_mode,info.st_uid)
     prepared_identity = _identity((origin_stage/'prepared.json').lstat())
-    closure = retained_closure(c.store,value,approved)
+    # The live workspace outlives the preparation operation's retention group.
+    # Keep its original request and preparation input, rather than reconstructing
+    # expired metadata when a later build joins the captured workspace.
+    closure = publication_closure(c.store,value,approved,intent,claim['input_digest'])
     for digest in closure:c.store.verify(digest)
     guard()
     def fence():
@@ -288,7 +301,7 @@ def verify_origin(coordinator,claim,intent,value,result):
             info = path.lstat()
             if path.resolve() != path or (info.st_dev,info.st_ino,info.st_mode,info.st_uid) != before:
                 raise Conflict('distribution replay parent changed')
-        if retained_closure(c.store,value,approved) != closure: raise Conflict('distribution provenance closure changed')
+        if publication_closure(c.store,value,approved,intent,claim['input_digest']) != closure: raise Conflict('distribution provenance closure changed')
         for digest in closure:c.store.verify(digest)
     fence()
     def durable():

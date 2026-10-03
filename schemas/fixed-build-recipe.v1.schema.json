@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quirkbench:schema:fixed-build-recipe:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_type",
+    "recipe_id",
+    "source",
+    "kernel",
+    "userspace",
+    "composition"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "fixed-build-recipe"
+    },
+    "recipe_id": {
+      "const": "fedora-kernel-rpm-v1"
+    },
+    "source": {
+      "const": "distribution-prepared-source-v1"
+    },
+    "kernel": {
+      "const": "bounded-kbuild-v1"
+    },
+    "userspace": {
+      "const": "scoped-make-v1"
+    },
+    "composition": {
+      "const": "offline-fedora-rpm-ostree-v1"
+    }
+  }
+}
