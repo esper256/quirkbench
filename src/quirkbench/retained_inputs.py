@@ -32,6 +32,24 @@ def observe_directory(path):
         observer.remember(observer.directories, Path(path), Path(path).is_dir())
 
 
+def is_directory(path):
+    """Observe a presence predicate without adding managed-directory policy."""
+    present = path.is_dir()
+    observer = _observer.get()
+    if observer is not None and observer.includes(path):
+        observer.remember(observer.presence, Path(path), present)
+    return present
+
+
+def is_present(path):
+    """Record optional phase inputs, including dangling links as present."""
+    present = path.exists() or path.is_symlink()
+    observer = _observer.get()
+    if observer is not None and observer.includes(path):
+        observer.remember(observer.existence, Path(path), present)
+    return present
+
+
 def entries(directory, limit):
     """The existing bounded listing, also recording its namespace when requested."""
     paths = list(islice(directory.iterdir(), limit))
@@ -48,6 +66,8 @@ class RetainedInputs:
         self.reads = {}
         self.policies = {}
         self.directories = {}
+        self.presence = {}
+        self.existence = {}
         self.names = {}
 
     def includes(self, path):
@@ -81,6 +101,12 @@ class RetainedInputs:
         for directory, present in self.directories.items():
             if _managed_path(directory).is_dir() != present:
                 raise Conflict('retained proof directory presence changed')
+        for directory, present in self.presence.items():
+            if directory.is_dir() != present:
+                raise Conflict('retained proof directory presence changed')
+        for path, present in self.existence.items():
+            if is_present(path) != present:
+                raise Conflict('retained proof input presence changed')
         for directory, names in self.names.items():
             if frozenset(p.name for p in entries(directory, len(names) + 1)) != names:
                 raise Conflict('retained proof namespace changed')

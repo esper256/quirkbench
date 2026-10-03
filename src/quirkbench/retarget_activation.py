@@ -16,12 +16,12 @@ from .enrollment_target import _intent,_media
 from .retarget_local import _location,validate_intent,validate_source
 from .state_reader import read_file
 from .store import atomic_write,sync_directory
-from .retained_inputs import entries
+from .retained_inputs import entries,is_directory,is_present
 
 NAMES=('intent.json','request.json','key.pem','result.json')
 
 
-def _present(path):return path.exists() or path.is_symlink()
+def _present(path):return is_present(path)
 
 
 def validate_activation(value):
@@ -192,7 +192,7 @@ def completed(control,request_id, *,binding_reader=None,_endpoint_preparation=Fa
             or journal['claim_request_id'] is not None and not isinstance(journal['claim_request_id'],str)):
         raise Conflict('completed retarget journal differs from selected new identity')
     archive=_managed_path(directory/'archive')
-    if (not (archive/'agent').is_dir() or not (archive/'enrollment-pending').is_dir()
+    if (not is_directory(archive/'agent') or not is_directory(archive/'enrollment-pending')
             or digest(_read(archive,'runtime.json'))!=intent['runtime_sha256']):
         raise Conflict('completed retarget original archive is unavailable')
     if intent['schema_version']==3:

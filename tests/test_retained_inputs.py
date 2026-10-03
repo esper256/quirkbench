@@ -8,7 +8,7 @@ from quirkbench.contracts import Conflict, ContractError
 from quirkbench.controller_endpoint import _strict_read
 from quirkbench.controller_setup import _managed_path
 from quirkbench.controller_tls import _read
-from quirkbench.retained_inputs import RetainedInputs, entries
+from quirkbench.retained_inputs import RetainedInputs, entries, is_directory, is_present
 from quirkbench.state_reader import read_file
 from stat_fixtures import stat_with
 
@@ -44,6 +44,27 @@ def test_proof_retains_absent_directory_observation(tmp_path):
     with inputs.recording():
         _managed_path(tmp_path / 'endpoint')
     (tmp_path / 'endpoint').mkdir()
+    with pytest.raises(Conflict, match='presence changed'):
+        inputs.check()
+
+
+def test_presence_only_reader_rejects_disappearing_archive(tmp_path):
+    archive = tmp_path / 'archive'; archive.mkdir()
+    inputs = RetainedInputs(tmp_path)
+    with inputs.recording():
+        assert is_directory(archive)
+    archive.rmdir()
+    with pytest.raises(Conflict, match='presence changed'):
+        inputs.check()
+
+
+@pytest.mark.parametrize('kind', ['file', 'dangling-link'])
+def test_optional_phase_input_cannot_appear_without_revalidation(tmp_path, kind):
+    path = tmp_path / 'activation.json'; inputs = RetainedInputs(tmp_path)
+    with inputs.recording():
+        assert not is_present(path)
+    if kind == 'file':path.write_bytes(b'new phase')
+    else:path.symlink_to(tmp_path / 'missing')
     with pytest.raises(Conflict, match='presence changed'):
         inputs.check()
 

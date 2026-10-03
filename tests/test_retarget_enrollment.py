@@ -66,6 +66,19 @@ def test_new_key_preparation_retry_retains_exact_private_state(paused,phase):
     assert retarget_local.pending_intent(paused[0][1]) is not None
 
 
+def test_activation_appearing_during_request_requires_full_phase_validation(paused):
+    from quirkbench.store import atomic_write
+    changed=[];original=original_files(paused[0][1])
+    def fault(phase):
+        if phase=='intent_retained':
+            atomic_write(key_path(paused).parent.parent.parent/'activation.json',b'{}')
+            changed.append(True)
+    with pytest.raises((Conflict,ContractError)):
+        request(paused,fault_hook=fault)
+    assert changed and not key_path(paused).exists()
+    assert original_files(paused[0][1])==original
+
+
 @pytest.mark.parametrize('change',['original-journal','original-runtime','original-result','source-map','pending-pointer','new-hardware','new-key'])
 def test_private_changes_block_new_proof_without_replacing_key(paused,change):
     control=paused[0][1];req=request(paused);old=key_path(paused).read_bytes();kwargs={}

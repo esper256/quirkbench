@@ -255,6 +255,32 @@ def test_repeated_retarget_after_completed_retarget_endpoint_keeps_both_origins(
     assert Path(second['original_archive'],'endpoint/active.json').exists()
     plan=retarget_evidence.export_archived_plan(control,CONFIG,'retarget-1','earliest-plan',verify_target=lambda:True,binding_reader=lambda:third,recovery_verifier=lambda _:True)
     assert json.loads(Path(plan['plan_file']).read_bytes())['device_id']==moved[0][2]['device_id']
+    # An earlier archive's drain still requires the CURRENT head's completion.
+    # Losing either head archive child must stop uploads, not just fail on exit.
+    from quirkbench import evidence_drain as grants
+    from test_evidence_drain_target import Client
+    approved=grants.approve(c.root,moved[0][2]['device_id'],plan['plan'],'approve-earliest')
+    credential=grants.read_credential(Path(approved['credential_file']));grant=credential['record']['grant_id']
+    (control/'setup').mkdir(mode=0o700,exist_ok=True);atomic_write(control/'setup'/(grant+'.json'),canonical(credential))
+    original_journal=Path(first['original_archive'])/'agent/journal.json';before=original_journal.read_bytes()
+    head_archive=Path(second['original_archive'])
+    for child in ('agent','enrollment-pending'):
+        clients=[];changed=[];path=head_archive/child;saved=head_archive/(child+'-saved')
+        def fault(stage):
+            if stage=='drain_client_prepared':path.rename(saved);changed.append(True)
+        with c.lifecycle() as owner:
+            def client(url,credential,cafile):
+                value=Client(c,owner,credential);clients.append(value);return value
+            try:
+                with pytest.raises((Conflict,ContractError)):
+                    retarget_evidence.drain_archived(control,CONFIG,'retarget-1','earliest-plan',grant,
+                        verify_target=lambda:True,binding_reader=lambda:third,recovery_verifier=lambda _:True,
+                        client_factory=client,fault_hook=fault)
+            finally:
+                if saved.exists():saved.rename(path)
+        assert changed and len(clients)==1 and clients[0].calls==[]
+        assert original_journal.read_bytes()==before
+    with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM evidence').fetchone()[0]==0
 
 
 @pytest.mark.parametrize('change',['attempt','descriptor','snapshot'])
@@ -280,12 +306,18 @@ def test_archived_identity_and_snapshot_are_rechecked_after_capture_callbacks(mo
 
 def test_scoped_archived_drain_uses_approved_endpoint_without_new_target_changes(moved,monkeypatch):
     from quirkbench import evidence_drain as grants
+    from quirkbench import retarget_enrollment
     from test_evidence_drain_target import Client
     captures=[];native_capture=retarget_evidence._capture_source
     def capture(*args,**kwargs):
         captures.append(True)
         return native_capture(*args,**kwargs)
     monkeypatch.setattr(retarget_evidence,'_capture_source',capture)
+    proofs=[];native_proof=retarget_enrollment._capture_source
+    def proof(*args,**kwargs):
+        proofs.append(True)
+        return native_proof(*args,**kwargs)
+    monkeypatch.setattr(retarget_enrollment,'_capture_source',proof)
     c,control,old,attempt,_=moved[0];prepare(moved);receipt=activate(moved);archive=Path(receipt['original_archive'])
     plan=retarget_evidence.export_archived_plan(control,CONFIG,'retarget-1','approved-endpoint-drain',verify_target=lambda:True,binding_reader=lambda:NEW,recovery_verifier=lambda _:True)
     approved=grants.approve(c.root,old['device_id'],plan['plan'],'approve-endpoint-drain');credential=grants.read_credential(Path(approved['credential_file']));grant=credential['record']['grant_id']
@@ -307,3 +339,6 @@ def test_scoped_archived_drain_uses_approved_endpoint_without_new_target_changes
     # Two records, export, drain and ACK repair must not multiply adjacent full
     # reconstructions. Budget work counts, not wall time on a particular host.
     assert len(captures)<=6,len(captures)
+    # New-key proof is rebuilt at entry/exit and actual activation namespace
+    # changes, rather than once for every unchanged private read/native guard.
+    assert len(proofs)<=16,len(proofs)

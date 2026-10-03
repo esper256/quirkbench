@@ -17,8 +17,9 @@ from .enrollment_client import endpoint
 from .enrollment_proof import validate_challenge
 from .enrollment_target import _storage,_media,_prepare_at,_sign_at,_intent,_saved
 from .maintenance import private_lock
-from .retarget_local import pending_intent,_location,_capture_source,validate_source
+from .retarget_local import pending_intent,_location,_capture_source,validate_source,_private_journal
 from .release_http import _remaining
+from .retained_inputs import RetainedInputs
 
 
 class _FinalChecks(list):
@@ -63,14 +64,41 @@ def _paused_source(control,config,request_id, *,verify_target,binding_reader,cle
         def locations():
             from .retarget_activation import original_locations
             return original_locations(control,directory,intent)
-        def guard():
+        inputs=None
+        def guard(*,reconstruct=False):
+            nonlocal inputs
             basic()
-            if _capture_source(control,intent,basic,locations=locations())!=source:raise Conflict('original retarget source changed before new-key proof')
+            if inputs is not None and not reconstruct:
+                try:
+                    inputs.check()
+                except Conflict:
+                    # Activation legitimately publishes new records and moves
+                    # the original namespaces. A changed observation never
+                    # grants authority: reconstruct the existing exact phase
+                    # mapping and require the SAME prepared source below.
+                    pass
+                else:
+                    current_agent=directory/'archive/agent' if (directory/'activation.json').exists() and (directory/'archive/agent').exists() else control/'agent'
+                    if digest(_private_journal(current_agent))!=source['files']['agent/journal.json']:
+                        raise Conflict('original retarget journal changed before new-key proof')
+                    _remaining(deadline,monotonic)
+                    return
+            observed=RetainedInputs(control)
+            with observed.recording():
+                captured=_capture_source(control,intent,basic,locations=locations())
+            if captured!=source:raise Conflict('original retarget source changed before new-key proof')
+            # Reject inconsistent dependencies and retain the stable journal
+            # predicate after the last callback, before reusing this proof.
+            observed.check()
+            current_agent=directory/'archive/agent' if (directory/'activation.json').exists() and (directory/'archive/agent').exists() else control/'agent'
+            if digest(_private_journal(current_agent))!=source['files']['agent/journal.json']:
+                raise Conflict('original retarget journal changed before new-key proof')
+            inputs=observed
             _remaining(deadline,monotonic)
         final_checks=_FinalChecks(deadline,monotonic)
         with final_checks.locks:
             guard();yield control,directory,intent,guard,final_checks
-            guard()
+            guard(reconstruct=True)
             for check in final_checks:check()
             _remaining(deadline,monotonic)
 
