@@ -168,7 +168,8 @@
       "src/quirkbench/shutdown_local.py",
       "src/quirkbench/target_shutdown.py",
       "tests/test_shutdown.py",
-      "examples/shutdown.json"
+      "examples/shutdown.json",
+      "src/quirkbench/controller_install.py"
     ],
     "tests": [
       "tests/test_build_storage.py",
@@ -215,7 +216,8 @@
       "tests/test_release_compatibility.py",
       "tests/test_release_install.py",
       "tests/test_installed_release.py",
-      "schemas/publication-preflight.v1.schema.json"
+      "schemas/publication-preflight.v1.schema.json",
+      "src/quirkbench/controller_install.py"
     ],
     "tests": [
       "tests/test_release_plan.py",

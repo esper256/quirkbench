@@ -80,17 +80,23 @@ def _archive_payload(archive, *,expected_archive_sha256=None,expected_version=No
     supplied = Path(archive).expanduser().absolute()
     # Accept ordinary ancestor aliases at the CLI boundary; keep the leaf under
     # the canonical reader's no-follow traversal rather than resolving it too.
-    parent = supplied.parent.resolve(strict=True)
-    path = parent / supplied.name
-    before = path.stat(follow_symlinks=False)
+    try:
+        parent = supplied.parent.resolve(strict=True)
+        path = parent / supplied.name
+        before = path.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ContractError('controller archive must be an accessible bounded regular file') from exc
     if not stat.S_ISREG(before.st_mode) or before.st_size > LIMIT:
         raise ContractError('controller archive must be a bounded regular file')
-    raw = read_file(path.parent, path.name, limit=LIMIT)
-    after = path.stat(follow_symlinks=False)
+    try:
+        raw = read_file(path.parent, path.name, limit=LIMIT)
+        after = path.stat(follow_symlinks=False)
+        stable_parent = supplied.parent.resolve(strict=True) == parent
+    except OSError as exc:
+        raise ContractError('controller archive input changed during capture; retry with a stable archive') from exc
     identity = lambda info: (info.st_dev, info.st_ino, info.st_mode, info.st_size,
                              info.st_mtime_ns, info.st_ctime_ns)
-    if (supplied.parent.resolve(strict=True) != parent
-            or identity(after) != identity(before)):
+    if not stable_parent or identity(after) != identity(before):
         raise ContractError('controller archive input changed during capture; retry with a stable archive')
     consume(len(raw));verify()
     archive_digest = hashlib.sha256(raw).hexdigest()
