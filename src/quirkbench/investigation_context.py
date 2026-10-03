@@ -192,27 +192,10 @@ def proposal_schema(reader,name):
 
 @contextmanager
 def object_parent(path):
-    """Hold every no-follow ancestor, following the read_file descriptor pattern."""
-    fds=[os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)];links=[]
-    directory_identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid)
-    try:
-        for part in path.parts[1:-1]:
-            child=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fds[-1])
-            fds.append(child);parent=fds[-2]
-            before=directory_identity(os.fstat(child))
-            if directory_identity(os.stat(part,dir_fd=parent,follow_symlinks=False))!=before:
-                raise ContractError('evidence ancestor changed')
-            links.append((parent,part,child,before))
-        yield fds[-1]
-        for parent,name,child,before in links:
-            if (directory_identity(os.fstat(child))!=before or
-                    directory_identity(os.stat(name,dir_fd=parent,follow_symlinks=False))!=before):
-                raise ContractError('evidence ancestor changed')
-    except OSError as exc:
-        if exc.errno in (errno.ELOOP,errno.ENOTDIR):raise ContractError('evidence path is linked') from exc
-        raise
-    finally:
-        for fd in reversed(fds):os.close(fd)
+    from .state_reader import held_parent
+    with held_parent(path) as (fd,guard):
+        yield fd
+        guard()
 
 
 def evidence_read(reader,name,identity, *,offset=0,length=LOG_BYTES,after=0,limit=20):

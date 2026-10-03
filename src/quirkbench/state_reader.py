@@ -288,3 +288,29 @@ class ReadOnlyStore:
             if actual!=value or (before.st_size,before.st_mtime_ns,before.st_ctime_ns)!=(after.st_size,after.st_mtime_ns,after.st_ctime_ns):
                 raise ContractError('stored artifact failed verification')
             return before.st_size
+
+
+@contextmanager
+def held_parent(path):
+    """Hold and recheck every nofollow ancestor of an absolute named file."""
+    path=Path(path)
+    if not path.is_absolute():raise ContractError('held path must be absolute')
+    fds=[os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)];links=[]
+    identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid)
+    def guard():
+        for parent,name,child,before in links:
+            if (identity(os.fstat(child))!=before or
+                    identity(os.stat(name,dir_fd=parent,follow_symlinks=False))!=before):
+                raise ContractError('held path ancestor changed')
+    try:
+        for part in path.parts[1:-1]:
+            child=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fds[-1])
+            fds.append(child);parent=fds[-2];before=identity(os.fstat(child))
+            links.append((parent,part,child,before));guard()
+        yield fds[-1],guard
+        guard()
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP,errno.ENOTDIR):raise ContractError('held path is linked') from exc
+        raise
+    finally:
+        for fd in reversed(fds):os.close(fd)
