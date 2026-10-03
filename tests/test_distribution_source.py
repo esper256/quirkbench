@@ -108,7 +108,11 @@ def test_changed_package_during_final_callbacks_is_rejected(prepared):
 def test_source_root_link_cannot_change_outside_mode(prepared, tmp_path):
     entry, record, source_stage, stage, store = prepared
     source = source_stage/'source'; source.rename(source_stage/'saved-source')
-    outside = tmp_path/'outside'; outside.mkdir(mode=0o755); source.symlink_to(outside)
+    outside = tmp_path/'outside'; outside.mkdir(); source.symlink_to(outside)
+    # mkdir's mode is filtered by umask; ensure a forbidden chmod(0700) would
+    # actually change this target, while retaining the preservation assertion.
+    outside.chmod(0o755)
+    assert outside.stat().st_mode & 0o777 == 0o755
     original_mode = outside.stat().st_mode
     with pytest.raises(Conflict, match='root is linked'): run(prepared)
     assert outside.stat().st_mode == original_mode and list(outside.iterdir()) == []

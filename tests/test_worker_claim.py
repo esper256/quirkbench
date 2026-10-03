@@ -1,5 +1,6 @@
 """A service worker must not trust the launch arguments as claim authority."""
 from pathlib import Path
+import stat
 
 import pytest
 
@@ -56,12 +57,17 @@ def test_worker_claim_rejects_wrong_stage_and_private_path_escape(tmp_path):
         with pytest.raises(WorkerClaimError, match='canonical'):
             _read(root, row, stage_dir=link)
         database = root / 'controller.sqlite'
-        database.chmod(0o644)
+        before = stat.S_IMODE(database.stat().st_mode)
+        assert before & 0o077 == 0
+        assert _read(root, row).stage_dir == row['stage_dir']
+        database.chmod(before | stat.S_IRGRP)
+        assert stat.S_IMODE(database.stat().st_mode) == before | stat.S_IRGRP
         try:
             with pytest.raises(WorkerClaimError, match='database'):
                 _read(root, row)
         finally:
-            database.chmod(0o600)
+            database.chmod(before)
+        assert _read(root, row).stage_dir == row['stage_dir']
 
 
 def test_interrupted_image_requires_stop_then_explicit_resume(tmp_path):

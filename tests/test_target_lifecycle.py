@@ -35,7 +35,7 @@ def test_atomic_revocation_and_lost_reply_exact_receipt(publication,boundary):
     device=result['device_id'];generation=result['credential_generation']['generation']
     c.register(CapabilityReport(device,'recovery',[],inventory={'target_binding':req['target_binding'],'media_instance_id':req['media_instance_id']}))
     c.create_campaign('campaign',device);c.resume('campaign')
-    before=list(c.store.objects.iterdir())
+    before=set(c.store.objects.iterdir())
     def fault(stage):
         if stage==boundary:raise KeyboardInterrupt()
     with pytest.raises(KeyboardInterrupt):revoke_target(c.root,'target','revoke-1',generation=generation,fault_hook=fault)
@@ -50,7 +50,7 @@ def test_atomic_revocation_and_lost_reply_exact_receipt(publication,boundary):
     with pytest.raises(Conflict,match='revoked'):c.resume('campaign')
     with pytest.raises(Conflict,match='revoked'):c.claim(device,'recovery','claim-1')
     assert c.status('campaign')['state']=='PAUSED'
-    assert list(c.store.objects.iterdir())==before
+    assert set(c.store.objects.iterdir())==before
     assert result['device_token'] not in json.dumps(receipt)
     assert not any(receipt[k] for k in ('physical_shutdown_verified','evidence_drain_authorized','boot_authorized'))
 
