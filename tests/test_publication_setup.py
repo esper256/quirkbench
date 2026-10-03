@@ -152,7 +152,7 @@ BOOT='11111111-1111-4111-8111-111111111111'
         ('test_controller_release.py',{'fake_gpg'}),
         ('test_builder_setup.py',{'Workers'}),
         ('test_recovery_download.py',{'execute'}),
-        ('test_publication_setup.py',{'initialized','installed','setup',
+        ('test_publication_setup.py',{'initialized','installed','publication_inputs','setup',
             'test_installed_setup_publication_pairing_lost_reply_and_private_reboot_state'})):
         adapters+='\n'+definitions(filename,names)
     arguments,record,payloads,_,_=signed_factory
