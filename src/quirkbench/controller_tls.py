@@ -12,7 +12,7 @@ import tempfile
 import uuid
 
 from .contracts import Conflict, ContractError, canonical, digest, identifier, sha256
-from .controller_setup import _durable_directory, _private_path
+from .controller_setup import _durable_directory, _managed_path
 from .maintenance import private_lock
 from .product_contracts import _depth, _pairs
 from .setup_contracts import SetupUnavailable
@@ -64,13 +64,21 @@ def load_identity(raw):
     return value
 
 
-def _read(directory, name):
+def _read(directory, name, *, limit=LIMIT):
     path = directory / name
     info = path.lstat()
-    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
-            or stat.S_IMODE(info.st_mode) != 0o600):
-        raise ContractError('controller TLS files must be owned private regular files')
-    return read_file(directory, name, limit=LIMIT)
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()):
+        raise ContractError('controller records must be owned regular files')
+    return read_file(directory, name, limit=limit)
+
+
+def _secret_read(directory, name, *, limit=LIMIT, stores=()):
+    """Private keys/tokens may rely on their declared enclosing secret store."""
+    raw = _read(directory, name, limit=limit)
+    if ((directory / name).stat().st_mode & 0o077
+            and all(store.stat().st_mode & 0o077 for store in (directory, *stores))):
+        raise ContractError('credential requires a private file or enclosing secret store')
+    return raw
 
 
 def _openssl(arguments, *, run):
@@ -85,12 +93,15 @@ def _openssl(arguments, *, run):
 
 
 def inspect_identity(directory, *, host=None, request_id=None, run=subprocess.run,temporary_parent=None):
-    directory = _private_path(directory)
+    directory = _managed_path(directory)
     value = load_identity(_read(directory, 'identity.json'))
     if ((host is not None and value['host'] != host)
             or (request_id is not None and value['request_id'] != request_id)):
         raise Conflict('controller TLS identity belongs to another setup endpoint/request')
-    captured = {name: _read(directory, name) for name in FILES}
+    # The managed layout has three known enclosing stores; never search ancestry.
+    stores = (directory.parent, directory.parent.parent, directory.parent.parent.parent) if directory.parent.name == 'controller-tls' else ()
+    captured = {name: _secret_read(directory, name, stores=stores) if name.endswith('.key')
+                else _read(directory, name) for name in FILES}
     if any(digest(raw) != value['files'][name] for name, raw in captured.items()):
         raise Conflict('controller TLS identity bytes differ; refuse automatic trust replacement')
     _lineage(directory,value)
@@ -105,7 +116,7 @@ def _lineage(directory,value):
     seen={directory.name}
     for _ in range(32):
         if value['schema_version']==1:return
-        predecessor=_private_path(directory.parent/value['previous_directory'])
+        predecessor=_managed_path(directory.parent/value['previous_directory'])
         if predecessor.name in seen:raise Conflict('cyclic controller TLS identity history')
         seen.add(predecessor.name);raw=_read(predecessor,'identity.json');parent=load_identity(raw)
         if digest(raw)!=value['previous_identity_sha256'] or any(value['files'][name]!=parent['files'][name] for name in ('ca.key','ca.crt')):
@@ -146,7 +157,7 @@ def create_identity(root, host, request_id, *, run=subprocess.run, fault_hook=No
     """
     validate_identity({'schema_version':1, 'record_type':'controller-tls-identity', 'request_id':request_id,
                        'host':host, 'files':{k:'0'*64 for k in FILES}})
-    directory = _private_path(Path(root) / 'private/controller-tls' / ('setup-' + digest(request_id.encode())[:32]))
+    directory = _managed_path(Path(root) / 'private/controller-tls' / ('setup-' + digest(request_id.encode())[:32]))
     _durable_directory(directory)
     fault_hook = fault_hook or (lambda _: None)
     with private_lock(directory / 'identity.lock'):

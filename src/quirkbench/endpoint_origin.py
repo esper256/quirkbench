@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .contracts import Conflict,canonical,digest
 from .controller_endpoint import _strict_read
-from .controller_setup import _private_path
+from .controller_setup import _managed_path
 from .enrollment import _document
 from .endpoint_generation import read_generation
 
@@ -30,13 +30,13 @@ def retarget_original(control, *,reference=None,pending=None):
             raise Conflict('endpoint retained origin is absent from linked retarget history')
         public={}
     if request_id is None:raise Conflict('endpoint source requires an exact completed retarget origin')
-    selected_pending=_private_path(control/'enrollment/pending' if pending is None else pending)
+    selected_pending=_managed_path(control/'enrollment/pending' if pending is None else pending)
     directory=_location(control,request_id);intent=validate_intent(_document(_strict_read(directory,'intent.json')))
     activation,source=_records(control,directory,intent)
     if _strict_read(directory,'completion.json')!=canonical(_completion(activation)):
         raise Conflict('endpoint retarget origin completion changed')
     raw,result,files,active=_new_view(directory,intent,activation)
-    pending=_private_path(directory/'enrollment/pending');bundle=_private_path(pending/'activation-bundle')
+    pending=_managed_path(directory/'enrollment/pending');bundle=_managed_path(pending/'activation-bundle')
     if ({p.name for p in islice(pending.iterdir(),6)}!=NAMES|{'activation-bundle'}
             or {p.name for p in islice(bundle.iterdir(),17)}!=set(files)
             or any(_strict_read(pending,name)!=value for name,value in raw.items())
@@ -46,8 +46,8 @@ def retarget_original(control, *,reference=None,pending=None):
     root=selected_pending
     if {p.name for p in islice(root.iterdir(),5)}!=NAMES or any(_strict_read(root,name)!=value for name,value in raw.items()):
         raise Conflict('endpoint retarget origin differs from selected enrollment')
-    archive=_private_path(directory/'archive')
-    if (not _private_path(archive/'agent').is_dir() or not _private_path(archive/'enrollment-pending').is_dir()
+    archive=_managed_path(directory/'archive')
+    if (not _managed_path(archive/'agent').is_dir() or not _managed_path(archive/'enrollment-pending').is_dir()
             or digest(_strict_read(archive,'runtime.json'))!=intent['runtime_sha256']):
         raise Conflict('endpoint retarget original archive is unavailable')
     selection=canonical({'schema_version':2,'request_id':request_id,'intent_sha256':activation['local_intent_sha256'],

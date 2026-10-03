@@ -9,7 +9,7 @@ import time
 
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest
-from .controller_setup import _durable_directory,_private_path
+from .controller_setup import _durable_directory,_managed_path
 from .controller_tls import _read,_openssl
 from .enrollment import _document,_now
 from .enrollment_client import endpoint
@@ -90,7 +90,7 @@ def activate_enrollment(control,result,approved_certificate_pem, *, verify_targe
     with private_lock(control/'runtime-config.lock'):
         from .shutdown_local import require_available
         require_available(control)
-        verify_target();pending=_private_path(control/'enrollment/pending')
+        verify_target();pending=_managed_path(control/'enrollment/pending')
         intent=_document(_read(pending,'intent.json'));request,private=_saved(pending,intent,run=run)
         _media(control,request['media_instance_id']);verify_binding(request['target_binding'],reader=binding_reader)
         result=validate_result(result,request)
@@ -98,7 +98,7 @@ def activate_enrollment(control,result,approved_certificate_pem, *, verify_targe
             raise Conflict('enrollment reply controller differs from approved endpoint')
         if not _now(clock)<result['credential_generation']['expires_at']:
             raise Conflict('enrollment credentials expired; explicit lifecycle maintenance required')
-        directory=_private_path(pending/'activation-bundle');_durable_directory(directory)
+        directory=_managed_path(pending/'activation-bundle');_durable_directory(directory)
         if directory.stat().st_dev!=control.stat().st_dev:
             raise ContractError('enrollment bundle is on another storage device')
         _validate_native(pending,intent,result,private,approved_certificate_pem,verify_target,run)

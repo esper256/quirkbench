@@ -7,7 +7,7 @@ import time
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
 from .controller_endpoint import _strict_read
-from .controller_setup import _private_path
+from .controller_setup import _managed_path
 from .enrollment import _document
 from .enrollment_target import _storage,_media
 from .endpoint_activation import (_source_records,_expected_activation,_completion,_selection,_journal,_original_bundle)
@@ -108,7 +108,7 @@ def rollback_stopped(control,config,request_id,expected_source_sha256, *,verify_
     from .boot import clear_once,_verify_state_identity
     identifier(request_id);sha256(expected_source_sha256);deadline=monotonic()+120;fault=fault_hook or (lambda _:None)
     recover=recovery_verifier or (lambda cfg:_verify_state_identity(cfg,Path('/boot/quirkbench-state')))
-    recover(config);control,storage=_storage(control,verify_target);agent=_private_path(control/'agent')
+    recover(config);control,storage=_storage(control,verify_target);agent=_managed_path(control/'agent')
     _strict_read(control,'runtime-config.lock');_strict_read(agent,'agent.lock')
     with private_lock(control/'runtime-config.lock') as config_fd,private_lock(agent/'agent.lock') as agent_fd:
         from .shutdown_local import require_available

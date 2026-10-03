@@ -35,8 +35,8 @@ def prepare(unit, stage, log, status, arguments=()):
     if stage != root / 'development-runs' / run_id / 'work':
         raise ContractError(f'build stage must be {root}/development-runs/{run_id}/work')
     directory = stage.parent
-    if directory.resolve() != directory or directory.stat().st_mode & 0o077:
-        raise ContractError('development run directory must be canonical and private')
+    if directory.resolve() != directory:
+        raise ContractError('development run directory must be canonical')
     if (directory / 'run.json').exists():
         raise ContractError('development run identity already used')
     for name in (log, status):

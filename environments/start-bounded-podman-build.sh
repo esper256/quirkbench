@@ -17,8 +17,8 @@ shift 4
 [[ $unit =~ ^quirkbench-build-[a-z0-9-]+\.service$ ]] || fail 'use a fresh quirkbench-build-NAME.service'
 [[ $stage == /* && -d $stage && ! -L $stage && $(realpath -e "$stage") == "$stage" ]] ||
   fail 'private stage must be an existing canonical directory'
-[[ $(stat -c %u "$stage") == "$EUID" && $(stat -c %a "$stage") == 700 ]] ||
-  fail 'private stage must be owned by the current user with mode 0700'
+[[ $(stat -c %u "$stage") == "$EUID" ]] ||
+  fail 'stage must be owned by the current user'
 [[ $log_name =~ ^[a-z][a-z0-9.-]*\.log$ && $status_name =~ ^[a-z][a-z0-9.-]*\.status$ ]] ||
   fail 'invalid log or status name'
 [[ ! -e $stage/$log_name && ! -L $stage/$log_name &&

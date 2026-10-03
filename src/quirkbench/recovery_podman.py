@@ -46,8 +46,8 @@ def _canonical(path: Path, *, directory: bool) -> Path:
 
 def _private_stage(stage: Path) -> Path:
     stage = _canonical(stage, directory=True)
-    if stage.stat().st_uid != os.getuid() or stage.stat().st_mode & 0o077:
-        raise BuildError('recovery worker stage must be private and owned by its user')
+    if stage.stat().st_uid != os.getuid():
+        raise BuildError('recovery worker stage must be owned by its user')
     return stage
 
 
@@ -318,13 +318,13 @@ def rootfs_command(*, image_id: str, claim: dict, state_root: Path, stage: Path,
     diagnostics = stage / 'diagnostics'
     if diagnostics.exists() or diagnostics.is_symlink():
         _canonical(diagnostics, directory=True)
-        if diagnostics.stat().st_uid != os.getuid() or diagnostics.stat().st_mode & 0o077:
-            raise BuildError('worker diagnostics must be private')
+        if diagnostics.stat().st_uid != os.getuid():
+            raise BuildError('worker diagnostics must be owned')
     if any(path not in (inputs, output, diagnostics) for path in stage.iterdir()):
         raise BuildError('recovery stage contains unexpected paths')
-    if (output.stat().st_uid != os.getuid() or output.stat().st_mode & 0o077
+    if (output.stat().st_uid != os.getuid()
             or (output / output_name).exists() or (output / output_name).is_symlink()):
-        raise BuildError('rootfs output must be new under a private worker directory')
+        raise BuildError('rootfs output must be new under an owned worker directory')
     volumes = ((code, '/workspace/code', 'ro,Z'),
                (lock, '/workspace/rootfs-lock.json', 'ro,Z'),
                (cas, '/workspace/cas', 'ro,Z'),

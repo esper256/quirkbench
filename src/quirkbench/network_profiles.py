@@ -8,7 +8,7 @@ import sys
 
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _private_path,_durable_directory
+from .controller_setup import _managed_path,_durable_directory
 from .controller_tls import _read
 from .enrollment import _document
 from .enrollment_target import _storage
@@ -87,7 +87,7 @@ def _ready(profiles,ready,names=()):
     from .console import network_profiles_ready
     if not (ready or network_profiles_ready)(profiles):
         raise ContractError('network profile storage must be verified private RAM')
-    _private_path(profiles)
+    _managed_path(profiles)
     if any(Path(path)!=profiles for path in nested_mounts(profiles)):
         raise ContractError('RAM network profile storage contains nested mounts')
     device=profiles.stat().st_dev
@@ -95,10 +95,14 @@ def _ready(profiles,ready,names=()):
         path=profiles/_name(name)
         if (path.exists() or path.is_symlink()) and (path.is_symlink() or path.stat().st_dev!=device):
             raise ContractError('network profile artifact is outside the verified RAM device')
+        # NetworkManager ignores keyfiles accessible by group/other users, even
+        # inside its private tmpfs. Retained copies are not native keyfiles.
+        if path.exists() and path.stat().st_mode & 0o077:
+            raise ContractError('NetworkManager requires private keyfile permissions')
 
 
 def _captured(directory,expected):
-    _private_path(directory)
+    _managed_path(directory)
     if (set(path.name for path in directory.iterdir())!=set(expected)
             or any(_read(directory,name)!=raw for name,raw in expected.items())):
         raise Conflict('retained private network generation changed before activation')
@@ -122,9 +126,9 @@ def save_selected(control,selected, *, verify_target,profiles=PROFILES,profiles_
         manifest=validate_generation({'schema_version':1,'record_type':'network-profile-generation',
             **identity,'files':{name:digest(raw) for name,raw in files.items()}})
         raw=canonical(manifest);generation=digest(raw)
-        base=_private_path(control/'network');_durable_directory(base)
-        parent=_private_path(base/'generations');_durable_directory(parent)
-        final=_private_path(parent/generation);stage=_private_path(parent/('.pending-'+generation))
+        base=_managed_path(control/'network');_durable_directory(base)
+        parent=_managed_path(base/'generations');_durable_directory(parent)
+        final=_managed_path(parent/generation);stage=_managed_path(parent/('.pending-'+generation))
         expected=files|{'manifest.json':raw}
         destination=final if final.exists() else stage
         _durable_directory(destination)
@@ -165,10 +169,10 @@ def replay_selected(control, *, verify_target,profiles=PROFILES,profiles_ready=N
         require_runtime_available(control)
         if not (control/'network/active.json').exists() and not (control/'network/active.json').is_symlink():return {'replayed':False,'reason':'no_selected_profiles'}
         identity=_identity(control,binding_reader)
-        base=_private_path(control/'network');manifest=validate_generation(_document(_read(base,'active.json')))
+        base=_managed_path(control/'network');manifest=validate_generation(_document(_read(base,'active.json')))
         if any(manifest[name]!=value for name,value in identity.items()):
             raise Conflict('saved network selection belongs to another target/media/configuration')
-        generation=digest(canonical(manifest));directory=_private_path(base/'generations'/generation)
+        generation=digest(canonical(manifest));directory=_managed_path(base/'generations'/generation)
         if (set(path.name for path in directory.iterdir())!=set(manifest['files'])|{'manifest.json'}
                 or _read(directory,'manifest.json')!=canonical(manifest)):
             raise Conflict('private network generation is incomplete or changed')

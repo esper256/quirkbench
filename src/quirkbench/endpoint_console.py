@@ -7,7 +7,7 @@ import time
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,digest,identifier,sha256
 from .controller_endpoint import _strict_read
-from .controller_setup import _private_path
+from .controller_setup import _managed_path
 from .enrollment import _document
 from .enrollment_client import endpoint,inspect_certificate
 from .enrollment_console import _answer
@@ -67,7 +67,7 @@ def run_endpoint(control,config, *,verify_target,input_stream=None,output_stream
         staged=_answer(source,output,'Staged public certificate basename in setup (empty observes endpoint): ',128)
         if staged is None:return None
         if staged:
-            identifier(staged);pem=_strict_read(_private_path(control/'setup'),staged).decode('ascii')
+            identifier(staged);pem=_strict_read(_managed_path(control/'setup'),staged).decode('ascii')
             import ssl
             observation={'certificate_pem':pem,'certificate_sha256':digest(ssl.PEM_cert_to_DER_cert(pem))}
         elif (directory/'approved-controller.pem').exists():

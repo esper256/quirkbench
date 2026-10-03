@@ -10,7 +10,7 @@ import subprocess
 import time
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,canonical,digest,identifier,sha256
-from .controller_setup import _private_path
+from .controller_setup import _managed_path
 from .controller_tls import _read
 from .enrollment import _document,_now
 from .enrollment_client import endpoint
@@ -37,7 +37,7 @@ def _paused_source(control,config,request_id, *,verify_target,binding_reader,cle
         from .shutdown_local import require_available
         require_available(control)
         archived=directory/'archive/agent'
-        agent=_private_path(archived if (directory/'activation.json').exists() and archived.exists() else control/'agent')
+        agent=_managed_path(archived if (directory/'activation.json').exists() and archived.exists() else control/'agent')
         if not agent.is_dir():raise Conflict('original retarget spool unavailable; no new initialization permitted')
         original_fd=ownership.enter_context(private_lock(agent/'agent.lock'))
         intent=pending_intent(control)
@@ -76,7 +76,7 @@ def _paused_source(control,config,request_id, *,verify_target,binding_reader,cle
 
 
 def _retained_new(directory):
-    return {name:_read(_private_path(directory),name) for name in ('intent.json','request.json','key.pem')}
+    return {name:_read(_managed_path(directory),name) for name in ('intent.json','request.json','key.pem')}
 
 
 def _exact_new(directory,expected):
@@ -230,7 +230,7 @@ def exchange(control,config,request_id,controller_url,approved_certificate_pem,a
             if _read(pending,'result.json')!=raw:raise Conflict('retarget already retained a different complete result')
         else:atomic_write(path,raw)
         fault('retarget_result_retained');verified();fresh()
-        bundle=_bundle(result,request,private);bundle_dir=_private_path(pending/'activation-bundle')
+        bundle=_bundle(result,request,private);bundle_dir=_managed_path(pending/'activation-bundle')
         _durable_directory(bundle_dir);verified();_retain_bundle(bundle_dir,bundle,verified)
         fault('retarget_bundle_retained');verified();fresh()
         def complete():

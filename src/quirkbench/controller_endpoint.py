@@ -6,7 +6,7 @@ import tempfile
 import time
 
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _private_path,_durable_directory,_database_present
+from .controller_setup import _managed_path,_durable_directory,_database_present
 from .controller_tls import (FILES,_read,_openssl,validate_identity,load_identity,
     inspect_identity,_lineage,_generate_material,_inspect_material)
 from .enrollment import _document,_now
@@ -74,14 +74,14 @@ def _stage(root,host,request_id,expected_identity_sha256, *,run,fault_hook,clock
     identifier(request_id);sha256(expected_identity_sha256)
     validate_identity({'schema_version':1,'record_type':'controller-tls-identity','request_id':request_id,
         'host':host,'files':{name:'0'*64 for name in FILES}})
-    root=_private_path(root);deadline=monotonic()+180;fault=fault_hook or (lambda _:None)
+    root=_managed_path(root);deadline=monotonic()+180;fault=fault_hook or (lambda _:None)
     if not _database_present(root):raise SetupUnavailable('controller setup required before endpoint maintenance')
     from .controller_install import _idle
     from .controller_service import configuration
     with private_lock(root/'command.lock') as command_fd,private_lock(root/'coordinator.lock') as owner_fd:
         _remaining(deadline,monotonic);_idle(root);config=configuration(root)
         config_raw=_strict_read(root/'private','controller-service.json')
-        previous=_private_path(Path(config['cert']).parent)
+        previous=_managed_path(Path(config['cert']).parent)
         if (previous.parent!=root/'private/controller-tls' or Path(config['cert'])!=previous/'controller.crt'
                 or Path(config['key'])!=previous/'controller.key'):
             raise Conflict('endpoint maintenance requires the currently configured managed TLS identity')
@@ -100,7 +100,7 @@ def _stage(root,host,request_id,expected_identity_sha256, *,run,fault_hook,clock
                     or any(_strict_read(previous,name)!=raw for name,raw in captured.items())):
                 raise Conflict('current endpoint configuration or original trust changed')
             _lineage(previous,old);_remaining(deadline,monotonic)
-        directory=_private_path(root/'private/controller-tls'/('endpoint-'+digest(request_id.encode())[:32]))
+        directory=_managed_path(root/'private/controller-tls'/('endpoint-'+digest(request_id.encode())[:32]))
         guard();_durable_directory(directory)
         intent_path=directory/'intent.json'
         fields={'host':host,'request_id':request_id,'previous_directory':previous.name,

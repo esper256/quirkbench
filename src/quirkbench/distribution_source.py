@@ -16,7 +16,7 @@ from .baseline_catalog import validate_entry
 from .contracts import Conflict, ContractError, canonical, identifier, sha256
 from .source_capture import _directory_owner, _git, _identity, _observe, _path, _parent, _staged_identity, MAX_FILES
 from .source_preparation import prepare
-from .controller_setup import _private_path
+from .controller_setup import _managed_path
 from .state_config import outside_checkout
 
 
@@ -305,7 +305,7 @@ def import_prepared(entry, prepared, source_stage, stage, store, workspace_id, *
     for path in (source_stage, stage):
         if not path.is_absolute() or path.resolve() != path:
             raise ContractError('canonical private distribution staging required')
-        outside_checkout(path); _private_path(path)
+        outside_checkout(path); _managed_path(path)
     if source_stage == stage or source_stage.is_relative_to(stage) or stage.is_relative_to(source_stage):
         raise ContractError('distribution import and source stages must be separate')
     expected = {'schema_version','kernel_srpm_sha256','kernel_source_nevra','spec_sha256','source','source_tree_sha256','source_date_epoch'}
@@ -319,20 +319,7 @@ def import_prepared(entry, prepared, source_stage, stage, store, workspace_id, *
     store.verify(entry['kernel_srpm_sha256'])
     stage.mkdir(mode=0o700, parents=True, exist_ok=True)
     source = source_stage/'source'
-    # The RPM-created tree can start at 0755 beneath private worker staging.
-    # Change only the held owned directory, after proving its named path.
-    with _directory_owner(source_stage) as parent_guard:
-        parent_guard(); verify(); parent_guard()
-        if source.resolve() != source: raise Conflict('prepared source root is linked')
-        fd = os.open(source, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        try:
-            info = os.fstat(fd)
-            if info.st_uid != os.geteuid() or _identity(info) != _identity(source.lstat()):
-                raise Conflict('prepared source root changed or is foreign')
-            os.fchmod(fd, 0o700)
-            if _identity(os.fstat(fd)) != _identity(source.lstat()):
-                raise Conflict('prepared source root changed during mode selection')
-        finally: os.close(fd)
+    if source.resolve() != source: raise Conflict('prepared source root is linked')
     with _directory_owner(source_stage) as source_stage_guard, _directory_owner(stage) as stage_guard, _directory_owner(source) as source_guard:
         git_identity = [None]; native_active = [False]
         def guard():

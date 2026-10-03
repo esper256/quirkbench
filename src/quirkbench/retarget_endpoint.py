@@ -6,7 +6,7 @@ booting or network replay; callers own NEW binding/recovery before private proof
 from pathlib import Path
 from .contracts import Conflict,canonical,digest
 from .controller_endpoint import _strict_read
-from .controller_setup import _private_path
+from .controller_setup import _managed_path
 from .enrollment import _document
 
 
@@ -19,7 +19,7 @@ def public(control,intent):
     if digest(raw)!=intent['endpoint_selection_sha256']:raise Conflict('retarget original endpoint selection changed')
     selection=pointer(raw)
     if selection['schema_version']==1:raise Conflict('finish stopped endpoint maintenance before moving media')
-    archived=_private_path(directory/'archive/endpoint');root=_private_path(control/'endpoint')
+    archived=_managed_path(directory/'archive/endpoint');root=_managed_path(control/'endpoint')
     if archived.exists() or archived.is_symlink():
         if not (directory/'activation.json').exists():raise Conflict('retarget original endpoint has an unowned archive location')
         if root.exists() or root.is_symlink():

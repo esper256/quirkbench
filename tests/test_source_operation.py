@@ -17,7 +17,7 @@ from test_builder_setup import Workers,BOOT
 def prepared(tmp_path,monkeypatch):
     c=Controller(tmp_path/'state',reserve_bytes=0,boot_id_reader=lambda:BOOT)
     c.register(CapabilityReport('target','boot',[],mode='simulation'));c.create_campaign('campaign','target')
-    root=c.root/'workspaces/kernel-1';root.mkdir(mode=0o700,parents=True);root.parent.chmod(0o700)
+    root=c.root/'workspaces/kernel-1';root.mkdir(parents=True);root.chmod(0o755)
     git(root,'init','-q');(root/'driver.c').write_text('original\n');git(root,'add','.')
     git(root,'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','baseline')
     value=workspace.register(c,'campaign','kernel-1',git(root,'rev-parse','HEAD'),allowed_untracked=['new.c'])

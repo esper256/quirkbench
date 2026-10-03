@@ -116,8 +116,8 @@ class BuildStageCache:
         self.root=outside_checkout(self.root)
         self.root.mkdir(parents=True, mode=0o700, exist_ok=True)
         _directory(self.root)
-        if self.root.stat().st_uid != os.getuid() or self.root.stat().st_mode & 0o077:
-            raise BuildError("build cache must be private and owned by its user")
+        if self.root.stat().st_uid != os.getuid():
+            raise BuildError("build cache must be owned by its user")
 
     @staticmethod
     def key(stage: str, identity: dict) -> str:
@@ -142,8 +142,8 @@ class BuildStageCache:
         if slot.is_symlink() or (slot.exists() and not slot.is_dir()):
             raise BuildError("build cache lineage cannot be linked")
         slot.mkdir(mode=0o700, exist_ok=True)
-        if slot.stat().st_uid != os.getuid() or slot.stat().st_mode & 0o077:
-            raise BuildError("build cache lineage must be private")
+        if slot.stat().st_uid != os.getuid():
+            raise BuildError("build cache lineage must be owned")
         try:
             descriptor = os.open(slot / ".lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
                                  0o600)
@@ -152,8 +152,8 @@ class BuildStageCache:
         handle = os.fdopen(descriptor, "r+b")
         try:
             info = os.fstat(handle.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-                raise BuildError("build cache lock must be a private regular file")
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+                raise BuildError("build cache lock must be an owned regular file")
             try:
                 fcntl.flock(handle, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
             except BlockingIOError as exc:

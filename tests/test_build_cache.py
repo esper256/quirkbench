@@ -68,7 +68,7 @@ def test_prune_rejects_active_lineage(tmp_path):
     assert cache.prune(key)
 
 
-def test_lineage_lock_rejects_link_and_permissive_directory(tmp_path):
+def test_lineage_lock_rejects_links_and_preserves_user_permissions(tmp_path):
     cache = BuildStageCache(tmp_path / "cache")
     external = tmp_path / "external"
     external.mkdir()
@@ -79,9 +79,8 @@ def test_lineage_lock_rejects_link_and_permissive_directory(tmp_path):
     permissive = cache.root / "permissive"
     permissive.mkdir(mode=0o700)
     permissive.chmod(0o755)
-    with pytest.raises(BuildError, match="must be private"):
-        with cache.lock("permissive"):
-            pass
+    with cache.lock("permissive"):
+        assert permissive.stat().st_mode & 0o777 == 0o755
 
 
 def test_lineage_lock_rejects_linked_lock_file(tmp_path):

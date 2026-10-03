@@ -195,3 +195,14 @@ def test_native_oneshot_blocks_networkmanager_if_saved_copies_cannot_be_cleared(
     assert network.main()==(0 if cleanup=='complete' else 1)
     assert path.exists()==(cleanup!='complete')
     assert 'never-export-this-password' not in capsys.readouterr().out
+
+
+
+def test_native_keyfile_modes_are_required_without_normalizing_user_files(local):
+    control, profiles, kw = local
+    network.save_selected(control, ['Home Wi-Fi.nmconnection'], **kw)
+    path = profiles / 'Home Wi-Fi.nmconnection'
+    path.chmod(0o644)
+    with pytest.raises(ContractError, match='NetworkManager requires'):
+        network.replay_selected(control, **kw)
+    assert path.stat().st_mode & 0o777 == 0o644

@@ -353,14 +353,9 @@ def _verify_state_identity(config: RecoveryConfig, state_mount: Path, *, identit
         raise BootError('one-shot clearance needs exactly one verified p3 mount')
     fields, detail = matches[0]
     partition = layout.partitions[2]
-    options = dict(item.split('=', 1) for item in detail[2].split(',') if '=' in item)
-    def private_mask(name):
-        value = options.get(name, options.get('umask', ''))
-        return bool(re.fullmatch(r'0?[0-7]{3}', value)) and int(value, 8) & 0o077 == 0o077
     if (fields[3] != '/' or detail[0] != 'vfat'
             or Path(detail[1]).resolve() != partition.path.resolve()
             or fields[2] != f'{partition.major_minor[0]}:{partition.major_minor[1]}'
-            or not private_mask('fmask') or not private_mask('dmask')
             or not {'rw', 'nosuid', 'nodev', 'noexec'} <= set(fields[5].split(','))):
         raise BootError('one-shot clearance needs the restricted whole p3 filesystem')
     return partition.major_minor
@@ -393,8 +388,8 @@ def clear_once(config: RecoveryConfig, *, state_mount: Path = Path('/boot/quirkb
                 if (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino) or (held.st_dev, held.st_ino) != (original.st_dev, original.st_ino):
                     raise BootError('one-shot state was replaced during clearance')
                 if ((os.major(held.st_dev), os.minor(held.st_dev)) != expected_device
-                        or held.st_dev != before[0].st_dev or held.st_uid != os.geteuid() or held.st_mode & 0o077):
-                    raise BootError('one-shot state must remain private on the verified p3 filesystem')
+                        or held.st_dev != before[0].st_dev or held.st_uid != os.geteuid()):
+                    raise BootError('one-shot state must remain on the verified p3 filesystem')
                 if index < 2 and not stat.S_ISDIR(held.st_mode) or index == 2 and (
                         not stat.S_ISREG(held.st_mode) or held.st_nlink != 1 or held.st_size != 1024):
                     raise BootError('preallocated one-shot state is missing or unsafe')

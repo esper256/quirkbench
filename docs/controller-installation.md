@@ -163,14 +163,14 @@ The current directory never selects a new `.quirkbench` root. Existing configure
 selections remain authoritative; explicit legacy paths remain available for read-only
 inspection. New state/build staging inside Git checkouts is rejected.
 Empty sandbox `.git` guards are allowed; linked worktrees and ambiguous metadata
-remain blocked. Controller build paths may also use explicitly selected private
+remain blocked. Controller build paths may also use explicitly selected
 scratch beneath `/var/tmp` or a build-storage volume under `/mnt` or `/media`.
-Create a dedicated directory owned by the executing user with mode `0700` first
+Create a dedicated directory owned by the executing user first
 (for example `/mnt/build-volume/quirkbench`). The volume must already be mounted;
 Quirkbench does not mount it or change permissions. The directory must be below the
-mount root, contain no nested mounts and have no symlink or unsafe writable
-ancestors. Paths below it must remain user-owned and not writable by other users.
-Shared sticky temporary parents are allowed. System trees such as `/var/lib`,
+mount root, contain no nested mounts and have no symlink ancestors. Paths below
+it must remain user-owned. Usable user-selected permissions are preserved; no
+special umask or mode is required. System trees such as `/var/lib`,
 `/dev`, `/etc` and `/usr` remain forbidden. Use home state or a persistent volume
 for durable work; temporary storage may be cleaned by the host. These controller
 path choices do not change the target's boot-device-only storage policy.
@@ -268,8 +268,9 @@ Manual service setup remains supported. `setup --start-service` provisions disti
 private local controller TLS and the fixed user service as described below; it never
 changes host packages, lingering or power settings.
 
-Provision a complete, private `STATE/private/controller-service.json` (mode 0600)
-with explicit existing TLS/device credentials. Illustrative paths below must be
+Provision a complete `STATE/private/controller-service.json` pointing to existing
+TLS/device credentials. Keep actual keys and tokens in a private file or secret
+store; the configuration record itself has no exact-mode requirement. Illustrative paths below must be
 replaced; this example creates no keys or default credentials:
 
 ```json

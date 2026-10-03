@@ -58,7 +58,7 @@ def test_exact_bounded_chain_preserves_original_enrollment(source):
     with pytest.raises(Conflict):endpoint.verify_chain([first,second,third],generations,original,'a'*64,'b'*64)
     with pytest.raises(ContractError):endpoint.verify_chain([first]*33,generations,original,'a'*64,'b'*64)
 
-@pytest.mark.parametrize('change',['bytes','extra','missing','symlink','hardlink','permissions','manifest'])
+@pytest.mark.parametrize('change',['bytes','extra','missing','symlink','hardlink','manifest'])
 def test_private_reader_uses_fixed_bounded_owned_namespace(tmp_path,source,change):
     _,generation,manifest=endpoint._bundle(source);control=tmp_path/'control';directory=control/'generations'/generation
     directory.mkdir(parents=True,mode=0o700);control.chmod(0o700);directory.parent.chmod(0o700)
@@ -70,7 +70,6 @@ def test_private_reader_uses_fixed_bounded_owned_namespace(tmp_path,source,chang
     elif change=='missing':path.unlink()
     elif change=='symlink':path.unlink();path.symlink_to(directory/'device.token')
     elif change=='hardlink':path.rename(directory/'retained.pem');path.hardlink_to(directory/'retained.pem')
-    elif change=='permissions':path.chmod(0o644)
     else:atomic_write(directory/'generation.json',canonical(manifest|{'ca.pem':'f'*64}))
     with pytest.raises((Conflict,ContractError,OSError)):endpoint.read_generation(control,generation)
 

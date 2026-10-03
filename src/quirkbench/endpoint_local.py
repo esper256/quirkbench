@@ -7,7 +7,7 @@ import time
 
 from .binding import read_system_uuid,verify_binding,BindingError
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _private_path,_durable_directory
+from .controller_setup import _managed_path,_durable_directory
 from .controller_endpoint import _strict_read
 from .enrollment import _document
 from .enrollment_activation import _bundle
@@ -42,12 +42,12 @@ def validate_intent(value):
 
 
 def location(control,request_id):
-    identifier(request_id);return _private_path(Path(control)/'endpoint/requests'/digest(request_id.encode()))
+    identifier(request_id);return _managed_path(Path(control)/'endpoint/requests'/digest(request_id.encode()))
 
 
 def pending(control, *,binding_reader=None):
     """Public records only; orphan, missing and corrupt selections remain paused."""
-    control=Path(control);base=_private_path(control/'endpoint');requests=_private_path(base/'requests')
+    control=Path(control);base=_managed_path(control/'endpoint');requests=_managed_path(base/'requests')
     if not base.exists():return None
     if not base.is_dir():raise ContractError('endpoint maintenance state is unavailable')
     from .endpoint_history import MAX_HISTORY,history
@@ -92,7 +92,7 @@ def require_available(control, *,binding_reader=None):
 def _public_retarget(control):
     """Freeze only public lineage before clearance; never read enrolled secrets."""
     from .retarget_local import _pointer,_history,_location
-    base=_private_path(control/'retarget');requests=_private_path(base/'requests')
+    base=_managed_path(control/'retarget');requests=_managed_path(base/'requests')
     if not (base/'active.json').exists() and not (base/'active.json').is_symlink():
         if requests.exists() and any(islice(requests.iterdir(),1)):raise Conflict('retarget history lacks its exact selection')
         return None,{}
@@ -124,7 +124,7 @@ def prepare(control,config,request_id,confirmed_device_id,expected_runtime_sha25
     if digest(der)!=approved_certificate_sha256:raise Conflict('approve the exact full endpoint fingerprint before maintenance')
     recover=recovery_verifier or (lambda cfg:_verify_state_identity(cfg,Path('/boot/quirkbench-state')))
     clearer=clearer or clear_once;fault=fault_hook or (lambda _:None);deadline=monotonic()+120
-    recover(config);control,storage=_storage(control,verify_target);agent=_private_path(control/'agent')
+    recover(config);control,storage=_storage(control,verify_target);agent=_managed_path(control/'agent')
     if not agent.is_dir():raise Conflict('existing enrolled spool required; no initialization permitted')
     with private_lock(control/'runtime-config.lock') as config_fd,private_lock(agent/'agent.lock') as agent_fd:
         from .shutdown_local import require_available
@@ -202,7 +202,7 @@ def prepare(control,config,request_id,confirmed_device_id,expected_runtime_sha25
         if retarget_id is not None and previous is None:
             from .retarget_activation import completed
             completed(control,retarget_id,binding_reader=binding_reader);exact()
-        pending_dir=_private_path(control/'enrollment/pending')
+        pending_dir=_managed_path(control/'enrollment/pending')
         captured={name:_strict_read(pending_dir,name) for name in ('intent.json','request.json','result.json','key.pem')}
         result=validate_result(_document(captured['result.json']),request)
         if result['device_id']!=confirmed_device_id:raise Conflict('endpoint source differs from original enrolled target')

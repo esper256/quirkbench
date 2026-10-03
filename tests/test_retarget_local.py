@@ -112,11 +112,10 @@ def test_existing_execution_locks_protect_original_source(spool,lock):
     assert not (spool[1]/'retarget').exists()
 
 
-@pytest.mark.parametrize('change',['dangling-pointer','public-pointer','wrong-version','missing-intent','changed-intent','directory'])
+@pytest.mark.parametrize('change',['dangling-pointer','wrong-version','missing-intent','changed-intent','directory'])
 def test_all_pending_pointer_failures_block_runtime_and_network_before_secrets(spool,tmp_path,monkeypatch,change):
     control=spool[1];prepare(spool);pointer=control/'retarget/active.json'
     if change=='dangling-pointer':pointer.unlink();pointer.symlink_to(control/'absent')
-    elif change=='public-pointer':pointer.chmod(0o644)
     elif change=='wrong-version':pointer.write_bytes(canonical({'schema_version':True,'request_id':'retarget-1','intent_sha256':'a'*64}))
     elif change=='directory':pointer.unlink();pointer.mkdir(mode=0o700)
     else:

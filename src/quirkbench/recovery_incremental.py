@@ -140,8 +140,8 @@ def adopt_completed_recovery_kernel_stage(
     stage = Path(stage)
     _safe_build_path(stage)
     if (stage.is_symlink() or not stage.is_dir() or stage.resolve() != stage
-            or stage.stat().st_uid != os.getuid() or stage.stat().st_mode & 0o077):
-        raise BuildError("kernel adoption stage must be private")
+            or stage.stat().st_uid != os.getuid()):
+        raise BuildError("kernel adoption stage must be owned and canonical")
     checked = preflight_recipe(recipe, catalog, store)
     if (not isinstance(builder_config_digest, str) or not builder_config_digest.startswith("sha256:")
             or len(builder_config_digest) != 71
@@ -374,9 +374,8 @@ def prepare_cached_recovery_image_stage(
                 raise BuildError("uncertain recovery Kbuild workspace requires explicit worker reconciliation")
             if (work.exists() or work.is_symlink()) and (
                     work.is_symlink() or not work.is_dir()
-                    or work.stat().st_uid != os.getuid()
-                    or work.stat().st_mode & 0o077):
-                raise BuildError("interrupted recovery workspace is not private")
+                    or work.stat().st_uid != os.getuid()):
+                raise BuildError("interrupted recovery workspace is linked, foreign or not a directory")
             cached = cache.load(lineage, "kernel", kernel_identity,
                                 {"objects": build.build_dir,
                                  "modules": modules,

@@ -13,7 +13,7 @@ import tempfile
 import time
 
 from .contracts import Conflict,ContractError,canonical,digest
-from .controller_setup import _durable_directory,_private_path
+from .controller_setup import _durable_directory,_managed_path
 from .controller_tls import _read
 from .credential_registry import record_generation_in_transaction
 from .enrollment import _document,_now,_snapshot,observe_clock
@@ -88,12 +88,12 @@ def export_public_key(signing, *,run=subprocess.run):
 def complete_bound(controller,request, *, run=subprocess.run,tls_inspector=None,clock=time.time,
                    fault_hook=None,guard=None):
     """Local writer API: private complete reply first, both-channel registry last."""
-    request=validate_request(request);root=_private_path(controller.root);fault_hook=fault_hook or (lambda _:None)
+    request=validate_request(request);root=_managed_path(controller.root);fault_hook=fault_hook or (lambda _:None)
     with private_lock(root/'command.lock',shared=True):
         now=_now(clock);observe_clock(controller,now)
         context=publication(controller,run=run,tls_inspector=tls_inspector);context_digest=digest(canonical(context))
         now=_now(clock);observe_clock(controller,now)
-        directory=_private_path(root/'private/enrollment/replies'/digest(request['request_id'].encode()))
+        directory=_managed_path(root/'private/enrollment/replies'/digest(request['request_id'].encode()))
         _durable_directory(directory)
         with private_lock(directory/'completion.lock'):
             with controller.transaction() as db:

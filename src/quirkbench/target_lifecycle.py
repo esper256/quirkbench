@@ -82,7 +82,7 @@ def revoke_target(root,target,request_id=None, *, generation=None,action='revoke
     capability. The shared command lock preserves restore/maintenance exclusion.
     """
     from .controller import Controller
-    from .controller_setup import _private_path,_database_present
+    from .controller_setup import _managed_path,_database_present
     from .maintenance import private_lock
     from .setup_contracts import SetupUnavailable
     identifier(target)
@@ -92,7 +92,7 @@ def revoke_target(root,target,request_id=None, *, generation=None,action='revoke
     request_id=request_id or 'target-'+action+'-'+digest(target.encode())[:32]
     identifier(request_id)
     intent={'schema_version':1,'action':action,'target':target,'generation':generation}
-    raw=canonical(intent);root=_private_path(Path(root))
+    raw=canonical(intent);root=_managed_path(Path(root))
     if not _database_present(root):raise SetupUnavailable('complete controller setup before target revocation')
     fault_hook=fault_hook or (lambda _:None)
     with private_lock(root/'command.lock',shared=True):

@@ -5,7 +5,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .contracts import Conflict,ContractError,canonical,digest
-from .controller_setup import _private_path
+from .controller_setup import _managed_path
 from .enrollment import _now,_document
 from .enrollment_activation import _bundle,_validate_native
 from .enrollment_proof import validate_request,_bytes
@@ -23,7 +23,7 @@ def probe(record,source_files,destination_files,request,result,approved_certific
     Preserve original authenticated enrollment documents. No pointer, generation,
     journal, contact, registration, work or approval is published by this adapter.
     """
-    parent=_private_path(temporary_parent)
+    parent=_managed_path(temporary_parent)
     if not parent.is_dir():raise ContractError('owned private endpoint staging directory required')
     deadline=monotonic()+120 if deadline is None else deadline
     _remaining(deadline,monotonic)

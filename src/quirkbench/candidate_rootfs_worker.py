@@ -10,7 +10,7 @@ from pathlib import Path
 
 from . import baseline_inputs
 from .contracts import ContractError,Conflict,canonical,sha256
-from .controller_setup import _private_path
+from .controller_setup import _managed_path
 from .state_reader import read_file
 from .store import atomic_write
 
@@ -21,7 +21,7 @@ def inner(cas,record,output, *,runner=None,marker=Path('/etc/quirkbench-containe
     from .build_pipeline import ResourceLimits,_tree_hash,_reject_credentials
     from .recovery_rootfs import CASReader
     from .source_capture import load_document
-    output = _private_path(output)
+    output = _managed_path(output)
     if runner is None:
         _require_container();ResourceLimits.from_cgroup()
     value = baseline_inputs.validate(load_document(read_file(Path(record).parent,Path(record).name,limit=16384)))
@@ -47,7 +47,7 @@ def validate_result(output,value,result):
             or result['schema_version']!=1 or result['rootfs']!='rootfs'
             or result['input_sha256']!=sha256_file_record(baseline_inputs.validate(value))):
         raise ContractError('candidate rootfs result differs from pinned input')
-    sha256(result['target_tree_sha256']);output = _private_path(output)
+    sha256(result['target_tree_sha256']);output = _managed_path(output)
     rootfs = output/'rootfs'
     if rootfs.resolve()!=rootfs or rootfs.is_symlink() or not rootfs.is_dir():
         raise ContractError('candidate rootfs is unavailable or linked')
@@ -66,7 +66,7 @@ def prepare(root,stage,value,builder,verify,report,deadline, *,execute=None):
     from .recovery_worker import execute_rootfs
     from .source_capture import _directory_owner,_staged_identity,load_document
     from .builder_setup import reserve_bytes,check_space
-    root = Path(root);stage = _private_path(stage)
+    root = Path(root);stage = _managed_path(stage)
     with _directory_owner(stage) as stage_owner:
         original_value,original_builder=value,builder
         frozen_value=canonical(baseline_inputs.validate(value));frozen_builder=canonical(builder)

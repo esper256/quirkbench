@@ -15,7 +15,7 @@ import time
 
 from .contracts import CapabilityReport,Conflict,ContractError,canonical,digest,identifier,sha256
 from .binding import read_system_uuid,verify_binding
-from .controller_setup import _durable_directory,_private_path
+from .controller_setup import _durable_directory,_managed_path
 from .controller_tls import _read
 from .enrollment import _document
 from .enrollment_proof import validate_request
@@ -52,9 +52,9 @@ def _journal(control):
 
 def _journal_at(agent,name='journal.json'):
     from .product_contracts import _depth,_pairs
-    agent=_private_path(agent);path=agent/name;before=path.lstat()
-    if not stat.S_ISREG(before.st_mode) or before.st_uid!=os.geteuid() or stat.S_IMODE(before.st_mode)!=0o600 or before.st_nlink!=1:
-        raise ContractError('original journal must remain a private owned regular file')
+    agent=_managed_path(agent);path=agent/name;before=path.lstat()
+    if not stat.S_ISREG(before.st_mode) or before.st_uid!=os.geteuid() or before.st_nlink!=1:
+        raise ContractError('original journal must remain an owned regular file')
     raw=read_file(agent,name,limit=MAX_JOURNAL)
     after=path.lstat()
     if (before.st_dev,before.st_ino,before.st_size,before.st_mtime_ns,before.st_ctime_ns)!=(after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns,after.st_ctime_ns):
@@ -88,7 +88,7 @@ def _journal_at(agent,name='journal.json'):
 def _source(control,verify, *,locations=None,_endpoint_files=None):
     """Capture exact original enrollment/configuration; do not authenticate as it."""
     verify();runtime_home,pending,agent=locations or (control,control/'enrollment/pending',control/'agent')
-    pending=_private_path(pending)
+    pending=_managed_path(pending)
     def read(directory,name):verify();return _read(directory,name)
     req_raw=read(pending,'request.json');request=validate_request(_document(req_raw))
     result_raw=read(pending,'result.json');result=validate_result(_document(result_raw),request)
@@ -98,7 +98,7 @@ def _source(control,verify, *,locations=None,_endpoint_files=None):
     ca=active.get('ca')
     if (not isinstance(ca,str) or len(Path(ca).parts)!=3 or Path(ca).parts[0]!='generations' or Path(ca).parts[2]!='ca.pem'):
         raise Conflict('exact initial enrolled private generation required for original evidence drain')
-    generation=sha256(Path(ca).parts[1]);directory=_private_path(control/'generations'/generation)
+    generation=sha256(Path(ca).parts[1]);directory=_managed_path(control/'generations'/generation)
     manifest_raw=read(directory,'generation.json');manifest=_document(manifest_raw)
     if not isinstance(manifest,dict) or digest(manifest_raw)!=generation:raise Conflict('original private generation identity differs')
     runtime={'schema_version':1,'device_id':result['device_id'],'controller_url':result['controller_url'],
@@ -140,7 +140,7 @@ def _source(control,verify, *,locations=None,_endpoint_files=None):
 @contextmanager
 def _locked(control,verify_target,binding_reader):
     control,verify=_storage(control,verify_target)
-    agent=_private_path(control/'agent')
+    agent=_managed_path(control/'agent')
     if not agent.is_dir():raise Conflict('original target spool unavailable')
     with private_lock(control/'runtime-config.lock'):
         with private_lock(agent/'agent.lock'):
@@ -186,7 +186,7 @@ def _prepare(control,request_id,verify,fault,deadline,clock, *,source_reader=Non
         original()
         if clock()>=deadline:raise TimeoutError('bounded original evidence capture window elapsed')
     identifier(request_id);result,journal,ca,source=source_reader(verify)
-    plans=_private_path(control/'evidence-drain/plans');directory=_private_path(plans/digest(request_id.encode()))
+    plans=_managed_path(control/'evidence-drain/plans');directory=_managed_path(plans/digest(request_id.encode()))
     if plans.exists() and len(list(islice(plans.iterdir(),MAX_PLANS)))>=MAX_PLANS and not directory.exists():raise Conflict('retained drain plan limit reached; preserve/export history before further maintenance')
     marker=directory/'source.json'
     if marker.exists() or marker.is_symlink():
@@ -255,14 +255,14 @@ def _drain_locked(control,verify,request_id,grant_id, *,client_factory=HTTPSDrai
     fault=fault_hook or (lambda _:None)
     deadline=clock()+timeout_s if deadline is None else deadline
     saved,directory,result,journal=_prepare(control,request_id,verify,fault,deadline,clock,source_reader=source_reader,agent_root=agent_root)
-    staged=_private_path(control/'setup')/(grant_id+'.json');verify()
-    credential=read_credential(staged)
+    staged=_managed_path(control/'setup')/(grant_id+'.json');verify()
+    credential=read_credential(staged,stores=(control,control.parent))
     if credential['record']['grant_id']!=grant_id or canonical(credential['record']['plan'])!=canonical(saved['plan']):
         raise Conflict('staged grant differs from exact original evidence plan')
     verify();client=client_factory(result['controller_url'],{'record':credential['record'],'token':credential['token']},str(directory/'ca.pem'))
     fault('drain_client_prepared')
     latest,current,ca,source=source_reader(verify)
-    if source!=saved['source_sha256'] or digest(ca)!=saved['ca_sha256'] or read_credential(staged)!=credential:
+    if source!=saved['source_sha256'] or digest(ca)!=saved['ca_sha256'] or read_credential(staged,stores=(control,control.parent))!=credential:
         raise Conflict('original source or staged drain credential changed before exchange')
     scope=_selected(saved['plan'],current,latest)
     if isinstance(client,HTTPSDrainClient):
@@ -273,7 +273,7 @@ def _drain_locked(control,verify,request_id,grant_id, *,client_factory=HTTPSDrai
         if (source!=saved['source_sha256'] or digest(ca)!=saved['ca_sha256']
                 or _journal_digest(current,scope)!=saved['journal_sha256']
                 or _read(directory,'ca.pem')!=ca or _read(directory,'plan.json')!=canonical(saved['plan'])
-                or read_credential(staged)!=credential):raise Conflict('original drain source changed before request or journal write')
+                or read_credential(staged,stores=(control,control.parent))!=credential):raise Conflict('original drain source changed before request or journal write')
         if clock()>=deadline:raise TimeoutError('bounded old-evidence drain window elapsed')
     class GuardedClient:
         device_id=client.device_id

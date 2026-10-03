@@ -2,7 +2,6 @@
 import json
 import os
 from pathlib import Path
-import stat
 
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
 
@@ -45,13 +44,13 @@ def location(root,workspace_id):
 
 
 def owned_path(root,value):
-    from .controller_setup import _private_path
+    from .controller_setup import _managed_path
     path=location(root,value['workspace_id'])
     if not path.is_dir() or path.is_symlink() or path.resolve()!=path:raise Conflict('registered source workspace is missing or linked')
     info=path.lstat()
     if (info.st_dev,info.st_ino)!=(value['root_device'],value['root_inode']):raise Conflict('registered source workspace root changed')
-    if info.st_uid!=os.geteuid() or stat.S_IMODE(info.st_mode)!=0o700:raise Conflict('source workspace must remain private to its operator')
-    _private_path(path.parent);return path
+    if info.st_uid!=os.geteuid():raise Conflict('source workspace must remain owned by its operator')
+    _managed_path(path.parent);return path
 
 
 def register(controller,campaign_id,workspace_id,base_oid, *,allowed_untracked=(),provenance=None):

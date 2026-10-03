@@ -93,6 +93,36 @@ credentials remain confidential. Boundary review uses this policy when simplifyi
 implementation; removing an obsolete blanket check does not itself require another
 product decision.
 
+### Remaining permission behavior
+
+Ordinary state, setup records, worker directories, locks, source workspaces and
+capture outputs, build caches and target evidence have no private-mode admission
+rule. Canonical paths, ownership, correct-device checks, locks, immutable digests
+and bounded stable reads still serve their original purposes. Atomic updates
+preserve an existing regular file's mode; newly created records and the controller
+database retain private defaults. The database can contain attempt tokens, so keep
+it or its enclosing state directory private when using real targets.
+
+The remaining access-mode checks have specific purposes:
+
+- Managed TLS private keys and drain tokens require a private file or their declared
+  enclosing secret store, because they authorize controller/target communication.
+  Public certificates and ordinary metadata do not inherit a secret-file mode rule.
+- Target control storage contains enrollment keys, device credentials and attempt
+  tokens. Its control directory or verified enclosing evidence directory provides
+  the private boundary; individual evidence blobs need not be 0600.
+- The configured GnuPG signing home keeps a private boundary for publication keys
+  outside worker/output mounts. NetworkManager's RAM profile store must be private
+  and writable for saved network credentials, and retains its restricted tmpfs.
+- Executable bits, source special-mode exclusions, installed archive modes and
+  read-only library/build snapshots retain their functional or reproducibility
+  meanings. They are not evidence of secret confidentiality or worker authority.
+
+Permission changes on newly created artifacts preserve the required source/image
+modes or establish secret defaults. Cleanup may restore owner access only inside
+an explicitly disposable, stopped, application-owned snapshot; it never normalizes
+user source or ordinary state as a precondition for use.
+
 ## C0 — Shared contract and authority rules
 
 Each genuinely new record starts at `schema_version: 1`; a successor to an existing

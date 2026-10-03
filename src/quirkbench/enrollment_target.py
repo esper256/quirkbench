@@ -14,7 +14,7 @@ import time
 
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _durable_directory,_private_path
+from .controller_setup import _durable_directory,_managed_path
 from .controller_tls import _openssl,_read
 from .enrollment import _document,_now
 from .enrollment_client import endpoint
@@ -36,15 +36,17 @@ def _intent(value):
 
 
 def _storage(control,verify_target):
-    verify_target();control=_private_path(control)
+    verify_target();control=_managed_path(control)
     if not control.is_dir():raise ContractError('verified evidence control directory is missing')
     original=verify_target
     def verify():
         original();device=control.stat().st_dev
+        from .provisioning import require_control_access
+        require_control_access(control)
         if any(Path(path)!=control for path in nested_mounts(control)):
             raise ContractError('private enrollment control contains nested mounts')
         for path in (control/'enrollment',control/'enrollment/pending'):
-            _private_path(path)
+            _managed_path(path)
             if path.exists() and path.stat().st_dev!=device:
                 raise ContractError('private enrollment destination is on another storage device')
         for path in (control/'media-instance.json',control/'runtime-config.lock',control/'runtime.json',
@@ -114,7 +116,7 @@ def _prepare_at(control,directory,controller_url,approved_fingerprint,code_id, *
     """Private request primitive; callers own initial/retarget policy and locks."""
     verify_target()
     binding={'schema_version':1,'system_uuid':binding_reader()};verify_binding(binding,reader=binding_reader)
-    directory=_private_path(directory);_durable_directory(directory)
+    directory=_managed_path(directory);_durable_directory(directory)
     media=control/'media-instance.json'
     if media.exists() or media.is_symlink():
         value=_document(_read(control,media.name))
@@ -175,7 +177,7 @@ def sign_challenge(control,challenge, *, verify_target,binding_reader=read_syste
 
 def _sign_at(control,directory,challenge,now, *,verify_target,binding_reader,clock,run):
     """Private proof primitive; callers fence the exact namespace and authority."""
-    verify_target();directory=_private_path(directory)
+    verify_target();directory=_managed_path(directory)
     intent=_document(_read(directory,'intent.json'));request,private=_saved(directory,intent,run=run)
     _media(control,request['media_instance_id'])
     verify_binding(request['target_binding'],reader=binding_reader)
