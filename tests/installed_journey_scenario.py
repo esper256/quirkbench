@@ -285,6 +285,9 @@ def run(home,runtime,inputs,case):
                 assert step(next_boot)=='completed'
                 fact=attended_views.attempt(attended_views.ApprovalReader(c.root),identity)['data']
                 assert fact['recovery']['returned'] and fact['evidence']['all_declared_acknowledged'] and fact['problem_reproduced'] is None
+                assert fact['execution']['terminal_result']['outcome']=='INCONCLUSIVE'
+                with c.transaction() as db:logs=[row[0] for row in db.execute('SELECT digest FROM evidence WHERE attempt=? AND stream=? ORDER BY sequence',(identity,'kernel-log'))]
+                assert logs and b'injected native kernel observation; no real target campaign' in b''.join(c.store.get(value) for value in logs)
                 return identity
             denied=None
             if case=='interrupted':
