@@ -449,6 +449,26 @@ known totals do not claim to meter unrelated external spending.
 
 Admission is bounded metadata work, not a full archive rehash or source scan.
 Captured bytes were verified at stopped publication and are retained for later
-independent execution validation. The operation stays QUEUED with the named
-`external_loop_pending` reason; execution wiring belongs to #35. Acceptance never
-invokes a managed agent, builds a candidate, authorizes or repeats an attempt.
+independent execution validation. An unbound operation has the named
+`external_loop_pending` reason. `dispatch-proposal NAME --proposal OP
+--candidate CANDIDATE_OP --repository ALIAS --request-id ID` binds one strict
+proposal-dispatch-input v1 to the original operation. Source-free actions omit
+candidate/repository. Exact replay precedes current readiness/source checks;
+changed choices or a second binding conflict.
+
+The existing controller owner atomically links deterministic build/compose child
+requests and advances the parent. A stopped admitted capture is read from the
+proposal-owned retained closure, independently of later writer edits or original
+capture-owner retirement. Child claims revalidate the current parent and exact
+frozen intent. Pause blocks new stages; already claimed workers drain. Restart
+requires explicit parent and interrupted-child resume after termination
+reconciliation. Storage/native failures interrupt without automatically retrying.
+
+Experiment submission reuses the published-composition proof, with strict
+proposal-experiment-input v1 attribution. It binds the exact recipe, parameters,
+repetitions, deadline and candidate deployment; existing experiment/jobs/refs and
+parent completion commit atomically after final CAS/native-retention fences.
+`proposals` exposes the linked child/experiment IDs. Source-free human/conclusion
+actions retain their decision and pause without build or experiment. Parent success
+means submission; attempt approval, evidence acknowledgement, recovery and problem
+reproduction remain separate. No managed invocation or unattended grant is implied.

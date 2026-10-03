@@ -241,15 +241,20 @@ def test_source_free_final_cas_fence(target,published,monkeypatch):
         with c.transaction() as db:
             row=db.execute('SELECT proposal_digest,context_digest FROM external_proposals WHERE operation=?',(operation,)).fetchone()
         selected={'dispatch':receipt['data']['dispatch_sha256'],'proposal':row[0],'context':row[1]}[target]
+        saved_bytes=c.store.path(selected).read_bytes()
         original=c.store.put
         def changed(raw,**kw):
             artifact=original(raw,**kw)
             if json.loads(raw).get('action')=='needs_human':c.store.path(selected).write_bytes(b'corrupted admitted input')
             return artifact
         monkeypatch.setattr(c.store,'put',changed)
-        assert dispatch.tick(owner)=={'id':operation,'state':'FAILED'}
+        assert dispatch.tick(owner)=={'id':operation,'state':'INTERRUPTED'}
         assert c.status('investigation')['state']=='RUNNING'
         no_experiments(c,operation)
+        with pytest.raises(Conflict):dispatch.resume(owner,operation)
+        c.store.path(selected).write_bytes(saved_bytes);monkeypatch.setattr(c.store,'put',original)
+        dispatch.resume(owner,operation)
+        assert dispatch.tick(owner)=={'id':operation,'state':'SUCCEEDED'}
 
 
 @pytest.mark.parametrize('target',['dispatch','proposal','context'])
@@ -259,12 +264,17 @@ def test_native_pin_callback_final_fence(target,published,joined,monkeypatch):
         operation,_,receipt,_=stopped_composition(c,owner,monkeypatch,joined[5])
         with c.transaction() as db:row=db.execute('SELECT proposal_digest,context_digest FROM external_proposals WHERE operation=?',(operation,)).fetchone()
         selected={'dispatch':receipt['data']['dispatch_sha256'],'proposal':row[0],'context':row[1]}[target]
+        saved_bytes=c.store.path(selected).read_bytes()
         original=c._retain_deployment
         def changed(*args,**kwargs):
             original(*args,**kwargs);c.store.path(selected).write_bytes(b'corrupt during native pin')
         monkeypatch.setattr(c,'_retain_deployment',changed)
-        assert dispatch.tick(owner)=={'id':operation,'state':'FAILED'}
+        assert dispatch.tick(owner)=={'id':operation,'state':'INTERRUPTED'}
         no_experiments(c,operation)
+        c.store.path(selected).write_bytes(saved_bytes);monkeypatch.setattr(c,'_retain_deployment',original)
+        dispatch.resume(owner,operation)
+        assert dispatch.tick(owner)=={'id':operation,'state':'SUCCEEDED'}
+        with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0]==1
 
 
 def test_signing_choice_changed_during_child_admission_rolls_back_link(published,joined,monkeypatch):
@@ -331,7 +341,7 @@ def test_waiting_interrupted_children_do_not_starve_later_human_decision(publish
             for index in range(100):
                 clone={**original,'id':'blocked-'+str(index),'request_id':'blocked-'+str(index)}
                 db.execute('INSERT INTO operations('+','.join(columns)+') VALUES('+','.join('?' for _ in columns)+')',tuple(clone[k] for k in columns))
-                db.execute('INSERT INTO proposal_outbox SELECT ?,proposal_digest,action FROM proposal_outbox WHERE operation=?',(clone['id'],operation))
+                db.execute('INSERT INTO proposal_outbox SELECT ?,proposal_digest,context_digest,action FROM proposal_outbox WHERE operation=?',(clone['id'],operation))
                 db.execute('INSERT INTO proposal_dispatch_commands SELECT ?,request_digest,?,input_digest,result_document,build_operation,composition_operation,experiment FROM proposal_dispatch_commands WHERE operation=?',(clone['request_id'],clone['id'],operation))
         later,_=source_free(c,decision='later')
         dispatch.declare(c,'investigation',later,'dispatch-later',ready=lambda _:None)

@@ -1,7 +1,7 @@
 """Durable external proposal admission; existing operations own all execution.
 
-The outbox is an immutable dispatch-intent mapping, not another scheduler. #35
-connects its operation to the existing services. Acceptance grants no attempt.
+The outbox maps immutable admission intent. Explicit proposal dispatch binds its
+operation to the existing services. Acceptance grants no attempt approval.
 """
 import os
 from pathlib import Path
