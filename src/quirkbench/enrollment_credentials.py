@@ -48,6 +48,14 @@ def publication(controller, *, run=subprocess.run,tls_inspector=None):
         if (not path.is_absolute() or path.resolve()!=path or not path.is_relative_to(controller.root/'repositories')
                 or not path.is_dir()):raise ContractError('enrollment repository must be initialized in configured controller state')
         read_file(path,'config',limit=65536)
+    public_key=export_public_key(signing,run=run)
+    fingerprint=signing['fingerprint']
+    return {**snapshot,'repository_url':repository['url'],'repository_roots':roots,
+            'repository_public_key':public_key,'signing_fingerprint':fingerprint.upper()}
+
+
+def export_public_key(signing, *,run=subprocess.run):
+    """Verify exact explicitly selected public signing identity; no key generation."""
     fingerprint=signing['fingerprint']
     if not isinstance(fingerprint,str) or not re.fullmatch(r'[A-Fa-f0-9]{40}|[A-Fa-f0-9]{64}',fingerprint):
         raise ContractError('full configured composition signing fingerprint required')
@@ -74,8 +82,7 @@ def publication(controller, *, run=subprocess.run,tls_inspector=None):
                 or 's' not in rows[public[0]][11].lower() or public[0]+1>=len(rows)
                 or len(rows[public[0]+1])<=9 or rows[public[0]+1][0]!='fpr' or rows[public[0]+1][9].upper()!=fingerprint.upper()):
             raise Conflict('repository export differs from configured signing identity')
-    return {**snapshot,'repository_url':repository['url'],'repository_roots':roots,
-            'repository_public_key':exported.stdout.decode('ascii'),'signing_fingerprint':fingerprint.upper()}
+    return exported.stdout.decode('ascii')
 
 
 def complete_bound(controller,request, *, run=subprocess.run,tls_inspector=None,clock=time.time,
