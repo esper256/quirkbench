@@ -54,10 +54,11 @@ class ComposeInputs:
     replacement_rpms: dict[Path, str] = field(default_factory=dict)
     evidence_paths: dict[str, Path] = field(default_factory=dict)
     evidence_sha256: dict[str, str] = field(default_factory=dict)
+    pinned_baseline: dict | None = None
 
     @classmethod
     def from_mapping(cls, raw: dict) -> "ComposeInputs":
-        required = set(cls.__dataclass_fields__) - {"protection_profile", "replacement_rpms"}
+        required = set(cls.__dataclass_fields__) - {"protection_profile", "replacement_rpms", "pinned_baseline"}
         if not required <= set(raw) or set(raw) - set(cls.__dataclass_fields__):
             raise BuildError("compose manifest has missing or unknown fields")
         raw = dict(raw)
@@ -69,6 +70,11 @@ class ComposeInputs:
         return cls(**raw)
 
     def validate(self) -> None:
+        if self.pinned_baseline is not None:
+            from .pinned_composition import metadata
+            entry,_=metadata(self.pinned_baseline)
+            if self.replacement_rpms or self.fedora_release!=entry["fedora_release"] or self.fedora_repo_sha256!=entry["repo_config_sha256"]:
+                raise BuildError("pinned composition differs from baseline or declares extra replacements")
         if set(self.artifact_paths) != ROLES or set(self.artifact_sha256) != ROLES:
             raise BuildError("composition requires exactly the staged kernel and userspace artifact roles")
         for role, path in self.artifact_paths.items():
@@ -124,8 +130,11 @@ class ComposeInputs:
             raise BuildError("kernel release differs from build provenance")
 
     def identity(self) -> str:
+        extra={}
+        if self.pinned_baseline is not None:
+            extra={"pinned_baseline":{key:self.pinned_baseline[key] for key in ("entry_sha256","snapshot_sha256","rpms_sha256")}}
         from .package_resources import target_assets_dir
-        return hashlib.sha256(canonical({"artifacts": self.artifact_sha256,
+        return hashlib.sha256(canonical({**extra,"artifacts": self.artifact_sha256,
             "kernel_release": self.kernel_release, "fedora_release": self.fedora_release,
             "fedora_repo_sha256": self.fedora_repo_sha256, "source_date_epoch": self.source_date_epoch,
             "composer_sha256": sha256_file(Path(__file__)), "protection_profile": self.protection_profile,
@@ -454,6 +463,10 @@ class FedoraComposer:
                 run(["rpmbuild", "-bb", "--define", f"_topdir {top}", str(spec)], f"package-{name}")
                 for rpm in (top / "RPMS").rglob("*.rpm"):
                     shutil.copyfile(rpm, packages / rpm.name)
+            pinned_entry=pinned_snapshot=None
+            if inputs.pinned_baseline is not None:
+                from .pinned_composition import prepare
+                pinned_entry,pinned_snapshot=prepare(inputs.pinned_baseline,stage,run,reserve=DISK_RESERVE)
             replacement_names = []
             for number, rpm in enumerate(inputs.replacement_rpms):
                 nevra = run(["rpm", "-qp", "--queryformat", "%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}", str(rpm)], f"inspect-replacement-{number}", 60).strip()
@@ -479,6 +492,11 @@ class FedoraComposer:
                             "quirkbench.config-sha256": inputs.artifact_sha256["config"],
                             "quirkbench.kernel-release": inputs.kernel_release},
                         "check-passwd": {"type": "none"}, "check-groups": {"type": "none"}}
+            if pinned_entry is not None:
+                treefile["repos"]=["quirkbench-baseline","quirkbench-experiment"]
+                treefile["packages"]=sorted({p["name"] for p in pinned_entry["packages"]})+["kernel-quirkbench","quirkbench-experiment-userspace"]
+                treefile["add-commit-metadata"]["quirkbench.baseline-sha256"]=inputs.pinned_baseline["entry_sha256"]
+                treefile["add-commit-metadata"]["quirkbench.rpm-snapshot-sha256"]=inputs.pinned_baseline["snapshot_sha256"]
             if replacement_names:
                 treefile["repo-packages"] = [{"repo": "quirkbench-experiment", "packages": replacement_names}]
             (stage / "tree.json").write_bytes(canonical(treefile) + b"\n")
@@ -523,11 +541,21 @@ class FedoraComposer:
                     shutil.copyfile(rpm, target)
             if not list(snapshot.glob("*.rpm")):
                 raise BuildError("download did not retain dependency RPMs for replay")
+            if pinned_entry is not None:
+                from .pinned_composition import validate_downloads
+                validate_downloads(pinned_snapshot,packages,snapshot)
             _sync_tree(snapshot)
             run([*common, "--cache-only", f"--ex-lockfile={lockfile}", "--ex-lockfile-strict", str(stage / "tree.json")], "compose-tree", 4 * 3600)
             revision = run(["ostree", f"--repo={repo}", "rev-parse", treefile["ref"]], "resolve-revision", 60).strip()
             if not re.fullmatch(r"[0-9a-f]{64}", revision):
                 raise BuildError("composer returned invalid revision")
+            pinned_result=None
+            if pinned_entry is not None:
+                from .pinned_composition import verify_checkout
+                checkout=stage/"pinned-checkout"
+                run(["ostree",f"--repo={repo}","checkout","--user-mode","--force-copy",revision,str(checkout)],"checkout-pinned-baseline")
+                pinned_result=verify_checkout(pinned_entry,pinned_snapshot,packages,checkout,run,inputs.pinned_baseline["entry_sha256"])
+                (stage/"pinned-baseline.json").write_bytes(canonical(pinned_result))
             inputs.validate()  # fail before publication if sources changed during composition
             if inputs.identity() != identity or builder_base_digest() != base_digest:
                 raise BuildError("composition inputs or runtime changed during build")
@@ -551,6 +579,7 @@ class FedoraComposer:
                 "compose_finalize_hook": finalize,
                 "compose_dependency_lock": lockfile, "compose_package_lock": stage / "compose-packages.lock",
                 "compose_fedora_repos": stage / "fedora.repo", "compose_toolchain_log": stage / "compose-toolchain.log"}
+            if pinned_result is not None:generated_evidence["compose_pinned_baseline"]=stage/"pinned-baseline.json"
             if inputs.evidence_paths.keys() & generated_evidence.keys():
                 raise BuildError("input evidence uses reserved generated role")
             self.evidence_files = {**inputs.evidence_paths, **generated_evidence}
@@ -566,6 +595,8 @@ class FedoraComposer:
                           "composer_packages_sha256": sha256_file(stage / "compose-packages.lock"),
                           "dependency_lock_sha256": sha256_file(lockfile),
                           "dependency_rpm_sha256": sorted(rpm.stem for rpm in snapshot.glob("*.rpm"))}
+            if pinned_result is not None:
+                provenance.update(baseline_sha256=pinned_result["baseline_sha256"],rpm_snapshot_sha256=pinned_result["rpm_snapshot_sha256"],target_recipes=pinned_result["target_recipes"])
             manifest = DeploymentManifest(backend="ostree", revision=revision, repository=inputs.repository,
                                           provenance=provenance, protection_profile=inputs.protection_profile)
             (stage / "deployment.json").write_bytes(canonical(manifest.to_dict()) + b"\n")

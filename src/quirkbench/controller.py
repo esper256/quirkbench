@@ -914,7 +914,7 @@ class Controller(OperatorApprovals):
     def _publish_operation(self, operation_id, worker_epoch, worker_generation, *,
                            output_refs=(), state=None, result=None, error=None, expected_claim=None, clear_stopped_worker=False,
                            storage_kind=None, final_output_digest=None, deployment=None, source_workspace=None, source_workspace_fence=None,
-                           source_provenance_refs=(),candidate_rootfs_fence=None):
+                           source_provenance_refs=(),candidate_rootfs_fence=None,joined_job_fence=None):
         """P2b worker hook: fence and reference publication share one transaction."""
         if clear_stopped_worker and (expected_claim is None or state not in ('SUCCEEDED','FAILED')):
             raise ContractError('clearing a worker requires exact stopped terminal publication')
@@ -933,7 +933,7 @@ class Controller(OperatorApprovals):
         outputs = sorted({sha256(value) for value in output_refs})
         for value in outputs:
             self.store.verify(value)
-        if not isinstance(source_provenance_refs,(tuple,list,set)) or len(source_provenance_refs)>8196:
+        if not isinstance(source_provenance_refs,(tuple,list,set)) or len(source_provenance_refs)>8212:
             raise ContractError('invalid distribution provenance closure')
         provenance_refs=sorted({sha256(value) for value in source_provenance_refs})
         if provenance_refs and source_workspace is None:raise ContractError('provenance retention requires a live workspace publication')
@@ -970,6 +970,10 @@ class Controller(OperatorApprovals):
             if not callable(candidate_rootfs_fence) or storage_kind!='input' or state!='SUCCEEDED':
                 raise ContractError('candidate publication requires stopped input verification')
             candidate_rootfs_fence()
+        if joined_job_fence is not None:
+            if not callable(joined_job_fence) or storage_kind not in ('build','deployment') or state!='SUCCEEDED':
+                raise ContractError('joined publication requires stopped job verification')
+            joined_job_fence()
         if source_workspace is not None:
             # Hash outside the database write lock; unrelated evidence uploads
             # retain access. The transaction then checks a fresh exact claim.
@@ -1016,6 +1020,10 @@ class Controller(OperatorApprovals):
                     raise ContractError('candidate publication requires independent final verification')
                 if candidate_rootfs_fence is not None and row['kind']!='candidate_prepare':
                     raise ContractError('candidate verification has another operation kind')
+                if row['kind'] in ('build','compose'):
+                    joined=json.loads(self.store.get(row['input_digest']))['arguments'].get('schema_version')==3
+                    if joined != callable(joined_job_fence):
+                        raise ContractError('joined job publication requires its independent final fence')
                 paths=[] if storage_kind=='recovery' else [row['stage_dir']]
                 stopped={key:row[key] for key in ('worker_unit','worker_boot_id','worker_generation','stage_dir','input_digest')};stopped['stop_kind']='stopped'
                 insert='INSERT OR REPLACE' if row['kind']=='source_prepare' else 'INSERT'
@@ -1040,8 +1048,9 @@ class Controller(OperatorApprovals):
                     raise Conflict('workspace has another preparation owner')
                 source_input=json.loads(self.store.get(admitted['input_digest']))
                 if source_input.get('schema_version')==2:
-                    from .distribution_prepare_operation import retained_closure
-                    if provenance_refs!=retained_closure(self.store,source_input,workspace):
+                    from .distribution_prepare_operation import publication_closure
+                    source_intent=json.loads(self.store.get(row['input_digest']))
+                    if provenance_refs!=publication_closure(self.store,source_input,workspace,source_intent,row['input_digest']):
                         raise Conflict('distribution workspace must retain its complete exact provenance')
                 elif provenance_refs:raise ContractError('legacy source preparation has no distribution closure')
                 if db.execute('SELECT 1 FROM source_workspaces WHERE id=?',(workspace['workspace_id'],)).fetchone():

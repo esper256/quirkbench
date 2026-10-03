@@ -38,6 +38,9 @@ def input_files(kind,raw):
     result={'fedora_repo_file':(raw['fedora_repo_file'],raw['fedora_repo_sha256'])}
     for field,hashes in (('artifact_paths','artifact_sha256'),('evidence_paths','evidence_sha256')):
         result.update({field+'/'+role:(path,raw[hashes][role]) for role,path in raw[field].items()})
+    if raw.get('pinned_baseline') is not None:
+        pinned=raw['pinned_baseline']
+        result.update({'pinned_baseline/'+key:(pinned[key],pinned[key.replace('_file','_sha256')]) for key in ('entry_file','snapshot_file','rpms_file')})
     result.update({'replacement_rpms/'+str(n):(path,value) for n,(path,value) in enumerate(sorted(raw.get('replacement_rpms',{}).items()))})
     return result
 
@@ -125,6 +128,8 @@ def restore(kind,raw,prepared,root,stage):
         result['replacement_rpms']={replacements['replacement_rpms/'+str(n)]:value for n,(path,value) in enumerate(sorted(raw.get('replacement_rpms',{}).items()))}
         home=stage/'empty-signing-home'; home.mkdir(mode=0o700)
         result['signing_home']=str(home)
+        if raw.get('pinned_baseline') is not None:
+            result['pinned_baseline']={**raw['pinned_baseline'],**{key:replacements['pinned_baseline/'+key] for key in ('entry_file','snapshot_file','rpms_file')}}
     return result
 
 
@@ -176,12 +181,20 @@ def run_worker(root,operation,epoch,generation,stage):
                 result=import_builder(root,args,stage,verify,report,claim.deadline)
         elif claim.stage=='job_inputs':
             _verify_retained_builder_archive(root,args['builder_archive_sha256'],args['builder_config_digest'])
-            result=capture(claim.kind,args['manifest'],stage,verify,report,state_root=root,excluded_roots=args['excluded_roots'])
+            raw=args.get('manifest')
+            if args.get('schema_version')==3:
+                from .investigation_pipeline import manifest
+                raw=manifest(root,args,claim.kind,stage=stage,verify=verify)
+            result=capture(claim.kind,raw,stage,verify,report,state_root=root,excluded_roots=args['excluded_roots'])
         else:
             _verify_retained_builder_archive(root,args['builder_archive_sha256'],args['builder_config_digest'])
             if not row['prepared_digest']: raise ValueError('retained inputs required before build')
             prepared=document(root,'artifacts/objects/'+row['prepared_digest'])
-            raw=restore(claim.kind,args['manifest'],prepared,root,stage)
+            raw=args.get('manifest')
+            if args.get('schema_version')==3:
+                from .investigation_pipeline import manifest
+                raw=manifest(root,args,claim.kind,prepared=prepared)
+            raw=restore(claim.kind,raw,prepared,root,stage)
             atomic_write(stage/'worker-manifest.json',canonical(raw))
             # Mount no private configuration, controller database or signing home.
             # The inner process has only captured inputs, private outputs and cache hints.

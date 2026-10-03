@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "record_type": "investigation-artifact-link",
+  "investigation_id": "investigation-id",
+  "operation_id": "operation-id",
+  "kind": "build",
+  "join_input_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "baseline_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "source_capture_operation_id": "source-capture-operation-id",
+  "candidate_operation_id": "candidate-operation-id",
+  "build_operation_id": "build-operation-id",
+  "outputs_index_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "deployment_revision": null
+}

@@ -48,6 +48,9 @@ def binding(intent, *, executable=False):
     if intent.get('kind') not in KINDS or intent.get('local_paths') or intent.get('source_refs'):
         raise ContractError('invalid fixed job intent')
     args=intent['arguments']
+    if args.get('schema_version')==3:
+        from .investigation_pipeline import binding as joined_binding
+        return joined_binding(intent)
     legacy={'manifest','builder_image_digest','publication','excluded_roots'}
     if set(args)==legacy:
         if executable: raise ContractError('legacy builder binding is ambiguous; resubmit with a retained builder archive and a new request ID')
