@@ -176,16 +176,25 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
         repo=_private_path(root/'repositories'/alias)
         _durable_directory(repo)
         config_path=repo/'config'
-        if not config_path.exists():
-            if 'repository_initialized' in saved['completed_steps'] or any(repo.iterdir()):
-                raise Conflict('publication repository is missing or partially initialized; reconcile it before retry')
+        if 'repository_initialized' not in saved['completed_steps']:
+            # OSTree init is idempotent for this exact fresh owned repository.
+            # A present config alone cannot establish interrupted initialization.
+            if config_path.exists():
+                from .job_coordinator import repository_tree
+                repository_tree(repo)
             try:
                 result=run(['ostree','--repo='+str(repo),'init','--mode=archive'],capture_output=True,check=False,timeout=30,stdin=subprocess.DEVNULL)
             except (OSError,subprocess.TimeoutExpired) as exc:raise SetupUnavailable('native OSTree repository initialization unavailable') from exc
             if result.returncode:raise SetupUnavailable('native OSTree repository initialization failed; inspect private setup state')
+        elif not config_path.exists():raise Conflict('completed publication repository configuration is unavailable')
         guard()
         from .job_coordinator import repository_tree
         repository_tree(repo)
+        try:
+            inspected=run(['ostree','--repo='+str(repo),'refs'],capture_output=True,check=False,timeout=15,stdin=subprocess.DEVNULL)
+        except (OSError,subprocess.TimeoutExpired) as exc:raise SetupUnavailable('native OSTree repository inspection unavailable') from exc
+        if inspected.returncode or inspected.stdout!=b'':raise Conflict('first publication requires an initialized empty OSTree repository')
+        guard();repository_tree(repo)
         repo_raw=read_file(repo,'config',limit=65536)
         retained=directory/'repository-config'
         if retained.exists():

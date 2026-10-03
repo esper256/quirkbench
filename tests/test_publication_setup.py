@@ -21,7 +21,11 @@ def installed(tmp_path,initialized):
     def run(argv,**kw):
         calls.append(argv)
         if argv[0]=='ostree':
-            repo=Path(argv[1].split('=',1)[1]);(repo/'config').write_text('[core]\nrepo_version=1\nmode=archive\nfsync=true\n')
+            repo=Path(argv[1].split('=',1)[1])
+            if argv[2]=='init':
+                (repo/'config').write_text('[core]\nrepo_version=1\nmode=archive\nfsync=true\n')
+                (repo/'objects').mkdir(exist_ok=True);(repo/'refs').mkdir(exist_ok=True)
+            else:assert (repo/'objects').is_dir() and (repo/'refs').is_dir()
             return subprocess.CompletedProcess(argv,0,b'',b'')
         return commands(argv,**kw)
     options={'unit':services.unit,'runner':services,'run':run,
@@ -41,7 +45,7 @@ def test_first_publication_zero_targets_exact_setup_retry_without_handwritten_co
     receipt=publication_receipt(type('Reader',(),{'root':root})(),run=options['run'],tls_inspector=options['tls_inspector'])
     assert receipt['repository_roots']=={'lab':str(root/'repositories/lab')}
     assert setup(installed)==result
-    assert sum(call[0]=='ostree' for call in calls)==1
+    assert sum(call[0]=='ostree' and call[2]=='init' for call in calls)==1
     assert start(tmp_path,services)['background_work_ready']
     from quirkbench.controller import Controller
     with Controller(root,reserve_bytes=0).lifecycle():
@@ -59,7 +63,7 @@ def test_ack_loss_retry_keeps_exact_trust_and_one_repository(installed,stage):
     with pytest.raises(KeyboardInterrupt):setup(installed,fault_hook=fail)
     result=setup(installed)
     assert result['configured'] and setup(installed)==result
-    assert sum(call[0]=='ostree' for call in installed[4])==1
+    assert sum(call[0]=='ostree' and call[2]=='init' for call in installed[4])==1
 
 
 @pytest.mark.parametrize('change',['request','alias','url','key'])
@@ -175,6 +179,20 @@ def test_final_key_callback_repository_symlink_blocks_publication(installed):
         return result
     with pytest.raises((ValueError,ContractError)):setup(installed,run=changed)
     assert 'repository_endpoint' not in configuration(root)
+
+
+def test_interrupted_native_init_after_config_resumes_complete_owned_repository(installed):
+    root,services,signing,options,calls=installed;native=options['run'];lost=False
+    def partial(argv,**kwargs):
+        nonlocal lost
+        if argv[0]=='ostree' and argv[2]=='init' and not lost:
+            lost=True;repo=Path(argv[1].split('=',1)[1]);(repo/'config').write_text('[core]\nrepo_version=1\nmode=archive\n')
+            raise KeyboardInterrupt()
+        return native(argv,**kwargs)
+    with pytest.raises(KeyboardInterrupt):setup(installed,run=partial)
+    assert not (root/'repositories/lab/objects').exists()
+    assert setup(installed)['configured']
+    assert (root/'repositories/lab/objects').is_dir() and (root/'repositories/lab/refs').is_dir()
 
 
 def test_setup_replay_cannot_accept_unjournaled_additional_settings(installed,tmp_path):
