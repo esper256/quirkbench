@@ -90,7 +90,7 @@ def test_installed_joined_baseline_approval_evidence_and_recovery(published,monk
     assert backend.calls==1 and boot.armed==[attempt] and boot.recovery_requests==1
 
 
-@pytest.mark.parametrize('boundary',['wrong','failed','running','retired','edited','pin-failed','cas-changed','post-pin-changed'])
+@pytest.mark.parametrize('boundary',['wrong','failed','running','retired','edited','pin-failed','cas-changed','post-pin-changed','baseline-metadata'])
 def test_wrong_or_changed_publication_rolls_back_all_admission(published,monkeypatch,boundary):
     c,composition=published
     with c.transaction() as db:
@@ -121,6 +121,7 @@ def test_wrong_or_changed_publication_rolls_back_all_admission(published,monkeyp
         monkeypatch.setattr(c.deployment_repository,'retain',lambda *a:(_ for _ in ()).throw(OSError('native retention failed')))
     elif boundary=='cas-changed':
         ready=lambda _:metadata.write_bytes(b'changed before admission')
+    elif boundary=='baseline-metadata':c.store.path(join['baseline_sha256']).write_bytes(b'corrupt retained baseline proof')
     else:
         native=c.deployment_repository.retain
         def retain(*a):native(*a);metadata.write_bytes(b'changed after native pin')

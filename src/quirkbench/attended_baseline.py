@@ -38,6 +38,12 @@ def document(reader,identity,limit=1024**2):
 
 
 def prepared(reader,name,composition,experiment_id,db):
+    from .build import BuildError
+    try:return _prepared(reader,name,composition,experiment_id,db)
+    except BuildError as exc:raise Conflict('retained baseline proof unavailable or corrupt') from exc
+
+
+def _prepared(reader,name,composition,experiment_id,db):
     from . import investigation_pipeline as pipeline
     from .investigations import record
     from .source_capture import validate_capture
@@ -103,6 +109,7 @@ def prepared(reader,name,composition,experiment_id,db):
     recipe=load_manifest(raw_metadata(reader,recipe_item['digest'],65536))
     if recipe!=registry.records['system-observation'][0]:raise Conflict('retained recipe differs from installed reviewed manifest')
     evidence=Controller._deployment_evidence_shape(manifest)
+    raw_metadata(reader,evidence['build_provenance'])
     Controller._validate_deployment_build(manifest,evidence,pipeline.legacy_document(reader.store,evidence['build_provenance']))
     value=validate({'schema_version':1,'record_type':'attended-baseline-input','investigation_id':name,
         'composition_operation_id':composition,'experiment_id':experiment_id,'recipe_id':'system-observation',
