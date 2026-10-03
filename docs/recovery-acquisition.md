@@ -53,3 +53,27 @@ qualification occur simply because this metadata or adapter is edited.
 `recovery-inputs recipe` accepts an explicit `--id`; when omitted, its ID is
 `stock-recovery-LOCK_SHA256`, derived from the verified lock. It carries no assumed
 release or issue name. Previously generated recipe IDs and bytes remain unchanged.
+
+## Reviewed pairing candidate
+
+`recovery-inputs candidate-spec --candidate fedora44-pairing-v1 --repository
+/absolute/reviewed.repo --repository-id SELECTED_REPO_ID` prints a complete v1
+specification; redirect it to a new candidate JSON file and pass that to
+`acquire-plan --spec`. Repeat `--repository-id` for each explicitly selected ID.
+This command reads supplied repository bytes and installed reviewed metadata only;
+it does not create controller state, download packages or publish an image.
+
+This selection adds `openssl-1:3.5.8-1.fc44.x86_64` to the historical Fedora44
+userspace closure without upgrading its libraries or kernel. Its signed RPM SHA256
+is `7481bac5460237c7b2105c067b18e2ab9109e82a7129a6e0c11c42cfe3f6d9c7`.
+Reviewed source: [Fedora signed Koji RPM](https://kojipkgs.fedoraproject.org/packages/openssl/3.5.8/1.fc44/data/signed/6d9f90a6/x86_64/openssl-3.5.8-1.fc44.x86_64.rpm),
+verified against Fedora44 public fingerprint
+`36F612DCF27F7D1A48A835E4DBFCF71C6D9F90A6`. The matching signed `openssl-libs`
+RPM equals the historical libraries digest. `gnupg2` already supplies `gpg`.
+The new snapshot is `stock-fedora44-pairing-rpm-candidate.v1.json`; historical
+snapshot bytes, existing specifications and acquisition without `--spec` retain
+their original meaning. Pairing needs this explicit selection, not a manual
+package-list edit. Missing/nonexecutable tools or paths escaping the target sysroot
+block stock staging and complete-image preparation, including cache replay.
+Repository availability, signature verification and native pairing remain separate
+outcomes; a signed input is not a boot or pairing acceptance result.
