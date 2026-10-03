@@ -22,6 +22,7 @@ from .retarget_enrollment import _same_source_scope
 from .retarget_local import pending_intent,_location,validate_intent,_capture_source,_history,_private_journal
 from .release_http import _remaining
 from .state_reader import read_file
+from .retained_inputs import RetainedInputs
 
 
 def _source_identity(source,snapshot):
@@ -74,7 +75,7 @@ def _archived(control,config,retarget_id,verify_target,binding_reader,recovery_v
                     if (held.st_dev,held.st_ino)!=(named.st_dev,named.st_ino):raise Conflict('archived drain lock ownership changed')
                 if (_read(control/'retarget','active.json')!=pointer or _read(control,'runtime.json')!=runtime
                         or any(_read(directory,name)!=raw for name,raw in retained.items())
-                        or read_file(new_agent,'journal.json',limit=4*1024**2)!=new_journal):
+                        or _private_journal(new_agent)!=new_journal):
                     raise Conflict('current retarget authority or new target work changed during archived drain')
                 remaining()
             basic()
@@ -108,19 +109,38 @@ def _archived(control,config,retarget_id,verify_target,binding_reader,recovery_v
                 if _journal_digest(_journal_at(old_agent),None)!=frozen:
                     raise Conflict('archived original attribution changed during capture')
                 remaining()
-            full()
-            def source_reader(check):
-                # Per-file checks keep live binding/ownership/deadline fences;
-                # full semantic reconstruction brackets the whole source read.
-                check();selected=None
+            # Reconstruct semantics at the owned operation boundaries. Record
+            # the transitive inputs reached by history/completion readers, not
+            # just the selected archive: later endpoints can reference earlier
+            # retarget enrollments. Journals have their own live/stable policies.
+            inputs=RetainedInputs(control,exclude=(old_agent/'journal.json',
+                new_agent/'journal.json',archive/'journal.initial.json'))
+            with inputs.recording():
+                full();selected=None
                 if intent['schema_version']==3:
                     from .retarget_endpoint import files as endpoint_files
                     selected=endpoint_files(control,intent,locations=locations)
+            def guarded():
+                # Callbacks can mutate any dependency. Always run them BEFORE
+                # the pure byte/namespace/attribution fence, including before
+                # network requests and journal writes by the existing drain.
+                basic();inputs.check()
+                if _private_journal(archive,name='journal.initial.json')!=snapshot_raw:
+                    raise Conflict('immutable original attribution snapshot changed')
+                if _journal_digest(_journal_at(old_agent),None)!=frozen:
+                    raise Conflict('archived original attribution changed beyond acknowledgment progress')
+                remaining()
+            guarded()
+            def source_reader(check):
+                # The exact retained endpoint proof stays valid only while its
+                # observed inputs pass both source-reader boundaries. Per-file
+                # callbacks still recheck binding, ownership and deadlines.
+                check()
                 value=_source(control,basic,locations=locations,_endpoint_files=selected)
                 check()
                 if value[3]!=expected_identity:raise Conflict('archived drain reader differs from exact retained source identity')
                 return value
-            yield control,full,source_reader,old_agent
+            yield control,guarded,source_reader,old_agent
             full();remaining()
 
 

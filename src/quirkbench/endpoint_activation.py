@@ -24,6 +24,7 @@ from .maintenance import private_lock
 from .provisioning import _publish_generation
 from .store import atomic_write
 from .state_reader import read_file
+from .retained_inputs import entries
 
 
 def validate_activation(value):
@@ -68,8 +69,8 @@ def _original_bundle(control,original, *,_pending=None,_reference=None):
         _,_,files,_,_,bundle=retarget_original(control,reference=_reference,pending=pending)
         if files!=enrolled:raise Conflict('endpoint original retarget bundle changed')
         return bundle
-    if ({path.name for path in islice(pending.iterdir(),6)}!={'intent.json','request.json','result.json','key.pem','activation-bundle'}
-            or {path.name for path in islice(bundle.iterdir(),17)}!=set(enrolled)
+    if ({path.name for path in entries(pending,6)}!={'intent.json','request.json','result.json','key.pem','activation-bundle'}
+            or {path.name for path in entries(bundle,17)}!=set(enrolled)
             or any(_strict_read(bundle,name)!=raw for name,raw in enrolled.items())):
         raise Conflict('endpoint retained activation bundle differs from original enrollment')
     return bundle
@@ -213,7 +214,7 @@ def completed(control,request_id, *,binding_reader=None):
     history(control,_strict_read(control/'endpoint','active.json'))
     names={'intent.json','source.json','approved-controller.pem','capture-completion.json','activation.json','completion.json'}
     if intent['schema_version']==2:names.add('previous-selection.json')
-    if {path.name for path in islice(directory.iterdir(),8)}!=names:raise Conflict('completed endpoint contains unknown retained records')
+    if {path.name for path in entries(directory,8)}!=names:raise Conflict('completed endpoint contains unknown retained records')
     directory,source,activation,active=_records(control,request_id)
     import ssl
     try:approved_der=ssl.PEM_cert_to_DER_cert(_strict_read(directory,'approved-controller.pem').decode('ascii'))

@@ -16,11 +16,12 @@ from .enrollment_target import _intent,_media
 from .retarget_local import _location,validate_intent,validate_source
 from .state_reader import read_file
 from .store import atomic_write,sync_directory
+from .retained_inputs import entries,is_directory,is_present
 
 NAMES=('intent.json','request.json','key.pem','result.json')
 
 
-def _present(path):return path.exists() or path.is_symlink()
+def _present(path):return is_present(path)
 
 
 def validate_activation(value):
@@ -92,10 +93,10 @@ def _records(control,directory,intent):
 
 def _blank_agent(path,device, *,partial=False):
     path=_managed_path(path)
-    names=set(p.name for p in path.iterdir());expected={'journal.json','blobs','agent.lock'}
+    names=set(p.name for p in entries(path,4));expected={'journal.json','blobs','agent.lock'}
     if names-expected or not partial and names!=expected:
         raise Conflict('new retarget agent is not the exact blank spool')
-    if 'blobs' in names and any(_managed_path(path/'blobs').iterdir()):raise Conflict('new retarget spool cannot inherit old chunks')
+    if 'blobs' in names and entries(_managed_path(path/'blobs'),1):raise Conflict('new retarget spool cannot inherit old chunks')
     if 'journal.json' in names and _read(path,'journal.json')!=_blank(device):raise Conflict('new retarget spool cannot inherit old work')
     if 'agent.lock' in names and _read(path,'agent.lock')!=b'':raise Conflict('new retarget lock file changed')
 
@@ -116,7 +117,7 @@ def original_locations(control,directory,intent):
     if _present(old_pending):
         _managed_path(old_pending)
         if _present(root_pending) and (_private_files(root_pending,NAMES)!=new
-                or set(p.name for p in root_pending.iterdir())!=set(NAMES)):
+                or set(p.name for p in entries(root_pending,len(NAMES)+1))!=set(NAMES)):
             raise Conflict('both original and archived enrollment sources remain or root state is mixed')
     else:
         old_pending=root_pending;_managed_path(old_pending)
@@ -133,7 +134,7 @@ def original_locations(control,directory,intent):
     pending_stage=_managed_path(directory/'new-enrollment')
     if _present(pending_stage):
         if _present(root_pending) and _present(archive/'enrollment-pending'):raise Conflict('both staged and selected new enrollment exist')
-        names=set(p.name for p in pending_stage.iterdir())
+        names=set(p.name for p in entries(pending_stage,len(NAMES)+1))
         if names-set(NAMES) or any(_read(pending_stage,name)!=new[name] for name in names):
             raise Conflict('new enrollment staging contains unknown or changed bytes')
     return archive,old_pending,old_agent
@@ -141,7 +142,7 @@ def original_locations(control,directory,intent):
 
 def _generation(control,activation,bundle):
     directory=_managed_path(control/'generations'/activation['generation'])
-    if (set(p.name for p in directory.iterdir())!=set(bundle)|{'generation.json'}
+    if (set(p.name for p in entries(directory,len(bundle)+2))!=set(bundle)|{'generation.json'}
             or _private_files(directory,bundle)!=bundle
             or _read(directory,'generation.json')!=canonical(activation['bundle_files'])):
         raise Conflict('exact new private retarget generation changed')
@@ -166,7 +167,7 @@ def completed(control,request_id, *,binding_reader=None,_endpoint_preparation=Fa
         from .endpoint_origin import selected_runtime
         active=selected_runtime(control,bundle,active,binding_reader=binding_reader,_prepared=_endpoint_preparation)
     if (_read(control,'runtime.json')!=active or _private_files(control/'enrollment/pending',NAMES)!=new
-            or set(p.name for p in (control/'enrollment/pending').iterdir())!=set(NAMES)):
+            or set(p.name for p in entries(control/'enrollment/pending',len(NAMES)+1))!=set(NAMES)):
         raise Conflict('completed retarget differs from exact selected runtime/enrollment')
     runtime=_document(active)
     if set(runtime)!={'schema_version','device_id','controller_url','ca','token_file','target_binding','remotes'}:
@@ -191,7 +192,7 @@ def completed(control,request_id, *,binding_reader=None,_endpoint_preparation=Fa
             or journal['claim_request_id'] is not None and not isinstance(journal['claim_request_id'],str)):
         raise Conflict('completed retarget journal differs from selected new identity')
     archive=_managed_path(directory/'archive')
-    if (not (archive/'agent').is_dir() or not (archive/'enrollment-pending').is_dir()
+    if (not is_directory(archive/'agent') or not is_directory(archive/'enrollment-pending')
             or digest(_read(archive,'runtime.json'))!=intent['runtime_sha256']):
         raise Conflict('completed retarget original archive is unavailable')
     if intent['schema_version']==3:

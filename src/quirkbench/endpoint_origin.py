@@ -3,7 +3,6 @@
 Callers hold their existing storage/binding owners before opening private evidence.
 Original enrollment records and retarget activation remain immutable.
 """
-from itertools import islice
 from pathlib import Path
 
 from .contracts import Conflict,canonical,digest
@@ -11,6 +10,7 @@ from .controller_endpoint import _strict_read
 from .controller_setup import _managed_path
 from .enrollment import _document
 from .endpoint_generation import read_generation
+from .retained_inputs import entries
 
 NAMES={'intent.json','request.json','result.json','key.pem'}
 
@@ -37,14 +37,14 @@ def retarget_original(control, *,reference=None,pending=None):
         raise Conflict('endpoint retarget origin completion changed')
     raw,result,files,active=_new_view(directory,intent,activation)
     pending=_managed_path(directory/'enrollment/pending');bundle=_managed_path(pending/'activation-bundle')
-    if ({p.name for p in islice(pending.iterdir(),6)}!=NAMES|{'activation-bundle'}
-            or {p.name for p in islice(bundle.iterdir(),17)}!=set(files)
+    if ({p.name for p in entries(pending,6)}!=NAMES|{'activation-bundle'}
+            or {p.name for p in entries(bundle,17)}!=set(files)
             or any(_strict_read(pending,name)!=value for name,value in raw.items())
             or any(_strict_read(bundle,name)!=value for name,value in files.items())
             or read_generation(control,activation['generation'])!=files):
         raise Conflict('endpoint retarget original private evidence changed')
     root=selected_pending
-    if {p.name for p in islice(root.iterdir(),5)}!=NAMES or any(_strict_read(root,name)!=value for name,value in raw.items()):
+    if {p.name for p in entries(root,5)}!=NAMES or any(_strict_read(root,name)!=value for name,value in raw.items()):
         raise Conflict('endpoint retarget origin differs from selected enrollment')
     archive=_managed_path(directory/'archive')
     if (not _managed_path(archive/'agent').is_dir() or not _managed_path(archive/'enrollment-pending').is_dir()
@@ -98,7 +98,7 @@ def selected_runtime(control,original_files,original_runtime, *,binding_reader=N
             raise Conflict('unfinished endpoint association differs from its captured intent')
         from .endpoint_history import history
         history(control,expected)
-        names={p.name for p in islice(directory.iterdir(),8)}
+        names={p.name for p in entries(directory,8)}
         required={'intent.json','source.json','approved-controller.pem','capture-completion.json','activation.json'}
         if intent['schema_version']==2:required.add('previous-selection.json')
         if names not in (required,required|{'completion.json'}):raise Conflict('unfinished endpoint association has unknown records')

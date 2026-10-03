@@ -28,7 +28,9 @@
     "paths": [
       "src/quirkbench/endpoint*",
       "src/quirkbench/controller_endpoint.py",
+      "src/quirkbench/controller_tls.py",
       "tests/test_endpoint*",
+      "tests/test_controller_tls.py",
       "tests/test_controller_endpoint.py"
     ],
     "tests": [
@@ -37,7 +39,8 @@
       "tests/test_endpoint_history.py",
       "tests/test_endpoint_generation.py",
       "tests/test_endpoint_activation.py",
-      "tests/test_controller_endpoint.py"
+      "tests/test_controller_endpoint.py",
+      "tests/test_controller_tls.py"
     ]
   },
   "endpoint-retarget": {
@@ -50,18 +53,23 @@
     "tests": [
       "tests/test_retarget_endpoint.py",
       "tests/test_retarget_activation.py",
+      "tests/test_retarget_enrollment.py",
+      "tests/test_retarget_local.py",
       "tests/test_endpoint_retarget.py"
     ]
   },
   "evidence": {
     "paths": [
       "src/quirkbench/*evidence*",
+      "src/quirkbench/retained_inputs.py",
       "src/quirkbench/release_http.py",
       "tests/test_*evidence*",
+      "tests/test_retained_inputs.py",
       "tests/test_release_http.py"
     ],
     "tests": [
       "tests/test_archived_evidence_validation.py",
+      "tests/test_retained_inputs.py",
       "tests/test_retarget_evidence.py",
       "tests/test_evidence_drain_client.py",
       "tests/test_evidence_drain_target.py",

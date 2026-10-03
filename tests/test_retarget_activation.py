@@ -111,6 +111,35 @@ def test_partial_selection_never_adopts_duplicate_or_mixed_old_sources(paused,ph
     assert retarget_local.pending_intent(control) is not None
 
 
+@pytest.mark.parametrize('change',['new-agent-entry','new-agent-blob','root-enrollment-entry','staged-enrollment-entry'])
+def test_cached_activation_phase_rejects_new_namespace_entries_before_effects(paused,monkeypatch,change):
+    control=paused[0][1];directory=key_path(paused).parent.parent.parent
+    runtime=(control/'runtime.json').read_bytes();changed=[];native_write=activation.atomic_write
+    def fault(phase):
+        if change in ('new-agent-entry','new-agent-blob') and phase=='retarget_new_agent_selected':
+            path=control/('agent/unknown' if change=='new-agent-entry' else 'agent/blobs/unexpected')
+            native_write(path,b'unknown');changed.append(True)
+        elif change=='root-enrollment-entry' and phase=='retarget_new_enrollment_selected':
+            native_write(control/'enrollment/pending/unknown',b'unknown');changed.append(True)
+    def write(path,raw,*args,**kwargs):
+        answer=native_write(path,raw,*args,**kwargs)
+        # The first staged record has already been validated. Adding an unknown
+        # entry after the next write must block publication of the private key.
+        if change=='staged-enrollment-entry' and path==directory/'new-enrollment/request.json':
+            native_write(directory/'new-enrollment/unknown',b'unknown');changed.append(True)
+        return answer
+    monkeypatch.setattr(activation,'atomic_write',write)
+    with pytest.raises((Conflict,ContractError)):
+        select(paused,fault_hook=fault)
+    assert changed and (control/'runtime.json').read_bytes()==runtime
+    assert retarget_local.pending_intent(control) is not None
+    if change in ('new-agent-entry','new-agent-blob'):
+        assert (control/'enrollment/pending/result.json').read_bytes()==canonical(paused[0][2])
+        assert not (directory/'archive/enrollment-pending').exists()
+    elif change=='staged-enrollment-entry':
+        assert not (directory/'new-enrollment/key.pem').exists()
+
+
 @pytest.mark.parametrize('partial',['empty','blobs','journal'])
 def test_partially_created_new_spool_is_exactly_retryable(paused,partial):
     control=paused[0][1];directory=key_path(paused).parent.parent.parent

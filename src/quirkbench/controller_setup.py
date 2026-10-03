@@ -101,6 +101,8 @@ def _managed_path(path):
         info = path.stat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
             raise ContractError('setup directory must be user-owned')
+    from .retained_inputs import observe_directory
+    observe_directory(path)
     return path
 
 

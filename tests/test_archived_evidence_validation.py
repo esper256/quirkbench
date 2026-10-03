@@ -11,6 +11,7 @@ from quirkbench.store import atomic_write
 from test_retarget_endpoint import (moved,prepare,activate,spool,received,publication,bound,args,issuer,initialized,
     test_scoped_archived_drain_uses_approved_endpoint_without_new_target_changes as _round_trip)
 from test_retarget_local import NEW,CONFIG
+from test_evidence_drain_target import Client
 
 
 @pytest.fixture(params=[0,8],ids=['shallow','deep'])
@@ -50,6 +51,7 @@ def test_export_drain_replay_do_not_reconstruct_inside_individual_source_reads(m
     _round_trip(moved,monkeypatch)
     assert len(phases)==3 and [row['operation'] for row in phases]==['archived evidence export','archived evidence drain','archived evidence drain']
     assert all(row['source_reads']>=2 for row in phases)
+    assert all(row['captures']==2 for row in phases),phases
     print('archived validation counts (export, drain, replay): '+json.dumps(phases,sort_keys=True))
 
 
@@ -97,3 +99,44 @@ def test_archived_deadline_names_operation_without_resetting_budget(operation):
     with pytest.raises(Conflict,match='archived evidence '+operation+' total deadline expired'):
         if operation=='export':archive.export_archived_plan(Path('/unopened'),None,'retarget-1','plan',**kwargs)
         else:archive.drain_archived(Path('/unopened'),None,'retarget-1','plan','grant',**kwargs)
+
+
+@pytest.mark.parametrize('change', ['endpoint-approval', 'endpoint-orphan', 'old-bundle',
+    'head-bundle', 'head-generation-orphan', 'single-link', 'live-endpoint-appears'])
+@pytest.mark.parametrize('tmp_path', [0], indirect=True, ids=['shallow'])
+def test_changed_proof_after_client_creation_cannot_upload_or_write_journal(moved, change):
+    from quirkbench import evidence_drain as grants
+    c,control,old,_,_=moved[0];prepare(moved);receipt=activate(moved)
+    original=Path(receipt['original_archive']);directory=retarget_local._location(control,'retarget-1')
+    endpoint_request=next((original/'endpoint/requests').iterdir())
+    plan=archive.export_archived_plan(control,CONFIG,'retarget-1','guarded-upload',
+        verify_target=lambda:True,binding_reader=lambda:NEW,recovery_verifier=lambda _:True)
+    approved=grants.approve(c.root,old['device_id'],plan['plan'],'approve-guarded-upload')
+    credential=grants.read_credential(Path(approved['credential_file']));grant=credential['record']['grant_id']
+    (control/'setup').mkdir(mode=0o700,exist_ok=True)
+    atomic_write(control/'setup'/(grant+'.json'),canonical(credential))
+    old_journal=(original/'agent/journal.json').read_bytes();new_journal=(control/'agent/journal.json').read_bytes()
+    changed=[];clients=[]
+    def fault(stage):
+        if stage!='drain_client_prepared':return
+        if change=='endpoint-approval':atomic_write(endpoint_request/'approved-controller.pem',b'changed approval')
+        elif change=='endpoint-orphan':(original/'endpoint/requests/orphan').mkdir()
+        elif change=='old-bundle':atomic_write(original/'enrollment-pending/activation-bundle/device.token',b'changed old credential')
+        elif change=='head-bundle':atomic_write(directory/'enrollment/pending/activation-bundle/device.token',b'changed new credential')
+        elif change=='head-generation-orphan':
+            runtime=json.loads((control/'runtime.json').read_bytes())
+            atomic_write((control/runtime['token_file']).parent/'unknown.json',b'unknown')
+        elif change=='single-link':os.link(endpoint_request/'approved-controller.pem',control/'approval-alias')
+        else:(control/'endpoint').mkdir()
+        changed.append(True)
+    with c.lifecycle() as owner:
+        def factory(url,credential,cafile):
+            client=Client(c,owner,credential);clients.append(client);return client
+        with pytest.raises((Conflict,ContractError)):
+            archive.drain_archived(control,CONFIG,'retarget-1','guarded-upload',grant,
+                verify_target=lambda:True,binding_reader=lambda:NEW,recovery_verifier=lambda _:True,
+                client_factory=factory,fault_hook=fault)
+    assert changed and len(clients)==1 and clients[0].calls==[]
+    assert (original/'agent/journal.json').read_bytes()==old_journal
+    assert (control/'agent/journal.json').read_bytes()==new_journal
+    with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM evidence').fetchone()[0]==0
