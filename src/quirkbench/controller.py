@@ -1757,7 +1757,7 @@ class Controller(OperatorApprovals):
                 self._pause(db, campaign_id, 'session token budget reached')
         return decision_id
 
-    def backup(self, destination):
+    def backup(self, destination, *,coverage=False):
         destination = Path(destination)
         if destination.exists():
             raise Conflict('backup destination must be new')
@@ -1792,7 +1792,11 @@ class Controller(OperatorApprovals):
                 if path.is_file():
                     with path.open('rb') as handle:
                         os.fsync(handle.fileno())
-            atomic_write(temporary / 'manifest.json', canonical({'schema_version': 2, 'artifacts': sorted(values), 'deployments': deployments}))
+            manifest={'schema_version': 2, 'artifacts': sorted(values), 'deployments': deployments}
+            if coverage:
+                from .backup_coverage import derive,NAME
+                atomic_write(temporary/NAME,canonical(derive(temporary,manifest)))
+            atomic_write(temporary / 'manifest.json', canonical(manifest))
             for path in sorted((p for p in temporary.rglob('*') if p.is_dir()), key=lambda p: len(p.parts), reverse=True):
                 sync_directory(path)
             sync_directory(temporary)
@@ -1808,6 +1812,8 @@ class Controller(OperatorApprovals):
         backup = Path(backup); destination = Path(destination)
         if destination.exists():
             raise Conflict('restore destination must be new')
+        from .backup_coverage import require_stopped_cut
+        require_stopped_cut(backup)
         manifest = json.loads((backup / 'manifest.json').read_bytes())
         db = sqlite3.connect(f'file:{backup / "controller.sqlite"}?mode=ro&immutable=1', uri=True)
         try:
@@ -1822,6 +1828,8 @@ class Controller(OperatorApprovals):
             raise ContractError('backup references do not match manifest')
         if (version == 1 and deployments) or (version == 2 and manifest.get('deployments') != deployments):
             raise ContractError('backup deployment references do not match manifest')
+        from .backup_coverage import verify_if_present
+        verify_if_present(backup)
         repository = kwargs.get('deployment_repository')
         if deployments and repository is None:
             raise ContractError('complete restore requires the deployment repository adapter')

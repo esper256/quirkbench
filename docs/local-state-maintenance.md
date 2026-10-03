@@ -46,6 +46,9 @@ quirkbench maintenance prune
 ```
 
 `maintenance status` reports owner identities, pins, settings and recent retirements.
+`storage --json --after OWNER --limit 20` gives a bounded read-only summary without
+pin notes or cleanup. Eligibility remains unknown until an explicit maintenance
+dry run evaluates it. See [backup coverage and paused restore](backup-and-restore.md).
 Pin before retirement; pinning cannot restore deleted bytes. Abandonment excludes
 publishers, requires recorded shutdown proof and begins the failed-stage grace.
 Ad hoc systemd development runs instead use the existing `retain-run --abandon`
