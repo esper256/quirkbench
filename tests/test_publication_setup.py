@@ -2,6 +2,9 @@
 import json
 from pathlib import Path
 import subprocess
+import os
+import sys
+from io import StringIO
 import pytest
 
 from quirkbench import publication_setup as publication,cli
@@ -9,8 +12,29 @@ from quirkbench.contracts import Conflict,ContractError,canonical
 from quirkbench.controller_service import configuration
 from quirkbench.controller_tls import inspect_identity
 from quirkbench.enrollment_credentials import publication as publication_receipt
-from test_setup_service import initialized,Services,start
+from test_setup_service import Services,start
 from test_enrollment_credentials import Commands,FPR
+from test_resumable_setup import observations
+
+
+@pytest.fixture(scope='module')
+def packaged_archive(tmp_path_factory):
+    root=Path(__file__).resolve().parents[1];output=tmp_path_factory.mktemp('publication-package')/'controller.tar.gz'
+    result=subprocess.run([sys.executable,str(root/'environments/build-controller-archive.py'),'--output',str(output)],
+        capture_output=True,text=True,timeout=60)
+    assert result.returncode==0,result.stderr
+    assert not json.loads(result.stdout)['signed']
+    return output
+
+
+@pytest.fixture
+def initialized(tmp_path,packaged_archive):
+    from quirkbench.controller_install import install
+    from quirkbench.controller_setup import setup_controller
+    runtime=Path(install(packaged_archive,data_home=tmp_path/'data')['runtime_root'])
+    setup_controller(tmp_path/'state',request_id='initial',runtime_root=runtime,reserve_gib=0,
+        config_home=tmp_path/'config',**observations())
+    return runtime
 
 
 @pytest.fixture
@@ -54,6 +78,70 @@ def test_first_publication_zero_targets_exact_setup_retry_without_handwritten_co
     with StateReader(root).connection() as db:
         for table in ('devices','campaigns','attempts','credential_generations','enrollment_codes'):
             assert db.execute('SELECT COUNT(*) FROM '+table).fetchone()[0]==0
+
+
+def test_packaged_command_runs_without_checkout_or_ambient_pythonpath(installed,tmp_path):
+    root=installed[0];runtime=Path(configuration(root)['runtime']).parent.parent
+    env={**os.environ,'PYTHONPATH':'/nonexistent','XDG_CONFIG_HOME':str(tmp_path/'config')}
+    result=subprocess.run([sys.executable,'-I',str(runtime/'bin/quirkbench'),'publication','--help'],
+        cwd=tmp_path,env=env,capture_output=True,text=True,timeout=20)
+    assert result.returncode==0,result.stderr
+    assert '--signing-home' in result.stdout and '--request-id' in result.stdout
+    assert (runtime/'lib/quirkbench/schemas/publication-setup.v1.schema.json').is_file()
+
+
+def test_installed_setup_publication_pairing_lost_reply_and_private_reboot_state(installed,tmp_path,monkeypatch):
+    root,services,signing,options,calls=installed
+    setup(installed);start(tmp_path,services)
+    from quirkbench.controller import Controller
+    from quirkbench import enrollment_runtime as runtime,enrollment_console as console,target_setup
+    from quirkbench.credential_registry import CredentialRegistry
+    from quirkbench.enrollment_activation import activate_enrollment
+    from quirkbench.provisioning import activate_bundle
+    from quirkbench.transport import TransportError
+    from test_enrollment_runtime import Repository,advertise
+    c=Controller(root,reserve_bytes=0);config=configuration(root)
+    with c.lifecycle() as owner:
+        with runtime.publication_runtime(c,registry=CredentialRegistry(root),service_runtime=config['runtime'],
+                host=config['host'],port=config['port'],certfile=config['cert'],keyfile=config['key'],allow_lan=False,
+                run=options['run'],tls_inspector=options['tls_inspector'],repository_factory=Repository) as published:
+            advertise(monkeypatch,owner,published)
+            ready=lambda value:runtime.require_enrollment(value,ready=lambda _:True)
+            code=target_setup.add_target(root,'joined','joined-invitation',ready=ready,tls_inspector=options['tls_inspector'])
+            observation={'certificate_sha256':code['record']['certificate_sha256'],'certificate_pem':Path(config['cert']).read_text()}
+            control=tmp_path/'recovery-control';control.mkdir(mode=0o700);lost=[True];posts=[]
+            class Client:
+                def __init__(self,url,pem,pin,**kwargs):
+                    assert url==code['record']['controller_url'] and pin==observation['certificate_sha256'] and pem==observation['certificate_pem']
+                def post(self,path,data):
+                    posts.append(path);result=published.application.handle(path,data,'127.0.0.1')
+                    if path.endswith('redeem') and lost[0]:lost[0]=False;raise TransportError('lost accepted reply')
+                    return result
+            def activation(*args,**kwargs):
+                def activate(bundle,control,**opts):
+                    # Privileged target-runtime boot validation is injected; the
+                    # actual generation verification/fsync/publication remains.
+                    return activate_bundle(bundle,control,validator=lambda path:json.loads(path.read_bytes()),**opts)
+                return activate_enrollment(*args,**kwargs,activator=activate)
+            def source():return StringIO(code['record']['controller_url']+'\n'+observation['certificate_sha256']+'\n'+code['record']['code_id']+'\n')
+            args={'verify_target':lambda:True,'binding_reader':lambda:'12345678-1234-1234-1234-123456789abc',
+                'run':options['run'],'certificate_inspector':lambda *a,**kw:observation,'client_factory':Client,
+                'read_secret':lambda:code['code'],'activator':activation}
+            with pytest.raises(TransportError):console.run_initial_enrollment(control,input_stream=source(),output_stream=StringIO(),**args)
+            key=(control/'enrollment/pending/key.pem').read_bytes();request=(control/'enrollment/pending/request.json').read_bytes()
+            assert not (control/'runtime.json').exists()
+            result=console.run_initial_enrollment(control,input_stream=source(),output_stream=StringIO(),**args)
+            assert result['enrolled'] and not result['boot_authorized']
+            assert (control/'enrollment/pending/key.pem').read_bytes()==key and (control/'enrollment/pending/request.json').read_bytes()==request
+            private={path:path.read_bytes() for path in control.rglob('*') if path.is_file()}
+            shown=target_setup.show_target(root,'joined')
+            assert shown['enrollment']['credentials_live'] and not shown['recovery']['report_available']
+            assert not shown['execution_authorized'] and not shown['candidate_preparation']['recorded_inputs_ready']
+            with c.transaction() as db:
+                assert db.execute('SELECT COUNT(*) FROM credential_generations').fetchone()[0]==1
+                for table in ('devices','campaigns','jobs','attempts'):assert db.execute('SELECT COUNT(*) FROM '+table).fetchone()[0]==0
+            assert all(path.read_bytes()==raw for path,raw in private.items())
+        with pytest.raises(Conflict):ready(root)
 
 
 @pytest.mark.parametrize('stage',['inputs_retained','repository_initialized','configuration_written','configuration_published'])
