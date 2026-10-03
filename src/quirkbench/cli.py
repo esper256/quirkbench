@@ -111,6 +111,12 @@ def parser():
             command.add_argument('--file',type=Path,help='existing typed observation response; required for machine input')
             command.add_argument('--request-id',required=True,help='durable answer retry identity')
             command.add_argument('--operator',help='operator identity for attended input')
+    propose=investigation_actions.add_parser('propose',help='durably admit an external v2 proposal; grants no attempt approval')
+    propose.add_argument('name');propose.add_argument('--file',type=Path,required=True)
+    propose.add_argument('--request-id',required=True);propose.add_argument('--json',action='store_true')
+    proposals=investigation_actions.add_parser('proposals',help='page retained proposals and dispatch intents; never invokes an agent')
+    proposals.add_argument('name');proposals.add_argument('--after',type=int,default=0)
+    proposals.add_argument('--limit',type=int,default=20);proposals.add_argument('--json',action='store_true')
     evidence=commands.add_parser('evidence',help='read public investigation evidence without private CAS access')
     evidence_actions=evidence.add_subparsers(dest='action',required=True)
     read=evidence_actions.add_parser('read')
@@ -329,7 +335,10 @@ def _main(argv=None):
                 print('Investigation operation accepted: ' + answer['operation_id'])
                 print('Inspect: ' + answer['data']['status_command'])
                 print('Progress: ' + answer['data']['monitor_command'])
-                print('Preparation/capture completion requires the existing controller service. Resume the investigation explicitly if paused.')
+                if args.action=='propose':
+                    print('Proposal retained; execution awaits external-loop integration. Acceptance grants no attempt approval.')
+                else:
+                    print('Preparation/capture completion requires the existing controller service. Resume the investigation explicitly if paused.')
             else:
                 from .state_reader import safe_text
                 print(safe_text(json.dumps(answer['data'], indent=2, sort_keys=True)))
@@ -1160,7 +1169,7 @@ def main(argv=None):
     readonly=(args.command in ('build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
                                'target','endpoint','target-service','serve-repository') or
               (args.command=='campaign' and args.action=='status') or
-              (args.command=='investigation' and args.action in ('status','source','brief','baseline','context','history','recipes','proposal-schema','observations','observation')) or args.command=='evidence' or
+              (args.command=='investigation' and args.action in ('status','source','brief','baseline','context','history','recipes','proposal-schema','proposals','observations','observation')) or args.command=='evidence' or
               (args.command=='settings' and args.action=='show') or
               (args.command=='maintenance' and args.action in ('status','prune')) or
               (args.command=='session' and args.action in ('observations','observation')) or

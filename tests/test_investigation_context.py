@@ -175,13 +175,14 @@ def test_evidence_other_investigation_has_no_authority(lab):
     assert not page['items']
 
 
-def test_schema_is_standalone_and_preserves_digest_semantics(lab):
+def test_schema_is_standalone_and_preserves_legacy_digest_semantics(lab):
     import jsonschema
     c,_=lab;data=context.proposal_schema(StateReader(c.root),'investigation')
     jsonschema.Draft202012Validator.check_schema(data['schema'])
-    assert data['schema']['$ref']=='#/$defs/agent-proposal'
-    assert data['schema']['$defs']['agent-proposal']['properties']['base_revision']=={'$ref':'#/$defs/digest'}
-    assert not data['admission_available']
+    assert data['schema']['properties']['schema_version']['const']==2
+    legacy=json.loads(open(data['legacy_schema_path']).read())
+    assert legacy['$defs']['agent-proposal']['properties']['base_revision']=={'$ref':'#/$defs/digest'}
+    assert data['admission_available'] and not data['execution_authorized']
 
 
 def test_attended_answer_selection_and_lost_reply_retry(lab,monkeypatch,capsys):

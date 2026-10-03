@@ -64,9 +64,44 @@ It requires an explicit `recipe.NAME` advertisement; unsupported advertisements 
 missing capabilities remain explicit. A controller manifest does not prove deployed
 target code. Peripherals remain unknown here; discovery is not a hardware probe,
 current-readiness certificate or exact-attempt approval. Non-audio investigations do
-not need an audio peripheral. The proposal schema preserves existing v1 digest
-semantics and includes its referenced definitions; durable proposal admission remains
-pending [#33](https://github.com/esper256/quirkbench/issues/33).
+not need an audio peripheral. `proposal-schema` returns the installed admission-v2
+schema, immutable source/baseline scope receipts and the legacy schema path. The
+legacy v1 `base_revision` digest meaning remains unchanged.
+
+## Submit an external proposal
+
+Stop every writer, then complete `investigation capture-source INVESTIGATION
+--quiesced --request-id CAPTURE_ID` through the existing service. Read
+`investigation proposal-schema INVESTIGATION --json` after stopped capture
+publication. Create a v2 proposal using the installed `agent-proposal.v2.json`
+example and exact returned `proposal_scope.input_context` and
+`proposal_scope.input_context_digest`. Select that completed capture ID/receipt,
+the actual Git `base_oid`, and the investigation's reserved workspace. Experiment
+inputs must match the pinned baseline's build/target recipe IDs and digests; recipe
+parameters/deadline must fit the exact installed reviewed manifest. Discovery alone
+does not certify target installation or physical readiness.
+
+```sh
+quirkbench investigation propose INVESTIGATION --file proposal.json --request-id PROPOSAL_ID --json
+quirkbench investigation proposals INVESTIGATION --limit 20 --json
+quirkbench operation status OPERATION_ID --json
+quirkbench operation events OPERATION_ID --json
+```
+
+Keep the file and request ID for a lost-response retry. Exact replay returns the
+same operation without reacquiring a writer or counting usage twice. Different
+bytes or reuse of a decision with another request ID conflict. The immutable
+context receipt binds decision scope; it is not a hash of the entire mutable
+context view or external prompt. Use `source_free_scope` with null source/base
+and null experiment for `needs_human`/`conclude` when preparation is blocked.
+Hypotheses, summaries and rejected approaches remain retained data. Unknown token
+observations remain null; displayed known totals are explicitly incomplete when
+needed and do not meter unrelated external spending.
+
+The acknowledgment retains an operation and dispatch intent atomically. It remains
+queued with `external_loop_pending` until [#35](https://github.com/esper256/quirkbench/issues/35)
+connects execution. Acceptance does not invoke an agent, build or boot anything,
+approve an attempt, conclude that the bug is fixed, or release the source writer.
 
 Read only evidence attributed and retained for this investigation:
 
