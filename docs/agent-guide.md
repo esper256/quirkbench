@@ -255,7 +255,7 @@ candidate, attempt, recipe and original human-observation facts. Compare explici
 roles with `--comparison FILE`; passing execution is not reproduction or proof of
 a fix. Exposure counts remain unknown without typed attributable recipe evidence.
 Follow experiment/attempt cursors; do not treat a page as the entire investigation.
-`investigation report-retain INVESTIGATION --note TEXT` atomically preserves current
+`investigation report-retain INVESTIGATION --note TEXT --request-id ID` atomically preserves current
 owners through existing retention, but cannot restore expired bytes. See
 [investigation reports](investigation-reports.md) and the installed
 [investigation report schema](../schemas/investigation-report.v1.schema.json).

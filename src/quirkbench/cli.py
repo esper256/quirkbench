@@ -127,6 +127,7 @@ def parser():
     report.add_argument('--experiment',help='select one exact experiment in this investigation')
     report.add_argument('--attempt-after',type=int,default=0);report.add_argument('--attempt-limit',type=int,default=5)
     retain=investigation_actions.add_parser('report-retain',help='pin currently recorded report owners; cannot restore expired bytes')
+    retain.add_argument('--request-id',help='durable retry identity; required with --json, new ID for a later selection')
     retain.add_argument('name');retain.add_argument('--note',required=True);retain.add_argument('--json',action='store_true')
     propose=investigation_actions.add_parser('propose',help='durably admit an external v2 proposal; grants no attempt approval')
     propose.add_argument('name');propose.add_argument('--file',type=Path,required=True)

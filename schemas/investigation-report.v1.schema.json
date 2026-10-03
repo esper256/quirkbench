@@ -286,6 +286,8 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "required_object_count",
+        "required_objects_truncated",
         "state",
         "reason",
         "input_sha256",
@@ -299,6 +301,13 @@
         "required_objects"
       ],
       "properties": {
+        "required_object_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "required_objects_truncated": {
+          "type": "boolean"
+        },
         "state": {
           "enum": [
             "available",
@@ -907,6 +916,7 @@
         "schema_version",
         "record_type",
         "investigation_id",
+        "request_id",
         "pinned_owners",
         "unavailable",
         "restored_bytes",
@@ -924,6 +934,10 @@
           "const": "investigation-report-retention"
         },
         "investigation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "request_id": {
           "type": "string",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
         },

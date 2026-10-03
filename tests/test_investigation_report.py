@@ -135,7 +135,7 @@ def test_wrong_comparison_scope_duplicate_roles_unknown_records_and_symlink_inpu
 def test_retention_uses_existing_owners_and_cannot_revive_expired_bytes(lab):
     c,_=lab;populate(c,attempts=2)
     with c.transaction() as db:db.execute("INSERT INTO storage_retired VALUES('attempt:attempt-0-1',1)")
-    data=report.retain(c.root,'investigation','preserve inconclusive evidence')
+    data=report.retain(c.root,'investigation','preserve inconclusive evidence','retain-preserve')
     assert 'experiment:experiment-0' in data['pinned_owners']
     assert 'attempt:attempt-0-0' in data['pinned_owners']
     assert data['unavailable']==[{'owner':'attempt:attempt-0-1','reason':'retired_bytes_cannot_be_restored'}]
@@ -160,7 +160,7 @@ def test_retention_failure_rolls_back_all_new_pins(lab,monkeypatch):
         if len(calls)==2:raise ContractError('injected pin failure')
         return original(db,owner,note)
     monkeypatch.setattr(retention,'pin_db',fail)
-    with pytest.raises(ContractError,match='injected'):report.retain(c.root,'investigation','keep')
+    with pytest.raises(ContractError,match='injected'):report.retain(c.root,'investigation','keep','retain-failure')
     with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM storage_pins').fetchone()[0]==0
 
 
@@ -199,7 +199,7 @@ def test_report_and_retention_records_match_strict_installed_schema(lab):
     schema=json.loads((Path(__file__).parents[1]/'schemas/investigation-report.v1.schema.json').read_text())
     validator=jsonschema.Draft202012Validator(schema)
     value=report.report(report.ReportReader(c.root),'investigation')
-    validator.validate(value);validator.validate(report.retain(c.root,'investigation','schema check'))
+    validator.validate(value);validator.validate(report.retain(c.root,'investigation','schema check','retain-schema'))
     validator.validate(plan([('patched','experiment-0')]))
     value['items'][0]['attempts'][0]['token']='must reject private wire fields'
     assert not validator.is_valid(value)
@@ -207,7 +207,7 @@ def test_report_and_retention_records_match_strict_installed_schema(lab):
 
 def test_retention_reports_missing_objects_without_claiming_restoration(lab):
     c,_=lab;identity=populate(c);c.store.path(identity).unlink()
-    retained=report.retain(c.root,'investigation','retain partial evidence')
+    retained=report.retain(c.root,'investigation','retain partial evidence','retain-partial')
     assert retained['missing_object_count']==1 and retained['missing_objects']==[identity]
     assert not retained['restored_bytes'] and not retained['payload_bytes_verified']
 
@@ -249,3 +249,91 @@ def test_joined_baseline_patch_regression_revert_compare_actual_retained_bytes(p
     from pathlib import Path
     import jsonschema
     for page in pages:jsonschema.validate(page,json.loads((Path(__file__).parents[1]/'schemas/investigation-report.v1.schema.json').read_text()))
+
+
+def test_retention_exact_replay_freezes_scope_and_cross_kind_request_namespace(lab):
+    from quirkbench.contracts import Conflict
+    c,_=lab;populate(c)
+    first=report.retain(c.root,'investigation','original selection','retention-request')
+    with c.transaction() as db:
+        job=db.execute("INSERT INTO jobs(campaign,experiment,repetition,state) VALUES('investigation','experiment-0',2,'DONE')").lastrowid
+        db.execute("INSERT INTO attempts(id,job,device,boot,generation,token,lease_until,deadline,state) VALUES('later',?,'target-1','boot',1,'PRIVATE-LATER',0,0,'COMPLETE')",(job,))
+        db.execute("INSERT INTO refs SELECT 'attempt:later',digest FROM refs WHERE owner='attempt:attempt-0-0'")
+    assert report.retain(c.root,'investigation','original selection','retention-request')==first
+    with c.transaction() as db:assert not db.execute("SELECT 1 FROM storage_pins WHERE owner='attempt:later'").fetchone()
+    with pytest.raises(Conflict,match='replay'):report.retain(c.root,'investigation','changed selection','retention-request')
+    assert 'attempt:later' in report.retain(c.root,'investigation','original selection','new-retention-request')['pinned_owners']
+    from quirkbench.attended_baseline import check_request
+    with c.transaction() as db:
+        with pytest.raises(Conflict,match='another'):check_request(db,'retention-request','operations')
+    with pytest.raises(Conflict,match='another'):report.retain(c.root,'investigation','owner collision','start-request')
+
+
+def test_valid_large_closure_and_well_formed_unadmitted_or_alternate_recipe_inputs(published,monkeypatch):
+    c,composition=published
+    original=attended_baseline.admit(c,'investigation',composition,'large-report',ready=lambda _:None)['data']['experiment_id']
+    with c.transaction() as db:
+        for n in range(200):
+            blob=c.store.put(('synthetic pinned package payload '+str(n)).encode()).sha256
+            db.execute('INSERT INTO refs VALUES(?,?)',('experiment:'+original,blob))
+        spec=json.loads(db.execute('SELECT spec FROM experiments WHERE id=?',(original,)).fetchone()[0])
+    view=report.report(report.ReportReader(c.root),'investigation')['items'][0]
+    assert view['attribution']['metadata_verified'] and view['comparison_role']=='baseline'
+    assert view['attribution']['required_object_count']>200 and view['attribution']['required_objects_truncated']
+    assert len(view['attribution']['required_objects'])<128
+    proof=attended_baseline.document(c,spec['artifacts']['attended_baseline'])
+    newproof={**proof,'experiment_id':'manual-input'}
+    forged=c.store.put(canonical(newproof)).sha256
+    manual={**spec,'experiment_id':'manual-input','artifacts':{**spec['artifacts'],'attended_baseline':forged}}
+    # A regular manually submitted experiment may retain opaque extra artifacts;
+    # they cannot impersonate controller-derived attended baseline admission.
+    c.submit_attended('investigation',Experiment.from_dict(manual))
+    with c.transaction() as db:
+        db.execute("INSERT OR IGNORE INTO refs SELECT 'experiment:manual-input',digest FROM refs WHERE owner=?",('experiment:'+original,))
+    unadmitted=report.report(report.ReportReader(c.root),'investigation',experiment='manual-input')['items'][0]
+    assert not unadmitted['attribution']['metadata_verified'] and unadmitted['comparison_role']=='unclassified'
+    recipe=report.stored(attended_baseline.raw_metadata(c,proof['recipe_manifest_sha256']).decode(),'recipe')
+    alternate=c.store.put(canonical({**recipe,'version':recipe['version']+1})).sha256
+    changedproof={**proof,'recipe_manifest_sha256':alternate}
+    changed_input=c.store.put(canonical(changedproof)).sha256
+    altered={**spec,'artifacts':{**spec['artifacts'],'recipe_manifest':alternate,'attended_baseline':changed_input}}
+    with c.transaction() as db:
+        db.execute('UPDATE experiments SET spec=? WHERE id=?',(canonical(altered).decode(),original))
+        # Make the admission digest agree, isolating the actual deployed recipe check.
+        db.execute('UPDATE attended_baseline_commands SET input_digest=? WHERE experiment=?',(changed_input,original))
+        db.execute('INSERT INTO refs VALUES(?,?)',('experiment:'+original,alternate))
+        db.execute('INSERT INTO refs VALUES(?,?)',('experiment:'+original,changed_input))
+    wrong=report.report(report.ReportReader(c.root),'investigation',experiment=original)['items'][0]
+    assert not wrong['attribution']['metadata_verified'] and wrong['comparison_role']=='unclassified'
+
+
+def test_same_recovery_start_interrupted_handoff_result_is_not_candidate_adoption(published,tmp_path):
+    c,composition=published
+    experiment=attended_baseline.admit(c,'investigation',composition,'interrupted-report',ready=lambda _:None)['data']['experiment_id']
+    hardware,client,step,backend,boot=attended_lab(c,tmp_path)
+    assert step()=='awaiting_operator_approval'
+    with c.transaction() as db:attempt,token=db.execute('SELECT id,token FROM attempts').fetchone()
+    c.decide_attempt(attempt,'approved',request_id='approve-interrupted',operator='operator')
+    c.start(attempt,token,hardware.boot_id)
+    source=report.report(report.ReportReader(c.root),'investigation')['items'][0]['attribution']
+    c.handoff(attempt,token,hardware.boot_id,source['deployment_revision'])
+    c.recovery_returned(attempt,token,hardware.boot_id)
+    c.complete(Result(attempt,'INCONCLUSIVE','Candidate handoff interrupted.'),token,hardware.boot_id)
+    fact=report.report(report.ReportReader(c.root),'investigation')['items'][0]['attempts'][0]
+    assert fact['candidate_requested'] and fact['attempt_started']
+    assert fact['boot_id']==hardware.boot_id and not fact['exact_candidate_adoption']
+    assert fact['problem_reproduced'] is None
+
+
+def test_retention_machine_input_and_receipt_privacy_are_strict(lab,capsys):
+    c,_=lab;populate(c)
+    argv=['--state',str(c.root),'investigation','report-retain','investigation','--note','preserve','--json']
+    assert cli.main(argv)!=0
+    assert '--request-id required' in capsys.readouterr().out
+    assert cli.main(argv+['--request-id','cli-retain'])==0
+    receipt=json.loads(capsys.readouterr().out)['data']
+    assert receipt['request_id']=='cli-retain'
+    with c.transaction() as db:
+        receipt['token']='PRIVATE-RECEIPT-TOKEN'
+        db.execute('UPDATE report_retention_commands SET result_document=? WHERE request_id=?',(canonical(receipt).decode(),'cli-retain'))
+    with pytest.raises(ContractError,match='invalid retained'):report.retain(c.root,'investigation','preserve','cli-retain')

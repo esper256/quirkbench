@@ -38,7 +38,9 @@ actual candidate deployment, installed recipe manifest/version and stimulus iden
 (the canonical recipe manifest identity plus parameters). Exact candidate adoption
 requires the original attempt's matching handoff revision, start and result. It
 still does not establish reproduction. Large source archives, symbols and evidence
-objects are listed by retained identity and safe file presence; their bytes are
+objects are listed by essential retained identity and safe file presence; additional
+RPM/dependency references contribute to `required_object_count` with
+`required_objects_truncated`, without invalidating the exact metadata joins; their bytes are
 **not verified** by a report. Missing, expired or corrupt bytes are never invented.
 No private controller/target credentials, raw measurement dictionaries or current
 mutable inventory are exported through this allowlisted view.
@@ -53,15 +55,17 @@ report is not a second truth or a controller backup.
 Read-only reports never insert pins. To preserve the currently recorded owners:
 
 ```sh
-quirkbench investigation report-retain input-device-investigation --note 'Keep this inconclusive comparison' --json
+quirkbench investigation report-retain input-device-investigation --note 'Keep this inconclusive comparison' --request-id retain-comparison-01 --json
 quirkbench maintenance status
 ```
 
 This explicit command atomically uses existing retention pins for the investigation,
 experiments and attempts, preserving their dependency references to source, symbols
 and evidence. It reports retired/unknown owners and missing object identities;
-inserting a pin cannot restore missing bytes or validate them. New attempts added
-later require another retain command. Limits are 100 experiments, 1,000 attempts
+inserting a pin cannot restore missing bytes or validate them. The request ID freezes the selected owners and receipt; retry returns that exact
+receipt, including its original missing-object observations; it is not fresh
+byte verification. New attempts added later require a new request ID. Human calls derive a
+stable name/note identity; machine input requires `--request-id`. Limits are 100 experiments, 1,000 attempts
 and 16,384 direct object references; oversized scope is refused before new pins
 commit. Existing [storage maintenance](local-state-maintenance.md) owns pin removal and
 collection. Pin only the evidence you intend to keep.

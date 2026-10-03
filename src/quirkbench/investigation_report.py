@@ -41,6 +41,7 @@ class ReportReader(StateReader):
     @contextmanager
     def connection(self):
         if getattr(self, '_db', None) is not None:
+            if self._db.execute('PRAGMA query_only').fetchone()[0]!=1:raise ContractError('report requires a read-only snapshot')
             yield self._db
         else:
             with super().connection() as db:
@@ -71,7 +72,7 @@ def attribution(reader, db, name, spec):
     from .deployment import DeploymentManifest
     from .recipe_registry import load_manifest, _validate_parameters
     keys = [k for k in ('attended_baseline','proposal_input') if k in spec['artifacts']]
-    unknown = {'state':'unavailable', 'reason':'exact_source_input_missing', 'input_sha256':None,
+    unknown = {'required_object_count':0,'required_objects_truncated':False,'state':'unavailable', 'reason':'exact_source_input_missing', 'input_sha256':None,
         'input_type':None, 'identities':None, 'metadata_verified':False,
         'source_bytes_verified':False, 'deployment_revision':None, 'recipe_version':None,
         'stimulus_sha256':digest(canonical({'recipe_manifest_sha256':spec['artifacts'].get('recipe_manifest'),'parameters':spec['parameters']})), 'required_objects':[]}
@@ -123,6 +124,48 @@ def attribution(reader, db, name, spec):
             raise Conflict('baseline source is modified')
         if evidence['kernel_source'] != capture['archive_sha256'] or manifest.provenance.get('baseline_sha256')!=bound['baseline_sha256']:
             raise Conflict('candidate source or baseline provenance differs')
+        from .baseline_catalog import validate_entry
+        entry=validate_entry(document(reader,bound['baseline_sha256']))
+        pinned_recipe=next((v for v in entry['target_recipes'] if v['recipe_id']==spec['recipe']),None)
+        if (spec['baseline_id']!=entry['baseline_id'] or pinned_recipe is None
+                or pinned_recipe['digest']!=bound['recipe_manifest_sha256']
+                or manifest.provenance.get('target_recipes')!=entry['target_recipes']
+                or manifest.provenance.get('rpm_snapshot_sha256')!=entry['rpm_snapshot_sha256']):
+            raise Conflict('recipe or baseline differs from actual published candidate')
+        if key=='attended_baseline':
+            admitted=db.execute('SELECT campaign,composition_operation,input_digest FROM attended_baseline_commands WHERE experiment=?',(spec['experiment_id'],)).fetchone()
+            if (admitted is None or admitted['campaign']!=name or admitted['input_digest']!=identity
+                    or admitted['composition_operation']!=bound['composition_operation_id']):
+                raise Conflict('exact baseline input was not admitted')
+        else:
+            from .proposal_contracts import validate as validate_proposal
+            admitted=db.execute('SELECT operation,input_digest,build_operation,composition_operation FROM proposal_dispatch_commands WHERE experiment=?',(spec['experiment_id'],)).fetchone()
+            original=db.execute('SELECT campaign,proposal_digest,context_digest FROM external_proposals WHERE operation=?',(bound['proposal_operation_id'],)).fetchone()
+            finished=db.execute('SELECT state,campaign,final_output_digest FROM operations WHERE id=?',(bound['proposal_operation_id'],)).fetchone()
+            if (admitted is None or admitted['operation']!=bound['proposal_operation_id'] or admitted['input_digest']!=bound['dispatch_sha256']
+                    or admitted['build_operation']!=join['build_operation_id'] or admitted['composition_operation']!=bound['composition_operation_id']
+                    or original is None or original['campaign']!=name or original['proposal_digest']!=bound['proposal_sha256']
+                    or finished is None or finished['state']!='SUCCEEDED' or finished['campaign']!=name):
+                raise Conflict('exact proposal experiment was not admitted and published')
+            final=document(reader,finished['final_output_digest'],16384)
+            proposal=validate_proposal(document(reader,bound['proposal_sha256']))
+            dispatch=proposal_input(document(reader,bound['dispatch_sha256'],16384))
+            selected=proposal['experiment']
+            if document(reader,original['context_digest'])!=proposal['input_context']:raise Conflict('retained proposal context differs')
+            if (final.get('input')!=bound or final.get('experiment_id')!=spec['experiment_id'] or final.get('action')!='experiment'
+                    or proposal['campaign_id']!=name or proposal['action']!='experiment' or proposal['base_oid']!=bound['base_oid']
+                    or proposal['source']['capture_sha256']!=bound['source_capture_sha256']
+                    or proposal['source']['capture_operation_id']!=build['source_capture_operation_id']
+                    or proposal['input_context_digest']!=original['context_digest']
+                    or dispatch['record_type']!='proposal-dispatch-input' or dispatch['investigation_id']!=name
+                    or dispatch['proposal_operation_id']!=bound['proposal_operation_id'] or dispatch['proposal_sha256']!=bound['proposal_sha256']
+                    or dispatch['context_sha256']!=original['context_digest'] or dispatch['action']!='experiment'
+                    or dispatch['candidate_operation_id']!=build['candidate_operation_id'] or dispatch['repository']!=join['repository']
+                    or dispatch['signing_fingerprint']!=join['signing_fingerprint']
+                    or selected['baseline_sha256']!=bound['baseline_sha256'] or selected['target_recipe_id']!=spec['recipe']
+                    or selected['target_recipe_sha256']!=bound['recipe_manifest_sha256'] or selected['parameters']!=spec['parameters']
+                    or selected['repetitions']!=spec['repetitions'] or selected['deadline_s']!=spec['timeout_s']):
+                raise Conflict('proposal choices differ from recorded experiment/source/deployment')
         recipe = load_manifest(raw_metadata(reader, bound['recipe_manifest_sha256'], QUERY_BYTES))
         if recipe['recipe_id'] != spec['recipe']:raise Conflict('recipe identity differs')
         _validate_parameters(recipe['parameter_specs'],spec['parameters'])
@@ -132,16 +175,17 @@ def attribution(reader, db, name, spec):
         required = {bound[k] for k in bound if k.endswith('_sha256')}
         required.update((capture['archive_sha256'],capture['manifest_sha256'],base['archive_sha256'],base['manifest_sha256']))
         required.add(identity)
+        if key=='proposal_input':required.update((original['context_digest'],finished['final_output_digest']))
         required.update(evidence.values())
         # The retained experiment closure includes build outputs/symbol references.
-        refs = db.execute('SELECT digest FROM refs WHERE owner=? LIMIT 1025', (owners[0],)).fetchall()
-        if len(refs) > 1024:raise ContractError('experiment retention closure exceeds report budget')
-        owned={r[0] for r in refs}
-        if not required<=owned:raise Conflict('exact report metadata or source closure is no longer retained')
-        required.update(owned)
-        items = [presence(reader, item) for item in sorted(required)]
-        if len(items) > 128:raise ContractError('experiment object inventory exceeds report budget')
-        return {'state':'available', 'reason':None, 'input_sha256':identity, 'input_type':bound['record_type'],
+        required=sorted(required)
+        owned_count=db.execute('SELECT COUNT(DISTINCT digest) FROM refs WHERE owner=?',(owners[0],)).fetchone()[0]
+        membership=db.execute('SELECT COUNT(DISTINCT digest) FROM refs WHERE owner=? AND digest IN ('+','.join('?' for _ in required)+')',[owners[0],*required]).fetchone()[0]
+        if membership!=len(required):raise Conflict('exact report metadata or source closure is no longer retained')
+        # Essential source/symbol/evidence identities are shown; thousands of RPM
+        # dependencies stay retained without expanding or invalidating this page.
+        items=[presence(reader,item) for item in required]
+        return {'required_object_count':owned_count,'required_objects_truncated':owned_count>len(items),'state':'available', 'reason':None, 'input_sha256':identity, 'input_type':bound['record_type'],
             'identities':{**{k:bound[k] for k in bound if k.endswith('_sha256') or k.endswith('_operation_id') or k == 'base_oid'},
                 'candidate_operation_id':build['candidate_operation_id'],'build_operation_id':join['build_operation_id']},
             'metadata_verified':True, 'source_bytes_verified':False, 'deployment_revision':deployment['revision'],
@@ -190,6 +234,7 @@ def attempt_fact(reader, db, name, session, row, source, device):
     ack={sha256(r['digest']) for r in receipts}
     items=[{**presence(reader,v),'acknowledged':v in ack} for v in sorted(declared)]
     binding=(saved['device']==device and source['metadata_verified'] and saved['handoff_revision'] == source['deployment_revision']
+             and row['handoff_origin'] is not None and saved['boot']!=row['handoff_origin']
              and saved['started'] is not None and result is not None)
     obs=observations(db,name,session,row['id'])
     missing=[]
@@ -247,7 +292,7 @@ def report(reader, name, *, plan=None, after=0, limit=5, experiment=None, attemp
             if spec['experiment_id']!=row['id']:raise ContractError('stored experiment identity differs')
             source=attribution(reader,db,name,spec)
             role=roles.get(row['id'],'baseline' if source['input_type']=='attended-baseline-input' else 'unclassified')
-            selected=db.execute('''SELECT a.rowid AS cursor,a.id,j.experiment,j.repetition FROM attempts a
+            selected=db.execute('''SELECT a.rowid AS cursor,a.id,a.handoff_origin,j.experiment,j.repetition FROM attempts a
                 JOIN jobs j ON j.id=a.job WHERE j.campaign=? AND j.experiment=? AND a.rowid>?
                 ORDER BY a.rowid LIMIT ?''',(name,row['id'],attempt_after,attempt_limit+1)).fetchall()
             facts=[attempt_fact(reader,db,name,inv['session']['session_id'],r,source,inv['session']['device_id']) for r in selected[:attempt_limit]]
@@ -297,14 +342,62 @@ def report(reader, name, *, plan=None, after=0, limit=5, experiment=None, attemp
         return data
 
 
-def retain(root,name,note):
+def retention_receipt(value):
+    fields={'schema_version','record_type','investigation_id','request_id','pinned_owners','unavailable',
+        'restored_bytes','payload_bytes_verified','missing_object_count','missing_objects','missing_objects_truncated','scope'}
+    if (not isinstance(value,dict) or set(value)!=fields or type(value['schema_version']) is not int or value['schema_version']!=1
+            or value['record_type']!='investigation-report-retention' or value['restored_bytes'] is not False
+            or value['payload_bytes_verified'] is not False
+            or value['scope']!='frozen recorded owners; future attempts require a new request ID'):
+        raise ContractError('invalid retained report receipt')
+    identifier(value['investigation_id']);identifier(value['request_id'])
+    owners=[]
+    for field in ('pinned_owners','unavailable'):
+        if not isinstance(value[field],list) or len(value[field])>1101:raise ContractError('invalid receipt owners')
+        for row in value[field]:
+            if field=='unavailable':
+                if not isinstance(row,dict) or set(row)!={'owner','reason'} or row['reason'] not in ('retired_bytes_cannot_be_restored','no_retained_payload'):
+                    raise ContractError('invalid unavailable receipt owner')
+                owner=row['owner']
+            else:owner=row
+            if not isinstance(owner,str) or ':' not in owner:raise ContractError('invalid receipt owner')
+            kind,identity=owner.split(':',1)
+            if kind not in ('investigation','experiment','attempt'):raise ContractError('invalid receipt owner type')
+            identifier(identity);owners.append(owner)
+    if len(owners)>1101 or len(set(owners))!=len(owners):raise ContractError('invalid receipt owner scope')
+    count=value['missing_object_count'];items=value['missing_objects']
+    if (type(count) is not int or not 0<=count<=16384 or not isinstance(items,list) or len(items)>20
+            or len(items)!=min(count,20) or type(value['missing_objects_truncated']) is not bool
+            or value['missing_objects_truncated']!=(count>20)):
+        raise ContractError('invalid receipt missing objects')
+    for item in items:sha256(item)
+    if len(canonical(value))>QUERY_BYTES:raise ContractError('receipt exceeds output budget')
+    return value
+
+
+def retain(root,name,note,request_id):
     """Explicit existing pins, atomic under the collector's database serialization."""
     if not isinstance(note,str) or not note.strip() or len(note.encode())>512:raise ContractError('bounded retention note required')
-    from .retention import connection, pin_db
+    identifier(name);identifier(request_id)
+    requested=digest(canonical({'investigation_id':name,'note':note}))
+    from .retention import pin_db
+    from .attended_baseline import check_request
+    from .controller import Controller
     from .investigations import record
     reader=ReportReader(root)
-    with connection(reader.root) as db:
-        db.execute('BEGIN IMMEDIATE')
+    # StateReader checked the existing root; mutations use the ordinary migration
+    # and DB transaction service, never initialize a state as a side effect of read.
+    with reader.connection() as db:db.execute('SELECT 1 FROM investigations WHERE id=?',(name,))
+    controller=Controller(reader.root,reserve_bytes=0)
+    with controller.transaction() as db:
+        previous=db.execute('SELECT request_digest,CASE WHEN length(CAST(result_document AS BLOB))<=? THEN result_document END AS result FROM report_retention_commands WHERE request_id=?',(QUERY_BYTES,request_id)).fetchone()
+        if previous:
+            if previous['request_digest']!=requested:raise Conflict('retention request replay differs')
+            if previous['result'] is None:raise ContractError('retention receipt exceeds read budget')
+            value=retention_receipt(stored(previous['result'],'retention receipt'))
+            if value['request_id']!=request_id or value['investigation_id']!=name:raise Conflict('retention receipt scope differs')
+            return value
+        check_request(db,request_id,'report_retention_commands')
         if record(reader,name,db) is None:raise ContractError('existing investigation required')
         owners=['investigation:'+identifier(name)]
         owners += ['experiment:'+r[0] for r in db.execute('SELECT DISTINCT experiment FROM jobs WHERE campaign=? LIMIT 101',(name,))]
@@ -312,7 +405,7 @@ def retain(root,name,note):
         if len(owners)>101 or len(attempts)>1000:raise ContractError('retention scope exceeds bounds')
         owners += ['attempt:'+r[0] for r in attempts]
         unavailable=[]
-        count=db.execute('SELECT COUNT(*) FROM refs WHERE owner IN ('+','.join('?' for _ in owners)+')',owners).fetchone()[0]
+        count=db.execute('SELECT COUNT(DISTINCT digest) FROM refs WHERE owner IN ('+','.join('?' for _ in owners)+')',owners).fetchone()[0]
         if count>16384:raise ContractError('retention object inventory exceeds bounds')
         missing=[]
         # Pinning protects existing ownership only; absent bytes remain absent.
@@ -324,14 +417,24 @@ def retain(root,name,note):
             known=db.execute('SELECT 1 FROM refs WHERE owner=? UNION SELECT 1 FROM storage_groups WHERE owner=?',(owner,owner)).fetchone()
             if not known:unavailable.append({'owner':owner,'reason':'no_retained_payload'});continue
             pin_db(db,owner,note)
-        return {'schema_version':1,'record_type':'investigation-report-retention','investigation_id':name,
+        result={'schema_version':1,'record_type':'investigation-report-retention','investigation_id':name,'request_id':request_id,
             'pinned_owners':[v for v in owners if v not in {r['owner'] for r in unavailable}],
-            'unavailable':unavailable,'restored_bytes':False,'payload_bytes_verified':False,'missing_object_count':len(missing),'missing_objects':missing[:20],'missing_objects_truncated':len(missing)>20,'scope':'currently recorded owners; future attempts require another retain'}
+            'unavailable':unavailable,'restored_bytes':False,'payload_bytes_verified':False,'missing_object_count':len(missing),'missing_objects':missing[:20],'missing_objects_truncated':len(missing)>20,'scope':'frozen recorded owners; future attempts require a new request ID'}
+        retention_receipt(result)
+        raw=canonical(result)
+        if len(raw)>QUERY_BYTES:raise ContractError('retention receipt exceeds output budget')
+        db.execute('INSERT INTO report_retention_commands VALUES(?,?,?,?)',(request_id,requested,name,raw.decode()))
+        return result
 
 
 def execute(root,args):
     from .operations import operation_response
-    if args.action=='report-retain':data=retain(root,args.name,args.note)
+    if args.action=='report-retain':
+        request=args.request_id
+        if request is None:
+            if args.json:raise ContractError('--request-id required with --json')
+            request='report-retain-'+digest(canonical({'investigation_id':args.name,'note':args.note}))[:40]
+        data=retain(root,args.name,args.note,request)
     else:data=report(ReportReader(root),args.name,plan=load_comparison(args.comparison,args.name),
         after=args.after,limit=args.limit,experiment=args.experiment,attempt_after=args.attempt_after,attempt_limit=args.attempt_limit)
     return operation_response(data=data)
