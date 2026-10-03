@@ -21,10 +21,8 @@ CREATE TABLE proposal_outbox(
 '''
 
 
-def document(store,identity,limit=1<<20):
+def metadata_bytes(store,identity,limit=1<<20):
     from .recovery_podman import _metadata_object
-    from .product_contracts import _pairs,_depth
-    import json
     from .store import ArtifactStore
     from .build import BuildError
     from .state_reader import held_parent
@@ -33,6 +31,13 @@ def document(store,identity,limit=1<<20):
         with held_parent(root/'objects'/identity) as (_,guard):
             guard();raw=_metadata_object(root,identity,limit);guard()
     except (BuildError,OSError) as exc:raise Conflict('retained proposal metadata unavailable: '+identity) from exc
+    return raw
+
+
+def document(store,identity,limit=1<<20):
+    from .product_contracts import _pairs,_depth
+    import json
+    raw=metadata_bytes(store,identity,limit)
     try:
         value=json.loads(raw,object_pairs_hook=_pairs,
             parse_constant=lambda _:(_ for _ in ()).throw(ContractError('nonfinite metadata number')))
@@ -57,7 +62,9 @@ def scope(reader,name,db, *,capture=None):
     refs={row['document_digest']}
     if inv['baseline_sha256'] is not None:refs.add(inv['baseline_sha256'])
     if capture is None:return validate_context(value),refs,inv
-    saved,workspace=workspace_record(reader,inv['session']['workspace_id'],db)
+    from .build import BuildError
+    try:saved,workspace=workspace_record(reader,inv['session']['workspace_id'],db)
+    except (BuildError,OSError) as exc:raise Conflict('retained source workspace metadata unavailable; reconcile capture') from exc
     owned_path(reader.root,workspace)
     if saved['campaign']!=name or saved['writer_state']!='QUIESCED' or saved['capture_operation']!=capture:
         raise Conflict('stop and hand off all writers; select the latest unreleased capture')
@@ -107,7 +114,7 @@ def recipe_scope(reader,proposal):
     experiment=proposal['experiment']
     if experiment is None:return set()
     from .baseline_catalog import validate_entry
-    from .recipe_registry import installed_registry,_validate_parameters
+    from .recipe_registry import installed_registry,_validate_parameters,load_manifest,MAX_MANIFEST_BYTES
     entry=validate_entry(document(reader.store,experiment['baseline_sha256']))
     if entry['build_recipe']!={'recipe_id':experiment['build_recipe_id'],'digest':experiment['build_recipe_sha256']}:
         raise Conflict('build recipe differs from pinned baseline')
@@ -117,6 +124,11 @@ def recipe_scope(reader,proposal):
     record=registry.records.get(target['recipe_id'])
     if record is None or record[1]!=target['digest']:raise Conflict('target recipe differs from installed reviewed manifest')
     manifest,identity,path=record
+    retained_manifest=load_manifest(metadata_bytes(reader.store,identity,MAX_MANIFEST_BYTES))
+    if retained_manifest!=manifest:raise Conflict('retained target recipe differs from reviewed installed manifest')
+    # Build descriptors are publisher-pinned inputs; their execution semantics
+    # are checked by the existing build adapter. Admission retains exact bytes.
+    metadata_bytes(reader.store,experiment['build_recipe_sha256'])
     if 'experiment' not in manifest['modes'] or entry['architecture'] not in manifest['architectures']:
         raise ContractError('recipe not supported for baseline candidate')
     _validate_parameters(manifest['parameter_specs'],experiment['parameters'])
@@ -213,21 +225,31 @@ def pending(reader,name, *,after=0,limit=20):
     if type(after) is not int or after<0 or type(limit) is not int or not 1<=limit<=100:raise ContractError('invalid proposal cursor')
     with reader.connection() as db:
         scope(reader,name,db)
+        if not tables_available(db):
+            return {'investigation_id':name,'items':[],'next_cursor':None,'migration_required':True,
+                'dispatch_connected':False,'execution_authorized':False}
         rows=db.execute('''SELECT p.rowid AS cursor,p.decision_id,p.operation AS operation_id,p.proposal_digest,p.context_digest,
             p.input_tokens,p.output_tokens,q.action,o.state FROM external_proposals p JOIN proposal_outbox q ON q.operation=p.operation
             JOIN operations o ON o.id=p.operation WHERE p.campaign=? AND p.rowid>? ORDER BY p.rowid LIMIT ?''',(name,after,limit+1)).fetchall()
     items=bounded_items([dict(row) for row in rows[:limit]],QUERY_BYTES-2048)
     return {'investigation_id':name,'items':items,'next_cursor':items[-1]['cursor'] if items and len(rows)>len(items) else None,
-        'dispatch_connected':False,'execution_authorized':False}
+        'migration_required':False,'dispatch_connected':False,'execution_authorized':False}
+
+
+def tables_available(db):
+    return db.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('external_proposals','proposal_outbox')").fetchone()[0]==2
 
 
 def usage(reader,name):
     with reader.connection() as db:
+        if not tables_available(db):
+            return {'observations':0,'known_input_tokens':0,'known_output_tokens':0,'incomplete_observations':0,
+                'migration_required':True,'external_spending_metered':False}
         row=db.execute('''SELECT count(*) AS observations,coalesce(sum(input_tokens),0) AS known_input_tokens,
             coalesce(sum(output_tokens),0) AS known_output_tokens,
             coalesce(sum(input_tokens IS NULL OR output_tokens IS NULL),0) AS incomplete_observations
             FROM external_proposals WHERE campaign=?''',(name,)).fetchone()
-    return {**dict(row),'external_spending_metered':False}
+    return {**dict(row),'migration_required':False,'external_spending_metered':False}
 
 
 def execute(root,args):

@@ -59,7 +59,7 @@ def test_captured_source_admission_pins_exact_closure_usage_outbox_and_no_attemp
         assert db.execute('SELECT count(*) FROM jobs').fetchone()[0]==db.execute('SELECT count(*) FROM attempts').fetchone()[0]==0
         assert db.execute('SELECT count(*) FROM ledger').fetchone()[0]==0
     assert proposals.usage(StateReader(c.root),'investigation')=={'observations':1,'known_input_tokens':12,'known_output_tokens':7,
-        'incomplete_observations':0,'external_spending_metered':False}
+        'incomplete_observations':0,'migration_required':False,'external_spending_metered':False}
     assert (private/'driver.c').read_text()=='external agent edit\n'
     assert (original/'driver.c').read_text()!='external agent edit\n'
 
@@ -77,7 +77,7 @@ def test_lost_reply_replays_without_source_bytes_live_writer_or_recipe(captured,
     assert proposals.usage(StateReader(c.root),'investigation')['observations']==1
 
 
-@pytest.mark.parametrize('mutation',('writer','capture','refs','receipt','context','proposal','intent','recipe'))
+@pytest.mark.parametrize('mutation',('writer','capture','refs','receipt','context','proposal','intent','recipe','build-recipe','target-recipe'))
 def test_race_during_cas_publication_leaves_no_admission_or_usage(captured,monkeypatch,mutation):
     c,value,private,original=captured;original_put=c.store.put;fired=[False]
     def racing_put(raw,*a,**kw):
@@ -95,6 +95,8 @@ def test_race_during_cas_publication_leaves_no_admission_or_usage(captured,monke
                 c.store.path(identity).write_bytes(b'{}')
             if mutation=='recipe':
                 c.store.path(value['experiment']['baseline_sha256']).write_bytes(b'{}')
+            if mutation in ('build-recipe','target-recipe'):
+                c.store.path(value['experiment'][mutation.replace('-','_')+'_sha256']).write_bytes(b'{}')
         return result
     monkeypatch.setattr(c.store,'put',racing_put)
     with pytest.raises((Conflict,ContractError)):proposals.submit(c,'investigation',value,'race')
@@ -156,8 +158,10 @@ def test_installed_cli_propose_schema_replay_and_readonly_listing(captured,monke
     assert cli._main(command)==0;answer=json.loads(capsys.readouterr().out)
     assert cli._main(command)==0;assert json.loads(capsys.readouterr().out)==answer
     monkeypatch.setattr(Controller,'__init__',lambda *a,**kw:pytest.fail('read initialized state'))
+    monkeypatch.setattr('quirkbench.maintenance.prune',lambda *a,**kw:pytest.fail('read pruned state'))
+    monkeypatch.setattr('quirkbench.maintenance.private_lock',lambda *a,**kw:pytest.fail('read acquired publication lock'))
     for action in ('proposals','proposal-schema','context'):
-        assert cli._main(['--state',str(c.root),'investigation',action,'investigation','--json'])==0
+        assert cli.main(['--state',str(c.root),'investigation',action,'investigation','--json'])==0
         assert not json.loads(capsys.readouterr().out)['data']['execution_authorized']
 
 
@@ -214,3 +218,72 @@ def test_missing_state_propose_never_creates_it(tmp_path):
     root=tmp_path/'never-created'
     with pytest.raises(ContractError):proposals.execute(root,SimpleNamespace(action='propose',name='unknown'))
     assert not root.exists()
+
+
+def test_legacy_readonly_context_and_listing_need_no_migration_or_housekeeping(setup,monkeypatch,capsys):
+    from quirkbench import cli
+    from quirkbench.controller import MIGRATIONS
+    c,_=setup;start(setup)
+    with c.transaction() as db:
+        db.execute('DROP TABLE proposal_outbox');db.execute('DROP TABLE external_proposals')
+        db.execute('PRAGMA user_version='+str(len(MIGRATIONS)-1))
+    def forbidden(*a,**kw):pytest.fail('read initialized/locked/pruned old state')
+    monkeypatch.setattr(Controller,'__init__',forbidden)
+    monkeypatch.setattr('quirkbench.maintenance.private_lock',forbidden)
+    monkeypatch.setattr('quirkbench.maintenance.prune',forbidden)
+    for action in ('context','proposals','proposal-schema'):
+        assert cli.main(['--state',str(c.root),'investigation',action,'investigation','--json'])==0
+        data=json.loads(capsys.readouterr().out)['data']
+        if action=='context':assert data['proposal_usage']['migration_required']
+        if action=='proposals':assert data['migration_required'] and data['items']==[]
+    with c.transaction() as db:assert db.execute('PRAGMA user_version').fetchone()[0]==len(MIGRATIONS)-1
+
+
+@pytest.mark.parametrize('corruption',('missing','corrupt'))
+def test_installed_propose_unavailable_workspace_metadata_has_c2_envelope(captured,monkeypatch,capsys,tmp_path,corruption):
+    from quirkbench import cli
+    c,value,private,original=captured
+    workspace=value['input_context']['source']['workspace_sha256']
+    if corruption=='missing':c.store.path(workspace).unlink()
+    else:c.store.path(workspace).write_bytes(b'{}')
+    path=tmp_path/'proposal.json';path.write_bytes(canonical(value))
+    result=cli.main(['--state',str(c.root),'--reserve-gib','0','investigation','propose','investigation',
+        '--file',str(path),'--request-id','unavailable','--json'])
+    answer=json.loads(capsys.readouterr().out)
+    assert result==3 and answer['error']['code']=='CONFLICT' and answer['operation_id'] is None
+    assert 'workspace metadata unavailable' in answer['error']['message']
+    with c.transaction() as db:assert not db.execute('SELECT 1 FROM external_proposals').fetchone()
+
+
+def test_corrupt_capture_metadata_keeps_source_free_human_scope_available(captured):
+    c,value,private,original=captured
+    c.store.path(value['source']['capture_sha256']).write_bytes(b'{}')
+    scope=proposals.context_receipt(StateReader(c.root),'investigation')
+    assert not scope['source_available'] and scope['blocking_reason'] and scope['input_context']['source'] is None
+    value.update(action='needs_human',source=None,base_oid=None,experiment=None,
+        input_context=scope['input_context'],input_context_digest=scope['input_context_digest'])
+    assert proposals.submit(c,'investigation',value,'capture-unavailable')['operation_id']
+
+
+def test_original_capture_request_cannot_be_reused_for_a_proposal(captured):
+    c,value,private,original=captured
+    with pytest.raises(Conflict,match='different proposal or operation'):
+        proposals.submit(c,'investigation',value,'capture')
+    assert proposals.usage(StateReader(c.root),'investigation')['observations']==0
+
+
+def test_backup_restore_keeps_source_closure_outbox_and_exact_replay(captured,tmp_path):
+    c,value,private,original=captured
+    answer=proposals.submit(c,'investigation',value,'backup-proposal')
+    backup=c.backup(tmp_path/'backup')
+    restored=Controller.restore(backup,tmp_path/'restored',reserve_bytes=0,boot_id_reader=lambda:BOOT)
+    assert restored.status('investigation')['state']=='PAUSED'
+    replay=proposals.submit(restored,'investigation',value,'backup-proposal')
+    assert replay['operation_id']==answer['operation_id'] and replay['data']['proposal']==answer['data']['proposal']
+    assert proposals.pending(StateReader(restored.root),'investigation')['items'][0]['operation_id']==answer['operation_id']
+    with restored.transaction() as db:
+        refs={r[0] for r in db.execute('SELECT digest FROM operation_refs WHERE operation=?',(answer['operation_id'],))}
+    assert value['source']['capture_sha256'] in refs
+    receipt=proposals.document(restored.store,value['source']['capture_sha256'])
+    assert restored.store.verify(receipt['archive_sha256'])>0
+    assert restored.store.verify(receipt['manifest_sha256'])>0

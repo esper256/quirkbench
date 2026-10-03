@@ -1169,7 +1169,7 @@ def main(argv=None):
     readonly=(args.command in ('build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
                                'target','endpoint','target-service','serve-repository') or
               (args.command=='campaign' and args.action=='status') or
-              (args.command=='investigation' and args.action in ('status','source','brief','baseline','context','history','recipes','proposal-schema','observations','observation')) or args.command=='evidence' or
+              (args.command=='investigation' and args.action in ('status','source','brief','baseline','context','history','recipes','proposal-schema','proposals','observations','observation')) or args.command=='evidence' or
               (args.command=='settings' and args.action=='show') or
               (args.command=='maintenance' and args.action in ('status','prune')) or
               (args.command=='session' and args.action in ('observations','observation')) or
