@@ -25,7 +25,9 @@ invent hashes or replace unavailable versions. Repository configuration can use
 Fedora's release/architecture substitutions, whose values are selected explicitly
 by this adapter. Signed package identities are verified before a usable v2 rootfs
 lock is published. The key supplied to `lock --public-key` must match the spec's
-fingerprint. Image assembly, boot-device storage policy and candidate exclusion
+fingerprint. Verification imports that one key into a fresh private RPM database
+using `rpmkeys --import`, which initializes the database, then checks every RPM;
+it does not use the host RPM trust database. Image assembly, boot-device storage policy and candidate exclusion
 rules remain unchanged.
 
 ```sh

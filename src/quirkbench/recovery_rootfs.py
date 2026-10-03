@@ -230,7 +230,8 @@ def verify_stock_rpm_signatures(lock, store, package_paths, stage, runner=_run):
         raise BuildError('RPM signing key fingerprint differs from pinned trust')
     database = stage / 'signature-rpmdb'
     database.mkdir(mode=0o700)
-    runner(['rpm', '--dbpath', str(database), '--initdb'], 30)
+    # Key import initializes a fresh database itself. Avoid a redundant RPM
+    # frontend invocation (which may delegate to another installed executable).
     runner(['rpmkeys', '--dbpath', str(database), '--import', str(key)], 30)
     for path in package_paths:
         output = runner(['rpmkeys', '--dbpath', str(database), '--checksig', str(path)], 60)
