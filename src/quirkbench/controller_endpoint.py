@@ -36,6 +36,8 @@ def validate_intent(value):
 def _strict_read(directory,name):
     info=(directory/name).lstat()
     if info.st_nlink!=1:raise ContractError('endpoint TLS inputs must remain single-link')
+    from .retained_inputs import observe_policy
+    observe_policy(directory/name,single_link=True)
     return _read(directory,name)
 
 

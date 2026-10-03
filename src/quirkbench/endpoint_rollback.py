@@ -1,5 +1,4 @@
 """Exact stopped restoration of a retained endpoint source; no transport authority."""
-from itertools import islice
 from pathlib import Path
 import os
 import time
@@ -17,6 +16,7 @@ from .endpoint_preflight import validate_source
 from .maintenance import private_lock
 from .release_http import _remaining
 from .store import atomic_write
+from .retained_inputs import entries
 
 BASE={'intent.json','source.json','approved-controller.pem','capture-completion.json'}
 
@@ -50,7 +50,7 @@ def _public(control,request_id):
     from .endpoint_history import history
     history(control,canonical({'schema_version':1,'request_id':request_id,'intent_sha256':digest(canonical(intent))}))
     base=BASE|({'previous-selection.json'} if intent['schema_version']==2 else set())
-    names={p.name for p in islice(directory.iterdir(),10)}
+    names={p.name for p in entries(directory,10)}
     if not base<=names or names-base-{'activation.json','completion.json','rollback.json','rollback-completion.json'}:
         raise Conflict('endpoint rollback contains unknown retained records')
     public={name:_strict_read(directory,name) for name in base}
@@ -88,7 +88,7 @@ def rolled_back(control,request_id, *,binding_reader=None):
     active=_active(original,record['restored_generation'])
     if (_strict_read(directory,'rollback.json')!=canonical(record) or _strict_read(directory,'rollback-completion.json')!=_receipt(record)
             or _strict_read(control/'endpoint','active.json')!=_pointer(record) or _strict_read(control,'runtime.json')!=active
-            or {p.name for p in islice(directory.iterdir(),10)}!=set(public)|{'rollback.json','rollback-completion.json'}):
+            or {p.name for p in entries(directory,10)}!=set(public)|{'rollback.json','rollback-completion.json'}):
         raise Conflict('endpoint rollback differs from exact restored state')
     for name,checksum in source['files'].items():
         if name=='agent/journal.json':continue

@@ -1,5 +1,4 @@
 """URL-only generation provenance; no activation, certificate approval or transport."""
-from itertools import islice
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -10,6 +9,7 @@ from .controller_endpoint import _strict_read
 from .enrollment import _document
 from .enrollment_client import endpoint
 from .retarget_activation import _active
+from .retained_inputs import entries
 
 MAX_TRANSITIONS=32
 FIELDS={'schema_version','record_type','request_id','enrollment_request_sha256','enrollment_result_sha256',
@@ -110,7 +110,7 @@ def read_generation(control,generation):
     manifest_raw=_strict_read(directory,'generation.json');manifest=_document(manifest_raw)
     if (not isinstance(manifest,dict) or not 5<=len(manifest)<=16 or manifest_raw!=canonical(manifest)
             or digest(manifest_raw)!=generation or any(not isinstance(name,str) or Path(name).name!=name for name in manifest)
-            or {p.name for p in islice(directory.iterdir(),18)}!=set(manifest)|{'generation.json'}):
+            or {p.name for p in entries(directory,18)}!=set(manifest)|{'generation.json'}):
         raise Conflict('endpoint generation is incomplete or differs from retained manifest')
     files={name:_strict_read(directory,name) for name in manifest};_,actual,checksums=_bundle(files)
     if actual!=generation or checksums!=manifest:raise Conflict('private endpoint generation bytes changed')

@@ -69,6 +69,8 @@ def _read(directory, name, *, limit=LIMIT):
     info = path.lstat()
     if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()):
         raise ContractError('controller records must be owned regular files')
+    from .retained_inputs import observe_policy
+    observe_policy(path)
     return read_file(directory, name, limit=limit)
 
 

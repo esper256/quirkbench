@@ -16,6 +16,7 @@ from .enrollment_target import _intent,_media
 from .retarget_local import _location,validate_intent,validate_source
 from .state_reader import read_file
 from .store import atomic_write,sync_directory
+from .retained_inputs import entries
 
 NAMES=('intent.json','request.json','key.pem','result.json')
 
@@ -141,7 +142,7 @@ def original_locations(control,directory,intent):
 
 def _generation(control,activation,bundle):
     directory=_managed_path(control/'generations'/activation['generation'])
-    if (set(p.name for p in directory.iterdir())!=set(bundle)|{'generation.json'}
+    if (set(p.name for p in entries(directory,len(bundle)+2))!=set(bundle)|{'generation.json'}
             or _private_files(directory,bundle)!=bundle
             or _read(directory,'generation.json')!=canonical(activation['bundle_files'])):
         raise Conflict('exact new private retarget generation changed')
@@ -166,7 +167,7 @@ def completed(control,request_id, *,binding_reader=None,_endpoint_preparation=Fa
         from .endpoint_origin import selected_runtime
         active=selected_runtime(control,bundle,active,binding_reader=binding_reader,_prepared=_endpoint_preparation)
     if (_read(control,'runtime.json')!=active or _private_files(control/'enrollment/pending',NAMES)!=new
-            or set(p.name for p in (control/'enrollment/pending').iterdir())!=set(NAMES)):
+            or set(p.name for p in entries(control/'enrollment/pending',len(NAMES)+1))!=set(NAMES)):
         raise Conflict('completed retarget differs from exact selected runtime/enrollment')
     runtime=_document(active)
     if set(runtime)!={'schema_version','device_id','controller_url','ca','token_file','target_binding','remotes'}:

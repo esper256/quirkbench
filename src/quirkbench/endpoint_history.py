@@ -1,11 +1,11 @@
 """Bounded public endpoint selection links; historical facts never activate runtime."""
-from itertools import islice
 from pathlib import Path
 
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
 from .controller_endpoint import _strict_read
 from .controller_setup import _managed_path
 from .enrollment import _document
+from .retained_inputs import entries
 
 MAX_HISTORY=32
 
@@ -76,7 +76,7 @@ def history(control,raw, *,extra=None,_home=None):
             try:der=ssl.PEM_cert_to_DER_cert(_strict_read(directory,'approved-controller.pem').decode('ascii'))
             except (ValueError,UnicodeError) as exc:raise ContractError('endpoint historical fingerprint changed') from exc
             if digest(der)!=record['approved_certificate_sha256']:raise Conflict('endpoint historical approval changed')
-            if {p.name for p in islice(directory.iterdir(),10)}!=names:raise Conflict('endpoint historical namespace changed')
+            if {p.name for p in entries(directory,10)}!=names:raise Conflict('endpoint historical namespace changed')
         elif child is not None:raise Conflict('endpoint predecessor is incomplete')
         if child is not None and (child['runtime_sha256']!=active_sha or any(child[name]!=intent[name]
                 for name in ('device_id','media_instance_id','target_binding'))):raise Conflict('endpoint successor differs from selected predecessor')
@@ -89,7 +89,7 @@ def history(control,raw, *,extra=None,_home=None):
             raise Conflict('endpoint source predecessor reference changed')
         raw=previous;child=intent
     else:raise Conflict('endpoint selection history exceeds bounded limit')
-    requests=_managed_path(home/'endpoint/requests');names=list(islice(requests.iterdir(),MAX_HISTORY+1))
+    requests=_managed_path(home/'endpoint/requests');names=entries(requests,MAX_HISTORY+1)
     if (len(names)>MAX_HISTORY or any(not _managed_path(p).is_dir() for p in names)
             or {p.name for p in names}!=set(seen)|({extra.name} if extra is not None else set())):
         raise Conflict('ambiguous endpoint history has orphan or missing requests')

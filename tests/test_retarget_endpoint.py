@@ -306,4 +306,4 @@ def test_scoped_archived_drain_uses_approved_endpoint_without_new_target_changes
         assert all(row['attempt']==attempt['attempt_id'] for row in db.execute('SELECT attempt FROM evidence'))
     # Two records, export, drain and ACK repair must not multiply adjacent full
     # reconstructions. Budget work counts, not wall time on a particular host.
-    assert len(captures)<=150,len(captures)
+    assert len(captures)<=6,len(captures)

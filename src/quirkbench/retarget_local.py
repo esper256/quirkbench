@@ -18,6 +18,7 @@ from .enrollment_target import _storage,_media
 from .maintenance import private_lock
 from .state_reader import read_file
 from .store import atomic_write
+from .retained_inputs import entries
 
 MAX_HISTORY=32
 
@@ -109,7 +110,7 @@ def _history(control,raw, *,extra=None):
             raise Conflict('retarget predecessor selection changed or incomplete')
         raw=previous;child=intent
     else:raise Conflict('retarget history exceeds bounded limit')
-    names=list(islice(requests.iterdir(),MAX_HISTORY+1))
+    names=entries(requests,MAX_HISTORY+1)
     if (len(names)>MAX_HISTORY or any(not _managed_path(p).is_dir() for p in names)
             or {p.name for p in names}!=set(seen)|({extra.name} if extra is not None else set())):
         raise Conflict('orphan or unlinked retarget request; explicit exact preparation retry required')
@@ -192,7 +193,7 @@ def _capture_source(control,intent,verify, *,locations=None):
     manifest_raw=capture(directory,'generation.json');manifest=_document(manifest_raw)
     if (not isinstance(manifest,dict) or digest(manifest_raw)!=generation or not 4<=len(manifest)<=16
             or any(not isinstance(name,str) or Path(name).name!=name for name in manifest)
-            or set(path.name for path in islice(directory.iterdir(),18))!=set(manifest)|{'generation.json'}):
+            or set(path.name for path in entries(directory,18))!=set(manifest)|{'generation.json'}):
         raise Conflict('original private generation is changed or incomplete')
     files={name:capture(directory,name) for name in manifest}
     if any(digest(raw)!=manifest[name] for name,raw in files.items()):raise Conflict('original generation bytes changed during retarget capture')

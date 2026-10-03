@@ -16,6 +16,7 @@ import unicodedata
 
 from .contracts import ContractError, canonical, identifier, sha256
 from .operations import operation_response
+from .retained_inputs import observe_read
 
 QUERY_BYTES = 64 * 1024
 LOG_BYTES = 16384
@@ -54,7 +55,9 @@ def read_file(root, relative, *, limit=LOG_BYTES, tail=False):
                 stream.seek(max(0, info.st_size - limit))
             elif info.st_size > limit:
                 raise ContractError('record exceeds read budget')
-            return stream.read(limit)
+            raw = stream.read(limit)
+            observe_read(root, relative, raw, limit=limit, tail=tail)
+            return raw
     finally:
         os.close(fd)
 
