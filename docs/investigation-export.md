@@ -89,3 +89,7 @@ Git supervision, not a hard interrupt for stalled kernel I/O. Oversized or press
 exports stop without a complete output file. Interruption or tampering before publish
 cannot expose partial output as complete. Export is bounded software preparation;
 physical/native qualification and publication require separate authorization.
+
+Public evidence/missing/file lists are each limited to 16,384 entries. Creation and
+reconstruction hashes stay pinned through the final inventory and serialization;
+later mutations cannot become new trusted hashes merely because inventory runs later.

@@ -89,6 +89,11 @@ def patch_series(base_path,capture,objects,stage,bundle,author,verify,*,reserve=
     from .source_operation import verify_tree
     from .build_pipeline import _extract_archive
     name,email=author_identity(author)
+    original_verify=verify;proof_files={}
+    def verify():
+        original_verify()
+        for path,identity in proof_files.items():
+            if _identity(path.lstat())!=identity:raise Conflict('reconstruction proof artifact changed')
     entries=verify_tree(objects,capture,verify=verify)
     repo=stage/'git';repo.mkdir(mode=0o700)
     def git(args,**kw):return _git(repo,args,verify,**kw)
@@ -97,6 +102,10 @@ def patch_series(base_path,capture,objects,stage,bundle,author,verify,*,reserve=
     git(['checkout','--quiet','--detach',capture['base_oid']])
     git(['update-ref','refs/heads/base',capture['base_oid']])
     git(['bundle','create',str(bundle/'reproduce/base.bundle'),'refs/heads/base'])
+    base_bundle=bundle/'reproduce/base.bundle'
+    from .controller_release import _asset_digest
+    base_identity=_asset_digest(base_bundle,verify=verify,byte_limit=MAX_OBJECT)
+    proof_files[base_bundle]=_identity(base_bundle.lstat())
     source=_extract_archive(objects.path(capture['archive_sha256']),stage/'captured',preserve_mode=True,reserve_bytes=reserve,verify=verify)
     # Bypass Git attributes/filters, including implicit CRLF normalization. Feed
     # only export-owned flat blob paths and a bounded NUL index to existing Git.
@@ -123,6 +132,7 @@ def patch_series(base_path,capture,objects,stage,bundle,author,verify,*,reserve=
     unchanged=git(['rev-parse',capture['base_oid']+'^{tree}']).strip()==git(['rev-parse',final+'^{tree}']).strip()
     patch=b'' if unchanged else git(['format-patch','--stdout','--binary','--full-index','--no-signature','--no-stat','--no-renames',capture['base_oid']+'..'+final])
     patch_path=bundle/'patches/0001-captured-changes.patch';patch_path.write_bytes(patch)
+    proof_files[patch_path]=_identity(patch_path.lstat())
     reconstructed=stage/'reconstructed';reconstructed.mkdir(mode=0o700)
     def fresh(args,**kw):return _git(reconstructed,args,verify,**kw)
     fresh(['init','--quiet','--template=','--object-format='+('sha256' if len(capture['base_oid'])==64 else 'sha1')])
@@ -135,9 +145,10 @@ def patch_series(base_path,capture,objects,stage,bundle,author,verify,*,reserve=
     for row in leaves:
         if row['kind']=='file':(reconstructed/row['path']).chmod(row['mode'])
     _check_tree(reconstructed,entries,verify)
-    (bundle/'reproduce/tree.jsonl').write_bytes(objects.path(capture['manifest_sha256']).read_bytes())
+    if not (bundle/'reproduce/tree.jsonl').exists():(bundle/'reproduce/tree.jsonl').write_bytes(objects.path(capture['manifest_sha256']).read_bytes())
     (bundle/'reproduce/check_tree.py').write_text(CHECKER)
-    return {'base_oid':capture['base_oid'],'export_commit_oid':final,'patch_sha256':digest(patch),
+    verify()
+    return {'base_bundle_sha256':base_identity['sha256'],'base_oid':capture['base_oid'],'export_commit_oid':final,'patch_sha256':digest(patch),
         'author':author,'authorship':'explicit operator-supplied export representation; historical authorship not inferred',
         'reconstruction_verified':True,'empty_changes':not bool(patch),'extra_modes':'reproduce/tree.jsonl',
         'upstream_ancestry':'unknown unless separately recorded; distribution base is not an upstream claim'}
@@ -210,7 +221,12 @@ def export(root,name,output,*,capture_id=None,author=None,plan=None,timeout_s=30
         current_stage[0]=stage
         for part in ('patches','reproduce','experiments','evidence'): (bundle/part).mkdir(mode=0o700)
         object_dir=stage/'objects';object_dir.mkdir(mode=0o700)
-        missing=[];copied_objects={};object_identities={}
+        missing=[];copied_objects={};object_identities={};public_pins={}
+        def pin_public(path,expected_sha):
+            public_pins[path.relative_to(bundle).as_posix()]=(expected_sha,_identity(path.lstat()))
+        def write_public(path,raw):
+            budget();check_space(stage,len(raw),reserve)
+            path.write_bytes(raw);pin_public(path,digest(raw))
         def copy(identity,role):
             nonlocal copied
             sha256(identity);budget()
@@ -261,14 +277,15 @@ def export(root,name,output,*,capture_id=None,author=None,plan=None,timeout_s=30
                     consume(len(block));state.update(block);out.write(block)
                 out.flush();os.fsync(out.fileno())
             if state.hexdigest()!=expected_sha or _identity(path.lstat())!=before:raise Conflict('public copy failed pinned hash verification')
+            pin_public(target,expected_sha)
         pages=[];cursor=0;rows=[];evidence_rows=[];symbol_rows=[]
         with reader.connection() as db:
             while True:
-                budget();page=report(reader,name,plan=plan,after=cursor,limit=1,attempt_limit=20)
+                budget();page=report(reader,name,plan=plan,after=cursor,limit=1,attempt_limit=1)
                 if page['items']:
                     row=page['items'][0];attempt_cursor=row['next_attempt_cursor']
                     while attempt_cursor is not None:
-                        more=report(reader,name,plan=plan,experiment=row['experiment_id'],limit=1,attempt_after=attempt_cursor,attempt_limit=20)['items'][0]
+                        more=report(reader,name,plan=plan,experiment=row['experiment_id'],limit=1,attempt_after=attempt_cursor,attempt_limit=1)['items'][0]
                         row['attempts']+=more['attempts'];attempt_cursor=more['next_attempt_cursor']
                         if len(row['attempts'])>1000:raise ContractError('export attempt count exceeds bounds')
                     row['next_attempt_cursor']=None;rows.append(row)
@@ -302,7 +319,7 @@ def export(root,name,output,*,capture_id=None,author=None,plan=None,timeout_s=30
             else:
                 capture_path=copy(op['final_output_digest'],'capture_receipt')
                 archive=copy(capture['archive_sha256'],'source_archive');manifest=copy(capture['manifest_sha256'],'source_manifest')
-                if capture_path is not None:(bundle/'reproduce/capture.json').write_bytes(capture_path.read_bytes())
+                if capture_path is not None:public_copy(capture_path,bundle/'reproduce/capture.json')
                 if manifest is not None:public_copy(manifest,bundle/'reproduce/tree.jsonl')
                 if archive is not None:public_copy(archive,bundle/'reproduce/source.tar')
                 for role,identity in capture['provenance'].items():
@@ -310,7 +327,7 @@ def export(root,name,output,*,capture_id=None,author=None,plan=None,timeout_s=30
                         try:
                             from .distribution_source import validate
                             prov=validate(document(reader.store,identity,4*1024**2))
-                            (bundle/'reproduce/distribution.json').write_bytes(canonical(prov))
+                            write_public(bundle/'reproduce/distribution.json',canonical(prov))
                         except (OSError,ValueError):limitations.append('Distribution provenance unavailable; upstream ancestry remains unknown.')
                 if author is None:limitations.append('Explicit export author missing; no authored patch generated.')
                 elif archive is None or manifest is None:limitations.append('Retained source bytes unavailable; patch reconstruction not attempted.')
@@ -319,7 +336,6 @@ def export(root,name,output,*,capture_id=None,author=None,plan=None,timeout_s=30
                         saved=db.execute('SELECT * FROM source_workspaces WHERE id=?',(workspace['workspace_id'],)).fetchone()
                         if saved is None or saved['writer_state']!='QUIESCED':raise Conflict('source writer is not quiesced')
                         base_path=owned_path(root,workspace)
-                        from .source_preparation import _git_metadata
                         from .source_prepare_operation import git_tree
                         # Fence the config bytes across the policy parser and full
                         # namespace snapshot; a mutation after parsing is rejected.
@@ -336,7 +352,6 @@ def export(root,name,output,*,capture_id=None,author=None,plan=None,timeout_s=30
                         consume(4*git_bytes)
                         config_before=read_file(base_path,'.git/config',limit=16384)
                         approved_git=git_tree(base_path,capture['base_oid'],budget)
-                        metadata=_git_metadata(base_path)
                         approved={path:identity for path,identity,_ in approved_git}
                         config_row=next(row for row in approved_git if row[0]=='config')
                         from .state_reader import read_file
@@ -346,10 +361,10 @@ def export(root,name,output,*,capture_id=None,author=None,plan=None,timeout_s=30
                             with StateReader(root).connection() as fresh:
                                 current=fresh.execute('SELECT writer_state,capture_operation,document_digest FROM source_workspaces WHERE id=?',(workspace['workspace_id'],)).fetchone()
                                 if current is None or current['writer_state']!='QUIESCED' or current['capture_operation']!=saved['capture_operation'] or current['document_digest']!=saved['document_digest']:raise Conflict('source handoff ended during export')
-                            if _git_metadata(base_path)!=metadata:raise Conflict('recorded Git base metadata changed during export')
                             observed={}
                             for current,dirs,files in os.walk(base_path/'.git',followlinks=False):
                                 for leaf in dirs+files:
+                                    if time.monotonic()>=deadline:raise ContractError('export deadline exceeded')
                                     path=Path(current)/leaf;relative=path.relative_to(base_path/'.git').as_posix()
                                     if len(observed)>1000000 or relative not in approved or path.resolve()!=path or _identity(path.lstat())!=approved[relative]:raise Conflict('approved Git namespace changed during export')
                                     observed[relative]=approved[relative]
@@ -373,9 +388,17 @@ def export(root,name,output,*,capture_id=None,author=None,plan=None,timeout_s=30
                         consume(allowance+12*archive.stat().st_size+4*manifest.stat().st_size)
                         check_space(stage,allowance,reserve)
                         patch=patch_series(base_path,capture,Objects(),stage,bundle,author,source_guard,reserve=reserve)
+                        pin_public(bundle/'reproduce/base.bundle',patch['base_bundle_sha256'])
+                        pin_public(bundle/'patches/0001-captured-changes.patch',patch['patch_sha256'])
+                        pin_public(bundle/'reproduce/check_tree.py',digest(CHECKER.encode()))
                     except (OSError,ValueError):
+                        patch=None
                         limitations.append('Recorded base/capture reconstruction unavailable or changed; no verified patch.')
-                        for path in (bundle/'patches').iterdir():path.unlink()
+                        for path in (bundle/'patches').iterdir():
+                            public_pins.pop(path.relative_to(bundle).as_posix(),None);path.unlink()
+                        (bundle/'reproduce/base.bundle').unlink(missing_ok=True)
+                        (bundle/'reproduce/check_tree.py').unlink(missing_ok=True)
+                        public_pins.pop('reproduce/base.bundle',None);public_pins.pop('reproduce/check_tree.py',None)
             tested=[]
             if capture is not None and patch is not None:
                 for row in rows:
@@ -392,8 +415,8 @@ def export(root,name,output,*,capture_id=None,author=None,plan=None,timeout_s=30
                 'source':patch,'tested_source_attempts':tested,'validation_status':'tested-source-match' if tested else 'unvalidated',
                 'conclusion':'inconclusive','native_qualification':False,'execution_authorized':False,
                 'evidence':evidence_rows,'symbols':symbol_rows,'missing':missing,'limitations':limitations}
-            (bundle/'experiments/report.json').write_bytes(canonical({'schema_version':1,'report_pages':pages}))
-            (bundle/'report.md').write_text('# Investigation '+name+'\n\nConclusion: inconclusive. Validation: '+public['validation_status']+'.\n\n'+ '\n'.join('* '+s for s in limitations)+'\n')
+            write_public(bundle/'experiments/report.json',canonical({'schema_version':1,'report_pages':pages}))
+            write_public(bundle/'report.md',('# Investigation '+name+'\n\nConclusion: inconclusive. Validation: '+public['validation_status']+'.\n\n'+ '\n'.join('* '+s for s in limitations)+'\n').encode())
             instructions='''# Quirkbench public investigation export
 
 Read report.md and manifest.json. An export is not a backup or a causal claim.
@@ -419,15 +442,24 @@ interpreting evidence; no native qualification or execution approval is granted.
 '''
             if capture is not None:instructions=instructions.replace('BASE_OID',capture['base_oid']).replace('OBJECT_FORMAT','sha256' if len(capture['base_oid'])==64 else 'sha1')
             if patch is not None and patch['empty_changes']:instructions=instructions.replace(next(line for line in instructions.splitlines() if ' am --keep-cr ' in line),'    # Empty changes: no git am step; the exact base is the captured source.')
-            (bundle/'README.md').write_text(instructions)
+            write_public(bundle/'README.md',instructions.encode())
             files=[]
             for path in sorted(bundle.rglob('*')):
+                relative=path.relative_to(bundle).as_posix();info=path.lstat()
+                if stat.S_ISDIR(info.st_mode):
+                    if relative not in ('patches','reproduce','experiments','evidence'):raise Conflict('unexpected public directory')
+                    continue
+                if relative not in public_pins or not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or path.resolve()!=path:raise Conflict('public file is undeclared, linked or special')
                 if path.is_file():
                     state=hashlib.sha256()
                     with path.open('rb') as stream:
                         while block:=stream.read(1024**2):budget();consume(len(block));state.update(block)
-                    files.append({'path':path.relative_to(bundle).as_posix(),'sha256':state.hexdigest(),'size_bytes':path.stat().st_size})
+                    relative=path.relative_to(bundle).as_posix()
+                    if relative not in public_pins or public_pins[relative]!=(state.hexdigest(),_identity(path.lstat())):raise Conflict('public file differs from creation/proof pin')
+                    files.append({'path':relative,'sha256':state.hexdigest(),'size_bytes':path.stat().st_size})
+            if {row['path'] for row in files}!=set(public_pins):raise Conflict('pinned public file missing')
             public['files']=files
+            if any(len(public[key])>16384 for key in ('evidence','symbols','missing','files')):raise ContractError('export manifest cardinality exceeds bounds')
             if len(canonical(public))>MAX_REPORT:raise ContractError('export manifest exceeds bounds')
             (bundle/'manifest.json').write_bytes(canonical(public))
             fault('verified');budget();parent_guard()
@@ -438,7 +470,9 @@ interpreting evidence; no native qualification or execution approval is granted.
                 names=set()
                 for path in bundle.rglob('*'):
                     mode=path.lstat().st_mode
-                    if stat.S_ISDIR(mode):continue
+                    if stat.S_ISDIR(mode):
+                        if path.relative_to(bundle).as_posix() not in ('patches','reproduce','experiments','evidence'):raise Conflict('unexpected public directory')
+                        continue
                     if not stat.S_ISREG(mode) or path.resolve()!=path or path.lstat().st_nlink!=1:raise Conflict('public bundle contains linked or special nodes')
                     names.add(path.relative_to(bundle).as_posix())
                 if names!=set(expected):raise Conflict('public bundle namespace differs from complete manifest')

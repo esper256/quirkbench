@@ -261,6 +261,16 @@ def test_tested_source_match_and_later_cleanup_remain_separate(published,joined,
     value,_=manifest(output)
     assert value['tested_source_attempts']==[attempt] and value['validation_status']=='tested-source-match'
     assert value['conclusion']=='inconclusive' and not value['native_qualification']
+    # Validated same-investigation experiment ownership is a legitimate retained
+    # successor; unrelated owners tested above are not.
+    selected=proposal['source']['capture_operation_id']
+    with c.transaction() as db:
+        db.execute('DELETE FROM operation_refs WHERE operation=?',(selected,))
+        db.execute('DELETE FROM refs WHERE owner=?',(selected,))
+        db.execute('INSERT INTO storage_retired VALUES(?,0)',(selected,))
+    successor=tmp_path/'successor.tar'
+    receipt=export.export(c.root,'investigation',successor,capture_id=selected,author='Author <a@example.invalid>')
+    assert receipt['source_reconstructed'] and manifest(successor)[0]['tested_source_attempts']==[attempt]
     with c.lifecycle() as owner:
         c.resume('investigation')
         capture_proposal(c,owner,monkeypatch,'export-cleanup','different final cleanup\n')
@@ -297,3 +307,47 @@ def test_installed_cli_and_resources_export_without_checkout(lab,tmp_path):
     from jsonschema import Draft202012Validator
     schema=json.loads((runtime/'lib/quirkbench/schemas/investigation-export.v1.schema.json').read_bytes())
     Draft202012Validator(schema).validate(manifest(output)[0])
+
+
+def test_base_bundle_mutation_after_consumption_invalidates_reconstruction(captured,tmp_path,monkeypatch):
+    c,proposal,private,_=captured;real=export._git;changed=[]
+    def mutate(root,args,verify,**kw):
+        answer=real(root,args,verify,**kw)
+        if kw.get('local_bundle'):
+            Path(args[5]).write_bytes(b'no longer the successfully consumed bundle');changed.append(True)
+        return answer
+    monkeypatch.setattr(export,'_git',mutate)
+    receipt=export.export(c.root,'investigation',tmp_path/'after-fetch.tar',author='Author <a@example.invalid>')
+    value,names=manifest(tmp_path/'after-fetch.tar')
+    assert changed and not receipt['source_reconstructed'] and value['source'] is None
+    assert 'reproduce/base.bundle' not in names
+
+
+@pytest.mark.parametrize('artifact',['reproduce/base.bundle','patches/0001-captured-changes.patch','evidence'])
+def test_final_inventory_cannot_bless_changed_semantically_pinned_public_bytes(captured,tmp_path,monkeypatch,artifact):
+    c,proposal,private,_=captured;identity=populate(c);real=export.patch_series
+    def mutate(*args,**kw):
+        proof=real(*args,**kw);bundle=args[4]
+        target=bundle/'evidence'/identity if artifact=='evidence' else bundle/artifact
+        target.write_bytes(b'changed after proof or verified copy')
+        return proof
+    monkeypatch.setattr(export,'patch_series',mutate)
+    output=tmp_path/'pre-inventory.tar'
+    with pytest.raises(Conflict,match='creation/proof pin'):export.export(c.root,'investigation',output,author='Author <a@example.invalid>')
+    assert not output.exists()
+
+
+def test_manifest_cardinality_refuses_too_many_original_evidence_rows(lab,tmp_path):
+    c,_=lab;populate(c,attempts=129)
+    identities=[c.store.put(('small public evidence '+str(n)).encode()).sha256 for n in range(128)]
+    with c.transaction() as db:
+        attempts=list(db.execute('SELECT id,result FROM attempts'))
+        db.execute('DELETE FROM evidence')
+        for attempt,raw in attempts:
+            result=json.loads(raw);result['evidence']=identities
+            db.execute('UPDATE attempts SET result=? WHERE id=?',(json.dumps(result),attempt))
+            db.executemany('INSERT OR IGNORE INTO refs VALUES(?,?)',[('attempt:'+attempt,v) for v in identities])
+            db.executemany('INSERT INTO evidence VALUES(?,?,?,?,?)',[(attempt,'public',n,v,20) for n,v in enumerate(identities)])
+    output=tmp_path/'too-many-evidence.tar'
+    with pytest.raises(ContractError,match='cardinality'):export.export(c.root,'investigation',output)
+    assert not output.exists()

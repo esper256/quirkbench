@@ -74,7 +74,8 @@
             "reconstruction_verified",
             "empty_changes",
             "extra_modes",
-            "upstream_ancestry"
+            "upstream_ancestry",
+            "base_bundle_sha256"
           ],
           "properties": {
             "base_oid": {
@@ -107,6 +108,10 @@
             },
             "upstream_ancestry": {
               "const": "unknown unless separately recorded; distribution base is not an upstream claim"
+            },
+            "base_bundle_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
             }
           }
         },
