@@ -94,7 +94,7 @@ def test_race_during_cas_publication_leaves_no_admission_or_usage(captured,monke
                     'proposal':digest(canonical(value)),'intent':result.sha256}[mutation]
                 c.store.path(identity).write_bytes(b'{}')
             if mutation=='recipe':
-                value['experiment']['target_recipe_sha256']='0'*64
+                c.store.path(value['experiment']['baseline_sha256']).write_bytes(b'{}')
         return result
     monkeypatch.setattr(c.store,'put',racing_put)
     with pytest.raises((Conflict,ContractError)):proposals.submit(c,'investigation',value,'race')
@@ -159,3 +159,58 @@ def test_installed_cli_propose_schema_replay_and_readonly_listing(captured,monke
     for action in ('proposals','proposal-schema','context'):
         assert cli._main(['--state',str(c.root),'investigation',action,'investigation','--json'])==0
         assert not json.loads(capsys.readouterr().out)['data']['execution_authorized']
+
+
+def test_competing_requests_with_same_identity_cannot_duplicate_admission_or_usage(captured,monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    c,value,private,original=captured;put=c.store.put;barrier=threading.Barrier(2)
+    def race(raw,*a,**kw):
+        result=put(raw,*a,**kw)
+        if json.loads(raw).get('kind')=='external_proposal':barrier.wait(timeout=10)
+        return result
+    monkeypatch.setattr(c.store,'put',race)
+    def submit(summary):
+        try:return proposals.submit(c,'investigation',{**value,'summary':summary},'concurrent')
+        except Conflict:return None
+    with ThreadPoolExecutor(max_workers=2) as workers:answers=list(workers.map(submit,['first','second']))
+    assert len([a for a in answers if a is not None])==1
+    assert proposals.usage(StateReader(c.root),'investigation')['observations']==1
+    assert len(proposals.pending(StateReader(c.root),'investigation')['items'])==1
+
+
+def test_outbox_failure_rolls_back_operation_references_and_usage(captured,monkeypatch):
+    from contextlib import contextmanager
+    import sqlite3
+    c,value,private,original=captured;transaction=c.transaction
+    class Failing:
+        def __init__(self,db):self.db=db
+        def execute(self,sql,*a):
+            if sql.startswith('INSERT INTO proposal_outbox'):raise sqlite3.OperationalError('injected outbox persistence failure')
+            return self.db.execute(sql,*a)
+    @contextmanager
+    def fault():
+        with transaction() as db:yield Failing(db)
+    monkeypatch.setattr(c,'transaction',fault)
+    with pytest.raises(sqlite3.OperationalError,match='outbox'):proposals.submit(c,'investigation',value,'atomic')
+    with transaction() as db:
+        assert not db.execute('SELECT 1 FROM external_proposals').fetchone()
+        assert not db.execute('SELECT 1 FROM proposal_outbox').fetchone()
+        assert not db.execute("SELECT 1 FROM operations WHERE kind='external_proposal'").fetchone()
+    monkeypatch.setattr(c,'transaction',transaction)
+    assert proposals.submit(c,'investigation',value,'atomic')['operation_id']
+
+
+def test_capture_closure_bytes_missing_blocks_new_admission_without_large_hash(captured,monkeypatch):
+    c,value,private,original=captured
+    receipt=proposals.document(c.store,value['source']['capture_sha256'])
+    c.store.path(receipt['archive_sha256']).unlink()
+    monkeypatch.setattr(c.store,'verify',lambda *a:pytest.fail('prompt admission hashed a large object'))
+    with pytest.raises(Conflict,match='unavailable'):proposals.submit(c,'investigation',value,'missing-source')
+
+
+def test_missing_state_propose_never_creates_it(tmp_path):
+    from types import SimpleNamespace
+    root=tmp_path/'never-created'
+    with pytest.raises(ContractError):proposals.execute(root,SimpleNamespace(action='propose',name='unknown'))
+    assert not root.exists()

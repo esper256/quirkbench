@@ -326,6 +326,13 @@
           },
           "base_oid": {
             "type": "string"
+          },
+          "input_context": {
+            "properties": {
+              "baseline_sha256": {
+                "type": "string"
+              }
+            }
           }
         }
       },

@@ -335,7 +335,10 @@ def _main(argv=None):
                 print('Investigation operation accepted: ' + answer['operation_id'])
                 print('Inspect: ' + answer['data']['status_command'])
                 print('Progress: ' + answer['data']['monitor_command'])
-                print('Preparation/capture completion requires the existing controller service. Resume the investigation explicitly if paused.')
+                if args.action=='propose':
+                    print('Proposal retained; execution awaits external-loop integration. Acceptance grants no attempt approval.')
+                else:
+                    print('Preparation/capture completion requires the existing controller service. Resume the investigation explicitly if paused.')
             else:
                 from .state_reader import safe_text
                 print(safe_text(json.dumps(answer['data'], indent=2, sort_keys=True)))

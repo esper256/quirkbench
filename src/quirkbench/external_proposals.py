@@ -26,8 +26,13 @@ def document(store,identity,limit=1<<20):
     from .product_contracts import _pairs,_depth
     import json
     from .store import ArtifactStore
+    from .build import BuildError
+    from .state_reader import held_parent
     root=store.root if isinstance(store,ArtifactStore) else store.root/'artifacts'
-    raw=_metadata_object(root,identity,limit)
+    try:
+        with held_parent(root/'objects'/identity) as (_,guard):
+            guard();raw=_metadata_object(root,identity,limit);guard()
+    except (BuildError,OSError) as exc:raise Conflict('retained proposal metadata unavailable: '+identity) from exc
     try:
         value=json.loads(raw,object_pairs_hook=_pairs,
             parse_constant=lambda _:(_ for _ in ()).throw(ContractError('nonfinite metadata number')))
@@ -80,17 +85,22 @@ def scope(reader,name,db, *,capture=None):
 
 def context_receipt(reader,name, *,include_source=True):
     """Bounded immutable decision-scope receipt; never hashes a mutable prompt."""
-    capture=None
+    capture=None;blocking_reason=None
     with reader.connection() as db:
+        value,_,_=scope(reader,name,db)
         if include_source:
             row=db.execute('''SELECT w.capture_operation FROM investigations i
                 JOIN source_workspaces w ON w.id=i.workspace_id
                 JOIN operations o ON o.id=w.capture_operation
                 WHERE i.id=? AND w.writer_state='QUIESCED' AND o.state='SUCCEEDED' AND o.worker_unit IS NULL''',(name,)).fetchone()
             capture=row[0] if row else None
-        value,_,_=scope(reader,name,db,capture=capture)
+        if capture is not None:
+            from .build import BuildError
+            try:value,_,_=scope(reader,name,db,capture=capture)
+            except (Conflict,ContractError,BuildError,OSError):
+                capture=None;blocking_reason='completed capture metadata unavailable; reconcile source or use source-free human/conclusion scope'
     return {'input_context':value,'input_context_digest':digest(canonical(value)),
-        'source_available':capture is not None,'execution_authorized':False}
+        'source_available':capture is not None,'blocking_reason':blocking_reason,'execution_authorized':False}
 
 
 def recipe_scope(reader,proposal):
@@ -117,13 +127,15 @@ def recipe_scope(reader,proposal):
 
 def availability(reader,refs):
     """Presence/fence only for large source bytes; stopped capture already verified them."""
-    from .investigation_context import object_parent
+    from .state_reader import held_parent
     for identity in sorted(refs):
         path=reader.root/'artifacts'/'objects'/identity
-        with object_parent(path) as (parent,guard):
-            guard();info=os.stat(path.name,dir_fd=parent,follow_symlinks=False)
-            if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_uid!=os.geteuid():
-                raise Conflict('retained proposal input unavailable: '+identity)
+        try:
+            with held_parent(path) as (parent,guard):
+                guard();info=os.stat(path.name,dir_fd=parent,follow_symlinks=False)
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_uid!=os.geteuid():
+                    raise Conflict('retained proposal input unavailable: '+identity)
+        except OSError as exc:raise Conflict('retained proposal input unavailable: '+identity) from exc
 
 
 def replay(controller,db,request,proposal_sha,campaign,decision):
@@ -153,7 +165,7 @@ def submit(controller,name,proposal,request_id):
     from .operations import operation_intent
     identifier(name);identifier(request_id);validate(proposal)
     if proposal['campaign_id']!=name:raise Conflict('proposal belongs to another investigation')
-    raw=canonical(proposal);proposal_sha=digest(raw);decision=proposal['decision_id']
+    raw=canonical(proposal);proposal=load(raw);proposal_sha=digest(raw);decision=proposal['decision_id']
     with controller.transaction() as db:
         answer=replay(controller,db,request_id,proposal_sha,name,decision)
         if answer is not None:return answer
@@ -189,6 +201,9 @@ def submit(controller,name,proposal,request_id):
         db.execute('INSERT INTO external_proposals VALUES(?,?,?,?,?,?,?)',
             (name,decision,row['id'],proposal_sha,context_sha,usage['input_tokens'],usage['output_tokens']))
         db.execute('INSERT INTO proposal_outbox VALUES(?,?,?,?)',(row['id'],proposal_sha,context_sha,proposal['action']))
+        db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
+            (row['id'],controller.clock(),'proposal-admitted',canonical({'action':proposal['action'],
+                'waiting_reason':'external_loop_pending','execution_authorized':False}).decode()))
         return response(controller,db,row['id'],request_id)
 
 
@@ -222,7 +237,9 @@ def execute(root,args):
     from .operations import operation_response
     reader=StateReader(root)
     if args.action=='proposals':return operation_response(data=pending(reader,args.name,after=args.after,limit=args.limit))
-    with reader.connection() as db:scope(reader,args.name,db)
+    with reader.connection() as db:
+        if not db.execute('SELECT 1 FROM investigations WHERE id=?',(identifier(args.name),)).fetchone():
+            raise ContractError('existing investigation required')
     if args.reserve_gib<0:raise ContractError('reserve must be nonnegative')
     path=args.file.expanduser().absolute();proposal=load(read_file(path.parent,path.name,limit=1<<20))
     with private_lock(reader.root/'command.lock',shared=True):
