@@ -118,14 +118,17 @@ quirkbench investigation release-source INVESTIGATION --json
 ```
 
 Edit only the assigned private workspace with one writer. Stop the writer, then
-capture the new bytes. Create `proposal.json` from the installed v2 example and
-returned immutable context/scope receipt; select the actual captured Git base and
-reviewed recipes. The [agent guide](agent-guide.md#submit-an-external-proposal)
+capture the new bytes. After the capture reports stopped `SUCCEEDED`, refresh
+context/schema and create `proposal.json` from the installed v2 example and that
+new immutable context/scope receipt; select the actual captured Git base and reviewed
+recipes. A receipt read before editing cannot admit the new capture. The [agent guide](agent-guide.md#submit-an-external-proposal)
 describes the exact fields and source-free human/conclusion decisions.
 
 ```sh
 quirkbench investigation capture-source INVESTIGATION --quiesced --request-id PATCH_CAPTURE --json
 quirkbench operation status PATCH_CAPTURE_OPERATION --json
+quirkbench investigation context INVESTIGATION --json
+quirkbench investigation proposal-schema INVESTIGATION --json
 quirkbench investigation propose INVESTIGATION --file /absolute/proposal.json --request-id PROPOSAL --json
 quirkbench investigation dispatch-proposal INVESTIGATION --proposal PROPOSAL_OPERATION --candidate CANDIDATE_OPERATION --repository REPOSITORY_ALIAS --request-id DISPATCH --json
 quirkbench investigation proposals INVESTIGATION --json
@@ -135,6 +138,7 @@ quirkbench attempt show PATCHED_ATTEMPT --json
 quirkbench attempt approve PATCHED_ATTEMPT --request-id PATCHED_APPROVAL --json
 quirkbench attempt show PATCHED_ATTEMPT --json
 quirkbench investigation observations INVESTIGATION --json
+quirkbench session request INVESTIGATION --campaign INVESTIGATION --file /absolute/question.json --json
 quirkbench investigation observation INVESTIGATION --request QUESTION_ID --json
 quirkbench investigation respond INVESTIGATION --request QUESTION_ID --file /absolute/answer.json --request-id ANSWER --json
 ```
@@ -142,7 +146,13 @@ quirkbench investigation respond INVESTIGATION --request QUESTION_ID --file /abs
 Dispatch builds/composes/submits one experiment through existing workers; acceptance
 is not completion or approval. A paused investigation needs explicit resume before
 the next stage. Preserve prior capture attribution when making a further edit.
-An answer addresses an existing typed question and its original attempt, using the
+If no relevant question exists, the external operator/agent prepares `question.json`
+using the installed observation-request schema in `product-contracts.v1.schema.json`
+and explicitly records it with `session request` above. Use the exact session and
+original attempt ID, unique request ID, recipe step/kind, prompt and UTC issue/deadline
+timestamps. This records a question; it does not invoke a managed agent or start a
+recipe, extend a physical deadline or ask the controller to invent an observation.
+An answer addresses that existing typed question and its original attempt, using the
 installed observation-response schema. Late/uncertain answers remain explicit; they
 do not extend deadlines or authorize another boot. Managed invocation and unattended
 modes are deferred; closing the external agent does not cancel submitted work or
@@ -192,10 +202,13 @@ safe eject are separate; contact loss never proves physical shutdown or safe rem
 `tests/test_installed_journey.py` installs a complete development archive into a fresh
 home, then runs outside Git with `python -I` and an unusable ambient `PYTHONPATH`.
 Every application import and fixture resource resolves into the installed runtime.
-One controller database and one actual enrolled identity join the services above;
+The installed target `runtime.main` reads the activated provisioning/binding, takes
+configuration ownership, constructs its actual agent and resolves installed recipes
+through the same candidate/recovery and shutdown journey. One controller database
+and one actual enrolled identity join the services above;
 installed launchers also query the resulting state and export it. Tiny native input
 fixtures, the initial enrollment transport, systemd/cgroup/RPM/compiler/OCI/OSTree/GPG/TLS-command
-and boot/poweroff adapters are injected. Attempts and shutdown use real authenticated
+kernel-log command output and boot/poweroff adapters are injected. Attempts and shutdown use real authenticated
 loopback HTTPS with the enrolled credential. They create no real image, kernel campaign,
 QEMU run, production identity or physical target action. Application admissions,
 records, approvals, source capture, report/export and backup verification are real.

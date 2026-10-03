@@ -8,6 +8,10 @@ import re
 import shlex
 from pathlib import Path
 import threading
+import tempfile
+import os
+from functools import partial
+from types import SimpleNamespace
 from contextlib import contextmanager
 from dataclasses import replace
 from io import StringIO
@@ -22,7 +26,9 @@ from quirkbench.controller import Controller
 from quirkbench.credential_registry import CredentialRegistry
 from quirkbench.job_coordinator import JobCoordinator
 from quirkbench.transport import HTTPSDeviceClient,TransportError,make_server
-from quirkbench.target import TargetAgent
+from quirkbench.target import _recipe_child as installed_recipe_child
+from quirkbench import runtime as target_runtime,target as target_module
+from quirkbench.watchdog import SupervisorMonitor
 from quirkbench.maintenance import private_lock
 
 from test_setup_service import start as start_service
@@ -38,7 +44,7 @@ from test_candidate_rootfs_worker import execution as native_candidate
 from test_investigation_pipeline import complete_job,bounded_build,bounded_compose
 from test_proposal_dispatch import capture_proposal,dispatch_and_build
 from test_operator_approval import InspectableBackend
-from test_physical_handoff import Boot,streaming
+from test_physical_handoff import Boot
 from test_investigation_context import question,answer
 from test_controller_deployments import Repository as NativeCommitRepository
 from test_shutdown import NativeCommands
@@ -72,6 +78,82 @@ def authenticated_transport(c,control):
     finally:
         server.shutdown();thread.join(5);server.server_close()
         assert not thread.is_alive()
+
+
+def native_recipe_child(pipe,recipe,experiment, *,native_boot):
+    """Keep installed registry/child producer; inject only native kernel readings."""
+    with tempfile.TemporaryDirectory(prefix='qb-native-recipe-') as directory,pytest.MonkeyPatch.context() as native:
+        boot_file=Path(directory)/'boot-id';boot_file.write_text(native_boot)
+        def command(argv):
+            assert argv==['dmesg','--kernel']
+            return 'injected native kernel observation; no real target campaign\n'
+        native.setattr(target_runtime,'_command',command)
+        native.setattr(target_runtime,'Path',lambda value:boot_file if str(value)=='/proc/sys/kernel/random/boot_id' else Path(value))
+        native.setattr(target_runtime.platform,'machine',lambda:'x86_64')
+        installed_recipe_child(pipe,recipe,experiment)
+
+
+def runtime_step(home,control,client,inventory,backend,boot,boot_id,mode='recovery'):
+    """Actual installed main/assembly/locks/registry; only native leaves injected."""
+    from contextlib import redirect_stdout,redirect_stderr
+    from quirkbench import binding
+    boot_file=home/'native-boot-id';boot_file.write_text(boot_id)
+    cgroup_file=home/'native-cgroup';cgroup_file.write_text('0::/system.slice/'+shutdown_local.UNIT+'\n')
+    layout=home/'native-layout';layout.mkdir(exist_ok=True)
+    capacity={'eligible':True,'current_ram_mib':1024,'evidence_mib':4096,'required_evidence_mib':2560}
+    native_boot={'quirkbench.mode':'candidate' if mode=='experiment' else 'recovery','quirkbench.capacity':capacity}
+    if mode=='experiment':native_boot.update({'quirkbench.candidate':'d'*64,'quirkbench.revision':'a'*64})
+    verifies=[];notifications=[]
+    def verify():verifies.append(True);return True
+    class Inventory:
+        def collect(self):return inventory['hardware_inventory']
+    backend.runner=SimpleNamespace(progress=None)
+    transport=target_runtime.HTTPSDeviceClient
+    def routed_transport(url,device,token,ca,**kwargs):
+        configured=json.loads((control/'runtime.json').read_bytes())
+        assert url==configured['controller_url'] and device==configured['device_id']
+        assert token==(control/configured['token_file']).read_text().strip()
+        assert Path(ca)==(control/configured['ca'])
+        return transport(client.base_url,device,token,ca,**kwargs)
+    original_watchdog=target_runtime.observe_watchdog
+    original_retain=shutdown_local.retain;original_execute=shutdown_local.execute
+    native_commands=NativeCommands();native_commands.state='active';native_commands.pid=str(os.getpid())
+    clearances=[]
+    def retain(*args,**kwargs):
+        return original_retain(*args,**kwargs,binding_reader=lambda:UUID,boot_reader=lambda:boot_id)
+    def execute(*args,**kwargs):
+        assert kwargs['self_owned'] is True and callable(kwargs['pulse'])
+        return original_execute(*args,**kwargs,run=native_commands,binding_reader=lambda:UUID,boot_reader=lambda:boot_id,
+            clearer=lambda config:clearances.append(config),cgroup_root=home/'native-cgroups')
+    with pytest.MonkeyPatch.context() as native:
+        native.setattr(target_runtime,'CONTROL',control);native.setattr(target_runtime,'BASE',layout)
+        native.setattr(target_runtime,'boot_context',lambda **kw:(CONFIG,native_boot,verify))
+        native.setattr(target_runtime,'Path',lambda value:boot_file if str(value)=='/proc/sys/kernel/random/boot_id' else Path(value))
+        native.setattr(binding,'read_system_uuid',lambda:UUID)
+        native.setattr(target_runtime,'hardware_identity',lambda:'fixture-native-hardware')
+        native.setattr(target_runtime,'running_kernel_build_id',lambda:None)
+        native.setattr(target_runtime.platform,'machine',lambda:'x86_64')
+        native.setattr(target_runtime,'InventoryCollector',lambda **kwargs:Inventory())
+        native.setattr(target_runtime,'observe_watchdog',lambda profile,**kwargs:original_watchdog(profile,sysfs_root=home/'absent-watchdog',**kwargs))
+        native.setattr(target_runtime,'SupervisorMonitor',lambda:SupervisorMonitor(notify=notifications.append))
+        native.setattr(target_runtime,'HTTPSDeviceClient',routed_transport)
+        native.setattr(target_runtime,'OstreeBackend',lambda *args,**kwargs:backend)
+        native.setattr(target_runtime,'UsbBootControl',lambda *args,**kwargs:boot)
+        native.setattr(target_module,'_recipe_child',partial(native_recipe_child,native_boot=boot_id))
+        native.setattr(shutdown_local,'retain',retain);native.setattr(shutdown_local,'execute',execute)
+        native.setattr(shutdown_local,'Path',lambda value:cgroup_file if str(value)=='/proc/self/cgroup' else Path(value))
+        output=StringIO();errors=StringIO()
+        with redirect_stdout(output),redirect_stderr(errors):status=target_runtime.main(['--once','--allow-experiments'])
+    assert status==0,(status,output.getvalue(),errors.getvalue())
+    assert verifies and any('READY=1' in note for note in notifications)
+    # Real main output plus durable controller assertions drive acceptance.
+    results=[line.removeprefix('QUIRKBENCH ') for line in output.getvalue().splitlines()
+        if line in {'QUIRKBENCH '+value for value in ('idle','completed','awaiting_operator_approval','candidate_requested','recovery_requested','shutdown_requested','shutdown_pending')}]
+    assert results,(output.getvalue(),errors.getvalue())
+    if results[-1]=='shutdown_requested':
+        assert native_commands.powered and clearances==[CONFIG],(output.getvalue(),errors.getvalue())
+    return results[-1]
+
 
 def pair(home,runtime,patch,case):
     home.mkdir(mode=0o700);root=home/'state'
@@ -164,13 +246,13 @@ def run(home,runtime,inputs,case):
             complete_job(c,owner,patch,kind='compose')
             native_commits=NativeCommitRepository();c.deployment_repository=native_commits
             baseline=attended_baseline.admit(c,'investigation',composed['operation_id'],'baseline',ready=lambda _:None)['data']['experiment_id']
-            from quirkbench.operator_approval import CAPABILITY
-            report=replace(observed,capabilities=[CAPABILITY,'deployment.ostree.v1','recipe.system-observation','target-shutdown.v1'],inventory={**observed.inventory,'deployment_id':'d'*64})
-            c.register(report);c.resume('investigation')
+            report=observed
             backend=InspectableBackend(home);boot=Boot()
             def step(boot_id=report.boot_id,mode='recovery'):
-                inventory={k:v for k,v in report.inventory.items() if mode=='recovery' or k!='hardware_inventory'}
-                return TargetAgent(client,control/'agent',replace(report,boot_id=boot_id,mode=mode,inventory=inventory),recipes={'system-observation':streaming},boot_control=boot,deployment_backend=backend).step()
+                return runtime_step(home,control,client,observed.inventory,backend,boot,boot_id,mode)
+            # Assembly reports the actual installed registry before claiming.
+            # A paused campaign guarantees this first step only registers recovery.
+            c.pause('investigation');assert step(report.boot_id)=='idle';c.resume('investigation')
             paused_baseline=None
             def attempt(recovery_boot,candidate_boot,next_boot,request):
                 nonlocal baseline,paused_baseline
@@ -217,10 +299,14 @@ def run(home,runtime,inputs,case):
                 c.resume('investigation')
             first=attempt(report.boot_id,'candidate-base','recovery-base','baseline-attempt')
             brief=query(c.root,'investigation','brief','investigation');assert brief['driver']=='external'
-            q=question('original-observation',attempt=first);c.issue_observation('investigation',q)
+            q=question('original-observation',attempt=first)
+            request=home/'question.json';request.write_bytes(canonical(q))
+            query(c.root,'session','request','investigation','--campaign','investigation','--file',str(request))
             response=home/'answer.json';response.write_bytes(canonical(answer(q)))
             query(c.root,'investigation','respond','investigation','--request',q['request_id'],'--file',str(response),'--request-id','human-answer')
-            assert query(c.root,'investigation','observation','investigation','--request',q['request_id'])['request']['attempt_id']==first
+            observation=query(c.root,'investigation','observation','investigation','--request',q['request_id'])
+            assert observation['request']['attempt_id']==first and observation['response']['answer']=='uncertain'
+            assert observation['state']=='answered_late'
             c.resume('investigation')
             proposal,proposal_value,workspace=capture_proposal(c,owner,patch,'patch','patched observed source\n')
             dispatched,patched=dispatch_and_build(c,owner,patch,proposal,candidate['operation_id'],'dispatch')
@@ -271,19 +357,7 @@ def run(home,runtime,inputs,case):
         with c.lifecycle(),authenticated_transport(c,control) as client:
             shutdown=target_shutdown.request(c.root,device,'shutdown')
             assert shutdown['admission_stopped'] and not shutdown['physical_poweroff_verified']
-            native=NativeCommands();retained=[]
-            def retain(intent):
-                retained.append(shutdown_local.retain(control,CONFIG,intent['request_id'],verify_target=lambda:True,
-                    binding_reader=lambda:UUID,boot_reader=lambda:'recovery-patch',controller_intent=intent))
-            shutdown_report=replace(report,boot_id='recovery-patch')
-            agent=TargetAgent(client,control/'agent',shutdown_report,shutdown_retain=retain,boot_control=boot,deployment_backend=backend)
-            shutdown_step=agent.step()
-            assert shutdown_step=='shutdown_requested' and len(retained)==1,(shutdown_step,target_shutdown.status(c.root,device))
-            assert agent.step()=='shutdown_pending'
-            local=shutdown_local.execute(control,CONFIG,'shutdown',verify_target=lambda:True,binding_reader=lambda:UUID,
-                boot_reader=lambda:'recovery-patch',clearer=lambda config:None,run=native,
-                acknowledge=lambda proof:client.shutdown_prepared('recovery-patch',proof))
-            assert native.powered and not local['physical_poweroff_verified']
+            assert runtime_step(home,control,client,observed.inventory,backend,boot,'recovery-patch')=='shutdown_requested'
             status=target_shutdown.status(c.root,device)
             assert status['state']=='PREPARED' and status['preparation']['local_evidence_durable']
             assert not status['safe_removal_verified']
