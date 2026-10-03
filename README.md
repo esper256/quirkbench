@@ -15,6 +15,10 @@ Development: [contribution workflow](CONTRIBUTING.md) · [testing policy](docs/t
 > tracks remaining work; the [roadmap](docs/product-roadmap.md) and
 > [acceptance guide](docs/installation-to-patch.md) define the intended scope.
 
+Quirkbench is a single-user application: you install your own per-user instance
+and use it exclusively. Shared installations, application accounts/roles and
+multi-user collaboration are outside the product scope.
+
 Quirkbench gives a coding agent a persistent lab for investigating a Linux computer.
 The agent reads source, forms hypotheses and writes changes. Quirkbench builds those
 changes, runs approved experiments on the computer, and brings the results back.

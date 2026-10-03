@@ -46,6 +46,47 @@ def execute(control,request='shutdown',**kwargs):
         clearer=kwargs.pop('clearer',lambda config:None),**kwargs)
 
 
+def test_ordinary_shutdown_state_preserves_permissions_and_blocks_writers(tmp_path):
+    control=tmp_path/'control';control.mkdir();control.chmod(0o755)
+    client=LocalDeviceClient(None,'target')
+    report=CapabilityReport('target','original-boot',[],mode='recovery')
+    assert local.pending(control) is None
+    agent=TargetAgent(client,control/'agent',report)
+    directory=control/'shutdown';directory.mkdir();directory.chmod(0o755)
+    value={'schema_version':1,'record_type':'recovery-shutdown','request_id':'shutdown',
+        'control_root':str(control),'boot_id':'original-boot','boot_config_sha256':'a'*64,
+        'source_sha256':{},'controller_intent':None,'local_attended':True,
+        'completed_steps':['retained'],'preparation':None}
+    path=directory/'active.json';path.write_bytes(canonical(value));path.chmod(0o644)
+    modes={p:p.stat().st_mode for p in (control,directory,path)}
+    journal=agent.journal_path.read_bytes()
+    assert local.pending(control)==value
+    with pytest.raises(Conflict,match='latched'):agent._save()
+    with pytest.raises(Conflict,match='latched'):TargetAgent(client,control/'agent',report)
+    assert agent.journal_path.read_bytes()==journal
+    assert {p:p.stat().st_mode for p in modes}==modes
+
+
+@pytest.mark.parametrize('change',['symlink','directory-link','oversized','invalid','wrong-root'])
+def test_shutdown_lookup_rejects_unusable_or_misattributed_fence(tmp_path,change):
+    control=tmp_path/'control';control.mkdir()
+    directory=control/'shutdown';directory.mkdir()
+    value={'schema_version':1,'record_type':'recovery-shutdown','request_id':'shutdown',
+        'control_root':str(control),'boot_id':'original-boot','boot_config_sha256':'a'*64,
+        'source_sha256':{},'controller_intent':None,'local_attended':True,
+        'completed_steps':['retained'],'preparation':None}
+    path=directory/'active.json';path.write_bytes(canonical(value))
+    if change=='symlink':
+        other=tmp_path/'other.json';path.rename(other);path.symlink_to(other)
+    elif change=='directory-link':
+        other=tmp_path/'other';directory.rename(other);directory.symlink_to(other,target_is_directory=True)
+    elif change=='oversized':path.write_bytes(b' '*(local.LIMIT+1))
+    elif change=='invalid':path.write_bytes(b'{}')
+    else:path.write_bytes(canonical(value|{'control_root':str(tmp_path)}))
+    with pytest.raises((ContractError,OSError)):
+        local.require_available(control)
+
+
 @pytest.fixture
 def spool(original_spool):
     # Existing drain fixtures deliberately retain arbitrary historical results.
@@ -164,6 +205,10 @@ def test_cancelled_controller_request_keeps_campaign_paused_and_never_clears_loc
 
 def test_offline_shutdown_seals_original_spool_and_clears_real_boot_environment(spool,tmp_path):
     c,control,result,attempt,agent=spool;original=agent.journal_path.read_bytes()
+    agent.state_dir.chmod(0o755);agent.blob_dir.chmod(0o755)
+    for path in (agent.journal_path, *agent.blob_dir.iterdir()):path.chmod(0o644)
+    modes={path:path.stat().st_mode for path in (agent.state_dir,agent.blob_dir,agent.journal_path,*agent.blob_dir.iterdir())}
+
     blobs={path.name:path.read_bytes() for path in agent.blob_dir.iterdir()}
     boot_root=tmp_path/'boot-state';boot_root.mkdir();context=boot_fixture(boot_root)
     native=NativeCommands()
@@ -179,6 +224,8 @@ def test_offline_shutdown_seals_original_spool_and_clears_real_boot_environment(
     assert not proof['physical_poweroff_verified'] and not proof['safe_removal_verified']
     assert all('umount' not in call and '--force' not in call for call in native.calls)
 
+    assert {path:path.stat().st_mode for path in modes}==modes
+
 
 @pytest.mark.parametrize('stage',local.STAGES)
 def test_interrupted_shutdown_blocks_agent_and_requires_fresh_explicit_retry(spool,stage):
@@ -193,7 +240,7 @@ def test_interrupted_shutdown_blocks_agent_and_requires_fresh_explicit_retry(spo
     assert answer['poweroff_requested'] and len(clears)==count+1 and agent.journal_path.read_bytes()==before
 
 
-@pytest.mark.parametrize('change',['unknown-claim','running','arming','missing-result','wrong-attempt','public-journal','corrupt-blob','linked-blob','public-blob'])
+@pytest.mark.parametrize('change',['unknown-claim','running','arming','missing-result','wrong-attempt','corrupt-blob','linked-blob'])
 def test_unsafe_or_incomplete_evidence_blocks_poweroff_preserving_original_attribution(spool,change):
     c,control,result,attempt,agent=spool;native=NativeCommands();journal=json.loads(agent.journal_path.read_bytes())
     if change=='unknown-claim':journal['claim_request_id']='lost-claim-reply'
@@ -201,12 +248,10 @@ def test_unsafe_or_incomplete_evidence_blocks_poweroff_preserving_original_attri
     elif change=='missing-result':journal['pending']['result']=None
     elif change=='wrong-attempt':journal['pending']['result']['attempt_id']='other-attempt'
     if change in ('unknown-claim','running','arming','missing-result','wrong-attempt'):atomic_write(agent.journal_path,canonical(journal))
-    elif change=='public-journal':agent.journal_path.chmod(0o644)
     else:
         path=agent.blob_dir/journal['pending']['evidence'][0]['sha256']
         if change=='corrupt-blob':path.write_bytes(b'x'*path.stat().st_size)
         elif change=='linked-blob':path.unlink();path.symlink_to(agent.journal_path)
-        else:path.chmod(0o644)
     before=agent.journal_path.read_bytes()
     with pytest.raises((Conflict,ContractError,OSError)):execute(control,run=native)
     assert not native.powered and agent.journal_path.read_bytes()==before

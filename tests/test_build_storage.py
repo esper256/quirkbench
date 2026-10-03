@@ -41,32 +41,23 @@ def test_private_scratch_or_volume_subdirectory_is_admitted(storage):
     assert not (private / 'build').exists()
 
 
-def test_existing_private_anchor_is_required(storage):
+def test_existing_owned_anchor_is_required(storage):
     root, volume, private = storage
-    with pytest.raises(BuildError, match='private user-owned subdirectory'):
+    with pytest.raises(BuildError, match='user-owned subdirectory'):
         _safe_build_path(volume / 'not-created/staging')
-    before = stat.S_IMODE(private.stat().st_mode)
-    assert before & 0o077 == 0
+    private.chmod(0o775)
     _safe_build_path(private / 'staging')
-    private.chmod(before | stat.S_IRGRP)
-    assert stat.S_IMODE(private.stat().st_mode) == before | stat.S_IRGRP
-    with pytest.raises(BuildError, match='private user-owned subdirectory'):
-        _safe_build_path(private / 'staging')
+    assert stat.S_IMODE(private.stat().st_mode) == 0o775
 
 
-@pytest.mark.parametrize('kind', ['symlink', 'public-write', 'file', 'foreign-owner', 'nested-mount'])
+
+@pytest.mark.parametrize('kind', ['symlink', 'file', 'foreign-owner', 'nested-mount'])
 def test_unsafe_storage_descendants_are_rejected(storage, tmp_path, monkeypatch, kind):
     root, volume, private = storage
     child = private / 'child'
     if kind == 'symlink': child.symlink_to(tmp_path)
     elif kind == 'file': child.write_text('not a directory')
     else: child.mkdir()
-    if kind == 'public-write':
-        before = stat.S_IMODE(child.stat().st_mode)
-        assert before & 0o022 == 0
-        _safe_build_path(child / 'staging')
-        child.chmod(before | stat.S_IWGRP)
-        assert stat.S_IMODE(child.stat().st_mode) == before | stat.S_IWGRP
     if kind == 'nested-mount':
         # Includes same-device bind mounts; stat()/ismount() cannot establish this.
         monkeypatch.setattr(maintenance, 'nested_mounts', lambda root: [str(volume), str(child)])
@@ -102,16 +93,6 @@ def test_storage_changed_to_link_before_resolution_is_rejected(storage, monkeypa
     monkeypatch.setattr(build, '_private_build_storage', changed)
     with pytest.raises(BuildError, match='changed or contains a symlink'):
         _safe_build_path(private / 'staging')
-
-
-def test_shared_scratch_requires_sticky_parent(storage):
-    root, volume, private = storage
-    volume.chmod(0o777)
-    assert stat.S_IMODE(volume.stat().st_mode) == 0o777
-    with pytest.raises(BuildError, match='writable by other users'): _safe_build_path(private / 'stage')
-    volume.chmod(0o1777)
-    assert stat.S_IMODE(volume.stat().st_mode) == 0o1777
-    _safe_build_path(private / 'stage')
 
 
 def test_unmapped_root_owner_does_not_authorize_arbitrary_volume_owners(tmp_path, monkeypatch):

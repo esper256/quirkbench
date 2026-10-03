@@ -22,11 +22,11 @@ KIND=STAGE='source_prepare'
 def private_workspace(path):
     # A product source workspace is intentionally a Git root; its containing
     # state/staging directory must remain outside any checkout.
-    from .controller_setup import _private_path
-    _private_path(path.parent)
+    from .controller_setup import _managed_path
+    _managed_path(path.parent)
     info=path.lstat()
-    if path.resolve()!=path or not stat.S_ISDIR(info.st_mode) or info.st_uid!=os.geteuid() or stat.S_IMODE(info.st_mode)!=0o700:
-        raise Conflict('prepared workspace must remain private and canonical')
+    if path.resolve()!=path or not stat.S_ISDIR(info.st_mode) or info.st_uid!=os.geteuid():
+        raise Conflict('prepared workspace must remain owned and canonical')
     with _source_owner(path) as guard:yield guard
 
 
@@ -142,7 +142,7 @@ def selection(root,operation_id,value):
     if path.exists() or path.is_symlink():owned_path(root,workspace)
     else:
         path=stage/'preparation/output/workspace'
-        from .controller_setup import _private_path
+        from .controller_setup import _managed_path
         with private_workspace(path) as guard:guard()
         info=path.lstat()
         if (info.st_dev,info.st_ino)!=(workspace['root_device'],workspace['root_inode']):raise Conflict('retained staged workspace changed')
@@ -335,8 +335,8 @@ def consume_prepared(coordinator,claim,intent,data,value, *,fault_hook=None,extr
     # The durable journal precedes the rename. Until atomic operation completion,
     # there is no EDITING record and interrupted private selection is not granted.
     destination=location(c.root,value['workspace_id']);destination.parent.mkdir(mode=0o700,exist_ok=True)
-    from .controller_setup import _private_path
-    _private_path(destination.parent);coordinator.verify(claim)
+    from .controller_setup import _managed_path
+    _managed_path(destination.parent);coordinator.verify(claim)
     if path!=destination:
         if destination.exists() or destination.is_symlink():raise Conflict('source workspace destination already exists')
         if working_tree(path,entries)!=working_identity:raise Conflict('prepared namespace changed before sync')
@@ -345,7 +345,7 @@ def consume_prepared(coordinator,claim,intent,data,value, *,fault_hook=None,extr
         with private_workspace(path) as guard:guard()
         info=path.lstat()
         if (info.st_dev,info.st_ino)!=(workspace['root_device'],workspace['root_inode']):raise Conflict('prepared root changed before selection rename')
-        _private_path(destination.parent)
+        _managed_path(destination.parent)
         os.rename(path,destination)
         from .store import sync_directory
         sync_directory(path.parent);sync_directory(destination.parent)

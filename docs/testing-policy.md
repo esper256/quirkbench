@@ -51,7 +51,7 @@ The focused regression creates both shallow and eight-level configured paths,
 executes the original joined endpoint export/drain/replay case, prints separate
 phase counts and asserts no recursive capture inside individual source reads or
 history/completion reconstruction inside capture callbacks. Other cases retain
-late private-byte/permission/link mutations, exact attribution, later current
+late private-byte/link mutations, exact attribution, later current
 endpoint history, scoped upload authorization and original-deadline checks.
 
 Run from the checkout with the test extra installed. Every `--basetemp` below is a
@@ -71,8 +71,9 @@ TASK_TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/quirkbench-issues-7-8.XXXXXXXX")"
 ```
 
 Further work for [issue #19](https://github.com/esper256/quirkbench/issues/19)
-caches bounded, immutable ancestor/`.git` path layouts, while repeating every
-filesystem, ownership and checkout check. Record reads use a fresh strict
+caches bounded, immutable ancestor/`.git` path layouts, while repeating the remaining
+filesystem, ownership and checkout checks. Blanket mode checks described in the
+historical measurements were subsequently removed under the file-access policy. Record reads use a fresh strict
 canonical-root traversal without constructing another resolved `Path`; symlink
 loops fail with `ContractError`, and missing/inaccessible roots still fail closed.
 Drain verification removes one adjacent full reconstruction because each private
@@ -298,6 +299,18 @@ distinguish historical qualification, current software tests and pending release
 qualification. Quota savings never justify silently reusing mismatched evidence.
 
 ## Assert requirements, not incidental implementation details
+
+Use the revised [file-access policy](implementation-contracts.md#file-access-and-permission-policy)
+when assessing permissions. Existing mode guards and the historical #49 audit are
+not independent evidence of a requirement. Remove tests that require blanket
+privacy or exact modes for ordinary data when the corresponding behavior is
+simplified in #66. Keep focused coverage for ordinary usable permissions (including
+0644 files/0755 children under a private parent), actual secret defaults/access,
+functional executable bits, meaningful source changes and unintended writes.
+Do not make an exhaustive mode matrix or new permission-testing framework.
+Permission-specific negative tests must identify the real access or functional
+violation; unrelated storage tests must exercise the intended guard. Validate
+affected paths under 022 and 077 without changing the host's global umask.
 
 For each new assertion, identify the behavior or contract it protects and a real
 defect it should reject. Preserve privacy, exact attribution/identity, mutation

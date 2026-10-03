@@ -19,7 +19,6 @@ from test_recovery_podman import builder_archive, IMAGE
 def fixture(tmp_path, monkeypatch):
     root = tmp_path/'state'; root.mkdir(mode=0o700)
     stage = root/'workers/operation/1'; stage.mkdir(mode=0o700,parents=True)
-    for path in (root/'workers',root/'workers/operation'):path.chmod(0o700)
     (stage/'diagnostics').mkdir(mode=0o700)
     store = ArtifactStore(root/'artifacts',reserve_bytes=0)
     srpm = store.put(b'explicit source package fixture')

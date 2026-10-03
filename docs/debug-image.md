@@ -96,8 +96,8 @@ boot overhead justifies its additional handoff states.
 The boot verifier writes a fresh `/run/quirkbench-boot.json`; the target supervisor
 revalidates current boot and USB identity. Recovery without device provisioning
 waits visibly. Put the device configuration and its separate TLS/token files under
-`/var/lib/quirkbench/evidence/control/`, owned by root with mode 0700 for directories
-and 0600 for credentials. `runtime.json` contains:
+`/var/lib/quirkbench/evidence/control/`, owned by root, with private creation defaults for the control store
+and credentials. Ordinary evidence descendants have no exact-mode requirement. `runtime.json` contains:
 
 ```json
 {

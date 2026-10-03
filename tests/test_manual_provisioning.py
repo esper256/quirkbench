@@ -98,3 +98,17 @@ def test_nested_generation_mount_blocks_activation(tmp_path,monkeypatch):
     with pytest.raises(ContractError,match='different storage device'):
         activate_bundle(bundle,control,verify_target=lambda:True,validator=validator)
     assert not (control/'runtime.json').exists()
+
+
+
+def test_existing_control_secret_boundary_is_checked_without_chmod(tmp_path):
+    from quirkbench.enrollment_target import _storage
+    from quirkbench.contracts import ContractError
+    evidence = tmp_path / 'evidence'; evidence.mkdir(); evidence.chmod(0o755)
+    control = evidence / 'control'; control.mkdir(); control.chmod(0o755)
+    with pytest.raises(ContractError, match='target credentials require'):
+        _storage(control, lambda: None)
+    assert control.stat().st_mode & 0o777 == 0o755
+    evidence.chmod(0o700)
+    assert _storage(control, lambda: None)[0] == control
+    assert control.stat().st_mode & 0o777 == 0o755

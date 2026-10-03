@@ -730,8 +730,8 @@ def _load_commission_identity(path: Path) -> CommissionIdentity:
     if not path.is_absolute() or path.is_symlink():
         raise CommissionError("identity must be an absolute non-symlink file")
     details = path.stat()
-    if not stat.S_ISREG(details.st_mode) or details.st_mode & 0o022:
-        raise CommissionError("identity file must be regular and not group/world writable")
+    if not stat.S_ISREG(details.st_mode):
+        raise CommissionError("identity file must be regular")
     document = json.loads(path.read_text())
     required = {"schema_version", "disk_guid", "partition_uuids", "partition_starts", "fixed_ends", "experiment_mib", "library_mib", "log_budget_mib"}
     if not isinstance(document, dict) or set(document) != required or type(document["schema_version"]) is not int or document["schema_version"] != 2:

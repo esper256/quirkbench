@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.mark.parametrize('total_gib,memory_gib', [(32, 8), (8, 4)])
 @pytest.mark.parametrize('admitted', [True, False])
 def test_headless_launcher_requires_admission_and_contains_worker(tmp_path, total_gib, memory_gib, admitted):
-    stage = tmp_path / 'stage'; stage.mkdir(mode=0o700)
+    stage = tmp_path / 'stage'; stage.mkdir(); stage.chmod(0o755)
     binary = tmp_path / 'bin'; binary.mkdir()
     captured = tmp_path / 'worker-argv'
     admission = tmp_path / 'admission-argv'

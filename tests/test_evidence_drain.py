@@ -84,6 +84,18 @@ def test_grant_replay_never_extends_expired_or_revoked_authority(reconciled):
     with pytest.raises(Conflict):approve(reconciled,ttl_seconds=60)
 
 
+def test_managed_drain_credential_accepts_its_enclosing_secret_store(reconciled):
+    answer,saved=approve(reconciled)
+    path=Path(answer['credential_file'])
+    path.chmod(0o644);path.parent.chmod(0o755)
+    assert drain.read_credential(path)==saved
+    assert path.stat().st_mode & 0o777==0o644
+    for store in (path.parent.parent,path.parent.parent.parent,path.parent.parent.parent.parent):
+        store.chmod(0o755)
+    with pytest.raises(ContractError,match='credential requires'):
+        drain.read_credential(path)
+
+
 def test_exact_drain_preserves_attribution_and_attempt_result_state(reconciled):
     c,now,attempt,raw,plan=reconciled;answer,saved=approve(reconciled)
     with c.lifecycle() as owner:
@@ -192,7 +204,7 @@ def test_registry_only_tls_routes_deny_execution_and_old_credentials(reconciled,
         finally:server.shutdown();server.server_close();thread.join(5)
 
 
-def test_cli_returns_scope_and_private_path_without_secret(reconciled,tmp_path,capsys):
+def test_cli_returns_scope_and_managed_path_without_secret(reconciled,tmp_path,capsys):
     c,now,attempt,raw,plan=reconciled
     # CLI native time differs from the deterministic controller clock.
     path=tmp_path/'plan.json';path.write_bytes(canonical(plan))

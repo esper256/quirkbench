@@ -89,7 +89,8 @@ def inspect_user_manager(*, runner: Callable = _run, uid: int | None = None,
     }
 
 
-def _private_path(path):
+def _managed_path(path):
+    """Canonical user-owned application directory; no blanket permission policy."""
     path = Path(path).expanduser().absolute()
     if any(part.is_symlink() for part in _ancestors(path)):
         raise ContractError('setup paths cannot contain symlinks')
@@ -98,8 +99,8 @@ def _private_path(path):
         raise ContractError('setup path cannot be filesystem root')
     if path.exists():
         info = path.stat()
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
-            raise ContractError('setup directory must be private and user-owned')
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+            raise ContractError('setup directory must be user-owned')
     return path
 
 
@@ -120,8 +121,8 @@ def _database_present(root):
         info = path.lstat()
     except FileNotFoundError:
         return False
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
-        raise ContractError('controller database must be a private user-owned regular file')
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
+        raise ContractError('controller database must be a user-owned regular file')
     return True
 
 
@@ -136,7 +137,7 @@ def _unlinked_tree(root):
 
 
 def _journal(config_home):
-    directory = _private_path(_config_home(config_home) / 'quirkbench')
+    directory = _managed_path(_config_home(config_home) / 'quirkbench')
     return directory / 'setup-progress.json'
 
 
@@ -146,8 +147,8 @@ def setup_progress(*, config_home=None):
         info = path.lstat()
     except FileNotFoundError:
         return None
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
-        raise ContractError('setup progress must be private and user-owned')
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
+        raise ContractError('setup progress must be a user-owned regular file')
     return load_progress(read_file(path.parent, path.name, limit=MAX_SETUP_BYTES))
 
 
@@ -165,7 +166,7 @@ class SetupFilesystem:
             return db.execute('SELECT count(*) FROM devices').fetchone()[0]
 
     def initialize(self, root, intent):
-        stage = _private_path(root / ('.setup-database-' + digest(canonical(intent))[:32]))
+        stage = _managed_path(root / ('.setup-database-' + digest(canonical(intent))[:32]))
         if not _database_present(root):
             from .controller import Controller
             # Only a complete database is published at the selected state root.
@@ -394,7 +395,7 @@ def setup_controller(root=None, *, request_id=None, runtime_root=None, cache_gib
             state = discover_state_root(config_home=config_home) if selected.exists() else default_state_root()
             if state.exists() and not selected.exists() and any(state.iterdir()):
                 raise Conflict('existing default state requires explicit --state selection')
-        state = _private_path(state)
+        state = _managed_path(state)
         runtime = runtime_root if runtime_root is not None else saved.get('runtime_root')
         if runtime is None and not progress:
             installed = Path(__file__).resolve().parents[2]
@@ -439,7 +440,7 @@ def setup_controller(root=None, *, request_id=None, runtime_root=None, cache_gib
             raise Conflict('completed state selection is unavailable')
         # The durable request now precedes every state mutation.
         _durable_directory(state)
-        _private_path(state)
+        _managed_path(state)
         with _state_guard(state, filesystem) as owner_locked:
             filesystem.select(intent, config_home)
             fault_hook('state_selected')

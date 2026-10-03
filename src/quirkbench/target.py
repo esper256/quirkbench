@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 import signal
 import stat
-import tempfile
 import time
 from typing import Callable, Protocol
 import uuid
@@ -17,11 +16,13 @@ import uuid
 from .contracts import CapabilityReport, Conflict, ContractError, Experiment, Outcome, Progress, Result, canonical, digest, identifier, sha256
 
 
+from .store import atomic_write as _atomic
+
 from .deployment import BootControl, DeploymentBackend, DeploymentManifest, PreparedDeployment
 
 
 def read_sealed_evidence(root,value,size, *,verify,deadline=None,clock=time.monotonic,collect=True):
-    """Capture a private regular spool object through no-follow descriptors."""
+    """Capture a regular spool object through no-follow descriptors."""
     import hashlib
     sha256(value)
     if type(size) is not int or not 0<=size<=128*1024**2:raise ContractError('sealed evidence exceeds stream bound')
@@ -33,9 +34,8 @@ def read_sealed_evidence(root,value,size, *,verify,deadline=None,clock=time.mono
             source=os.open(value,os.O_RDONLY|os.O_NONBLOCK|os.O_NOFOLLOW,dir_fd=blobs)
             with os.fdopen(source,'rb') as stream:
                 before=os.fstat(stream.fileno());expected_device=root.parent.stat().st_dev
-                if (not stat.S_ISREG(before.st_mode) or before.st_dev!=expected_device or before.st_uid!=os.geteuid()
-                        or stat.S_IMODE(before.st_mode)!=0o600 or before.st_nlink!=1 or before.st_size!=size):
-                    raise ContractError('sealed evidence must be private original regular bytes')
+                if (not stat.S_ISREG(before.st_mode) or before.st_dev!=expected_device or before.st_uid!=os.geteuid() or before.st_nlink!=1 or before.st_size!=size):
+                    raise ContractError('sealed evidence must be original owned regular bytes')
                 checksum=hashlib.sha256();raw=bytearray() if collect else None;total=0
                 while True:
                     verify()
@@ -112,30 +112,6 @@ def _recipe_child(conn, recipe, experiment):
         conn.close()
 
 
-def _fsync_dir(path: Path) -> None:
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-
-
-def _atomic(path: Path, raw: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=".pending-", dir=path.parent)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            os.fchmod(stream.fileno(), 0o600)
-            stream.write(raw)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(tmp, path)
-        _fsync_dir(path.parent)
-    finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-
-
 class TargetAgent:
     """One step claims at most one attempt and drains its durable outbox.
 
@@ -185,12 +161,10 @@ class TargetAgent:
         shutdown_available(self.state_dir.parent)
         self._check_storage()
         self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(self.state_dir, 0o700)
         self.journal_path = self.state_dir / "journal.json"
         self.lock_path = self.state_dir / "agent.lock"
         self.blob_dir = self.state_dir / "blobs"
         self.blob_dir.mkdir(exist_ok=True, mode=0o700)
-        os.chmod(self.blob_dir, 0o700)
         self.boot_control = boot_control
         self.recipes = dict(recipes or {})
         self.recipe_registry = recipe_registry
@@ -593,7 +567,6 @@ class TargetAgent:
         if shutdown_pending(self.state_dir.parent) is not None:return 'shutdown_pending'
         self._check_storage()
         with self.lock_path.open("a+b") as lock:
-            os.fchmod(lock.fileno(), 0o600)
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:

@@ -16,6 +16,16 @@ explicit; omit that paragraph if the worker should leave PRs for human merge.
 > other workers' changes. Do not pick supporting infrastructure ahead of product
 > work unless it is an actual blocker.
 >
+> This is a single-user, per-user installation used exclusively by its owner.
+> Do not add multi-user/shared-instance, account/role or collaboration machinery.
+> Multiple targets and workers do not change that scope.
+>
+> Apply the owner-approved file-access policy in implementation-contracts.md (#66).
+> Respect usable ordinary-data permissions; preserve actual secret protection and
+> storage/worker integrity. Existing mode checks/tests are not proof of a product
+> requirement. Do not turn another umask failure into a fixture-only fix without
+> checking the revised contract. Coordinate #65/#66 with the integration owner.
+>
 > Implement the complete bounded outcome on a topic branch using existing services.
 > Reuse working foundations, preserve compatibility and authority boundaries, and
 > update executable help/docs as needed. Run affected regressions and smoke as

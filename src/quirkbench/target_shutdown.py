@@ -106,12 +106,12 @@ def validate_public(value):
 def request(root,target,request_id, *,replace=None):
     """Persist admission fence and exact boot intent; historical replay is read-only."""
     from .controller import Controller
-    from .controller_setup import _private_path,_database_present
+    from .controller_setup import _managed_path,_database_present
     from .maintenance import private_lock
     from .target_setup import resolve_target_identity
     identifier(target);identifier(request_id)
     if replace is not None:identifier(replace)
-    root=_private_path(Path(root))
+    root=_managed_path(Path(root))
     if not _database_present(root):raise ContractError('complete controller setup first')
     arguments={'target':target,'replace':replace};raw=canonical(arguments)
     with private_lock(root/'command.lock',shared=True):
@@ -220,10 +220,10 @@ def status(root,target):
 def cancel(root,target,request_id):
     """Cancel only the controller admission fence; never resume work or clear a target intent."""
     from .controller import Controller
-    from .controller_setup import _private_path,_database_present
+    from .controller_setup import _managed_path,_database_present
     from .maintenance import private_lock
     from .target_setup import resolve_target_identity
-    identifier(target);identifier(request_id);root=_private_path(Path(root))
+    identifier(target);identifier(request_id);root=_managed_path(Path(root))
     if not _database_present(root):raise ContractError('complete controller setup first')
     with private_lock(root/'command.lock',shared=True):
         c=Controller(root,reserve_bytes=0)

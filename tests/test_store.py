@@ -53,3 +53,24 @@ def test_streamed_artifact_is_same_object_and_bad_hash_never_publishes(tmp_path)
     source.write_bytes(b'changed')
     with pytest.raises(ContractError):store.put_file(source,artifact.sha256)
     assert len(list(store.objects.iterdir()))==1
+
+
+def test_atomic_updates_preserve_user_modes_and_new_secret_defaults(tmp_path):
+    from quirkbench.store import atomic_write
+    path = tmp_path / 'record'
+    atomic_write(path, b'new secret')
+    assert path.stat().st_mode & 0o777 == 0o600
+    path.chmod(0o640)
+    atomic_write(path, b'updated data')
+    assert path.read_bytes() == b'updated data'
+    assert path.stat().st_mode & 0o777 == 0o640
+
+
+def test_controller_reopen_preserves_existing_database_mode(tmp_path):
+    from quirkbench.controller import Controller
+    controller = Controller(tmp_path / 'state', reserve_bytes=0)
+    path = controller.db_path
+    assert path.stat().st_mode & 0o777 == 0o600
+    path.chmod(0o640)
+    Controller(controller.root, reserve_bytes=0)
+    assert path.stat().st_mode & 0o777 == 0o640

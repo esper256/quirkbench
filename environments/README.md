@@ -50,7 +50,7 @@ MemorySwapMax=0
 TasksMax=4096
 ```
 
-Choose a fresh private stage, a unique unit/container name and an exact locked
+Choose a fresh user-owned stage, a unique unit/container name and an exact locked
 image. Pass the existing restricted build arguments to the launcher. For example:
 
 ```sh
@@ -65,7 +65,8 @@ environments/start-bounded-podman-build.sh \
 First run `quirkbench setup-state`. Choose `RUN_ID=quirkbench-build-NEW_RUN_ID`
 and set `STAGE` to the canonical selected state's
 `development-runs/$RUN_ID/work` directory. Create both the run directory and work
-directory with mode 0700. `IMAGE_ID` remains the exact pinned local builder image.
+directory with usable owner permissions; no exact mode is required. `IMAGE_ID`
+remains the exact pinned local builder image.
 Every run needs a fresh identity; the starter rejects staging in a Git checkout.
 Logs, service/boot identity and eventual exit status live beside `work`, so they
 can survive disposal of bulky work. The launcher prints the monitor command and

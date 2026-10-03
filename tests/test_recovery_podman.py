@@ -280,8 +280,8 @@ def test_unprepared_or_unclaimed_paths_fail(tmp_path):
             command(root, stage, claim)
         extra.rmdir()
         stage.chmod(0o755)
-        with pytest.raises(BuildError, match='private'):
-            command(root, stage, claim)
+        assert command(root, stage, claim)
+        assert stage.stat().st_mode & 0o777 == 0o755
 
 
 def test_existing_output_and_symlinked_input_fail(tmp_path):

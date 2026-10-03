@@ -1,5 +1,15 @@
 # Product interface contract
 
+Each installation serves one user exclusively. Install per user; do not add shared
+instances, accounts/roles, tenants or collaborative workspaces. Controller, targets,
+builders and agents act for that user. See the [single-user contract](implementation-contracts.md#single-user-installation).
+
+File access follows the owner-approved [permission policy](implementation-contracts.md#file-access-and-permission-policy).
+Ordinary data and workspaces respect usable user-selected permissions; users should
+not need chmod rituals or a special umask. Actual secrets receive private defaults.
+Implementation migration is tracked in [#66](https://github.com/esper256/quirkbench/issues/66);
+this contract update does not claim those runtime changes are already available.
+
 Implement the README's fresh-user installation,
 guided authenticated setup/pairing and attended external-agent investigation through
 patch export. Fresh controller setup comes first; managed invocation and unattended

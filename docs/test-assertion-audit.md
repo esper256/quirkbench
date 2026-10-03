@@ -1,5 +1,11 @@
 # Requirement-based test audit (#49)
 
+**Historical scope:** this audit preserved the then-existing blanket privacy
+contracts. The owner-approved [file-access policy](implementation-contracts.md#file-access-and-permission-policy)
+and [implementation follow-up #66](https://github.com/esper256/quirkbench/issues/66)
+supersede that assumption. The decisions below record what the first pass did;
+they do not require retaining exact ordinary-data/staging modes or their tests.
+
 This first pass starts from `e9c8152` and addresses
 [issue #49](https://github.com/esper256/quirkbench/issues/49). It changes test
 fixtures/assertions, not production behavior or permissions. Historical #3, #9,

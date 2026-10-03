@@ -4,6 +4,7 @@ Factory image measurement is injected (4GiB metadata, tiny placeholder), and
 most tests inject GPG; the final test verifies with real disposable GPG.
 No image assembly, native RPM validation, import, boot or publication occurs.
 """
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -79,13 +80,20 @@ def check(fixture,**kwargs):
     return release_plan.inspect(directory,store.root,trust_bundle=trust,run=fake_gpg,**kwargs)
 
 
-def tree(directory):
-    return {str(p.relative_to(directory)):digest(p.read_bytes()) for p in directory.rglob('*') if p.is_file()}
+def input_snapshot(roots):
+    files={}
+    for root in roots:
+        for path in root.rglob('*'):
+            if path.is_file():
+                with path.open('rb') as stream:
+                    files[path]=hashlib.file_digest(stream,'sha256').hexdigest()
+    return files
 
 
 def test_complete_authenticated_compatible_closure_is_readonly_unqualified(publication):
     directory,store,trust,catalog,_,snapshot,_=publication
-    before=tree(directory.parent.parent)
+    roots=(directory,store.root,trust.parent)
+    before=input_snapshot(roots)
     answer=check(publication,baseline=catalog['entries'][0]['baseline_id'])
     assert answer['input_closure_complete'] and answer['publisher_authenticated']
     assert answer['input_object_count']==answer['verified_input_count']
@@ -93,7 +101,7 @@ def test_complete_authenticated_compatible_closure_is_readonly_unqualified(publi
     for field in ('inner_signed','inner_qualified','runtime_ready','execution_authorized','published','native_package_compatibility_verified','builder_base_marker_verified'):
         assert answer[field] is False
     assert answer['qualification_status']=='unqualified'
-    assert tree(directory.parent.parent)==before
+    assert input_snapshot(roots)==before
     schema=json.loads((ROOT/'schemas/publication-preflight.v1.schema.json').read_bytes())
     Draft202012Validator.check_schema(schema);Draft202012Validator(schema).validate(answer)
 

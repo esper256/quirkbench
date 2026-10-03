@@ -19,7 +19,7 @@ import tarfile
 
 from .agent import SENSITIVE
 from .contracts import Conflict,ContractError,canonical,sha256
-from .controller_setup import _private_path
+from .controller_setup import _managed_path
 from .state_config import outside_checkout
 
 MAX_FILES=250000
@@ -168,7 +168,7 @@ def _parent(root_fd,name):
 
 @contextmanager
 def _directory_owner(path):
-    path=_private_path(path);fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    path=_managed_path(path);fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
     held=os.fstat(fd)
     def guard():
         named=path.lstat()
@@ -188,8 +188,8 @@ class _DigestWriter:
 
 def _staged_identity(path):
     info=path.lstat()
-    if (not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_uid!=os.geteuid() or stat.S_IMODE(info.st_mode)!=0o600):
-        raise ContractError('source serialization must remain a private single-link regular file')
+    if (not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_uid!=os.geteuid()):
+        raise ContractError('source serialization must remain an owned single-link regular file')
     return _identity(info)
 
 
@@ -264,7 +264,7 @@ def capture(repository,base_oid,allowed_untracked,stage,store, *,writer_quiesced
     if not root.is_absolute() or root.resolve()!=root or root.is_symlink() or not root.is_dir():raise ContractError('canonical approved repository required')
     stage=Path(stage)
     if not stage.is_absolute() or stage.resolve()!=stage or stage.is_symlink() or '..' in stage.parts:raise ContractError('source staging must be canonical')
-    stage=_private_path(stage)
+    stage=_managed_path(stage)
     outside_checkout(stage);stage.mkdir(mode=0o700,parents=True,exist_ok=True)
     if stage==root or stage.is_relative_to(root) or root.is_relative_to(stage):raise ContractError('source capture staging must be separate from source')
     fault=fault_hook or (lambda _:None)

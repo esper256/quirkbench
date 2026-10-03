@@ -77,36 +77,36 @@ def test_git_guard_replacement_during_inspection_is_rejected(tmp_path, monkeypat
         outside_checkout(tmp_path / 'state')
 
 
-def test_repeated_path_checks_do_not_cache_checkout_or_private_permissions(tmp_path):
-    from quirkbench.controller_setup import _private_path
+def test_repeated_path_checks_preserve_permissions_and_recheck_checkout(tmp_path):
+    from quirkbench.controller_setup import _managed_path
     state=tmp_path/'state';state.mkdir(mode=0o700)
-    for _ in range(3):assert _private_path(state)==state
+    for _ in range(3):assert _managed_path(state)==state
     state.chmod(0o755)
-    with pytest.raises(ContractError,match='private'):_private_path(state)
-    state.chmod(0o700)
+    assert _managed_path(state)==state
+    assert state.stat().st_mode & 0o777 == 0o755
     marker=tmp_path/'.git';marker.mkdir()
-    assert _private_path(state)==state
+    assert _managed_path(state)==state
     (marker/'HEAD').write_text('ref: refs/heads/main\n')
-    with pytest.raises(StateConfigurationError,match='outside a Git checkout'):_private_path(state)
+    with pytest.raises(StateConfigurationError,match='outside a Git checkout'):_managed_path(state)
 
 
 def test_repeated_path_checks_reject_new_symlink_ancestors(tmp_path):
-    from quirkbench.controller_setup import _private_path
+    from quirkbench.controller_setup import _managed_path
     parent=tmp_path/'parent';parent.mkdir(mode=0o700)
     state=parent/'state';state.mkdir(mode=0o700)
-    assert _private_path(state)==state
+    assert _managed_path(state)==state
     parent.rename(tmp_path/'moved');parent.symlink_to(tmp_path/'moved',target_is_directory=True)
-    with pytest.raises(ContractError,match='symlinks'):_private_path(state)
+    with pytest.raises(ContractError,match='symlinks'):_managed_path(state)
 
 
 def test_path_layouts_do_not_cache_home_or_working_directory(tmp_path,monkeypatch):
-    from quirkbench.controller_setup import _private_path
+    from quirkbench.controller_setup import _managed_path
     homes=[tmp_path/'one',tmp_path/'two']
     for home in homes:
         home.mkdir(mode=0o700);(home/'state').mkdir(mode=0o700)
         monkeypatch.setenv('HOME',str(home));monkeypatch.chdir(home)
-        assert _private_path('~/state')==home/'state'
-        assert _private_path('state')==home/'state'
+        assert _managed_path('~/state')==home/'state'
+        assert _managed_path('state')==home/'state'
 
 
 @pytest.mark.parametrize('kind',['terminal-link','ancestor-link','terminal-loop','ancestor-loop','relative','escape'])

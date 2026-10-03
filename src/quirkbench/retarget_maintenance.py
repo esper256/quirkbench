@@ -9,7 +9,7 @@ import time
 
 from .binding import read_system_uuid
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _private_path
+from .controller_setup import _managed_path
 from .controller_tls import _read
 from .enrollment import _document
 from .enrollment_client import endpoint
@@ -24,7 +24,7 @@ def _present(path):return path.exists() or path.is_symlink()
 
 
 def _view(control,directory,intent,guard):
-    base=_private_path(directory/'enrollment')
+    base=_managed_path(directory/'enrollment')
     scope={'retarget_request_id':intent['request_id'],'local_intent_sha256':digest(canonical(intent)),
         'source_sha256':digest(_read(directory,'source.json'))}
     def eligible():
@@ -33,11 +33,11 @@ def _view(control,directory,intent,guard):
                 or _present(base/'pending/activation-bundle')):
             raise Conflict('retarget result or activation exists; recover the original request before invitation maintenance')
         if base.exists():
-            archives=_private_path(base/'archives')
+            archives=_managed_path(base/'archives')
             entries=list(islice(archives.iterdir(),MAX_ARCHIVES+1)) if archives.exists() else []
             if len(entries)>MAX_ARCHIVES:raise Conflict('retarget invitation archive exceeds bounded limit')
             for path in entries:
-                identifier(path.name);_private_path(path)
+                identifier(path.name);_managed_path(path)
                 if _present(path/'result.json') or _present(path/'activation-bundle'):
                     raise Conflict('archived retarget redemption exists; recover its original request')
         guard()
@@ -45,13 +45,13 @@ def _view(control,directory,intent,guard):
 
 
 def _unfinished(view):
-    selections=_private_path(view.base/'selections')
+    selections=_managed_path(view.base/'selections')
     if not selections.exists():return []
     entries=list(islice(selections.iterdir(),MAX_SELECTIONS+1))
     if len(entries)>MAX_SELECTIONS:raise Conflict('retarget invitation selections exceed bounded limit')
     unfinished=[]
     for path in entries:
-        identifier(path.name);_private_path(path);record=_load_record(path,view)
+        identifier(path.name);_managed_path(path);record=_load_record(path,view)
         if record['request_id']!=path.name:raise Conflict('selection name differs from exact maintenance request')
         if _present(path/'complete.json'):
             if _read(path,'complete.json')!=canonical(record):raise Conflict('retarget invitation completion changed')
@@ -65,7 +65,7 @@ def _current_selected(view):
     selections=view.base/'selections'
     entries=list(islice(selections.iterdir(),MAX_SELECTIONS+1)) if selections.exists() else []
     if not entries:return lambda:None
-    pending=_private_path(view.base/'pending')
+    pending=_managed_path(view.base/'pending')
     current={name:digest(_read(pending,name)) for name in FILES}
     for path in entries:
         record=_load_record(path,view)
@@ -93,7 +93,7 @@ def reconcile_selection(control,directory,intent,url,pin,code_id,guard,binding_r
         raise ContractError('invalid retarget invitation selection pointer')
     identifier(value['request_id']);chosen=value['request_id']
     if unfinished not in ([],[chosen]):raise Conflict('retarget invitation pointer differs from unfinished choice')
-    selected=_private_path(view.base/'selections'/chosen);record=_load_record(selected,view)
+    selected=_managed_path(view.base/'selections'/chosen);record=_load_record(selected,view)
     if (record['request_id']!=chosen or record['code_id']!=code_id
             or record['domain']!=_domain(control,url,pin,binding_reader)):
         raise Conflict('another retarget invitation selection must finish first')
@@ -111,7 +111,7 @@ def _owned(control,config,retarget_id,verify_target,binding_reader,clearer,recov
 
 def _selected_bytes(view,request_id,expected,records,names, *,pointer=None,strict=False):
     """Final file fence after all native work; no additional native callbacks."""
-    selected=_private_path(view.base/'selections'/request_id);record=_load_record(selected,view)
+    selected=_managed_path(view.base/'selections'/request_id);record=_load_record(selected,view)
     pointer_path=view.base/'selection.json'
     pointer_ok=not _present(pointer_path) if pointer is None else _read(view.base,'selection.json')==pointer
     if (not pointer_ok or set(p.name for p in selected.parent.iterdir())!=names
@@ -121,7 +121,7 @@ def _selected_bytes(view,request_id,expected,records,names, *,pointer=None,stric
         raise Conflict('retarget invitation selection is incomplete')
     for path,expected in ((view.base/'pending',record['selected']),
             (view.base/'archives'/record['source']['intent']['request_id'],record['source'])):
-        _private_path(path)
+        _managed_path(path)
         names=set(p.name for p in path.iterdir())
         allowed=FILES if strict or path!=view.base/'pending' else FILES|{'result.json','activation-bundle'}
         if not FILES<=names<=allowed or any(digest(_read(path,name))!=checksum for name,checksum in expected['files'].items()):

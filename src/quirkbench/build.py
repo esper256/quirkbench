@@ -138,15 +138,13 @@ def _private_build_storage(path: Path, root: Path) -> None:
                 owners.add(infrastructure_owner)
             if not stat.S_ISDIR(info.st_mode) or info.st_uid not in owners:
                 raise BuildError(f'build storage ancestor must be an owned directory: {directory}')
-            if info.st_mode & 0o022 and (private is not None or not info.st_mode & stat.S_ISVTX):
-                raise BuildError(f'build storage ancestor is writable by other users: {directory}')
             if private is not None and info.st_uid != os.geteuid():
                 raise BuildError(f'private build storage must remain user-owned: {directory}')
             if (private is None and root in directory.parents and directory not in mounts
-                    and info.st_uid == os.geteuid() and not info.st_mode & 0o077):
+                    and info.st_uid == os.geteuid()):
                 private = directory
         if private is None:
-            raise BuildError(f'build storage needs an existing private user-owned subdirectory below {root}: {path}')
+            raise BuildError(f'build storage needs an existing user-owned subdirectory below {root}: {path}')
         if any(mount.is_relative_to(private) for mount in mounts):
             raise BuildError(f'private build storage must not contain mount points: {private}')
     except (OSError, ValueError, IndexError) as exc:

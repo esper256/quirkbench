@@ -10,7 +10,7 @@ import time
 
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _private_path
+from .controller_setup import _managed_path
 from .controller_tls import _read
 from .enrollment import _document
 from .enrollment_target import _storage
@@ -59,7 +59,7 @@ def _archived(control,config,retarget_id,verify_target,binding_reader,recovery_v
         verify_binding(head['new_target_binding'],reader=binding_reader)
         if pending_intent(control,binding_reader=binding_reader) is not None:raise Conflict('retarget remains paused; archived drain unavailable')
         completed(control,head_id,binding_reader=binding_reader)
-        new_agent=_private_path(control/'agent');archive=_private_path(directory/'archive');old_agent=_private_path(archive/'agent')
+        new_agent=_managed_path(control/'agent');archive=_managed_path(directory/'archive');old_agent=_managed_path(archive/'agent')
         if not new_agent.is_dir() or not old_agent.is_dir():raise Conflict('exact current and original spools must exist')
         with private_lock(new_agent/'agent.lock') as new_fd,private_lock(old_agent/'agent.lock') as old_fd:
             activation,source=_records(control,directory,intent)

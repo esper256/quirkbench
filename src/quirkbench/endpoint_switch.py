@@ -8,7 +8,7 @@ import time
 
 from .contracts import Conflict, ContractError, canonical, digest, identifier, sha256
 from .controller_endpoint import _strict_read, _dates, validate_intent
-from .controller_setup import _private_path, _database_present
+from .controller_setup import _managed_path, _database_present
 from .controller_tls import FILES, load_identity, inspect_identity, _lineage
 from .enrollment import _document, _now
 from .enrollment_client import endpoint
@@ -66,9 +66,9 @@ def _switch(root,request_id,expected_identity,approved_pin, *,unit,repository_ur
     from .setup_service import _service_state, _effective_unit
     identifier(request_id)
     if not rollback:sha256(expected_identity);sha256(approved_pin)
-    root=_private_path(root)
+    root=_managed_path(root)
     if not _database_present(root):raise Conflict('endpoint switch requires configured controller state')
-    directory=_private_path(root/'private/controller-tls'/('endpoint-'+digest(request_id.encode())[:32]))
+    directory=_managed_path(root/'private/controller-tls'/('endpoint-'+digest(request_id.encode())[:32]))
     deadline=monotonic()+180;fault=fault_hook or (lambda _:None)
     with private_lock(root/'command.lock') as command_fd,private_lock(root/'coordinator.lock') as owner_fd:
         _remaining(deadline,monotonic);_idle(root)
@@ -79,7 +79,7 @@ def _switch(root,request_id,expected_identity,approved_pin, *,unit,repository_ur
         if identity['schema_version']!=2 or intent['request_id']!=request_id or any(identity[name]!=intent[name]
                 for name in ('request_id','host','previous_directory','previous_identity_sha256')):
             raise Conflict('endpoint switch requires the exact completed successor stage')
-        previous=_private_path(directory.parent/identity['previous_directory'])
+        previous=_managed_path(directory.parent/identity['previous_directory'])
         source_raw=_strict_read(previous,'identity.json');source=load_identity(source_raw)
         material={path:{name:_strict_read(path,name) for name in FILES} for path in (previous,directory)}
         if (digest(source_raw)!=identity['previous_identity_sha256']
@@ -135,7 +135,7 @@ def _switch(root,request_id,expected_identity,approved_pin, *,unit,repository_ur
         native_unit=Path(saved['unit'])
         if native_unit.name!=UNIT or native_unit.resolve()!=native_unit or native_unit.is_symlink():raise ContractError('invalid native controller unit')
         unit_info=native_unit.stat()
-        if not stat.S_ISREG(unit_info.st_mode) or unit_info.st_uid!=os.geteuid() or unit_info.st_mode&0o022:raise ContractError('native unit ownership changed')
+        if not stat.S_ISREG(unit_info.st_mode) or unit_info.st_uid!=os.geteuid():raise ContractError('native unit ownership changed')
         unit_raw=read_file(native_unit.parent,native_unit.name,limit=16384)
         journal_required=journal.exists()
         rolled=directory/'rollback-intent.json';receipt=directory/'switch-completion.json'

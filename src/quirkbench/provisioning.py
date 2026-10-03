@@ -105,6 +105,12 @@ def _publish_generation(files,control,verify_target,validator,fault):
             shutil.rmtree(staging)
 
 
+def require_control_access(control):
+    """Boot media holds device keys and attempt tokens, not just evidence."""
+    if control.stat().st_mode & 0o077 and control.parent.stat().st_mode & 0o077:
+        raise ContractError('target credentials require a private control or evidence directory')
+
+
 def activate_bundle(bundle: Path, control: Path, *, verify_target, validator=None, fault=None, maintenance=False,expected_files=None):
     """Publish immutable credential files, then atomically activate the v1 config last."""
     from .runtime import load_provisioning
@@ -115,6 +121,7 @@ def activate_bundle(bundle: Path, control: Path, *, verify_target, validator=Non
     original_verifier=verify_target
     def verify_target():
         original_verifier()
+        require_control_access(control)
         device=control.stat().st_dev
         for path in (control/'generations',control/'agent'):
             if path.exists() and path.stat().st_dev!=device:
@@ -148,7 +155,6 @@ def activate_bundle(bundle: Path, control: Path, *, verify_target, validator=Non
     if generations.is_symlink() or (generations.exists() and not generations.is_dir()):
         raise ContractError('private generations path is invalid')
     generations.mkdir(mode=0o700,exist_ok=True)
-    os.chmod(control,0o700); os.chmod(generations,0o700)
     # Serialize operator activation with target execution/maintenance.
     import fcntl
     agent=control/'agent'

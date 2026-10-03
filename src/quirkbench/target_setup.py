@@ -17,12 +17,12 @@ def add_target(root,name,request_id=None, *, ttl_seconds=None,ready=None,tls_ins
     """
     from .controller import Controller
     from .enrollment_runtime import require_enrollment
-    from .controller_setup import _private_path,_database_present
+    from .controller_setup import _managed_path,_database_present
     from .maintenance import private_lock
     identifier(name)
     request_id=request_id or 'target-add-'+digest(name.encode())[:32]
     identifier(request_id)
-    root=_private_path(root)
+    root=_managed_path(root)
     if not _database_present(root):
         from .setup_contracts import SetupUnavailable
         raise SetupUnavailable('controller setup unavailable; run quirkbench setup')

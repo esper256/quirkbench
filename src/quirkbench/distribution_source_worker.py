@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .baseline_catalog import validate_entry
 from .contracts import Conflict, ContractError, canonical, sha256, identifier
-from .controller_setup import _private_path
+from .controller_setup import _managed_path
 from .state_reader import read_file
 from .store import atomic_write
 
@@ -27,7 +27,7 @@ def inner(stage, *,runner=None,limits=None):
     from .build_pipeline import BoundedRunner, ResourceLimits, run_recovery_source_stage
     from .source_capture import load_document
     stage = Path(stage)
-    _private_path(stage)
+    _managed_path(stage)
     value = load_document(read_file(stage,'manifest.json',limit=4*1024**2),limit=4*1024**2)
     if (not isinstance(value,dict) or set(value) != {'schema_version','entry','source_date_epoch'}
             or type(value['schema_version']) is not int or value['schema_version'] != 1):
@@ -67,9 +67,9 @@ def prepare(root, stage, entry, builder, epoch, workspace_id, verify, report, de
         sha256(value[7:])
     sha256(builder['builder_archive_sha256'])
     if type(epoch) is not int or not 0 <= epoch <= 2**31-1: raise ContractError('bounded distribution epoch required')
-    root = Path(root); stage = _private_path(stage)
+    root = Path(root); stage = _managed_path(stage)
     # Import uses a sibling to the RPM stage; both remain below the exact worker.
-    source = _private_path(stage/'distribution'); source.mkdir(mode=0o700)
+    source = _managed_path(stage/'distribution'); source.mkdir(mode=0o700)
     store = ArtifactStore(root/'artifacts',reserve_bytes=reserve_bytes(root))
     with _directory_owner(stage) as stage_guard, _directory_owner(source) as source_guard:
         def guard(): verify(); stage_guard(); source_guard()

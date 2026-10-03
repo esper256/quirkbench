@@ -304,7 +304,8 @@ On the original controller, explicitly revoke the original generation, pause and
 reconcile all target work and confirm whole-worker stops using the existing lifecycle
 commands. Then `quirkbench target drain-approve TARGET --file PLAN --request-id ID`
 produces a private credential file. Stage that exact file privately as
-`evidence/control/setup/GRANT_ID.json` (owned mode 0600). Enter
+`evidence/control/setup/GRANT_ID.json` (a credential: use a private file or
+its enclosing secret store). Enter
 `drain REQUEST_ID GRANT_ID` in choice 7 to use only its selected manifest and original
 attribution. Each invocation has a 120-second batch deadline; interruptions retry
 the same selection/grant without widening or extending authorization.

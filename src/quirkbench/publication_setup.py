@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 
 from .contracts import Conflict,ContractError,canonical,digest,identifier
-from .controller_setup import _private_path,_durable_directory,_database_present
+from .controller_setup import _managed_path,_durable_directory,_database_present
 from .controller_endpoint import _strict_read
 from .controller_service import configuration,validate_configuration,UNIT
 from .enrollment import _document,_snapshot
@@ -85,7 +85,7 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
     from .setup_service import _service_state,_effective_unit
     from .state_config import _config_home
     identifier(request_id);identifier(alias)
-    root=_private_path(root);signing_home=_private_path(signing_home)
+    root=_managed_path(root);signing_home=_managed_path(signing_home)
     if not signing_home.is_dir():raise SetupUnavailable('provision an existing private composition signing home first')
     if not _database_present(root):raise SetupUnavailable('complete initial controller setup first')
     unit=Path(unit or _config_home()/('systemd/user/'+UNIT))
@@ -159,7 +159,7 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
             saved=validate({'schema_version':1,'record_type':'publication-setup','request_id':request_id,
                 'request_digest':digest(canonical({'kind':'publication-setup','arguments':intent})),'intent':intent,'completed_steps':[],
                 'repository_configuration_sha256':None})
-            _durable_directory(_private_path(directory))
+            _durable_directory(_managed_path(directory))
             for key,name in FILES.items():
                 path=directory/name
                 if path.exists() and _strict_read(directory,name)!=captured[key]:raise Conflict('uncommitted publication inputs differ')
@@ -173,7 +173,7 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
                 saved['completed_steps'].append(step);validate(saved);atomic_write(directory/'journal.json',canonical(saved))
             fault(step)
         completed('inputs_retained')
-        repo=_private_path(root/'repositories'/alias)
+        repo=_managed_path(root/'repositories'/alias)
         _durable_directory(repo)
         config_path=repo/'config'
         if 'repository_initialized' not in saved['completed_steps']:

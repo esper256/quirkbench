@@ -172,6 +172,7 @@
       "tests/test_build_storage.py",
       "tests/test_recovery_storage.py",
       "tests/test_runtime.py",
+      "tests/test_commission.py",
       "tests/test_target_lifecycle.py",
       "tests/test_resumable_setup.py",
       "tests/test_sqlite_lifetime.py",
@@ -221,7 +222,9 @@
       "tests/test_installed_release.py",
       "tests/test_controller_install.py",
       "tests/test_builder_setup.py",
-      "tests/test_baseline_inputs.py"
+      "tests/test_baseline_inputs.py",
+      "tests/test_recovery_distribution.py",
+      "tests/test_stock_recovery_flow.py"
     ]
   }
 }

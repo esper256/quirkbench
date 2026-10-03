@@ -15,7 +15,7 @@ import tempfile
 import time
 
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _durable_directory,_private_path
+from .controller_setup import _durable_directory,_managed_path
 from .controller_tls import _read,_openssl,inspect_identity,load_identity
 from .enrollment import _document,_now,_snapshot,observe_clock
 from .enrollment_proof import _bytes,validate_request,validate_public_key,row_request,_invitation
@@ -36,7 +36,7 @@ def issue_certificate(controller,request,generation,device_id, *, days=30,run=su
     """Reuse exact private issuance across lost ACK; refuse changed key/CA/intent."""
     request=validate_request(request);identifier(generation);identifier(device_id)
     if type(days) is not int or not 1<=days<=365:raise ContractError('invalid repository credential lifetime')
-    root=_private_path(controller.root);fault_hook=fault_hook or (lambda _:None)
+    root=_managed_path(controller.root);fault_hook=fault_hook or (lambda _:None)
     from .controller_service import configuration
     with private_lock(root/'command.lock',shared=True):
         now=_now(clock);observe_clock(controller,now);config=configuration(root)
@@ -58,7 +58,7 @@ def issue_certificate(controller,request,generation,device_id, *, days=30,run=su
                 or observed['certificate_sha256']!=snapshot['certificate_sha256']):
             raise Conflict('controller issuer bytes changed')
         public=_bytes(request['public_key'],44);validate_public_key(public,run=run)
-        directory=_private_path(root/'private/enrollment/generations'/generation);_durable_directory(directory)
+        directory=_managed_path(root/'private/enrollment/generations'/generation);_durable_directory(directory)
         with private_lock(directory/'issuance.lock'):
             intent={'schema_version':1,'generation':generation,'device_id':device_id,
                     'request_digest':digest(canonical(request)),'key_sha256':digest(public),
