@@ -299,6 +299,18 @@ qualification. Quota savings never justify silently reusing mismatched evidence.
 
 ## Assert requirements, not incidental implementation details
 
+Use the revised [file-access policy](implementation-contracts.md#file-access-and-permission-policy)
+when assessing permissions. Existing mode guards and the historical #49 audit are
+not independent evidence of a requirement. Remove tests that require blanket
+privacy or exact modes for ordinary data when the corresponding behavior is
+simplified in #66. Keep focused coverage for ordinary usable permissions (including
+0644 files/0755 children under a private parent), actual secret defaults/access,
+functional executable bits, meaningful source changes and unintended writes.
+Do not make an exhaustive mode matrix or new permission-testing framework.
+Permission-specific negative tests must identify the real access or functional
+violation; unrelated storage tests must exercise the intended guard. Validate
+affected paths under 022 and 077 without changing the host's global umask.
+
 For each new assertion, identify the behavior or contract it protects and a real
 defect it should reject. Preserve privacy, exact attribution/identity, mutation
 rejection, ownership and ordering where those implement a documented boundary.
