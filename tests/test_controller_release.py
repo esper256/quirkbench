@@ -11,7 +11,7 @@ from quirkbench import cli, controller_release
 from quirkbench.contracts import ContractError, canonical, digest
 from quirkbench.controller_install import install
 from quirkbench.controller_release import load_statement, validate_statement, verify_release
-from test_controller_install import archive as archive_fixture
+from test_controller_install import make_archive
 
 ROOT = Path(__file__).resolve().parents[1]
 FINGERPRINT = 'A' * 40
@@ -20,7 +20,7 @@ FINGERPRINT = 'A' * 40
 @pytest.fixture
 def inputs(tmp_path):
     downloads = tmp_path / 'downloads'; downloads.mkdir()
-    archive = archive_fixture.__wrapped__(downloads)
+    archive = make_archive(downloads)
     key = tmp_path / 'trusted.asc'; key.write_bytes(b'independent publisher key')
     value = json.loads((ROOT / 'examples/controller-release-set.json').read_text())
     value['controller_archive_sha256'] = digest(archive.read_bytes())

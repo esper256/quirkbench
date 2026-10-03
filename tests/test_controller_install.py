@@ -17,9 +17,9 @@ from quirkbench.contracts import Conflict, canonical
 from quirkbench.store import atomic_write
 
 
-@pytest.fixture
-def archive(tmp_path):
-    wheel=tmp_path/'input.whl'
+def make_archive(directory):
+    """Build the small software archive at an explicitly supplied destination."""
+    wheel=directory/'input.whl'
     names=('cli.py','job_worker.py','job_operations.py','job_coordinator.py','job_cache.py',
            'controller_service.py','run-bounded-podman.sh','quirkbench-controller.service',
            'recovery_worker.py','assets/quirkbench-recovery.service',
@@ -30,9 +30,14 @@ def archive(tmp_path):
             raw=(Path(__file__).resolve().parents[1]/'src/quirkbench/quirkbench-controller.service').read_bytes() if name=='quirkbench-controller.service' else b'fixture'
             out.writestr('quirkbench/'+name,raw)
         out.writestr('quirkbench-0.1.0.dist-info/METADATA','Name: quirkbench\nVersion: 0.1.0\n')
-    output=tmp_path/'arbitrary-name.tar.gz'
+    output=directory/'arbitrary-name.tar.gz'
     build_controller_archive(wheel,output)
     return output
+
+
+@pytest.fixture
+def archive(tmp_path):
+    return make_archive(tmp_path)
 
 
 def test_install_identity_repeat_and_corrupt_existing_refusal(tmp_path,archive):
