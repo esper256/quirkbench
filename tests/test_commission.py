@@ -79,8 +79,7 @@ class Lab:
         return execute_commission(chosen,commissioned_identity=self.identity,allow_write=True,
             paths=self.paths,runner=self.run,block_rdev=self.rdev,journal=self.journal,current_ram_mib=8)
 
-@pytest.fixture
-def lab(tmp_path):
+def make_lab(tmp_path):
     sys=tmp_path/'sys';dev=tmp_path/'dev';proc=tmp_path/'proc'
     root=sys/'devices/pci/usb1/1-1/host0/block/sda'
     for path in (root,sys/'class/block',sys/'bus/usb',sys/'firmware/efi',dev/'disk/by-partuuid',proc):path.mkdir(parents=True,exist_ok=True)
@@ -94,6 +93,10 @@ def lab(tmp_path):
     paths=ProbePaths(sys/'class/block',sys/'devices',sys/'bus/usb',proc/'cmdline',proc/'mountinfo',proc/'swaps',sys/'firmware/efi',dev,dev/'disk/by-partuuid')
     result=Lab(paths,disk,CommissionIdentity(GUID,UUIDS,STARTS,ENDS[:3],16,16,4),tmp_path/'commission.json')
     result.sysfs();return result
+
+@pytest.fixture
+def lab(tmp_path):
+    return make_lab(tmp_path)
 
 def test_plan_is_inert_and_factory_is_not_a_commissioned_device(lab):
     plan=lab.plan();assert len(plan.geometry)==6 and lab.mutations==0

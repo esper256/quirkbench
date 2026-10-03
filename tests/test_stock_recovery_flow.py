@@ -95,14 +95,15 @@ def test_stock_release_v2_and_signed_checksum_reuse(tmp_path,monkeypatch):
     from quirkbench.contracts import canonical
     from jsonschema import Draft202012Validator
     from test_recovery_distribution import fake_gpg,FINGERPRINT
-    _,recipe,store,record,inputs,manifest=assembled_stock(tmp_path,monkeypatch)
+    publication=tmp_path/'publication';publication.mkdir()
+    _,recipe,store,record,inputs,manifest=assembled_stock(publication,monkeypatch)
     candidate=recovery_release_candidate(recipe,None,store,record,inputs)
     assert candidate['schema_version']==2 and candidate['qualification_status']=='unqualified'
     assert 'source_tree_sha256' not in candidate and 'kernel_srpm_sha256' not in candidate
     assert load_release_candidate(canonical(candidate))==candidate
     schema=json.loads((Path(__file__).parents[1]/'schemas/recovery-release-candidate.v2.schema.json').read_bytes())
     Draft202012Validator(schema).validate(candidate)
-    home=tmp_path.parent/(tmp_path.name+'-signing'); home.mkdir()
+    home=tmp_path/'signing'; home.mkdir()
     import quirkbench.recovery_distribution as distribution
     monkeypatch.setattr(distribution,'_image_identity',lambda _:('a'*64,4096*1024**2))
     statement,signature=sign_recovery_checksums(candidate,inputs.output,home,FINGERPRINT,run=fake_gpg)

@@ -3,7 +3,6 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import zipfile
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -11,7 +10,6 @@ from jsonschema import Draft202012Validator
 from quirkbench.contracts import Conflict, ContractError, canonical
 from quirkbench import cli, controller_setup, controller_service, setup_service
 from quirkbench.controller import Controller
-from quirkbench.controller_archive import build_controller_archive
 from quirkbench.controller_install import install
 from quirkbench.controller_service import configuration, UNIT
 from quirkbench.controller_setup import setup_controller
@@ -19,7 +17,7 @@ from quirkbench.maintenance import private_lock
 from quirkbench.setup_service import install_service, service_progress
 from quirkbench.setup_service_contracts import STEPS, load_progress
 from quirkbench.state_reader import StateReader
-from test_controller_install import archive as archive_fixture
+from test_controller_install import make_archive
 from test_resumable_setup import observations
 from tls_command_fixture import TLSCommands
 
@@ -28,13 +26,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def initialized(tmp_path):
-    archive_fixture.__wrapped__(tmp_path)
-    wheel=tmp_path/'input.whl'
-    with zipfile.ZipFile(wheel) as old: files={name:old.read(name) for name in old.namelist()}
-    files['quirkbench/quirkbench-controller.service']=(ROOT/'src/quirkbench/quirkbench-controller.service').read_bytes()
-    with zipfile.ZipFile(wheel,'w') as out:
-        for name,raw in files.items(): out.writestr(name,raw)
-    archive=tmp_path/'service.tar.gz';build_controller_archive(wheel,archive)
+    archive=make_archive(tmp_path)
     runtime=Path(install(archive,data_home=tmp_path/'data')['runtime_root'])
     setup_controller(tmp_path/'state',request_id='initial',runtime_root=runtime,reserve_gib=0,
                      config_home=tmp_path/'config',**observations())

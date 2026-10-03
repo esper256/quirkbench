@@ -32,11 +32,12 @@ ROOT = Path(__file__).resolve().parents[1]
 def inputs(tmp_path, monkeypatch):
     import quirkbench.recovery_distribution as distribution
 
-    catalog, recipe, store, record, image_inputs, _ = assembled(tmp_path, monkeypatch)
+    publication=tmp_path/'publication';publication.mkdir()
+    catalog, recipe, store, record, image_inputs, _ = assembled(publication, monkeypatch)
     candidate = recovery_release_candidate(recipe, catalog, store, record, image_inputs)
     monkeypatch.setattr(distribution, "_image_identity",
                         lambda _: (FAKE_IMAGE_SHA, candidate["image_size_bytes"]))
-    signing_home = tmp_path.parent / f"{tmp_path.name}-release-key"
+    signing_home = tmp_path / 'release-key'
     signing_home.mkdir()
     return candidate, image_inputs.output, signing_home
 
@@ -54,7 +55,7 @@ def fake_gpg(argv, **kwargs):
 
 
 def trusted_key(tmp_path):
-    path = tmp_path.parent / f"{tmp_path.name}-trusted.asc"
+    path = tmp_path / 'trusted.asc'
     path.write_bytes(b"synthetic public key")
     return path
 
@@ -247,7 +248,7 @@ def test_public_verification_rejects_bad_or_untrusted_material(
         key = image.parent / "untrusted.asc"
         key.write_bytes(b"synthetic public key")
     elif failure == "key_link":
-        linked = tmp_path.parent / f"{tmp_path.name}-linked.asc"
+        linked = tmp_path / 'linked.asc'
         linked.symlink_to(key)
         key = linked
 
@@ -284,10 +285,8 @@ def test_public_verification_rejects_candidate_wire_changes(tmp_path, monkeypatc
 @pytest.mark.skipif(shutil.which("gpg") is None
                     or os.environ.get("QUIRKBENCH_REAL_GPG_TEST") != "1",
                     reason="opt-in GPG test needs gpg-agent Unix sockets")
-def test_disposable_gpg_key_signs_and_public_key_verifies(tmp_path, monkeypatch):
+def test_disposable_gpg_key_signs_and_public_key_verifies(tmp_path, monkeypatch,signing_home):
     candidate, image, _ = inputs(tmp_path, monkeypatch)
-    signing_home = tmp_path.parent / f"{tmp_path.name}-actual-signing"
-    signing_home.mkdir(mode=0o700)
     subprocess.run(["gpg", "--batch", "--no-tty", "--homedir", str(signing_home),
                     "--pinentry-mode", "loopback", "--passphrase", "",
                     "--quick-generate-key", "Quirkbench Test <test@example.invalid>",
@@ -302,7 +301,7 @@ def test_disposable_gpg_key_signs_and_public_key_verifies(tmp_path, monkeypatch)
     exported = subprocess.run(["gpg", "--batch", "--no-tty", "--homedir", str(signing_home),
                                "--armor", "--export", fingerprint], check=True,
                               capture_output=True, timeout=30)
-    key = tmp_path.parent / f"{tmp_path.name}-actual-public.asc"
+    key = tmp_path / 'actual-public.asc'
     key.write_bytes(exported.stdout)
     statement, signature = sign_recovery_checksums(candidate, image, signing_home,
                                                    fingerprint)
@@ -430,11 +429,12 @@ def test_signed_bundle_keeps_marker_when_sidecar_changes_during_final_verify(tmp
 def test_prepared_image_can_resume_signing_without_reassembly(tmp_path, monkeypatch):
     import quirkbench.recovery_distribution as distribution
 
-    catalog, recipe, store, stage_record, image_inputs, _ = assembled(tmp_path, monkeypatch)
+    publication=tmp_path/'publication';publication.mkdir()
+    catalog, recipe, store, stage_record, image_inputs, _ = assembled(publication, monkeypatch)
     candidate = recovery_release_candidate(recipe, catalog, store, stage_record, image_inputs)
     monkeypatch.setattr(distribution, "_image_identity",
                         lambda _: (FAKE_IMAGE_SHA, candidate["image_size_bytes"]))
-    home = tmp_path.parent / f"{tmp_path.name}-signing-home"
+    home = tmp_path / 'signing-home'
     home.mkdir()
     key = trusted_key(tmp_path)
 
@@ -456,7 +456,8 @@ def test_prepared_image_can_resume_signing_without_reassembly(tmp_path, monkeypa
 def test_image_worker_record_has_no_signing_and_controller_can_publish(tmp_path, monkeypatch):
     import quirkbench.recovery_distribution as distribution
 
-    catalog, recipe, store, stage_record, image_inputs, _ = assembled(tmp_path, monkeypatch)
+    publication=tmp_path/'publication';publication.mkdir()
+    catalog, recipe, store, stage_record, image_inputs, _ = assembled(publication, monkeypatch)
     candidate = recovery_release_candidate(recipe, catalog, store, stage_record, image_inputs)
     monkeypatch.setattr(distribution, "_image_identity",
                         lambda _: (FAKE_IMAGE_SHA, candidate["image_size_bytes"]))
@@ -465,7 +466,7 @@ def test_image_worker_record_has_no_signing_and_controller_can_publish(tmp_path,
         image_builder=lambda _: (_ for _ in ()).throw(AssertionError("rebuild")))
     assert assembled_record["candidate"] == candidate
     assert not Path(str(image_inputs.output) + ".checksums.json.sig").exists()
-    home = tmp_path.parent / f"{tmp_path.name}-split-signing-home"
+    home = tmp_path / 'signing-home'
     home.mkdir()
     published = sign_and_publish_recovery_image(
         assembled_record, home, trusted_key(tmp_path), FINGERPRINT,
