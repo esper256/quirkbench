@@ -166,9 +166,9 @@ def run_worker(root,operation,epoch,generation,stage):
             from .source_operation import capture as capture_source
             result=capture_source(intent,stage,verify,report,state_root=root,operation_id=operation)
         elif claim.kind=='recovery_download':
-            from .recovery_download import capture
+            from .recovery_download import capture as capture_download
             from .builder_setup import reserve_bytes
-            result=capture(intent,stage,verify,report,deadline=claim.deadline,reserve=reserve_bytes(root))
+            result=capture_download(intent,stage,verify,report,deadline=claim.deadline,reserve=reserve_bytes(root))
         elif claim.kind=='builder_prepare':
             from .builder_setup import capture as capture_builder, import_builder
             if claim.stage=='builder_capture':
@@ -207,7 +207,7 @@ def run_worker(root,operation,epoch,generation,stage):
             _private_directory(cache)
             from .retention_settings import settings
             atomic_write(stage/'cache-policy.json',canonical({'cache_gib':settings(root)['cache_gib']}))
-            argv=['/usr/bin/bash',str(helper),'--rm','--pull=never','--network=none' if claim.kind=='build' else '--network=slirp4netns',
+            argv=['/usr/bin/bash',str(helper),'--rm','--pull=never','--network=none' if claim.kind=='build' or args.get('schema_version')==3 else '--network=slirp4netns',
                   '--userns=keep-id','--security-opt=no-new-privileges',
                   '--volume',f'{stage}:{stage}:rw,z','--volume',f'{package}:{package}:ro,z',
                   '--volume',f'{cache}:{cache}:ro,z','--env',f'PYTHONPATH={package.parent}',

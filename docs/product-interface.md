@@ -393,3 +393,26 @@ complete are different claims. Do not label a backup fully resumable while requi
 sources, credentials or evidence are missing. Restore verifies content and stays paused
 until private identity is restored and outstanding execution is reconciled. Public
 exports still exclude private credentials and are not resumable backups.
+
+#### Available immutable investigation build/composition facade
+
+`investigation prepare-candidate NAME --request-id ID` derives candidate-rootfs
+input v1 from the investigation baseline. `investigation build NAME --capture OP
+--candidate OP --request-id ID` binds stopped source/candidate receipts to
+investigation-build-input v1. `investigation compose NAME --build OP --repository
+ALIAS --request-id ID` binds a completed joined build and configured publication
+to investigation-compose-input v1. All accept `--json`, return the existing durable
+operation envelope, and use existing build/compose worker kinds with versioned
+schema 3 arguments. Manifests are derived inside the adapter, never accepted from
+the caller on this path. Schema 2 manual jobs remain compatible.
+
+The reviewed fixed-build-recipe v1 descriptor has exact allowlisted semantics;
+unknown descriptors are unsupported. Offline composition consumes only the pinned
+RPM snapshot plus the existing generated kernel/userspace replacements. Both worker
+and stopped owner verify exact package identities and pinned recipe bytes before
+signing. The owner rechecks dependencies and publication configuration after CAS
+callbacks before committing success. Every completed joined job retains an
+investigation-artifact-link v1 in its public outputs. This is attribution, not
+operator approval or native acceptance. Existing expired metadata remains missing;
+new workspace publication retains its original preparation intent/input so normal
+operation retirement does not destroy that join.

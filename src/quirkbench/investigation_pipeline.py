@@ -7,6 +7,10 @@ import stat
 from .contracts import ContractError,Conflict,canonical,digest,identifier,sha256
 from .distribution_prepare_operation import document
 
+class PipelineBlocked(Conflict):
+    pass
+
+
 BUILDER={'builder_image_digest','builder_config_digest','builder_archive_sha256'}
 BUILD_FIELDS={'investigation_id','baseline_sha256','source_capture_operation_id','source_capture_sha256',
  'source_preparation_operation_id','source_preparation_sha256','source_workspace_sha256','base_capture_sha256',
@@ -64,6 +68,13 @@ def binding(intent):
         if args['publication'] is not None:raise ContractError('build cannot select signing/publication')
     elif not isinstance(args['publication'],dict) or set(args['publication'])!={'repository','signing_home','signing_key'}:
         raise ContractError('composition requires configured signing/publication')
+    if intent['kind']=='compose':
+        publication=args['publication']
+        if any(not isinstance(publication[k],str) or not Path(publication[k]).is_absolute() for k in ('repository','signing_home')):
+            raise ContractError('absolute configured publication paths required')
+        import re
+        if not isinstance(publication['signing_key'],str) or not re.fullmatch('[A-Fa-f0-9]{40}|[A-Fa-f0-9]{64}',publication['signing_key']):
+            raise ContractError('full publication fingerprint required')
     if intent.get('input_refs')!=sorted({args['join_input_sha256'],args['builder_archive_sha256']}):
         raise ContractError('join and builder must be retained')
     return args
@@ -127,7 +138,8 @@ def graph(controller,name,source,candidate,db):
     candidate_result=validate_result(document(controller.store,candidate_row['final_output_digest']))
     from .baseline_inputs import validate as candidate_input
     rootfs_input=candidate_input(document(controller.store,candidate_result['candidate_input_sha256']))
-    if (prep_input['baseline_sha256']!=inv['baseline_sha256'] or rootfs_input['baseline_sha256']!=inv['baseline_sha256'] or
+    if (prep_input['campaign_id']!=name or prep_input['workspace_id']!=workspace['workspace_id'] or
+            prep_input['baseline_sha256']!=inv['baseline_sha256'] or rootfs_input['baseline_sha256']!=inv['baseline_sha256'] or
             rootfs_input['rpm_snapshot_sha256']!=entry['rpm_snapshot_sha256'] or rootfs_input['target_rpm_lock_sha256']!=entry['target_rpm_lock_sha256'] or
             any(prep_input[k]!=candidate_result[k] for k in BUILDER) or prep['base_oid']!=capture['base_oid'] or
             capture['provenance']!=base_capture['provenance']):raise Conflict('candidate/source builder, baseline or actual base differs')
@@ -159,13 +171,17 @@ def submit(controller,name,kind,request_id, *,source=None,candidate=None,build=N
     with controller.transaction() as db:
         old=db.execute('SELECT * FROM operations WHERE request_id=?',(request_id,)).fetchone()
         if old:
-            intent=document(controller.store,old['input_digest']);args=binding(intent)
+            intent=document(controller.store,old['input_digest'])
+            if old['kind']!=kind or intent.get('arguments',{}).get('schema_version')!=3:
+                raise Conflict('request ID belongs to another operation kind or input version')
+            args=binding(intent)
             saved=validate(document(controller.store,args['join_input_sha256']))
             old_request={'name':saved['investigation_id'],'kind':old['kind'],'source':saved.get('source_capture_operation_id'),
                 'candidate':saved.get('candidate_operation_id'),'build':saved.get('build_operation_id'),'repository':saved.get('repository')}
             if request!=old_request:raise Conflict('joined request identity was reused with different input')
             return envelope(controller.root,controller._operation_status(db,old['id']),request_id)
-    (ready or require_ready)(controller.root)
+    try:(ready or require_ready)(controller.root)
+    except Conflict as exc:raise PipelineBlocked(str(exc)) from exc
     publication=None
     with controller.transaction() as db:
         if kind=='build':value,refs,parents=graph(controller,name,source,candidate,db)
@@ -221,6 +237,7 @@ def input_record(root,args,kind):
 
 def build_records(reader,value):
     from .source_capture import validate_capture
+    from .source_workspace import validate as workspace_record
     from .source_preparation import validate as prep
     from .distribution_source import validate as provenance
     from .candidate_rootfs_operation import validate_result
@@ -228,9 +245,12 @@ def build_records(reader,value):
     capture=validate_capture(document(reader.store,value['source_capture_sha256']))
     original=validate_capture(document(reader.store,value['base_capture_sha256']))
     preparation=prep(document(reader.store,value['source_preparation_sha256']))
+    workspace=workspace_record(document(reader.store,value['source_workspace_sha256']))
     prov=provenance(document(reader.store,value['distribution_provenance_sha256']))
     candidate=validate_result(document(reader.store,value['candidate_result_sha256']))
-    if (capture['base_oid']!=original['base_oid'] or preparation['capture_sha256']!=value['base_capture_sha256'] or
+    if (workspace['campaign_id']!=value['investigation_id'] or preparation['workspace_id']!=workspace['workspace_id'] or
+            any(capture[k]!=workspace[k] for k in ('base_oid','allowed_untracked','provenance')) or
+            capture['base_oid']!=original['base_oid'] or preparation['capture_sha256']!=value['base_capture_sha256'] or
             capture['provenance']!=original['provenance'] or capture['provenance'].get('distribution_patches_sha256')!=value['distribution_provenance_sha256'] or
             prov['baseline_sha256']!=value['baseline_sha256'] or prov['source_package_sha256']!=entry['kernel_srpm_sha256'] or
             any(candidate[k]!=value[k] for k in BUILDER)):
@@ -239,6 +259,21 @@ def build_records(reader,value):
     rootfs=candidate_input(document(reader.store,candidate['candidate_input_sha256']))
     if rootfs['baseline_sha256']!=value['baseline_sha256']:raise Conflict('retained candidate baseline differs')
     return entry,capture,original,prov,candidate,rootfs
+
+
+def legacy_document(store,identity):
+    """Existing build/compose evidence is bounded JSON, not canonical join JSON."""
+    from .store import ArtifactStore
+    from .recovery_podman import _metadata_object
+    root=store.root if isinstance(store,ArtifactStore) else store.root/'artifacts'
+    from .product_contracts import _pairs,_depth
+    try:
+        value=json.loads(_metadata_object(root,identity,4*1024**2),object_pairs_hook=_pairs,
+            parse_constant=lambda _:(_ for _ in ()).throw(ContractError('nonfinite output evidence')))
+    except (UnicodeError,ValueError,RecursionError) as exc:raise ContractError('invalid output evidence JSON') from exc
+    if not isinstance(value,dict):raise ContractError('output evidence object required')
+    _depth(value)
+    return value
 
 
 def manifest(root,args,kind, *,prepared=None,stage=None,verify=lambda:None):
@@ -272,7 +307,7 @@ def manifest(root,args,kind, *,prepared=None,stage=None,verify=lambda:None):
     entry,capture,original,prov,candidate,rootfs=build_records(reader,build_input)
     from .compose import ROLES
     outputs=document(reader.store,value['build_outputs_index_sha256'])
-    provenance=document(reader.store,outputs['build_provenance']['sha256'])
+    provenance=legacy_document(reader.store,outputs['build_provenance']['sha256'])
     raw={'artifact_paths':{role:object_path(outputs[role]['sha256']) for role in ROLES},
          'artifact_sha256':{role:outputs[role]['sha256'] for role in ROLES},
          'evidence_paths':{role:object_path(item['sha256']) for role,item in outputs.items()},
@@ -298,7 +333,7 @@ def manifest(root,args,kind, *,prepared=None,stage=None,verify=lambda:None):
     return raw
 
 
-def validate_captured(coordinator,claim,args,data):
+def validate_captured(coordinator,claim,args,prepared):
     """Independently check the newly serialized transports before adoption."""
     from .build_pipeline import _extract_archive
     from .builder_setup import reserve_bytes
@@ -311,18 +346,28 @@ def validate_captured(coordinator,claim,args,data):
             entry,capture,original,prov,candidate,rootfs=build_records(reader,value)
             from .source_operation import verify_tree
             verify_tree(c.store,capture,verify=verify);verify_tree(c.store,original,verify=verify)
-            transport=data['files']['target_sysroot'];path=stage/transport['path']
+            transport=prepared['files']['target_sysroot'];path=c.store.path(transport['sha256'])
+            c.store.verify(transport['sha256'])
             from .candidate_rootfs_worker import validate_result
             holder=stage/'joined-validation';holder.mkdir(mode=0o700)
             _extract_archive(path,holder/'rootfs',preserve_mode=True,rootfs_links=True,reserve_bytes=reserve_bytes(c.root),verify=verify)
             validate_result(holder,rootfs,{'schema_version':1,'rootfs':'rootfs','input_sha256':candidate['candidate_input_sha256'],
                                          'target_tree_sha256':candidate['target_tree_sha256']})
+            from .build_pipeline import EXCLUDED_CREDENTIAL_FILES
+            import tarfile
+            with tarfile.open(path,'r:') as archive:
+                from pathlib import PurePosixPath
+                if any(PurePosixPath(member.name).as_posix() in EXCLUDED_CREDENTIAL_FILES for member in archive):
+                    raise ContractError('captured candidate transport contains excluded credentials')
+            c.store.verify(transport['sha256'])
         else:
             from .baseline_inputs import package_closure
             from .pinned_composition import package_archive
             entry=baseline(c.store,value['baseline_sha256']);snapshot,_=package_closure(c.store,entry)
-            path=stage/data['files']['pinned_baseline/rpms_file']['path']
+            transport=prepared['files']['pinned_baseline/rpms_file'];path=c.store.path(transport['sha256'])
+            c.store.verify(transport['sha256'])
             package_archive(path,snapshot['packages'],verify=verify)
+            c.store.verify(transport['sha256'])
         verify()
 
 
@@ -336,7 +381,7 @@ def artifact_link(root,args,claim,index,deployment):
         'outputs_index_sha256':index,'deployment_revision':deployment[1].revision if deployment is not None else None})
 
 
-def publication_fence(coordinator,claim,args):
+def publication_fence(coordinator,claim,args, *,outputs=(),index=None,link=None,deployment=None):
     """Recheck immutable dependencies after all CAS callbacks, before SQL commit."""
     c=coordinator.owner.controller
     original=binding(document(c.store,claim['input_digest']))
@@ -346,8 +391,11 @@ def publication_fence(coordinator,claim,args):
     if expected!=args['manifest']:raise Conflict('joined adapter input changed')
     with c.transaction() as db:
         refs={r[0] for r in db.execute("SELECT digest FROM operation_refs WHERE operation=? AND role='input'",(claim['id'],))}
-    for identity in sorted(refs):
+    for identity in sorted(refs|set(outputs)):
         c.store.verify(identity)
+    if index is not None:
+        if document(c.store,link)!=artifact_link(c.root,args,claim,index,deployment):
+            raise Conflict('joined artifact attribution changed')
     # CAS verification callbacks may mutate metadata: derive it again last.
     if manifest(c.root,original,claim['kind'],prepared=document(c.store,claim['prepared_digest']))!=expected:
         raise Conflict('joined records changed before publication')
@@ -364,7 +412,7 @@ def publication_fence(coordinator,claim,args):
 def verify_composed(coordinator,claim,args,manifest,values,checkout):
     """Independent exact package/recipe proof, before the owner can sign."""
     from .baseline_inputs import package_closure
-    from .pinned_composition import package_archive,verify_checkout
+    from .pinned_composition import package_archive,verify_checkout,validate_lock,expected_tree
     from .builder_setup import reserve_bytes
     c=coordinator.owner.controller;reader,value=input_record(c.root,args,'compose')
     entry=baseline(c.store,value['baseline_sha256']);snapshot,_=package_closure(c.store,entry)
@@ -375,14 +423,51 @@ def verify_composed(coordinator,claim,args,manifest,values,checkout):
     for role in ('compose_custom_rpms','compose_pinned_baseline'):
         if role not in values:raise ContractError('joined composition evidence is incomplete')
     package_archive(c.store.path(values['compose_custom_rpms'].sha256),[],destination=custom,names=names,
-        epoch=args['manifest']['source_date_epoch'],mode=0o644,reserve=reserve_bytes(c.root),verify=lambda:coordinator.verify(claim))
+        epoch=args['manifest']['source_date_epoch'],mode=0o600,reserve=reserve_bytes(c.root),verify=lambda:coordinator.verify(claim))
     import subprocess
     def run(argv,phase,timeout=300):
         coordinator.verify(claim)
         result=subprocess.check_output(argv,text=True,timeout=timeout)
         coordinator.verify(claim);return result
     proof=verify_checkout(entry,snapshot,custom,checkout,run,value['baseline_sha256'])
+    for role in ('compose_dependency_rpms','compose_dependency_lock','compose_tree'):
+        if role not in values:raise ContractError('joined dependency evidence is incomplete')
+    closure={p['sha256']+'.rpm':p for p in proof['packages']}
+    package_archive(c.store.path(values['compose_dependency_rpms'].sha256),[],names=closure,
+        epoch=args['manifest']['source_date_epoch'],mode=0o600,verify=lambda:coordinator.verify(claim))
+    validate_lock(legacy_document(c.store,values['compose_dependency_lock'].sha256),proof['packages'])
+    if legacy_document(c.store,values['compose_tree'].sha256)!=expected_tree(args['manifest'],entry):
+        raise ContractError('joined treefile differs from pinned composition policy')
+    if (manifest.provenance.get('dependency_lock_sha256')!=values['compose_dependency_lock'].sha256 or
+            manifest.provenance.get('treefile_sha256')!=values['compose_tree'].sha256 or
+            manifest.provenance.get('dependency_rpm_sha256')!=sorted({p['sha256'] for p in proof['packages']})):
+        raise ContractError('joined dependency provenance differs from retained closure')
     recorded=document(c.store,values['compose_pinned_baseline'].sha256)
     if proof!=recorded or any(manifest.provenance.get(k)!=proof[k] for k in ('baseline_sha256','rpm_snapshot_sha256','target_recipes')):
-        raise Conflict('stopped composition pinned evidence differs from checkout')
+        raise ContractError('stopped composition pinned evidence differs from checkout')
     publication_fence(coordinator,claim,args)
+
+
+def execute(root,args, *,ready=None):
+    from .state_reader import StateReader
+    from .state_config import outside_checkout
+    from .maintenance import private_lock
+    from .controller import Controller
+    from .investigations import record
+    root=Path(root).expanduser().absolute();outside_checkout(root)
+    reader=StateReader(root)
+    with reader.connection() as db:inv=record(reader,args.name,db)
+    if inv is None:raise ContractError('unknown investigation')
+    if not args.request_id:raise ContractError('joined operation requires --request-id')
+    if args.reserve_gib<0:raise ContractError('reserve must be nonnegative')
+    with private_lock(root/'command.lock',shared=True):
+        c=Controller(root,reserve_bytes=int(args.reserve_gib*1024**3))
+        if args.action=='prepare-candidate':
+            from .baseline_inputs import validate as rootfs_input
+            from .candidate_rootfs_operation import submit as candidate_submit
+            entry=baseline(c.store,inv['baseline_sha256'])
+            value=rootfs_input({'schema_version':1,'record_type':'candidate-rootfs-input','baseline_sha256':inv['baseline_sha256'],
+                'rpm_snapshot_sha256':entry['rpm_snapshot_sha256'],'target_rpm_lock_sha256':entry['target_rpm_lock_sha256']})
+            return candidate_submit(c,value,args.request_id,ready=ready)
+        return submit(c,args.name,args.action,args.request_id,source=getattr(args,'capture',None),candidate=getattr(args,'candidate',None),
+            build=getattr(args,'build',None),repository=getattr(args,'repository',None),ready=ready)

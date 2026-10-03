@@ -23,6 +23,8 @@ def manifest(kind, raw):
         from .build_pipeline import BuildInputs
         BuildInputs.from_mapping(raw)
     elif kind=='compose':
+        if raw.get('pinned_baseline') is not None:
+            raise ContractError('pinned composition requires versioned investigation inputs')
         from .compose import ComposeInputs
         ComposeInputs.from_mapping(raw)
     else: raise ContractError('unsupported job kind')

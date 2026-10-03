@@ -350,7 +350,7 @@ def compose_lock(path: Path, event=None):
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-def archive_rpms(source: Path, output: Path, epoch: int, event=None):
+def archive_rpms(source: Path, output: Path, epoch: int, event=None, *, mode=None):
     files = sorted(source.glob("*.rpm"))
     if any(path.is_symlink() or not path.is_file() for path in files):
         raise BuildError("RPM snapshot must contain regular files")
@@ -365,6 +365,7 @@ def archive_rpms(source: Path, output: Path, epoch: int, event=None):
             info.uid = info.gid = 0
             info.uname = info.gname = ""
             info.mtime = epoch
+            if mode is not None:info.mode=mode
             with path.open("rb") as data:
                 archive.addfile(info, data)
             if event:
@@ -555,6 +556,8 @@ class FedoraComposer:
                 checkout=stage/"pinned-checkout"
                 run(["ostree",f"--repo={repo}","checkout","--user-mode","--force-copy",revision,str(checkout)],"checkout-pinned-baseline")
                 pinned_result=verify_checkout(pinned_entry,pinned_snapshot,packages,checkout,run,inputs.pinned_baseline["entry_sha256"])
+                from .pinned_composition import validate_lock
+                validate_lock(json.loads(lockfile.read_bytes()),pinned_result["packages"])
                 (stage/"pinned-baseline.json").write_bytes(canonical(pinned_result))
             inputs.validate()  # fail before publication if sources changed during composition
             if inputs.identity() != identity or builder_base_digest() != base_digest:
@@ -572,8 +575,8 @@ class FedoraComposer:
                 _sync_tree(self.publish_repo)
             dependency_archive = stage / "dependency-rpms.tar"
             custom_archive = stage / "custom-rpms.tar"
-            archive_rpms(snapshot, dependency_archive, inputs.source_date_epoch, self.event)
-            archive_rpms(packages, custom_archive, inputs.source_date_epoch, self.event)
+            archive_rpms(snapshot, dependency_archive, inputs.source_date_epoch, self.event,mode=0o600 if pinned_entry is not None else None)
+            archive_rpms(packages, custom_archive, inputs.source_date_epoch, self.event,mode=0o600 if pinned_entry is not None else None)
             generated_evidence = {"compose_dependency_rpms": dependency_archive,
                 "compose_custom_rpms": custom_archive, "compose_tree": stage / "tree.json",
                 "compose_finalize_hook": finalize,

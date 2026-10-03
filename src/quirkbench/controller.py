@@ -973,7 +973,7 @@ class Controller(OperatorApprovals):
         if joined_job_fence is not None:
             if not callable(joined_job_fence) or storage_kind not in ('build','deployment') or state!='SUCCEEDED':
                 raise ContractError('joined publication requires stopped job verification')
-            joined_job_fence()
+            joined_job_fence(terminal.sha256)
         if source_workspace is not None:
             # Hash outside the database write lock; unrelated evidence uploads
             # retain access. The transaction then checks a fresh exact claim.
@@ -1037,6 +1037,7 @@ class Controller(OperatorApprovals):
                     if manifest_value not in outputs: raise ContractError('deployment manifest must be retained')
                     if self.deployment_repository is None: raise ContractError('deployment repository is unavailable')
                     for digest_value in evidence.values(): db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)',(operation_id,digest_value))
+                    db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)',(operation_id,manifest_value))
                     db.execute('INSERT OR IGNORE INTO deployment_refs VALUES(?,?,?,?)',(operation_id,manifest_value,manifest.repository,manifest.revision))
             if source_workspace is not None:
                 from .source_workspace import validate,owned_path
