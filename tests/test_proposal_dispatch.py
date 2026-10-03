@@ -185,6 +185,19 @@ def test_real_human_cli_and_machine_replay(published,monkeypatch,capsys):
         assert replay['operation_id']==operation and replay['data']['dispatch_connected']
 
 
+def test_real_dispatch_cli_unavailable_service_is_retryable_block(published,monkeypatch,capsys):
+    c,_=published
+    with c.lifecycle():
+        c.resume('investigation');operation,_=source_free(c)
+        def unavailable(*args):raise Conflict('native controller user service unavailable')
+        monkeypatch.setattr('quirkbench.controller_service.require_ready',unavailable)
+        assert cli.main(['--state',str(c.root),'--reserve-gib','0','investigation','dispatch-proposal','investigation',
+            '--proposal',operation,'--request-id','dispatch-unavailable','--json'])==4
+        error=json.loads(capsys.readouterr().out)['error']
+        assert error['code']=='BLOCKED' and error['retryable'] is True and 'native controller' in error['message']
+        with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM proposal_dispatch_commands').fetchone()[0]==0
+
+
 def test_restart_child_resume_cannot_restart_unreconciled_parent(published,joined,monkeypatch):
     c,_=published
     from quirkbench.job_operations import resume
@@ -275,6 +288,7 @@ def test_native_pin_callback_final_fence(target,published,joined,monkeypatch):
         dispatch.resume(owner,operation)
         assert dispatch.tick(owner)=={'id':operation,'state':'SUCCEEDED'}
         with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0]==1
+        assert dispatch.tick(owner) is None
 
 
 def test_signing_choice_changed_during_child_admission_rolls_back_link(published,joined,monkeypatch):

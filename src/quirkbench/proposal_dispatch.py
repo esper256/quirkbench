@@ -153,7 +153,8 @@ def declare(controller,name,operation,request, *,candidate=None,repository=None,
         value=validate({'schema_version':1,'record_type':'proposal-dispatch-input','investigation_id':name,
             'proposal_operation_id':operation,'proposal_sha256':saved[0],'context_sha256':saved[1],'action':proposal['action'],
             'candidate_operation_id':candidate,'repository':repository,'signing_fingerprint':fingerprint})
-    (ready or require_ready)(controller.root)
+    try:(ready or require_ready)(controller.root)
+    except Conflict as exc:raise pipeline.PipelineBlocked(str(exc)) from exc
     artifact=controller.store.put(canonical(value));availability(controller,refs|{artifact.sha256})
     with controller.transaction() as db:
         old=replay(db,request,request_digest)
@@ -363,6 +364,8 @@ def resume(owner,operation):
         if row is None or row['kind']!='external_proposal' or row['state']!='INTERRUPTED' or row['worker_unit'] is not None:
             raise Conflict('proposal requires interrupted reconciled ownership before resume')
         admitted(c,row['campaign'],operation,db)
+        if db.execute('SELECT 1 FROM proposal_dispatch_commands WHERE operation=?',(operation,)).fetchone():
+            checked_binding(c,dict(row),db)
         if owner.closed or c._lifecycle_owner is not owner or db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]!=owner.epoch:
             raise Conflict('proposal resume owner changed')
         db.execute("UPDATE operations SET state='QUEUED',queued_epoch=?,worker_epoch=NULL,updated=? WHERE id=?",(owner.epoch,c.clock(),operation))
