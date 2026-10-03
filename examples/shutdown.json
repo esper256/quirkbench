@@ -1,0 +1,154 @@
+[
+  {
+    "schema_version": 1,
+    "record_type": "target-shutdown-intent",
+    "request_id": "shutdown-1",
+    "device_id": "target-1",
+    "credential_generation": "generation-1",
+    "media_instance_id": "media-1",
+    "target_binding": {
+      "schema_version": 1,
+      "system_uuid": "12345678-1234-1234-1234-123456789abc"
+    },
+    "boot_id": "boot-1"
+  },
+  {
+    "schema_version": 1,
+    "record_type": "target-shutdown-preparation",
+    "request_id": "shutdown-1",
+    "intent_sha256": "e819164ae7c2adfb3cb25b571ec6d70ed7eca9f38cdf5185dd07e4487705ca6a",
+    "boot_id": "boot-1",
+    "journal_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "one_shot_cleared": true,
+    "local_evidence_durable": true,
+    "sealed_records": 2,
+    "pending_upload_records": 2,
+    "pending_upload_bytes": 42,
+    "physical_poweroff_verified": false,
+    "safe_removal_verified": false
+  },
+  {
+    "schema_version": 1,
+    "record_type": "target-shutdown-request",
+    "request_id": "shutdown-1",
+    "intent": {
+      "schema_version": 1,
+      "record_type": "target-shutdown-intent",
+      "request_id": "shutdown-1",
+      "device_id": "target-1",
+      "credential_generation": "generation-1",
+      "media_instance_id": "media-1",
+      "target_binding": {
+        "schema_version": 1,
+        "system_uuid": "12345678-1234-1234-1234-123456789abc"
+      },
+      "boot_id": "boot-1"
+    },
+    "admission_stopped": true,
+    "target_work_unresolved": 0,
+    "worker_units_remaining": 0,
+    "maintenance_active": false,
+    "physical_poweroff_verified": false,
+    "safe_removal_verified": false,
+    "paused_campaign_count": 1,
+    "next_command": "quirkbench target poweroff-status target-1"
+  },
+  {
+    "schema_version": 1,
+    "record_type": "target-shutdown-status",
+    "request_id": "shutdown-1",
+    "intent": {
+      "schema_version": 1,
+      "record_type": "target-shutdown-intent",
+      "request_id": "shutdown-1",
+      "device_id": "target-1",
+      "credential_generation": "generation-1",
+      "media_instance_id": "media-1",
+      "target_binding": {
+        "schema_version": 1,
+        "system_uuid": "12345678-1234-1234-1234-123456789abc"
+      },
+      "boot_id": "boot-1"
+    },
+    "admission_stopped": true,
+    "target_work_unresolved": 0,
+    "worker_units_remaining": 0,
+    "maintenance_active": false,
+    "physical_poweroff_verified": false,
+    "safe_removal_verified": false,
+    "state": "PREPARED",
+    "execution_boot_matches": true,
+    "preparation": {
+      "schema_version": 1,
+      "record_type": "target-shutdown-preparation",
+      "request_id": "shutdown-1",
+      "intent_sha256": "e819164ae7c2adfb3cb25b571ec6d70ed7eca9f38cdf5185dd07e4487705ca6a",
+      "boot_id": "boot-1",
+      "journal_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "one_shot_cleared": true,
+      "local_evidence_durable": true,
+      "sealed_records": 2,
+      "pending_upload_records": 2,
+      "pending_upload_bytes": 42,
+      "physical_poweroff_verified": false,
+      "safe_removal_verified": false
+    },
+    "next_action": "Confirm physical poweroff locally before removing media."
+  },
+  {
+    "schema_version": 1,
+    "record_type": "target-shutdown-cancellation",
+    "request_id": "shutdown-1",
+    "admission_stopped": false,
+    "investigations_resumed": false,
+    "local_shutdown_fence_cleared": false,
+    "physical_poweroff_verified": false,
+    "safe_removal_verified": false,
+    "next_action": "Reconcile the retained local shutdown fence separately."
+  },
+  {
+    "schema_version": 1,
+    "record_type": "recovery-shutdown",
+    "request_id": "shutdown-1",
+    "control_root": "/var/lib/quirkbench/evidence/control",
+    "boot_id": "boot-1",
+    "boot_config_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "source_sha256": {
+      "runtime.json": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "controller_intent": {
+      "schema_version": 1,
+      "record_type": "target-shutdown-intent",
+      "request_id": "shutdown-1",
+      "device_id": "target-1",
+      "credential_generation": "generation-1",
+      "media_instance_id": "media-1",
+      "target_binding": {
+        "schema_version": 1,
+        "system_uuid": "12345678-1234-1234-1234-123456789abc"
+      },
+      "boot_id": "boot-1"
+    },
+    "local_attended": false,
+    "completed_steps": [
+      "retained",
+      "one_shot_cleared",
+      "evidence_sealed"
+    ],
+    "preparation": {
+      "schema_version": 1,
+      "record_type": "target-shutdown-preparation",
+      "request_id": "shutdown-1",
+      "intent_sha256": "e819164ae7c2adfb3cb25b571ec6d70ed7eca9f38cdf5185dd07e4487705ca6a",
+      "boot_id": "boot-1",
+      "journal_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "one_shot_cleared": true,
+      "local_evidence_durable": true,
+      "sealed_records": 2,
+      "pending_upload_records": 2,
+      "pending_upload_bytes": 42,
+      "physical_poweroff_verified": false,
+      "safe_removal_verified": false
+    }
+  }
+]

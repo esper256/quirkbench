@@ -14,7 +14,7 @@ import time
 from typing import Callable, Protocol
 import uuid
 
-from .contracts import CapabilityReport, ContractError, Experiment, Outcome, Progress, Result, canonical, digest, identifier, sha256
+from .contracts import CapabilityReport, Conflict, ContractError, Experiment, Outcome, Progress, Result, canonical, digest, identifier, sha256
 
 
 from .deployment import BootControl, DeploymentBackend, DeploymentManifest, PreparedDeployment
@@ -159,6 +159,7 @@ class TargetAgent:
         finish_upload_s: float = 30,
         recovery_only: bool = False,
         verify_storage=None,
+        shutdown_retain=None,
 
     ):
         if report.device_id != client.device_id:
@@ -170,6 +171,7 @@ class TargetAgent:
         if type(recovery_only) is not bool or (recovery_only and report.mode != "recovery"):
             raise ValueError("recovery-only mode requires a recovery report")
         self.recovery_only = recovery_only
+        self.shutdown_retain=shutdown_retain
         self.library_store = library_store
         self.deployment_backend = deployment_backend
         self.supervisor = supervisor
@@ -179,6 +181,8 @@ class TargetAgent:
         self.verify_storage = verify_storage or (lambda: True)
         self.verify_storage()
         self.state_dir = Path(state_dir)
+        from .shutdown_local import require_available as shutdown_available
+        shutdown_available(self.state_dir.parent)
         self._check_storage()
         self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.state_dir, 0o700)
@@ -218,6 +222,8 @@ class TargetAgent:
         return value
 
     def _save(self) -> None:
+        from .shutdown_local import require_available as shutdown_available
+        shutdown_available(self.state_dir.parent)
         self._check_storage()
         _atomic(self.journal_path, canonical(self._journal))
 
@@ -583,6 +589,8 @@ class TargetAgent:
 
     def step(self) -> str:
         """Advance one attempt under an exclusive local journal lock."""
+        from .shutdown_local import pending as shutdown_pending
+        if shutdown_pending(self.state_dir.parent) is not None:return 'shutdown_pending'
         self._check_storage()
         with self.lock_path.open("a+b") as lock:
             os.fchmod(lock.fileno(), 0o600)
@@ -596,6 +604,7 @@ class TargetAgent:
                     self.supervisor.begin("target-lock-wait", 120)
                     self.supervisor.pulse(waiting=True)
                 return "busy"
+            if shutdown_pending(self.state_dir.parent) is not None:return 'shutdown_pending'
             self._journal = self._load()
             if self._journal.get("device_id") != self.report.device_id:
                 raise ValueError("journal belongs to another device")
@@ -624,8 +633,27 @@ class TargetAgent:
         # Finished candidates return even when the controller is unavailable.
         if pending and pending.get("physical") and self.report.mode == "experiment" and pending["stage"] in {"observed", "returning"}:
             return self._finish_candidate(pending)
-        self.client.register(self.report)
+        registered=self.client.register(self.report)
         reconciliation = self.client.reconcile(self.report.boot_id)
+        if (self.shutdown_retain is not None and isinstance(registered,dict)
+                and type(registered.get('shutdown_protocol')) is int and registered['shutdown_protocol']==1):
+            shutdown=self.client.shutdown(self.report.boot_id)
+            if shutdown is not None:
+                if not isinstance(shutdown,dict) or type(shutdown.get('waiting')) is not bool:
+                    raise ContractError('invalid shutdown delivery')
+                if shutdown.get('waiting') is False:
+                    if set(shutdown)!={'waiting','intent','execution_authorized'} or shutdown['execution_authorized'] is not True:
+                        raise ContractError('shutdown execution requires exact authorization')
+                    from .target_shutdown import validate_intent
+                    intent=validate_intent(shutdown.get('intent'))
+                    if intent['device_id']!=self.report.device_id or intent['boot_id']!=self.report.boot_id or self.report.mode!='recovery':
+                        raise Conflict('shutdown request differs from actual target recovery boot')
+                    self.shutdown_retain(intent)
+                    return 'shutdown_requested'
+                if (set(shutdown)!={'waiting','request_id','execution_authorized'} or shutdown['execution_authorized'] is not False):
+                    raise ContractError('invalid shutdown wait')
+                identifier(shutdown['request_id'])
+                if pending is None:return 'shutdown_waiting'
         if pending and pending.get("physical") and self.report.mode == "recovery":
             # Candidate-start acknowledgement can be lost after the controller
             # adopts the boot. Reconcile identity before delivering uncertainty.

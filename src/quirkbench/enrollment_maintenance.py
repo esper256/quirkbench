@@ -239,6 +239,8 @@ def select_invitation(control,url,pin,code_id,request_id, *, action,confirmed_re
     if action not in ('new','resume'):raise ContractError('select new or resume explicitly')
     control,verify=_storage(control,verify_target);fault=fault_hook or (lambda _:None)
     with private_lock(control/'runtime-config.lock'),_agent_guard(control,verify):
+        from .shutdown_local import require_available
+        require_available(control)
         return _select_locked(control,url,pin,code_id,request_id,action=action,confirmed_request_id=confirmed_request_id,
             verify=verify,binding_reader=binding_reader,run=run,fault=fault)
 
@@ -302,6 +304,8 @@ def pending_choice(control,url,pin,code_id, *, verify_target,binding_reader=read
     """Bounded console choice; an already selected operation resumes normally."""
     control,verify=_storage(control,verify_target)
     with private_lock(control/'runtime-config.lock'):
+        from .shutdown_local import require_available
+        require_available(control)
         return _pending_choice_locked(control,url,pin,code_id,verify=verify,binding_reader=binding_reader,run=run)
 
 

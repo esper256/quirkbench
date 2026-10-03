@@ -87,6 +87,8 @@ def prepare_request(control,controller_url,approved_fingerprint,code_id, *, veri
     control,verify_target=_storage(control,verify_target)
     fault_hook=fault_hook or (lambda _:None)
     with private_lock(control/'runtime-config.lock'):
+        from .shutdown_local import require_available
+        require_available(control)
         # A selected maintenance operation must finish before any new key can
         # appear at the public pending location, including after the first rename.
         from .enrollment_maintenance import reconcile_selection
@@ -165,6 +167,8 @@ def sign_challenge(control,challenge, *, verify_target,binding_reader=read_syste
     challenge=validate_challenge(challenge);now=_now(clock)
     control,verify_target=_storage(control,verify_target)
     with private_lock(control/'runtime-config.lock'):
+        from .shutdown_local import require_available
+        require_available(control)
         return _sign_at(control,control/'enrollment/pending',challenge,now,
             verify_target=verify_target,binding_reader=binding_reader,clock=clock,run=run)
 
