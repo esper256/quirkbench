@@ -123,12 +123,17 @@ def test_stock_signature_checks_use_only_pinned_key_and_private_database(tmp_pat
     commands = []
     def runner(argv, timeout):
         commands.append(argv)
+        if argv[0] == 'rpm':
+            raise BuildError('redundant RPM initialization is unavailable')
         if argv[0] == 'gpg':
             return 'pub:::::::::\nfpr:::::::::'+lock['rpm_key_fingerprint']+':\n'
         if '--checksig' in argv:
             return 'package.rpm: digests signatures OK\n'
         return ''
-    verify_stock_rpm_signatures(lock, reader, ['package.rpm'], stage, runner)
+    verify_stock_rpm_signatures(lock, reader, ['first.rpm', 'second.rpm'], stage, runner)
+    assert [argv[-1] for argv in commands if '--checksig' in argv] == ['first.rpm', 'second.rpm']
+    assert [argv for argv in commands if '--import' in argv and argv[0] == 'rpmkeys'] == [
+        ['rpmkeys', '--dbpath', str(stage/'signature-rpmdb'), '--import', str(stage/'rpm-signing-key.asc')]]
     assert all(str(stage/'signature-rpmdb') in argv for argv in commands if argv[0] in {'rpm','rpmkeys'})
 
 
