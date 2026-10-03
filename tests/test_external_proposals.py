@@ -132,7 +132,7 @@ def test_restart_outbox_replay_retains_ids_unknown_usage_and_pauses(captured):
         assert JobCoordinator(owner,Workers()).tick() is None
         assert proposals.submit(restarted,'investigation',value,'restart')['operation_id']==answer['operation_id']
         items=proposals.pending(StateReader(c.root),'investigation')['items']
-        assert len(items)==1 and items[0]['operation_id']==answer['operation_id'] and items[0]['state']=='QUEUED'
+        assert len(items)==1 and items[0]['operation_id']==answer['operation_id'] and items[0]['state']=='INTERRUPTED'
     usage=proposals.usage(StateReader(c.root),'investigation')
     assert usage['known_input_tokens']==0 and usage['known_output_tokens']==7 and usage['incomplete_observations']==1
     assert items[0]['input_tokens'] is None

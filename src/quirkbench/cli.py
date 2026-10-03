@@ -67,6 +67,9 @@ def parser():
     commands = result.add_subparsers(dest='command', required=True)
     investigation = commands.add_parser('investigation', help='attended external investigation, source preparation and lifecycle')
     investigation_actions = investigation.add_subparsers(dest='action', required=True)
+    dispatch=investigation_actions.add_parser('dispatch-proposal',help='bind one admitted proposal to explicit candidate/repository choices; existing service advances it')
+    dispatch.add_argument('name');dispatch.add_argument('--proposal',required=True);dispatch.add_argument('--candidate')
+    dispatch.add_argument('--repository');dispatch.add_argument('--request-id');dispatch.add_argument('--json',action='store_true')
     for name in ('start','brief','baseline','prepare-distribution'):
         command = investigation_actions.add_parser(name)
         command.add_argument('name',help='stable investigation identity')
@@ -397,7 +400,9 @@ def _main(argv=None):
                 print('Inspect: ' + answer['data']['status_command'])
                 print('Progress: ' + answer['data']['monitor_command'])
                 if args.action=='propose':
-                    print('Proposal retained; execution awaits external-loop integration. Acceptance grants no attempt approval.')
+                    print('Proposal retained; bind it with dispatch-proposal. Acceptance grants no attempt approval.')
+                elif args.action=='dispatch-proposal':
+                    print('Dispatch bound; the existing controller service advances linked work. Each physical attempt still requires exact operator approval.')
                 else:
                     print('Preparation/capture completion requires the existing controller service. Resume the investigation explicitly if paused.')
             else:

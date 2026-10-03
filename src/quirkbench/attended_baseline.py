@@ -43,7 +43,12 @@ def prepared(reader,name,composition,experiment_id,db):
     except BuildError as exc:raise Conflict('retained baseline proof unavailable or corrupt') from exc
 
 
-def _prepared(reader,name,composition,experiment_id,db):
+def proposal_prepared(reader,name,composition,experiment_id,db,proposal,dispatch,dispatch_sha):
+    """Shared composition proof; the baseline wrapper still requires pristine bytes."""
+    return _prepared(reader,name,composition,experiment_id,db,proposal=proposal,dispatch=dispatch,dispatch_sha=dispatch_sha)
+
+
+def _prepared(reader,name,composition,experiment_id,db, *,proposal=None,dispatch=None,dispatch_sha=None):
     from . import investigation_pipeline as pipeline
     from .investigations import record
     from .source_capture import validate_capture
@@ -64,8 +69,14 @@ def _prepared(reader,name,composition,experiment_id,db):
         raise Conflict('composition belongs to another investigation or baseline')
     capture=validate_capture(document(reader,build['source_capture_sha256']))
     base=validate_capture(document(reader,build['base_capture_sha256']))
-    if any(capture[k]!=base[k] for k in ('base_oid','archive_sha256','manifest_sha256','file_count','allowed_untracked','provenance')):
+    if proposal is None and any(capture[k]!=base[k] for k in ('base_oid','archive_sha256','manifest_sha256','file_count','allowed_untracked','provenance')):
         raise Conflict('baseline attempt requires unmodified distribution-prepared source')
+    if proposal is not None and (build['source_capture_sha256']!=proposal['source']['capture_sha256'] or
+            build['source_capture_operation_id']!=proposal['source']['capture_operation_id'] or
+            capture['base_oid']!=proposal['base_oid'] or capture['base_oid']!=base['base_oid'] or
+            build['candidate_operation_id']!=dispatch['candidate_operation_id'] or join['repository']!=dispatch['repository'] or
+            join['signing_fingerprint']!=dispatch['signing_fingerprint']):
+        raise Conflict('published composition differs from immutable proposal dispatch')
     output=document(reader,row['final_output_digest'])
     if (not isinstance(output,dict) or set(output)!={'deployment','artifact'}
             or not isinstance(output['artifact'],dict) or set(output['artifact'])!={'sha256','size'}):
@@ -104,20 +115,31 @@ def _prepared(reader,name,composition,experiment_id,db):
             or manifest.provenance.get('target_recipes')!=entry['target_recipes']):
         raise Conflict('published deployment differs from pinned baseline and recipes')
     registry=installed_registry(Path(__file__).parent/'recipes',candidate=True)
-    recipe_item=next((x for x in entry['target_recipes'] if x['recipe_id']=='system-observation'),None)
+    recipe_id=proposal['experiment']['target_recipe_id'] if proposal is not None else 'system-observation'
+    recipe_item=next((x for x in entry['target_recipes'] if x['recipe_id']==recipe_id),None)
     if recipe_item is None:raise Conflict('baseline lacks the reviewed system observation recipe')
     recipe=load_manifest(raw_metadata(reader,recipe_item['digest'],65536))
-    if recipe!=registry.records['system-observation'][0]:raise Conflict('retained recipe differs from installed reviewed manifest')
+    if recipe!=registry.records[recipe_id][0]:raise Conflict('retained recipe differs from installed reviewed manifest')
+    if proposal is not None:
+        from .external_proposals import recipe_scope
+        recipe_scope(reader,proposal)
     evidence=Controller._deployment_evidence_shape(manifest)
     raw_metadata(reader,evidence['build_provenance'])
     Controller._validate_deployment_build(manifest,evidence,pipeline.legacy_document(reader.store,evidence['build_provenance']))
-    value=validate({'schema_version':1,'record_type':'attended-baseline-input','investigation_id':name,
-        'composition_operation_id':composition,'experiment_id':experiment_id,'recipe_id':'system-observation',
+    value={'schema_version':1,'record_type':'attended-baseline-input','investigation_id':name,
+        'composition_operation_id':composition,'experiment_id':experiment_id,'recipe_id':recipe_id,
         'composition_input_sha256':args['join_input_sha256'],'composition_output_sha256':row['final_output_digest'],
         'composition_link_sha256':link_sha,'build_input_sha256':join['build_input_sha256'],
         'baseline_sha256':inv['baseline_sha256'],'source_capture_sha256':build['source_capture_sha256'],
         'base_capture_sha256':build['base_capture_sha256'],'deployment_sha256':output['artifact']['sha256'],
-        'recipe_manifest_sha256':recipe_item['digest'],'base_oid':base['base_oid']})
+        'recipe_manifest_sha256':recipe_item['digest'],'base_oid':base['base_oid']}
+    if proposal is None:value=validate(value)
+    else:
+        from .proposal_dispatch_contracts import validate as proposal_record
+        value=proposal_record({**value,'record_type':'proposal-experiment-input','proposal_operation_id':dispatch['proposal_operation_id'],
+            'proposal_sha256':dispatch['proposal_sha256'],'dispatch_sha256':dispatch_sha})
+        if recipe_item['digest']!=proposal['experiment']['target_recipe_sha256']:raise Conflict('published proposal recipe differs')
+        refs|={dispatch['proposal_sha256'],dispatch_sha}
     if not ({v for k,v in value.items() if k.endswith('_sha256')}|set(evidence.values()))<=refs:
         raise Conflict('published composition closure was retired')
     pipeline.available(reader,refs)
@@ -136,7 +158,7 @@ def replay(db,request_id,request_digest):
 def check_request(db,request_id,namespace):
     """New mutations share retry identity while preserving historical exact replay."""
     for table,column in (('operations','request_id'),('observation_response_commands','id'),('investigations','request_id'),
-            ('attended_baseline_commands','request_id'),('attempt_approval_commands','request')):
+            ('attended_baseline_commands','request_id'),('attempt_approval_commands','request'),('proposal_dispatch_commands','request_id')):
         if table==namespace:continue
         if db.execute('SELECT 1 FROM '+table+' WHERE '+column+'=?',(request_id,)).fetchone():
             raise Conflict('request ID belongs to another command')

@@ -132,10 +132,48 @@ Hypotheses, summaries and rejected approaches remain retained data. Unknown toke
 observations remain null; displayed known totals are explicitly incomplete when
 needed and do not meter unrelated external spending.
 
-The acknowledgment retains an operation and dispatch intent atomically. It remains
-queued with `external_loop_pending` until [#35](https://github.com/esper256/quirkbench/issues/35)
-connects execution. Acceptance does not invoke an agent, build or boot anything,
-approve an attempt, conclude that the bug is fixed, or release the source writer.
+The acknowledgment retains an operation and dispatch intent atomically. Explicitly
+bind it to a completed candidate preparation and configured signed publication
+repository. The current controller service then advances the original proposal
+operation through existing build/compose workers and experiment submission:
+
+```sh
+quirkbench investigation dispatch-proposal INVESTIGATION --proposal PROPOSAL_OPERATION --candidate CANDIDATE_OPERATION --repository REPOSITORY_ALIAS --request-id DISPATCH_ID --json
+quirkbench investigation proposals INVESTIGATION --json
+quirkbench operation status PROPOSAL_OPERATION --json
+quirkbench experiment review EXPERIMENT_ID --json
+quirkbench attempt show ATTEMPT_ID --json
+quirkbench attempt approve ATTEMPT_ID --request-id APPROVAL_ID --json
+quirkbench investigation context INVESTIGATION --json
+```
+
+Keep the dispatch request and exact choices for replay. One proposal permits one
+binding; a changed candidate/repository or another dispatch request conflicts. The
+receipt is acceptance, while `proposals` exposes linked child operations and the
+eventual experiment. The parent succeeds after atomic experiment/job submission;
+each repetition still needs approval for its exact physical attempt. Build success,
+approval, acknowledged evidence and recovery arrival are separate facts. Missing
+human observations keep problem reproduction unknown. This flow also works for
+reviewed non-audio recipes; it never invokes a managed agent.
+
+Source-free `needs_human`/`conclude` dispatch omits `--candidate` and `--repository`.
+It retains the decision and pauses the investigation; it schedules no build or
+attempt and does not declare the bug fixed. To make a further comparison, explicitly
+release the stopped source writer with `investigation release-source INVESTIGATION`,
+edit, quiesce/capture again and submit a new decision with fresh context. The prior
+admitted capture remains immutable and retained even after the live writer moves on.
+
+Campaign pause blocks the next child stage while an already claimed bounded worker
+drains. Controller restart interrupts parent and unfinished children. Reconcile
+whole-service termination first, resume the investigation explicitly, then use
+`operation resume PROPOSAL_OPERATION --request-id RESUME_ID` and independently resume
+any interrupted child. Resuming a child alone cannot advance an unreconciled parent.
+Completed children are reused by identity; lost replies do not create another
+experiment. Storage pressure or signing/native publication failures leave explicit
+interruption and require repair/resume; a definite failed child makes the parent
+terminal, requiring a new explicit decision. Existing attempt uncertainty/recovery
+rules still fence further physical execution. Dispatch never releases the writer,
+grants future-patch approval or certifies native readiness.
 
 Read only evidence attributed and retained for this investigation:
 
