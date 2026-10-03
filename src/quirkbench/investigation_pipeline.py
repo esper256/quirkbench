@@ -124,6 +124,14 @@ def graph(controller,name,source,candidate,db, *,proposal=None):
         row,value,owned=admitted(controller,name,proposal,db)
         if value['action']!='experiment' or value['source']['capture_operation_id']!=source:
             raise Conflict('proposal does not select this immutable capture')
+        # A completed baseline/comparison can still retain candidate preparation
+        # after that preparation's own count-based owner has expired. Reuse only
+        # closure retained by experiments in this investigation; exact candidate,
+        # baseline/builder/source identities are independently reconciled below.
+        historical=db.execute('''SELECT DISTINCT r.digest FROM refs r JOIN jobs j ON r.owner='experiment:'||j.experiment
+            WHERE j.campaign=? LIMIT 32769''',(name,)).fetchall()
+        if len(historical)>32768:raise ContractError('investigation input closure exceeds metadata bound')
+        owned|={r[0] for r in historical}
     source_row,refs=retained(controller,db,source,'source_capture',campaign=name,owned_refs=owned)
     candidate_row,candidate_refs=retained(controller,db,candidate,'candidate_prepare',owned_refs=owned);refs|=candidate_refs
     source_intent=document(controller.store,source_row['input_digest']);scope=source_binding(source_intent)
