@@ -1,6 +1,7 @@
 """Bounded attended reviews over committed state; no startup or expiration writes."""
 import json
 import os
+from contextlib import contextmanager
 
 from .contracts import ContractError,Conflict,Experiment,canonical,digest,identifier
 from .operations import operation_response
@@ -25,6 +26,16 @@ def stored(raw,label):
 
 class ApprovalReader(StateReader,OperatorApprovals):
     # Pure existing helpers, backed by query_only connections and bounded CAS.
+    @contextmanager
+    def connection(self):
+        with super().connection() as db:
+            # Preflight scalar limits and subsequent helper reads share one WAL
+            # snapshot. Concurrent writers remain free to commit newer state.
+            db.execute('BEGIN')
+            try:yield db
+            finally:db.rollback()
+    transaction=connection
+
     def _campaign(self,db,campaign_id):
         row=db.execute('SELECT id,state FROM campaigns WHERE id=?',(identifier(campaign_id),)).fetchone()
         if row is None:raise ContractError('unknown investigation')

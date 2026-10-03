@@ -361,3 +361,24 @@ def test_auto_approval_binding_is_compared_in_authoritative_transaction(publishe
     with pytest.raises(Conflict,match='binding changed'):views.decide(c.root,args)
     with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM attempt_approval_commands').fetchone()[0]==0
     assert boot.armed==[]
+
+
+def test_bounded_approval_preflight_and_helpers_share_read_snapshot(published,monkeypatch,tmp_path):
+    from quirkbench.operator_approval import OperatorApprovals
+    c,composition=published
+    baseline.admit(c,'investigation',composition,'baseline',ready=lambda _:None)
+    _,_,step,_,_=attended_lab(c,tmp_path);step()
+    with c.transaction() as db:attempt=db.execute('SELECT id FROM attempts').fetchone()[0]
+    helper=OperatorApprovals._approval_status;changed=[False]
+    def concurrent(self,db,row):
+        if not changed[0]:
+            changed[0]=True
+            # A separate WAL writer commits after preflight and before the
+            # existing helper's raw reads. It cannot alter this read snapshot.
+            with c.transaction() as writer:writer.execute('UPDATE devices SET report=?',('x'*(views.QUERY_BYTES+1),))
+        return helper(self,db,row)
+    monkeypatch.setattr(OperatorApprovals,'_approval_status',concurrent)
+    reader=views.ApprovalReader(c.root)
+    assert views.attempt(reader,attempt)['data']['approval']['state']=='waiting'
+    assert changed[0]
+    with pytest.raises(ContractError,match='budget'):views.attempt(reader,attempt)
