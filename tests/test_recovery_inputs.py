@@ -78,8 +78,8 @@ def test_acquisition_wrapper_bootstraps_library_without_site_or_checkout(tmp_pat
     library=tmp_path/'installed/lib'
     source=Path(__file__).resolve().parents[1]/'src/quirkbench'
     shutil.copytree(source,library/'quirkbench',ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
-    env=dict(os.environ);env.pop('PYTHONPATH',None)
-    code=('import sys;sys.path.insert(0,sys.argv[1]);'
+    env=dict(os.environ);env.pop('PYTHONPATH',None);env.pop('PYTHONDONTWRITEBYTECODE',None)
+    code=('import sys;sys.dont_write_bytecode=True;sys.path.insert(0,sys.argv[1]);'
           'from quirkbench.recovery_inputs import acquisition_wrapper;'
           'import json;print(json.dumps(acquisition_wrapper(sys.argv[2],"unused-owner")))')
     planned=subprocess.run([sys.executable,'-S','-c',code,str(library),str(tmp_path/'unused-state')],
@@ -88,8 +88,11 @@ def test_acquisition_wrapper_bootstraps_library_without_site_or_checkout(tmp_pat
     argv=json.loads(planned.stdout)
     assert argv[0]==sys.executable and argv[3]==str(library)
     # Probe the exact generated bootstrap with module help; no acquisition runs.
+    before={p.relative_to(library):p.read_bytes() for p in library.rglob('*') if p.is_file()}
     argv=[argv[0],'-S',*argv[1:4],'--help']
     result=subprocess.run(argv,cwd=tmp_path,env=env,capture_output=True,text=True,timeout=30)
     assert result.returncode==0,result.stderr
     assert '--owner' in result.stdout and '--state' in result.stdout
+    assert {p.relative_to(library):p.read_bytes() for p in library.rglob('*') if p.is_file()} == before
+    assert not any(library.rglob('__pycache__'))
     assert not (tmp_path/'unused-state').exists()

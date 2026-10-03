@@ -140,3 +140,30 @@ def test_factory_unit_inventory_never_follows_reviewed_vendor_links(tmp_path, mo
     (units/'unreviewed.service').write_text('[Service]\nExecStart=/bin/true\n')
     with pytest.raises(BuildError,match='units differ'):
         audit_factory_root(root,checked)
+
+
+@pytest.mark.parametrize('name', ['openssl', 'gpg'])
+@pytest.mark.parametrize('change', ['missing', 'nonexecutable', 'outside', 'directory'])
+def test_stock_publication_requires_pairing_executable_payload(tmp_path, name, change):
+    from quirkbench.recovery_image_plan import prepare_recovery_image_inputs
+    recipe,lock,store,stage,result,_=prepared(tmp_path)
+    program=stage/'rootfs/usr/bin'/name
+    if change == 'missing': program.unlink()
+    if change == 'nonexecutable': program.chmod(0o644)
+    if change == 'outside':
+        program.unlink()
+        outside=tmp_path/'outside-program';outside.write_bytes(b'host executable');outside.chmod(0o755)
+        program.symlink_to(outside)
+    if change == 'directory':
+        program.unlink();program.mkdir()
+    with pytest.raises(BuildError,match='pairing executable.*'+name):
+        prepare_recovery_image_inputs(recipe,None,store,stage,result['initramfs'],tmp_path/'blocked.img')
+    assert not (tmp_path/'blocked.img').exists()
+
+
+def test_pairing_executable_may_use_confined_relative_symlink(tmp_path):
+    from quirkbench.recovery_stock_pipeline import audit_pairing_executables
+    root=tmp_path/'rootfs';install_fixture(root,'fixture-release')
+    program=root/'usr/bin/openssl';program.rename(program.with_name('openssl-real'))
+    program.symlink_to('openssl-real')
+    audit_pairing_executables(root)

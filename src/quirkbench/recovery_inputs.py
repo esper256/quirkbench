@@ -36,7 +36,7 @@ def recorded_packages():
 def acquisition_wrapper(root, owner):
     """Carry this installation's interpreter/library bootstrap outside checkouts."""
     import sys
-    bootstrap = ("import runpy,sys;sys.path.insert(0,sys.argv.pop(1));"
+    bootstrap = ("import runpy,sys;sys.dont_write_bytecode=True;sys.path.insert(0,sys.argv.pop(1));"
                  "runpy.run_module('quirkbench.recovery_inputs',run_name='__main__')")
     return [sys.executable, '-c', bootstrap, str(Path(__file__).resolve().parent.parent),
             '--state', str(root), '--owner', owner]

@@ -294,6 +294,10 @@ def parser():
     replay = recovery_actions.add_parser('replay-check', help='report missing or changed exact RPM inputs in a retained repository; read-only')
     replay.add_argument('--spec', type=Path, required=True)
     replay.add_argument('--directory', type=Path, required=True)
+    candidate = recovery_actions.add_parser('candidate-spec', help='print reviewed stock inputs with explicitly supplied repository bytes; no download')
+    candidate.add_argument('--candidate', choices=['fedora44-pairing-v1'], required=True)
+    candidate.add_argument('--repository', type=Path, required=True, help='reviewed .repo file for the exact selected closure')
+    candidate.add_argument('--repository-id', action='append', required=True, help='enabled ID from supplied repository; repeat for each selected ID')
     acquire = recovery_actions.add_parser('acquire-plan', help='prepare recorded acquisition and print exact command; does not download')
     acquire.add_argument('directory',type=Path)
     acquire.add_argument('--spec',type=Path,help='immutable acquisition specification with pinned repository bytes and RPM trust')
@@ -422,6 +426,15 @@ def _main(argv=None):
             return 0 if answer['selected_inputs_available'] else 4
         except (OSError, ValueError, RuntimeError) as exc:
             print('RPM replay inventory unavailable: '+str(exc), file=sys.stderr)
+            return 2
+    if args.command == 'recovery-inputs' and args.action == 'candidate-spec':
+        from .recovery_acquisition import stock_candidate_spec
+        try:
+            answer = stock_candidate_spec(args.candidate, args.repository, args.repository_id)
+            print(json.dumps(answer, indent=2, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print('stock specification unavailable: '+str(exc), file=sys.stderr)
             return 2
     if args.command in ('experiment','attempt'):
         from .attended_views import ApprovalReader,experiments,review,attempt,decide
@@ -1348,7 +1361,7 @@ def _main(argv=None):
 def main(argv=None):
     """A publication barrier, not a scheduler; read-only commands do no housekeeping."""
     args=parser().parse_args(argv)
-    readonly=((args.command=='recovery-inputs' and args.action=='replay-check') or args.command in ('storage','experiment','build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
+    readonly=((args.command=='recovery-inputs' and args.action in ('replay-check','candidate-spec')) or args.command in ('storage','experiment','build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
                                'target','endpoint','target-service','serve-repository','release-check') or
               (args.command=='campaign' and args.action=='status') or
               (args.command=='attempt' and args.action in ('status','show')) or

@@ -65,12 +65,25 @@ gpgcheck=1
 gpgkey=file:///absolute/reviewed-fedora-public.asc
 ```
 
-Create a **new** specification by changing only the repository binding of the
-selected JSON. Package hashes, Fedora/kernel release and full key fingerprint
+For a first pairing image, the supported reviewed selection needs no package-list
+editing:
+
+```sh
+quirkbench recovery-inputs candidate-spec --candidate fedora44-pairing-v1 \
+  --repository /absolute/retained-stock.repo --repository-id retained-stock \
+  > /absolute/replay-candidate.json
+```
+
+Inventory it before acquisition; the retained repository must also contain its
+exact signed OpenSSL input. This deliberately selects the new pairing snapshot;
+it does not change an existing acquisition owner's identity.
+
+For replay of an **existing** selected snapshot instead, create a new specification
+by changing only the repository binding of that selected JSON. Package hashes, Fedora/kernel release and full key fingerprint
 remain identical:
 
 ```sh
-PYTHONPATH=/absolute/selected-runtime/lib python3 - /absolute/selected-candidate.json /absolute/retained-stock.repo \
+PYTHONPATH=/absolute/selected-runtime/lib python3 -B - /absolute/selected-candidate.json /absolute/retained-stock.repo \
   /absolute/replay-candidate.json <<'PY'
 import sys
 from pathlib import Path
@@ -88,7 +101,8 @@ PY
 For an archive installation, use its recorded `runtime_root` in place of
 `/absolute/selected-runtime`: the launcher's library bootstrap is local to that
 launcher, so the specification-editing Python snippet explicitly selects the same installed
-`lib` directory with `PYTHONPATH`. The acquisition wrapper independently carries its own library bootstrap. Use a supported Python3.11+ interpreter. For a pip installation, use
+`lib` directory with `PYTHONPATH`. The acquisition wrapper independently carries its own library bootstrap. Use a supported Python3.11+ interpreter. `-B` and the generated wrapper prevent
+bytecode caches from changing the immutable installed library. For a pip installation, use
 its interpreter and omit this prefix if Quirkbench is already importable. Do not
 point it at a different runtime than the controller used for planning/locking.
 
