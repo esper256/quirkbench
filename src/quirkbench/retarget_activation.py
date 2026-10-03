@@ -93,10 +93,10 @@ def _records(control,directory,intent):
 
 def _blank_agent(path,device, *,partial=False):
     path=_managed_path(path)
-    names=set(p.name for p in path.iterdir());expected={'journal.json','blobs','agent.lock'}
+    names=set(p.name for p in entries(path,4));expected={'journal.json','blobs','agent.lock'}
     if names-expected or not partial and names!=expected:
         raise Conflict('new retarget agent is not the exact blank spool')
-    if 'blobs' in names and any(_managed_path(path/'blobs').iterdir()):raise Conflict('new retarget spool cannot inherit old chunks')
+    if 'blobs' in names and entries(_managed_path(path/'blobs'),1):raise Conflict('new retarget spool cannot inherit old chunks')
     if 'journal.json' in names and _read(path,'journal.json')!=_blank(device):raise Conflict('new retarget spool cannot inherit old work')
     if 'agent.lock' in names and _read(path,'agent.lock')!=b'':raise Conflict('new retarget lock file changed')
 
@@ -117,7 +117,7 @@ def original_locations(control,directory,intent):
     if _present(old_pending):
         _managed_path(old_pending)
         if _present(root_pending) and (_private_files(root_pending,NAMES)!=new
-                or set(p.name for p in root_pending.iterdir())!=set(NAMES)):
+                or set(p.name for p in entries(root_pending,len(NAMES)+1))!=set(NAMES)):
             raise Conflict('both original and archived enrollment sources remain or root state is mixed')
     else:
         old_pending=root_pending;_managed_path(old_pending)
@@ -134,7 +134,7 @@ def original_locations(control,directory,intent):
     pending_stage=_managed_path(directory/'new-enrollment')
     if _present(pending_stage):
         if _present(root_pending) and _present(archive/'enrollment-pending'):raise Conflict('both staged and selected new enrollment exist')
-        names=set(p.name for p in pending_stage.iterdir())
+        names=set(p.name for p in entries(pending_stage,len(NAMES)+1))
         if names-set(NAMES) or any(_read(pending_stage,name)!=new[name] for name in names):
             raise Conflict('new enrollment staging contains unknown or changed bytes')
     return archive,old_pending,old_agent

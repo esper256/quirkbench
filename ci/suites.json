@@ -28,8 +28,11 @@
     "paths": [
       "src/quirkbench/endpoint*",
       "src/quirkbench/controller_endpoint.py",
+      "src/quirkbench/controller_tls.py",
       "tests/test_endpoint*",
-      "tests/test_controller_endpoint.py"
+      "tests/test_controller_tls.py",
+      "tests/test_controller_endpoint.py",
+      "tests/test_controller_tls.py"
     ],
     "tests": [
       "tests/test_endpoint_probe.py",
