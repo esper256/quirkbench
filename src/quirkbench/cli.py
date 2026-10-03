@@ -317,6 +317,7 @@ def _main(argv=None):
         from .investigation_sources import execute
         from .contracts import Conflict, ContractError
         from .operations import operation_response
+        from .store import StoragePressure
         try:
             answer = execute(discover_state_root(args.state), args)
             if args.json:
@@ -333,10 +334,10 @@ def _main(argv=None):
                 from .state_reader import safe_text
                 print(safe_text(json.dumps(answer['data'], indent=2, sort_keys=True)))
             return 0
-        except (OSError, ValueError, sqlite3.Error) as exc:
+        except (OSError, ValueError, sqlite3.Error, StoragePressure) as exc:
             from .investigation_pipeline import PipelineBlocked
             from .candidate_rootfs_operation import CandidateBlocked
-            code = 'BLOCKED' if isinstance(exc,(PipelineBlocked,CandidateBlocked)) else 'CONFLICT' if isinstance(exc, Conflict) else 'INVALID_INPUT' if isinstance(exc, ContractError) else 'INFRASTRUCTURE'
+            code = 'BLOCKED' if isinstance(exc,(PipelineBlocked,CandidateBlocked,StoragePressure)) else 'CONFLICT' if isinstance(exc, Conflict) else 'INVALID_INPUT' if isinstance(exc, ContractError) else 'INFRASTRUCTURE'
             message = str(exc)[:512] if code != 'INFRASTRUCTURE' else 'source service unavailable; inspect the retained operation and readiness'
             if args.json:
                 print(json.dumps(operation_response(error={'code': code, 'message': message, 'retryable': code in ('BLOCKED','INFRASTRUCTURE')}), sort_keys=True))

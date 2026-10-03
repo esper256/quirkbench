@@ -462,3 +462,25 @@ def test_joined_service_unavailability_has_c2_blocked_response(joined,monkeypatc
     answer=json.loads(capsys.readouterr().out)
     assert result==4 and answer['error']['code']=='BLOCKED' and answer['error']['retryable'] is True
     assert answer['operation_id'] is None
+
+
+@pytest.mark.parametrize('action',('prepare-candidate','build','compose'))
+def test_joined_storage_pressure_has_c2_blocked_response(joined,bounded_build,monkeypatch,capsys,action):
+    from quirkbench import cli,controller_service
+    from quirkbench.store import ArtifactStore,StoragePressure
+    c,entry,builder,snapshot,source,candidate,config=joined
+    monkeypatch.setattr(controller_service,'require_ready',lambda _:None)
+    arguments=[]
+    if action=='build':arguments=['--capture',source,'--candidate',candidate]
+    elif action=='compose':
+        with c.lifecycle() as owner:
+            build=pipeline.submit(c,'investigation','build','pressure-build',source=source,candidate=candidate,ready=lambda _:None)
+            complete_job(c,owner,monkeypatch)
+        arguments=['--build',build['operation_id'],'--repository','lab']
+    def pressure(self,*args,**kwargs):raise StoragePressure('free-space reserve reached')
+    monkeypatch.setattr(ArtifactStore,'put',pressure)
+    result=cli._main(['--state',str(c.root),'--reserve-gib','0','investigation',action,'investigation',
+        *arguments,'--request-id','pressure-'+action,'--json'])
+    answer=json.loads(capsys.readouterr().out)
+    assert result==4 and answer['error']=={'code':'BLOCKED','message':'free-space reserve reached','retryable':True}
+    assert answer['operation_id'] is None
