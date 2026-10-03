@@ -108,6 +108,8 @@ from .investigations import MIGRATION as INVESTIGATION_MIGRATION
 MIGRATIONS.append(INVESTIGATION_MIGRATION)
 from .external_proposals import MIGRATION as EXTERNAL_PROPOSAL_MIGRATION
 MIGRATIONS.append(EXTERNAL_PROPOSAL_MIGRATION)
+from .attended_baseline import MIGRATION as ATTENDED_BASELINE_MIGRATION
+MIGRATIONS.append(ATTENDED_BASELINE_MIGRATION)
 
 def uid():
     return uuid.uuid4().hex
@@ -732,6 +734,8 @@ class Controller(OperatorApprovals):
 
     def _admit_operation_db(self,db,request_id,kind,intent,request_digest,input_digest,retained_inputs, *,campaign_id=None,device_id=None):
         """Shared transaction for planned additive application admission records."""
+        if db.execute('SELECT 1 FROM attended_baseline_commands WHERE request_id=?',(request_id,)).fetchone():
+            raise Conflict('request ID already belongs to an attended baseline command')
         if db.execute('SELECT 1 FROM observation_response_commands WHERE id=?', (request_id,)).fetchone():
             raise Conflict('request ID already belongs to an observation response')
         previous = db.execute('SELECT id,request_digest FROM operations WHERE request_id=?', (request_id,)).fetchone()
@@ -1618,7 +1622,9 @@ class Controller(OperatorApprovals):
         for value in evidence.values():self.store.verify(value)
         if self.store.path(evidence['build_provenance']).stat().st_size > 1024 * 1024:
             raise ContractError('build provenance exceeds size limit')
-        build=json.loads(self.store.get(evidence['build_provenance']))
+        try:build=json.loads(self.store.get(evidence['build_provenance']))
+        except (ValueError,TypeError) as exc:
+            raise ContractError('build evidence does not match deployment provenance') from exc
         self._validate_deployment_build(manifest,evidence,build)
         return evidence
 
@@ -1999,6 +2005,8 @@ class Controller(OperatorApprovals):
         with self.transaction() as db:
             if db.execute('SELECT 1 FROM operations WHERE request_id=?', (command_request_id,)).fetchone():
                 raise Conflict('request ID already belongs to an operation')
+            if db.execute('SELECT 1 FROM attended_baseline_commands WHERE request_id=?',(command_request_id,)).fetchone():
+                raise Conflict('request ID already belongs to an attended baseline command')
             replay = db.execute('SELECT request,document FROM observation_response_commands WHERE id=?',
                                 (command_request_id,)).fetchone()
             if replay and (replay['request'] != request_id or replay['document'] != document):

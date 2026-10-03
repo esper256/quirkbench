@@ -80,6 +80,8 @@ def start(controller,name,target,request_id, *,problem=b'',workspace=None,second
     validate({'schema_version':1,'record_type':'investigation','session':session,'limits':limits,
               'catalog_sha256':'0'*64,'inventory_sha256':None,'plan_sha256':None,'baseline_sha256':None})
     with controller.transaction() as db:
+        if db.execute('SELECT 1 FROM attended_baseline_commands WHERE request_id=?',(request_id,)).fetchone():
+            raise Conflict('request ID already belongs to an attended baseline command')
         previous = db.execute('SELECT * FROM investigations WHERE id=? OR request_id=?',(name,request_id)).fetchone()
         if previous:
             if previous['id'] != name or previous['request_id'] != request_id or previous['request_digest'] != requested:
