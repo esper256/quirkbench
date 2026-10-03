@@ -212,7 +212,7 @@ assert current trust. Missing or inconsistent retained objects are unavailable.
 | `investigation capture-source INVESTIGATION --request-id ID` | Explicit exclusive-writer handoff; return capture operation, not immediate snapshot completion. |
 | `experiment list --investigation INVESTIGATION --json`, `experiment review EXPERIMENT`, `attempt show ATTEMPT --json` | Keep experiment and physical attempt distinct; review exact source/candidate/recipe/risks. Retain current `attempt status`. |
 | `attempt approve ATTEMPT` | Human facade supplies durable retry identity; keep existing explicit `--request-id` form and exact approval semantics. |
-| `evidence read DIGEST --offset N --length N` | Authorized bounded reads, never private configuration. |
+| `evidence read DIGEST --investigation INVESTIGATION --offset N --length N` | Authorized bounded reads, never private configuration. |
 | `operation status ID --json`, `investigation status INVESTIGATION`, `monitor [INVESTIGATION]` | Shared facts and actionable waits; retain current monitor flags. Watching launches no agent. |
 | `investigation pause/resume INVESTIGATION`, `target poweroff TARGET` | Reuse pause/reconciliation; coordinated shutdown with local recovery equivalent and explicit uncertainty. |
 | `investigation observations INVESTIGATION --json`, `investigation respond INVESTIGATION` | Interactive response uses same durable typed API; machine form takes `--request ID --file FILE --request-id ID`. |

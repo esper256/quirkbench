@@ -87,6 +87,26 @@ def parser():
             command.add_argument('--source', type=Path, required=True, help='canonical existing user Git root; original is preserved')
             command.add_argument('--base-oid', required=True, help='full actual Git base OID, also the original HEAD')
             command.add_argument('--allow-untracked', action='append', default=[], metavar='PATH')
+    for name in ('context','history','recipes','proposal-schema','observations','observation','respond'):
+        command=investigation_actions.add_parser(name,help='bounded existing-record view' if name!='respond' else 'answer a typed human request')
+        command.add_argument('name',help='existing investigation identity')
+        command.add_argument('--json',action='store_true')
+        if name in ('history','observations'):
+            command.add_argument('--after',type=int,default=0,help='cursor for this investigation and query kind')
+            command.add_argument('--limit',type=int,default=20)
+        if name=='history':command.add_argument('--kind',choices=('attempts','events','evidence'),default='attempts')
+        if name in ('observation','respond'):command.add_argument('--request',required=name=='observation')
+        if name=='respond':
+            command.add_argument('--file',type=Path,help='existing typed observation response; required for machine input')
+            command.add_argument('--request-id',required=True,help='durable answer retry identity')
+            command.add_argument('--operator',help='operator identity for attended input')
+    evidence=commands.add_parser('evidence',help='read public investigation evidence without private CAS access')
+    evidence_actions=evidence.add_subparsers(dest='action',required=True)
+    read=evidence_actions.add_parser('read')
+    read.add_argument('digest');read.add_argument('--investigation',required=True,help='authorized existing investigation identity')
+    read.add_argument('--offset',type=int,default=0);read.add_argument('--length',type=int,default=16384)
+    read.add_argument('--after',type=int,default=0);read.add_argument('--limit',type=int,default=20)
+    read.add_argument('--json',action='store_true')
     endpoint = commands.add_parser('endpoint', help='inspect or maintain controller addresses using the existing stopped service')
     endpoint.add_argument('action',choices=['show','stage','renew','apply','rollback','wizard'])
     endpoint.add_argument('--request-id',help='exact retained endpoint request; omitted show selects configured identity')
@@ -281,7 +301,8 @@ def parser():
 
 def _main(argv=None):
     args = parser().parse_args(argv)
-    if args.command == 'investigation':
+    if args.command in ('investigation','evidence'):
+        if args.command=='evidence':args.name=args.investigation;args.action='evidence'
         from .investigation_sources import execute
         from .contracts import Conflict, ContractError
         from .operations import operation_response
@@ -298,7 +319,8 @@ def _main(argv=None):
                 print('Progress: ' + answer['data']['monitor_command'])
                 print('Preparation/capture completion requires the existing controller service. Resume the investigation explicitly if paused.')
             else:
-                print(json.dumps(answer['data'], indent=2, sort_keys=True))
+                from .state_reader import safe_text
+                print(safe_text(json.dumps(answer['data'], indent=2, sort_keys=True)))
             return 0
         except (OSError, ValueError, sqlite3.Error) as exc:
             code = 'CONFLICT' if isinstance(exc, Conflict) else 'INVALID_INPUT' if isinstance(exc, ContractError) else 'INFRASTRUCTURE'
@@ -1124,7 +1146,7 @@ def main(argv=None):
     readonly=(args.command in ('build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
                                'target','endpoint','target-service','serve-repository') or
               (args.command=='campaign' and args.action=='status') or
-              (args.command=='investigation' and args.action in ('status','source','brief','baseline')) or
+              (args.command=='investigation' and args.action in ('status','source','brief','baseline','context','history','recipes','proposal-schema','observations','observation')) or args.command=='evidence' or
               (args.command=='settings' and args.action=='show') or
               (args.command=='maintenance' and args.action in ('status','prune')) or
               (args.command=='session' and args.action in ('observations','observation')) or

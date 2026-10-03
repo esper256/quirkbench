@@ -1950,7 +1950,7 @@ class Controller(OperatorApprovals):
                         request['issued_at'], request['deadline_at']))
         return request['request_id']
 
-    def respond_observation(self, session_id, request_id, command_request_id, raw):
+    def respond_observation(self, session_id, request_id, command_request_id, raw, *, campaign_id=None):
         """Join by exact question ID and keep a late answer on that question."""
         from datetime import datetime, timezone
         from .product_contracts import load_document
@@ -1968,9 +1968,9 @@ class Controller(OperatorApprovals):
                                 (command_request_id,)).fetchone()
             if replay and (replay['request'] != request_id or replay['document'] != document):
                 raise Conflict('response command request ID was reused with different content')
-            question = db.execute('SELECT session,issued_at,deadline_at FROM observation_requests WHERE id=?',
+            question = db.execute('SELECT session,campaign,issued_at,deadline_at FROM observation_requests WHERE id=?',
                                   (request_id,)).fetchone()
-            if question is None or question['session'] != session_id:
+            if question is None or question['session'] != session_id or (campaign_id is not None and question['campaign'] != identifier(campaign_id)):
                 raise ContractError('unknown observation request for session')
             old = db.execute('SELECT document,received_at,late FROM observation_responses WHERE request=?',
                              (request_id,)).fetchone()
@@ -1996,7 +1996,7 @@ class Controller(OperatorApprovals):
             return {'request_id': request_id, 'response': response,
                     'received_at': now, 'late': late}
 
-    def list_observations(self, session_id, *, after=0, limit=20):
+    def list_observations(self, session_id, *, after=0, limit=20, campaign_id=None):
         """Return bounded durable question/answer records for CLI and monitors."""
         from datetime import datetime, timezone
         session_id = identifier(session_id)
@@ -2006,8 +2006,8 @@ class Controller(OperatorApprovals):
         try:
             rows = db.execute('SELECT q.seq,q.document AS question,r.document AS response,r.received_at,r.late '
                               'FROM observation_requests q LEFT JOIN observation_responses r ON r.request=q.id '
-                              'WHERE q.session=? AND q.seq>? ORDER BY q.seq LIMIT ?',
-                              (session_id, after, limit + 1)).fetchall()
+                              'WHERE q.session=? AND q.seq>? AND (? IS NULL OR q.campaign=?) ORDER BY q.seq LIMIT ?',
+                              (session_id, after, campaign_id, identifier(campaign_id) if campaign_id is not None else None, limit + 1)).fetchall()
         finally:
             db.close()
         now = self.clock()
@@ -2032,7 +2032,7 @@ class Controller(OperatorApprovals):
         return {'session_id': session_id, 'items': items,
                 'next_cursor': items[-1]['cursor'] if len(rows) > len(items) else None}
 
-    def observation_detail(self, session_id, request_id):
+    def observation_detail(self, session_id, request_id, *, campaign_id=None):
         """Read the exact persisted documents for a single human request."""
         from datetime import datetime, timezone
         session_id = identifier(session_id)
@@ -2041,7 +2041,7 @@ class Controller(OperatorApprovals):
         try:
             row = db.execute('SELECT q.document AS question,r.document AS response,r.received_at,r.late '
                              'FROM observation_requests q LEFT JOIN observation_responses r ON r.request=q.id '
-                             'WHERE q.session=? AND q.id=?', (session_id, request_id)).fetchone()
+                             'WHERE q.session=? AND q.id=? AND (? IS NULL OR q.campaign=?)', (session_id, request_id, campaign_id, identifier(campaign_id) if campaign_id is not None else None)).fetchone()
         finally:
             db.close()
         if row is None:
