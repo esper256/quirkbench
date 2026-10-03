@@ -67,6 +67,41 @@ def bounded_attempt(c,step,recovery_boot,candidate_boot,new_recovery):
     return attempt
 
 
+def source_free(c,action='needs_human',decision=None):
+    from quirkbench.investigations import record
+    from quirkbench.contracts import digest
+    context=proposals.context_receipt(StateReader(c.root),'investigation',include_source=False)['input_context']
+    with c.transaction() as db:inv=record(c,'investigation',db)
+    value={'schema_version':2,'record_type':'agent-proposal','decision_id':decision or action,'campaign_id':'investigation',
+        'input_context':context,'input_context_digest':digest(canonical(context)),'action':action,'hypothesis':'Need explicit observation.',
+        'summary':'No physical conclusion inferred.','rejected_approaches':[],'workspace_id':inv['session']['workspace_id'],'base_oid':None,
+        'change_intent':'Pause and retain this decision.','source':None,'experiment':None,'usage':{'input_tokens':1,'output_tokens':1}}
+    return proposals.submit(c,'investigation',value,'propose-'+value['decision_id'])['operation_id'],value
+
+
+def start_build(c,owner,monkeypatch,candidate,decision='failure'):
+    c.resume('investigation');operation,value,_=capture_proposal(c,owner,monkeypatch,decision,'selected patch\n')
+    receipt=dispatch.declare(c,'investigation',operation,'dispatch-'+decision,candidate=candidate,repository='lab',ready=lambda _:None)
+    build=JobCoordinator(owner,Workers()).tick()['operation_id']
+    return operation,value,receipt,build
+
+
+def stopped_composition(c,owner,monkeypatch,candidate):
+    operation,value,receipt,build=start_build(c,owner,monkeypatch,candidate)
+    complete_job(c,owner,monkeypatch)
+    compose=JobCoordinator(owner,Workers()).tick()['operation_id']
+    complete_job(c,owner,monkeypatch,kind='compose')
+    return operation,value,receipt,compose
+
+
+def no_experiments(c,operation):
+    with c.transaction() as db:
+        assert db.execute('SELECT COUNT(*) FROM experiments').fetchone()[0]==0
+        assert db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0]==0
+        assert db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0]==0
+        assert db.execute('SELECT experiment FROM proposal_dispatch_commands WHERE operation=?',(operation,)).fetchone()[0] is None
+
+
 def test_baseline_patch_further_comparison_with_distinct_approvals_evidence_context(published,joined,monkeypatch,tmp_path,capsys):
     c,composition=published;candidate=joined[5]
     with c.lifecycle() as owner:
@@ -125,18 +160,179 @@ def test_source_free_dispatch_pauses_without_build_or_attempt(published,monkeypa
     c,_=published
     with c.lifecycle() as owner:
         c.resume('investigation')
-        from quirkbench.investigations import record
-        from quirkbench.contracts import digest
-        context=proposals.context_receipt(StateReader(c.root),'investigation',include_source=False)['input_context']
-        with c.transaction() as db:inv=record(c,'investigation',db)
-        value={'schema_version':2,'record_type':'agent-proposal','decision_id':action,'campaign_id':'investigation',
-            'input_context':context,'input_context_digest':digest(canonical(context)),'action':action,'hypothesis':'Need explicit observation.',
-            'summary':'No physical conclusion inferred.','rejected_approaches':[],'workspace_id':inv['session']['workspace_id'],'base_oid':None,
-            'change_intent':'Pause and retain this decision.','source':None,'experiment':None,'usage':{'input_tokens':1,'output_tokens':1}}
-        operation=proposals.submit(c,'investigation',value,'propose-'+action)['operation_id']
+        operation,_=source_free(c,action)
         dispatch.declare(c,'investigation',operation,'dispatch-'+action,ready=lambda _:None)
         assert JobCoordinator(owner,Workers()).tick()=={'id':operation,'state':'SUCCEEDED'}
         assert c.status('investigation')['state']=='PAUSED'
         with c.transaction() as db:
             assert db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0]==0
             assert db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0]==0
+
+
+def test_real_human_cli_and_machine_replay(published,monkeypatch,capsys):
+    c,_=published
+    with c.lifecycle():
+        c.resume('investigation');operation,_=source_free(c)
+        monkeypatch.setattr('quirkbench.controller_service.require_ready',lambda _:None)
+        argv=['--state',str(c.root),'--reserve-gib','0','investigation','dispatch-proposal','investigation','--proposal',operation]
+        assert cli.main(argv)==0
+        human=capsys.readouterr().out
+        assert operation in human and 'monitor investigation' in human
+        with c.transaction() as db:request=db.execute('SELECT request_id FROM proposal_dispatch_commands').fetchone()[0]
+        monkeypatch.setattr('quirkbench.controller_service.require_ready',lambda _:pytest.fail('replay requested readiness'))
+        assert cli.main([*argv,'--request-id',request,'--json'])==0
+        replay=json.loads(capsys.readouterr().out)
+        assert replay['operation_id']==operation and replay['data']['dispatch_connected']
+
+
+def test_restart_child_resume_cannot_restart_unreconciled_parent(published,joined,monkeypatch):
+    c,_=published
+    from quirkbench.job_operations import resume
+    with c.lifecycle() as owner:
+        operation,_,_,build=start_build(c,owner,monkeypatch,joined[5])
+    with c.lifecycle() as owner:
+        assert c.operation_status(operation)['data']['state']=='INTERRUPTED'
+        resume(owner,build)
+        assert JobCoordinator(owner,Workers()).tick() is None
+        with pytest.raises(Conflict,match='explicit reconciliation'):
+            owner.claim(build,stage='job_inputs',deadline=c.clock()+30)
+        dispatch.resume(owner,operation)
+        complete_job(c,owner,monkeypatch)
+        assert c.operation_status(build)['data']['state']=='SUCCEEDED'
+        assert JobCoordinator(owner,Workers()).tick()['ok']
+        with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM operations WHERE kind=?',('build',)).fetchone()[0]==2
+        no_experiments(c,operation)
+
+
+def test_paused_active_worker_drains_but_next_stage_waits(published,joined,monkeypatch):
+    c,_=published
+    with c.lifecycle() as owner:
+        operation,_,_,build=start_build(c,owner,monkeypatch,joined[5])
+        services=Workers();coordinator=JobCoordinator(owner,services)
+        claim=coordinator.tick();assert claim['stage']=='job_inputs'
+        assert worker(c,claim,monkeypatch)==0
+        c.pause('investigation');services.done=True
+        assert coordinator.tick()['state']=='QUEUED'
+        assert coordinator.tick() is None
+        c.resume('investigation')
+        claim=coordinator.tick();assert claim['stage']=='kernel_build'
+        assert worker(c,claim,monkeypatch)==0;services.done=True
+        assert coordinator.tick()['state']=='SUCCEEDED'
+        no_experiments(c,operation)
+
+
+def test_changed_dispatch_blocks_authoritative_child_claim(published,joined,monkeypatch):
+    c,_=published
+    with c.lifecycle() as owner:
+        operation,_,receipt,build=start_build(c,owner,monkeypatch,joined[5])
+        c.store.path(receipt['data']['dispatch_sha256']).write_bytes(b'corrupted dispatch')
+        assert JobCoordinator(owner,Workers()).tick() is None
+        with pytest.raises(ContractError):owner.claim(build,stage='job_inputs',deadline=c.clock()+30)
+        assert c.operation_status(build)['data']['state']=='QUEUED'
+        no_experiments(c,operation)
+
+
+@pytest.mark.parametrize('target',['dispatch','proposal','context'])
+def test_source_free_final_cas_fence(target,published,monkeypatch):
+    c,_=published
+    with c.lifecycle() as owner:
+        c.resume('investigation');operation,_=source_free(c)
+        receipt=dispatch.declare(c,'investigation',operation,'dispatch-human',ready=lambda _:None)
+        with c.transaction() as db:
+            row=db.execute('SELECT proposal_digest,context_digest FROM external_proposals WHERE operation=?',(operation,)).fetchone()
+        selected={'dispatch':receipt['data']['dispatch_sha256'],'proposal':row[0],'context':row[1]}[target]
+        original=c.store.put
+        def changed(raw,**kw):
+            artifact=original(raw,**kw)
+            if json.loads(raw).get('action')=='needs_human':c.store.path(selected).write_bytes(b'corrupted admitted input')
+            return artifact
+        monkeypatch.setattr(c.store,'put',changed)
+        assert dispatch.tick(owner)=={'id':operation,'state':'FAILED'}
+        assert c.status('investigation')['state']=='RUNNING'
+        no_experiments(c,operation)
+
+
+@pytest.mark.parametrize('target',['dispatch','proposal','context'])
+def test_native_pin_callback_final_fence(target,published,joined,monkeypatch):
+    c,_=published
+    with c.lifecycle() as owner:
+        operation,_,receipt,_=stopped_composition(c,owner,monkeypatch,joined[5])
+        with c.transaction() as db:row=db.execute('SELECT proposal_digest,context_digest FROM external_proposals WHERE operation=?',(operation,)).fetchone()
+        selected={'dispatch':receipt['data']['dispatch_sha256'],'proposal':row[0],'context':row[1]}[target]
+        original=c._retain_deployment
+        def changed(*args,**kwargs):
+            original(*args,**kwargs);c.store.path(selected).write_bytes(b'corrupt during native pin')
+        monkeypatch.setattr(c,'_retain_deployment',changed)
+        assert dispatch.tick(owner)=={'id':operation,'state':'FAILED'}
+        no_experiments(c,operation)
+
+
+def test_signing_choice_changed_during_child_admission_rolls_back_link(published,joined,monkeypatch):
+    c,_=published
+    with c.lifecycle() as owner:
+        operation,_,_,build=start_build(c,owner,monkeypatch,joined[5]);complete_job(c,owner,monkeypatch)
+        from quirkbench import investigation_pipeline as pipeline
+        from quirkbench.controller_service import configuration
+        original=pipeline.submit
+        def changed(*args,**kwargs):
+            config=configuration(c.root);config['composition_signing']['fingerprint']='B'*40
+            (c.root/'private/controller-service.json').write_bytes(canonical(config))
+            return original(*args,**kwargs)
+        monkeypatch.setattr(pipeline,'submit',changed)
+        assert dispatch.tick(owner)=={'id':operation,'state':'INTERRUPTED'}
+        with c.transaction() as db:
+            assert db.execute('SELECT composition_operation FROM proposal_dispatch_commands WHERE operation=?',(operation,)).fetchone()[0] is None
+            assert db.execute('SELECT COUNT(*) FROM operations WHERE kind=?',('compose',)).fetchone()[0]==1
+        no_experiments(c,operation)
+
+
+@pytest.mark.parametrize('failure',['storage','native-auth','native-build','error-storage','error-corrupt'])
+def test_resource_and_native_failures_are_durable_without_experiment(failure,published,joined,monkeypatch):
+    c,_=published
+    import subprocess
+    from quirkbench.build import BuildError
+    from quirkbench.store import StoragePressure
+    with c.lifecycle() as owner:
+        if failure=='storage':
+            c.resume('investigation');operation,_,_=capture_proposal(c,owner,monkeypatch,'pressure','patch\n')
+            dispatch.declare(c,'investigation',operation,'dispatch-pressure',candidate=joined[5],repository='lab',ready=lambda _:None)
+            monkeypatch.setattr(c.store,'check_space',lambda *a:(_ for _ in ()).throw(StoragePressure('full')))
+        else:
+            operation,_,_,_=stopped_composition(c,owner,monkeypatch,joined[5])
+            def fail(*args,**kwargs):
+                if failure=='native-build':raise BuildError('private native details')
+                raise subprocess.CalledProcessError(1,['native','private-secret'])
+            monkeypatch.setattr(c,'_retain_deployment',fail)
+            original=c.store.put
+            def bad_error(raw,**kw):
+                if json.loads(raw).get('code')=='PROPOSAL_DISPATCH_BLOCKED':
+                    if failure=='error-storage':raise StoragePressure('full diagnostics')
+                    artifact=original(raw,**kw);c.store.path(artifact.sha256).write_bytes(b'bad diagnostic');return artifact
+                return original(raw,**kw)
+            if failure.startswith('error-'):monkeypatch.setattr(c.store,'put',bad_error)
+        assert dispatch.tick(owner)=={'id':operation,'state':'INTERRUPTED'}
+        row=c.operation_status(operation)['data']
+        if failure in ('storage','error-storage','error-corrupt'):assert row['error_digest'] is None
+        else:assert 'private' not in c.store.get(row['error_digest']).decode()
+        assert dispatch.tick(owner) is None
+        no_experiments(c,operation)
+
+
+def test_waiting_interrupted_children_do_not_starve_later_human_decision(published,joined,monkeypatch):
+    c,_=published
+    with c.lifecycle() as owner:
+        operation,_,_,build=start_build(c,owner,monkeypatch,joined[5])
+        with c.transaction() as db:
+            db.execute("UPDATE operations SET state='INTERRUPTED' WHERE id=?",(build,))
+            # Copy only the scheduling rows to reproduce a bounded scan barrier;
+            # no admission/source semantics of these blocked rows are exercised.
+            columns=[row[1] for row in db.execute('PRAGMA table_info(operations)')]
+            original=dict(db.execute('SELECT * FROM operations WHERE id=?',(operation,)).fetchone())
+            for index in range(100):
+                clone={**original,'id':'blocked-'+str(index),'request_id':'blocked-'+str(index)}
+                db.execute('INSERT INTO operations('+','.join(columns)+') VALUES('+','.join('?' for _ in columns)+')',tuple(clone[k] for k in columns))
+                db.execute('INSERT INTO proposal_outbox SELECT ?,proposal_digest,action FROM proposal_outbox WHERE operation=?',(clone['id'],operation))
+                db.execute('INSERT INTO proposal_dispatch_commands SELECT ?,request_digest,?,input_digest,result_document,build_operation,composition_operation,experiment FROM proposal_dispatch_commands WHERE operation=?',(clone['request_id'],clone['id'],operation))
+        later,_=source_free(c,decision='later')
+        dispatch.declare(c,'investigation',later,'dispatch-later',ready=lambda _:None)
+        assert dispatch.tick(owner)=={'id':later,'state':'SUCCEEDED'}

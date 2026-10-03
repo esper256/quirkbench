@@ -329,13 +329,28 @@ def tick(owner):
             state='FAILED' if isinstance(exc,ContractError) and not isinstance(exc,Conflict) else 'INTERRUPTED'
             message=str(exc)[:512] if isinstance(exc,ContractError) else 'Proposal publication or resources unavailable; inspect retained diagnostics and reconcile before explicit resume.'
             error_value={'code':'PROPOSAL_DISPATCH_BLOCKED','message':message,'retryable':state=='INTERRUPTED'}
-            error=None if isinstance(exc,StoragePressure) else c.store.put(canonical(error_value))
+            pressure=isinstance(exc,StoragePressure)
+            error=None
+            if not pressure:
+                try:
+                    error=c.store.put(canonical(error_value))
+                    if document(c.store,error.sha256)!=error_value:
+                        raise Conflict('dispatch failure bytes changed before publication')
+                except StoragePressure:
+                    pressure=True
+                except (OSError,ValueError):
+                    # A broken diagnostic must not become a referenced artifact
+                    # or hide the durable need for explicit reconciliation.
+                    error=None
             with c.transaction() as db:
                 try:fence(owner,db,row)
                 except Conflict:continue
-                if error is not None and document(c.store,error.sha256)!=error_value:raise Conflict('dispatch failure bytes changed before publication')
+                if error is not None:
+                    try:
+                        if document(c.store,error.sha256)!=error_value:raise Conflict('dispatch failure bytes changed before publication')
+                    except (OSError,ValueError):error=None
                 if error is not None:db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)',(row['id'],error.sha256))
-                reason='insufficient-storage; explicit-resume-required' if isinstance(exc,StoragePressure) else 'explicit-reconciliation-required'
+                reason='insufficient-storage; explicit-resume-required' if pressure else 'explicit-reconciliation-required'
                 db.execute("UPDATE operations SET state=?,error_digest=?,wait_event=?,updated=? WHERE id=?",(state,error.sha256 if error else None,reason,c.clock(),row['id']))
                 return {'id':row['id'],'state':state}
     return None
