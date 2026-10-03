@@ -147,7 +147,7 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
             if repo.exists() or repo.is_symlink():raise Conflict('initial publication repository already exists; select a fresh explicit alias')
             intent={'state_root':str(root),'repository_alias':alias,'repository_url':url,'signing_home':str(signing_home),
                 'signing_fingerprint':fingerprint,'unit':str(unit),**{key:digest(raw) for key,raw in captured.items()},
-                'controller_tls_identity_sha256':snapshot['identity_sha256'],'controller_certificate_sha256':snapshot['certificate_sha256']}
+                'controller_tls_identity_sha256':digest(tls_material['identity.json']),'controller_certificate_sha256':snapshot['certificate_sha256']}
             saved=validate({'schema_version':1,'record_type':'publication-setup','request_id':request_id,
                 'request_digest':digest(canonical({'kind':'publication-setup','arguments':intent})),'intent':intent,'completed_steps':[]})
             _durable_directory(_private_path(directory))
