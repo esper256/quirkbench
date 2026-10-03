@@ -15,6 +15,11 @@ from .state_config import configure_state_root, discover_state_root
 class CommandParser(argparse.ArgumentParser):
     def parse_args(self,args=None,namespace=None):
         value=super().parse_args(args,namespace)
+        if value.command in ('backup','restore'):
+            positional,option=('destination','output') if value.command=='backup' else ('backup','input')
+            if (getattr(value,positional) is None)==(getattr(value,option) is None):
+                self.error(value.command+' requires exactly one positional path or --'+option)
+            if getattr(value,option) is not None:setattr(value,positional,getattr(value,option))
         if value.command=='endpoint':
             requirements={'show':(), 'stage':('request_id','host','source_sha256'), 'renew':('request_id','host','source_sha256'),
                 'apply':('request_id','identity_sha256','fingerprint','unit'), 'rollback':('request_id','switch_sha256'), 'wizard':('unit',)}
@@ -281,8 +286,12 @@ def parser():
         decision.add_argument('--request-id',help='durable unique decision ID; human omission derives it from the complete exact binding; required with --json')
         decision.add_argument('--operator',help='local operator attribution; default current UID')
         decision.add_argument('--json',action='store_true')
-    backup = commands.add_parser('backup'); backup.add_argument('destination', type=Path)
-    restore = commands.add_parser('restore'); restore.add_argument('backup', type=Path)
+    backup = commands.add_parser('backup',help='backup the controller cut; capture quiesced sources first or report them incomplete')
+    backup.add_argument('destination',type=Path,nargs='?');backup.add_argument('--output',type=Path,help='new backup directory; includes coverage and reconciliation guidance')
+    restore = commands.add_parser('restore',help='verify backup into a new --state directory and leave scheduling paused')
+    restore.add_argument('backup',type=Path,nargs='?');restore.add_argument('--input',type=Path,help='backup directory; private identity and editable Git require separate restoration')
+    storage=commands.add_parser('storage',help='bounded read-only retention summary and eligible-cleanup guidance')
+    storage.add_argument('--json',action='store_true');storage.add_argument('--after',default='');storage.add_argument('--limit',type=int,default=20)
     resolve = commands.add_parser('resolve'); resolve.add_argument('attempt_id'); resolve.add_argument('disposition', choices=['retry','abandon']); resolve.add_argument('--note', required=True)
     snapshot = commands.add_parser('snapshot'); snapshot.add_argument('campaign_id'); snapshot.add_argument('--source', type=Path, required=True); snapshot.add_argument('files', nargs='+')
     agent = commands.add_parser('agent-step'); agent.add_argument('campaign_id'); agent.add_argument('argv', nargs=argparse.REMAINDER)
@@ -330,6 +339,21 @@ def parser():
 
 def _main(argv=None):
     args = parser().parse_args(argv)
+    if args.command=='storage':
+        from .storage_view import status
+        from .contracts import ContractError
+        from .operations import operation_response
+        from .state_reader import safe_text
+        try:
+            answer=status(discover_state_root(args.state),after=args.after,limit=args.limit)
+            print(json.dumps(answer,sort_keys=True) if args.json else safe_text(json.dumps(answer['data'],indent=2,sort_keys=True)))
+            return 0
+        except (OSError,ValueError,sqlite3.Error) as exc:
+            code,status_code=('INVALID_INPUT',2) if isinstance(exc,ContractError) else ('INFRASTRUCTURE',5)
+            message=str(exc)[:512] if status_code==2 else 'storage state unavailable; no work queued or cleanup performed'
+            if args.json:print(json.dumps(operation_response(error={'code':code,'message':message,'retryable':status_code==5}),sort_keys=True))
+            else:print(code+': '+message,file=sys.stderr)
+            return status_code
     if args.command in ('experiment','attempt'):
         from .attended_views import ApprovalReader,experiments,review,attempt,decide
         from .contracts import Conflict,ContractError
@@ -999,6 +1023,12 @@ def _main(argv=None):
         elif args.command == 'restore':
             restored = Controller.restore(args.backup, args.state, **controller_options)
             answer = {'restored': str(restored.root), 'scheduling': 'paused'}
+            if args.input:
+                from .backup_coverage import load_summary
+                answer['historical_backup_coverage']=load_summary(args.backup)
+                answer['next_steps']=['Restore private identity and operator configuration separately.',
+                    'Restore editable Git separately; reconcile original source ownership before capture.',
+                    'Reconcile target execution, recovery return and pending evidence before explicit resume.']
         else:
             if read_only:
                 from .state_reader import StateReader
@@ -1114,7 +1144,13 @@ def _main(argv=None):
                     answer = controller.decide_attempt(args.attempt_id,
                         'approved' if args.action == 'approve' else 'rejected', request_id=args.request_id)
             elif args.command == 'backup':
-                answer = {'backup': controller.backup(args.destination)}
+                answer = {'backup': controller.backup(args.destination,coverage=True)}
+                if args.output:
+                    from .backup_coverage import load_summary
+                    answer['coverage']=load_summary(args.destination)
+                    answer['next_steps']=['Keep private identity and operator configuration in a separate protected backup.',
+                        'For incomplete sources: stop writers, investigation capture-source NAME --workspace ID --quiesced --request-id ID; inspect operation status, then back up to a new destination.',
+                        'Reconcile offline targets and pending evidence; target-only backlog is unknown.']
             elif args.command == 'resolve':
                 answer = controller.resolve(args.attempt_id, args.disposition, args.note)
             elif args.command == 'snapshot':
@@ -1203,7 +1239,7 @@ def _main(argv=None):
 def main(argv=None):
     """A publication barrier, not a scheduler; read-only commands do no housekeeping."""
     args=parser().parse_args(argv)
-    readonly=(args.command in ('experiment','build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
+    readonly=(args.command in ('storage','experiment','build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
                                'target','endpoint','target-service','serve-repository') or
               (args.command=='campaign' and args.action=='status') or
               (args.command=='attempt' and args.action in ('status','show')) or
