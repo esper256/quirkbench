@@ -61,7 +61,7 @@ def test_archive_ancestor_alias_retains_canonical_installation_and_activation(tm
         runner=Services(root,record),ready=ready)['activated']
 
 
-@pytest.mark.parametrize('change',['bytes','leaf','ancestor','missing'])
+@pytest.mark.parametrize('change',['bytes','leaf','ancestor','ancestor-loop','missing'])
 def test_archive_alias_or_payload_change_during_capture_is_rejected(tmp_path,archive,monkeypatch,change):
     import quirkbench.controller_install as installer
     alias=tmp_path/'home-alias';alias.symlink_to(tmp_path,target_is_directory=True)
@@ -73,11 +73,19 @@ def test_archive_alias_or_payload_change_during_capture_is_rejected(tmp_path,arc
             moved=archive.with_suffix('.original');archive.rename(moved);archive.symlink_to(moved)
         elif change=='ancestor':
             other=tmp_path/'other';other.mkdir();alias.unlink();alias.symlink_to(other,target_is_directory=True)
+        elif change=='ancestor-loop':alias.unlink();alias.symlink_to(alias,target_is_directory=True)
         else:archive.unlink()
         return raw
     monkeypatch.setattr(installer,'read_file',replace_after_read)
     with pytest.raises(ValueError,match='archive input changed during capture'):
         install(alias/archive.name,data_home=tmp_path/'data')
+    assert not (tmp_path/'data').exists()
+
+
+def test_archive_looping_ancestor_is_a_typed_input_error(tmp_path):
+    alias=tmp_path/'loop';alias.symlink_to(alias,target_is_directory=True)
+    with pytest.raises(ValueError,match='controller archive must be an accessible'):
+        install(alias/'controller.tar.gz',data_home=tmp_path/'data')
     assert not (tmp_path/'data').exists()
 
 
