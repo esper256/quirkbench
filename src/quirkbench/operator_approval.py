@@ -57,7 +57,7 @@ class OperatorApprovals:
             if row is None: raise Conflict('unknown attempt')
             return {'attempt_id':attempt_id,'attempt_state':row['state'],**self._approval_status(db,row)}
 
-    def decide_attempt(self, attempt_id, decision, *, request_id, operator=None):
+    def decide_attempt(self, attempt_id, decision, *, request_id, operator=None,expected_binding=None):
         """Local administration only. Rejection cannot undo an already issued handoff."""
         identifier(attempt_id); identifier(request_id)
         if decision not in {'approved','rejected'}: raise ValueError('invalid operator decision')
@@ -71,6 +71,8 @@ class OperatorApprovals:
             require_execution_credentials(db,row['device'],self.clock(),expected_generation=row['credential_generation'])
             context,campaign=self._approval_context(db,row)
             if context is None: raise Conflict('legacy attempt has no negotiated approval contract')
+            if expected_binding is not None and expected_binding!=context:
+                raise Conflict('reviewed operator binding changed before decision')
             current_inventory=json.loads(db.execute('SELECT report FROM devices WHERE id=?',(row['device'],)).fetchone()[0]).get('inventory',{})
             if any(current_inventory.get(key)!=context[key] for key in ('media_instance_id','target_binding')):
                 raise Conflict('claimed media or target identity changed')
@@ -80,6 +82,8 @@ class OperatorApprovals:
             if previous:
                 if previous['document']!=raw: raise Conflict('changed operator decision replay')
                 return document
+            from .attended_baseline import check_request
+            check_request(db,request_id,'attempt_approval_commands')
             self._live(db,row['id'],row['token'],row['boot'])
             report=json.loads(db.execute('SELECT report FROM devices WHERE id=?',(row['device'],)).fetchone()[0])
             if report['mode']!='recovery' or row['handoff_revision'] is not None:
