@@ -121,6 +121,45 @@ def test_activation_aligns_all_paths_and_preserves_private_settings(tmp_path,arc
     assert (Path(old['runtime'])).read_text()=='old'
 
 
+def test_configured_builder_survives_activation_restart_and_retention(tmp_path,archive):
+    from quirkbench.retention import register
+    from quirkbench.retention_settings import set_setting
+    from quirkbench.maintenance import prune
+    from test_recovery_podman import builder_archive,IMAGE
+    record,root,c,conf,binary,config=configured(tmp_path,archive)
+    builder=c.store.put(builder_archive()).sha256
+    register(root,'input',[builder],owner='input:'+builder)
+    config.update(builder_image_digest=IMAGE,builder_config_digest=IMAGE,builder_archive_sha256=builder)
+    atomic_write(root/'private/controller-service.json',canonical(config))
+    set_setting(root,'input_generations',1)
+    for raw in (b'newer input',b'newest input'):
+        value=c.store.put(raw).sha256;register(root,'input',[value],owner='input:'+value)
+    # Exercise retirement and orphan expiry, without waiting for policy time.
+    os.utime(c.store.path(builder),(1,1))
+    activate(record,root,config_home=conf,bin_home=binary,runner=Services(root,record),ready=ready)
+    assert json.loads((root/'private/controller-service.json').read_bytes())['builder_archive_sha256']==builder
+    for _ in range(2):
+        restarted=Controller(root,reserve_bytes=0)
+        with restarted.lifecycle() as owner:
+            assert owner.housekeep() is not None
+        assert c.store.path(builder).read_bytes()==builder_archive()
+    config=json.loads((root/'private/controller-service.json').read_bytes())
+    for field in ('builder_image_digest','builder_config_digest','builder_archive_sha256'):config.pop(field)
+    atomic_write(root/'private/controller-service.json',canonical(config))
+    assert 'artifacts/objects/'+builder in prune(root)['removed']
+    assert not c.store.path(builder).exists()
+
+
+def test_missing_configured_builder_is_reported_by_housekeeping(tmp_path,archive):
+    from quirkbench.maintenance import prune
+    record,root,c,conf,binary,config=configured(tmp_path,archive)
+    config['builder_archive_sha256']='a'*64
+    atomic_write(root/'private/controller-service.json',canonical(config))
+    report=prune(root)
+    assert any('configured builder archive unavailable: '+'a'*64 in reason for reason in report['blocked'])
+    assert not c.store.path('a'*64).exists()
+
+
 def queue_operation(c):
     with c.transaction() as db:
         db.execute("INSERT INTO operations(id,request_id,request_digest,input_digest,kind,state,created,updated) VALUES('busy','busy',?,?,'build','QUEUED',0,0)",('a'*64,'b'*64))
