@@ -734,8 +734,6 @@ class Controller(OperatorApprovals):
 
     def _admit_operation_db(self,db,request_id,kind,intent,request_digest,input_digest,retained_inputs, *,campaign_id=None,device_id=None):
         """Shared transaction for planned additive application admission records."""
-        if db.execute('SELECT 1 FROM attended_baseline_commands WHERE request_id=?',(request_id,)).fetchone():
-            raise Conflict('request ID already belongs to an attended baseline command')
         if db.execute('SELECT 1 FROM observation_response_commands WHERE id=?', (request_id,)).fetchone():
             raise Conflict('request ID already belongs to an observation response')
         previous = db.execute('SELECT id,request_digest FROM operations WHERE request_id=?', (request_id,)).fetchone()
@@ -748,6 +746,8 @@ class Controller(OperatorApprovals):
                 db.execute('INSERT OR IGNORE INTO refs(owner,digest) VALUES(?,?)',(previous['id'],value))
                 db.execute('INSERT OR IGNORE INTO operation_refs(operation,role,digest) VALUES(?,"input",?)',(previous['id'],value))
             return self._operation_status(db, previous['id'])
+        from .attended_baseline import check_request
+        check_request(db,request_id,'operations')
         if campaign_id is not None:
             campaign = self._campaign(db, campaign_id)
             if device_id is not None and device_id != campaign['device']:
@@ -2005,12 +2005,13 @@ class Controller(OperatorApprovals):
         with self.transaction() as db:
             if db.execute('SELECT 1 FROM operations WHERE request_id=?', (command_request_id,)).fetchone():
                 raise Conflict('request ID already belongs to an operation')
-            if db.execute('SELECT 1 FROM attended_baseline_commands WHERE request_id=?',(command_request_id,)).fetchone():
-                raise Conflict('request ID already belongs to an attended baseline command')
             replay = db.execute('SELECT request,document FROM observation_response_commands WHERE id=?',
                                 (command_request_id,)).fetchone()
             if replay and (replay['request'] != request_id or replay['document'] != document):
                 raise Conflict('response command request ID was reused with different content')
+            if replay is None:
+                from .attended_baseline import check_request
+                check_request(db,command_request_id,'observation_response_commands')
             question = db.execute('SELECT session,campaign,issued_at,deadline_at FROM observation_requests WHERE id=?',
                                   (request_id,)).fetchone()
             if question is None or question['session'] != session_id or (campaign_id is not None and question['campaign'] != identifier(campaign_id)):

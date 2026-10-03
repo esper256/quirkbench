@@ -80,13 +80,13 @@ def start(controller,name,target,request_id, *,problem=b'',workspace=None,second
     validate({'schema_version':1,'record_type':'investigation','session':session,'limits':limits,
               'catalog_sha256':'0'*64,'inventory_sha256':None,'plan_sha256':None,'baseline_sha256':None})
     with controller.transaction() as db:
-        if db.execute('SELECT 1 FROM attended_baseline_commands WHERE request_id=?',(request_id,)).fetchone():
-            raise Conflict('request ID already belongs to an attended baseline command')
         previous = db.execute('SELECT * FROM investigations WHERE id=? OR request_id=?',(name,request_id)).fetchone()
         if previous:
             if previous['id'] != name or previous['request_id'] != request_id or previous['request_digest'] != requested:
                 raise Conflict('investigation identity or original request differs')
             return record(controller,name,db)
+        from .attended_baseline import check_request
+        check_request(db,request_id,'investigations')
         if db.execute('SELECT 1 FROM campaigns WHERE id=?',(name,)).fetchone():raise Conflict('existing legacy campaign needs an explicit migration')
         row = db.execute('SELECT * FROM devices WHERE id=?',(target,)).fetchone()
         if row is None:raise ContractError('register the enrolled target in recovery first')
@@ -121,6 +121,7 @@ def start(controller,name,target,request_id, *,problem=b'',workspace=None,second
             if previous['id']!=name or previous['request_id']!=request_id or previous['request_digest']!=requested:
                 raise Conflict('investigation identity or original request differs')
             return record(controller,name,db)
+        check_request(db,request_id,'investigations')
         current = db.execute('SELECT * FROM devices WHERE id=?',(target,)).fetchone()
         if current is None or dict(current)!=observed_device:raise Conflict('target registration changed during investigation selection')
         require_execution_credentials(db,target,controller.clock())

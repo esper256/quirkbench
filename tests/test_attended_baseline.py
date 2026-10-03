@@ -262,3 +262,102 @@ def test_human_retry_binding_and_legacy_explicit_output(published,capsys,tmp_pat
     c.startup()
     assert cli.main(['--state',str(c.root),'attempt','approve',attempt])==3
     assert boot.armed==[]
+
+
+@pytest.mark.parametrize('failure',['exit','timeout'])
+def test_actual_native_errors_return_c2_and_roll_back_admission(published,monkeypatch,capsys,failure):
+    import subprocess
+    c,composition=published;repository=c.deployment_repository
+    error=subprocess.CalledProcessError(1,['ostree','refs']) if failure=='exit' else subprocess.TimeoutExpired(['ostree','refs'],1)
+    monkeypatch.setattr(repository,'retain',lambda *a:(_ for _ in ()).throw(error))
+    monkeypatch.setattr('quirkbench.ostree_repository.OstreeRepository',lambda mapping:repository)
+    monkeypatch.setattr('quirkbench.controller_service.require_ready',lambda _:None)
+    assert cli.main(['--state',str(c.root),'--reserve-gib','0','investigation','submit-baseline','investigation',
+        '--compose',composition,'--request-id','baseline','--json'])==5
+    response=json.loads(capsys.readouterr().out)
+    assert response['error']['code']=='INFRASTRUCTURE' and response['operation_id'] is None
+    with c.transaction() as db:
+        assert db.execute('SELECT COUNT(*) FROM attended_baseline_commands').fetchone()[0]==0
+        assert db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0]==0
+
+
+@pytest.mark.parametrize('mapping',[{'lab':3},{'lab':True},{'lab':'relative'},[],{}, {'bad alias':'/tmp'}])
+def test_invalid_repository_configuration_is_c2_before_native_work(tmp_path,monkeypatch,capsys,mapping):
+    from quirkbench.controller import Controller
+    c=Controller(tmp_path/'state',reserve_bytes=0)
+    (c.root/'repositories.json').write_text(json.dumps(mapping))
+    def forbidden(*a,**kw):raise AssertionError('invalid configuration reached native repository')
+    monkeypatch.setattr('quirkbench.ostree_repository.OstreeRepository',forbidden)
+    assert cli.main(['--state',str(c.root),'--reserve-gib','0','investigation','submit-baseline','investigation',
+        '--compose','composition','--request-id','baseline','--json'])==2
+    assert json.loads(capsys.readouterr().out)['error']['code']=='INVALID_INPUT'
+
+
+def test_approval_and_baseline_ids_cannot_acquire_another_command_meaning(published,tmp_path):
+    c,composition=published
+    baseline.admit(c,'investigation',composition,'baseline',ready=lambda _:None)
+    _,_,step,_,boot=attended_lab(c,tmp_path);step()
+    with c.transaction() as db:attempt=db.execute('SELECT id FROM attempts').fetchone()[0]
+    with pytest.raises(Conflict,match='another command'):c.decide_attempt(attempt,'approved',request_id='baseline')
+    c.decide_attempt(attempt,'approved',request_id='approve')
+    with pytest.raises(Conflict,match='another command'):baseline.admit(c,'investigation',composition,'approve',ready=lambda _:None)
+    with pytest.raises(Conflict):c.admit_operation('approve','source_capture',{})
+    assert boot.armed==[]
+    with c.transaction() as db:
+        assert db.execute('SELECT COUNT(*) FROM attempt_approval_commands').fetchone()[0]==1
+        assert db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0]==1
+
+
+def test_investigation_request_collision_after_cas_is_rechecked_in_final_transaction(published,monkeypatch):
+    from quirkbench import investigations
+    c,composition=published
+    native=c.store.put;changed=[False]
+    def put(raw,*a,**kw):
+        result=native(raw,*a,**kw)
+        if not changed[0]:
+            changed[0]=True
+            baseline.admit(c,'investigation',composition,'race',ready=lambda _:None)
+        return result
+    monkeypatch.setattr(c.store,'put',put)
+    with pytest.raises(Conflict,match='another command'):
+        investigations.start(c,'next-investigation','target-1','race',workspace='next-source')
+    with c.transaction() as db:
+        assert db.execute("SELECT 1 FROM investigations WHERE id='next-investigation'").fetchone() is None
+        assert db.execute('SELECT COUNT(*) FROM attended_baseline_commands').fetchone()[0]==1
+
+
+@pytest.mark.parametrize('oversized',['spec','result','approval_inventory','report','decision','evidence'])
+def test_review_refuses_oversized_legacy_rows_and_bounds_evidence_before_loading(published,tmp_path,oversized):
+    c,composition=published
+    response=baseline.admit(c,'investigation',composition,'baseline',ready=lambda _:None)
+    _,_,step,_,_=attended_lab(c,tmp_path);step()
+    with c.transaction() as db:
+        attempt=db.execute('SELECT id FROM attempts').fetchone()[0]
+        if oversized=='spec':db.execute('UPDATE experiments SET spec=?',('x'*(views.QUERY_BYTES+1),))
+        elif oversized in ('result','approval_inventory'):db.execute('UPDATE attempts SET '+oversized+'=? WHERE id=?',('x'*(views.QUERY_BYTES+1),attempt))
+        elif oversized=='report':db.execute('UPDATE devices SET report=?',('x'*(views.QUERY_BYTES+1),))
+        elif oversized=='decision':db.execute('INSERT INTO attempt_approval_commands(request,attempt,document,created) VALUES(?,?,?,0)',('approval',attempt,'x'*(views.QUERY_BYTES+1)))
+        else:
+            db.executemany('INSERT INTO evidence VALUES(?,?,?,?,?)',[(attempt,'test',i,digest(str(i).encode()),1) for i in range(1001)])
+    reader=views.ApprovalReader(c.root)
+    with pytest.raises(ContractError,match='budget'):views.attempt(reader,attempt)
+    if oversized=='spec':
+        with pytest.raises(ContractError,match='budget'):views.review(reader,response['data']['experiment_id'])
+        with pytest.raises(ContractError,match='budget'):views.experiments(reader,'investigation')
+
+
+def test_auto_approval_binding_is_compared_in_authoritative_transaction(published,monkeypatch,tmp_path):
+    from quirkbench.controller import Controller
+    c,composition=published
+    baseline.admit(c,'investigation',composition,'baseline',ready=lambda _:None)
+    _,_,step,_,boot=attended_lab(c,tmp_path);step()
+    with c.transaction() as db:attempt=db.execute('SELECT id FROM attempts').fetchone()[0]
+    constructor=Controller.__init__
+    def changed(self,*a,**kw):
+        constructor(self,*a,**kw)
+        with self.transaction() as db:db.execute('UPDATE attempts SET deadline=deadline+1 WHERE id=?',(attempt,))
+    monkeypatch.setattr(Controller,'__init__',changed)
+    args=cli.parser().parse_args(['--reserve-gib','0','attempt','approve',attempt])
+    with pytest.raises(Conflict,match='binding changed'):views.decide(c.root,args)
+    with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM attempt_approval_commands').fetchone()[0]==0
+    assert boot.armed==[]

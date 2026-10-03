@@ -122,10 +122,17 @@ def replay(db,request_id,request_digest):
     if row:
         if row['request_digest']!=request_digest:raise Conflict('changed baseline command replay')
         return json.loads(row['result_document'])
-    for table,column in (('operations','request_id'),('observation_response_commands','id'),('investigations','request_id')):
+    check_request(db,request_id,'attended_baseline_commands')
+    return None
+
+
+def check_request(db,request_id,namespace):
+    """New mutations share retry identity while preserving historical exact replay."""
+    for table,column in (('operations','request_id'),('observation_response_commands','id'),('investigations','request_id'),
+            ('attended_baseline_commands','request_id'),('attempt_approval_commands','request')):
+        if table==namespace:continue
         if db.execute('SELECT 1 FROM '+table+' WHERE '+column+'=?',(request_id,)).fetchone():
             raise Conflict('request ID belongs to another command')
-    return None
 
 
 def admit(controller,name,composition,request_id, *,ready=None):
@@ -161,7 +168,9 @@ def admit(controller,name,composition,request_id, *,ready=None):
                 raise Conflict('published baseline changed during admission')
             if document(controller,artifact.sha256,16384)!=value:raise Conflict('attended input changed during admission')
         fence()
-        controller._submit_db(db,name,experiment,canonical(experiment.to_dict()).decode(),refs,manifest,evidence,fence=fence)
+        import subprocess
+        try:controller._submit_db(db,name,experiment,canonical(experiment.to_dict()).decode(),refs,manifest,evidence,fence=fence)
+        except subprocess.SubprocessError as exc:raise OSError('native baseline retention unavailable') from exc
         jobs=[r[0] for r in db.execute('SELECT id FROM jobs WHERE campaign=? AND experiment=? ORDER BY id',(name,experiment_id))]
         result=operation_response(data={'accepted':True,'request_id':request_id,'investigation_id':name,'experiment_id':experiment_id,
             'job_ids':jobs,'input_sha256':artifact.sha256,'approval_required':True,'boot_authorized':False,'problem_reproduced':None})
@@ -192,6 +201,10 @@ def execute(root,args, *,ready=None):
     except (ValueError,UnicodeError,RecursionError) as exc:raise ContractError('invalid repository configuration') from exc
     _depth(mapping)
     if not isinstance(mapping,dict) or not mapping or len(mapping)>64:raise ContractError('bounded configured repository aliases required')
+    for alias,path in mapping.items():
+        identifier(alias)
+        if not isinstance(path,str) or not Path(path).is_absolute() or Path(path).resolve()!=Path(path):
+            raise ContractError('repository aliases require absolute canonical directory paths')
     if args.reserve_gib<0:raise ContractError('reserve must be nonnegative')
     repository=OstreeRepository(mapping)
     with private_lock(Path(root)/'command.lock',shared=True):
