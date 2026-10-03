@@ -95,12 +95,13 @@ def review(reader,experiment):
         jobs=[dict(r) for r in db.execute('SELECT id,campaign,repetition,state FROM jobs WHERE experiment=? ORDER BY id LIMIT 101',(experiment,))]
         if len(jobs)>100:raise ContractError('experiment jobs exceed review budget')
         result={'experiment_id':experiment,'experiment_digest':digest(canonical(spec)),'specification':spec,'jobs':jobs,
-            'deployment':None,'baseline_input':None,'metadata_available':True,'problem_reproduced':None,
+            'deployment':None,'baseline_input':None,'proposal_input':None,'metadata_available':True,'problem_reproduced':None,
             'native_qualification':False,'approval_required':'operator-approval.v1' in spec['required_capabilities'],
             'risks':['One physical boot requires approval for the exact claimed attempt and candidate.']}
         try:
             if 'deployment' in spec['artifacts']:result['deployment']=document(reader,spec['artifacts']['deployment'])
             if 'attended_baseline' in spec['artifacts']:result['baseline_input']=document(reader,spec['artifacts']['attended_baseline'],16384)
+            if 'proposal_input' in spec['artifacts']:result['proposal_input']=document(reader,spec['artifacts']['proposal_input'],16384)
         except (OSError,ValueError):result['metadata_available']=False
     return operation_response(data=checked(result))
 

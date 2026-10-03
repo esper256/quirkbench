@@ -39,6 +39,9 @@ class JobCoordinator:
     def tick(self):
         owner=self.owner;c=owner.controller
         if owner.closed or c._lifecycle_owner is not owner: raise Conflict('controller ownership ended')
+        from .proposal_dispatch import tick as proposals
+        submitted=proposals(owner)
+        if submitted is not None:return submitted
         with c.transaction() as db:
             active=[dict(r) for r in db.execute('SELECT * FROM operations WHERE worker_unit IS NOT NULL')]
             queued=[dict(r) for r in db.execute("SELECT * FROM operations WHERE state='QUEUED' AND kind IN ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare','candidate_prepare','operation_resume') AND queued_epoch=? ORDER BY created",(owner.epoch,))]

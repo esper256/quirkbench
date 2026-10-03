@@ -66,6 +66,9 @@ def execute(root, args, *, ready=None):
     from .source_prepare_operation import submit
     from .source_workspace import handoff, release
     root = Path(root).expanduser().absolute()
+    if args.action=='dispatch-proposal':
+        from .proposal_dispatch import execute as dispatch
+        return dispatch(root,args,ready=ready)
     if args.action=='submit-baseline':
         from .attended_baseline import execute as baseline
         return baseline(root,args,ready=ready)

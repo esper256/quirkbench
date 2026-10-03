@@ -168,8 +168,11 @@ def response(controller,db,operation,request):
     answer=envelope(controller.root,controller._operation_status(db,operation),request)
     row=db.execute('SELECT proposal_digest,context_digest,action FROM proposal_outbox WHERE operation=?',(operation,)).fetchone()
     if row is None:raise Conflict('proposal outbox is missing; reconcile retained admission')
-    answer['data'].update(proposal=dict(row),dispatch_connected=False,execution_authorized=False,
-        waiting_reason='external_loop_pending')
+    connected=False
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name='proposal_dispatch_commands'").fetchone():
+        connected=db.execute('SELECT 1 FROM proposal_dispatch_commands WHERE operation=?',(operation,)).fetchone() is not None
+    answer['data'].update(proposal=dict(row),dispatch_connected=connected,execution_authorized=False,
+        waiting_reason=answer['data'].get('wait_event') if connected else 'external_loop_pending')
     return answer
 
 
@@ -232,8 +235,13 @@ def pending(reader,name, *,after=0,limit=20):
             p.input_tokens,p.output_tokens,q.action,o.state FROM external_proposals p JOIN proposal_outbox q ON q.operation=p.operation
             JOIN operations o ON o.id=p.operation WHERE p.campaign=? AND p.rowid>? ORDER BY p.rowid LIMIT ?''',(name,after,limit+1)).fetchall()
     items=bounded_items([dict(row) for row in rows[:limit]],QUERY_BYTES-2048)
+    with reader.connection() as db:
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name='proposal_dispatch_commands'").fetchone():
+            for item in items:
+                binding=db.execute('SELECT build_operation,composition_operation,experiment FROM proposal_dispatch_commands WHERE operation=?',(item['operation_id'],)).fetchone()
+                item['dispatch']=dict(binding) if binding else None
     return {'investigation_id':name,'items':items,'next_cursor':items[-1]['cursor'] if items and len(rows)>len(items) else None,
-        'migration_required':False,'dispatch_connected':False,'execution_authorized':False}
+        'migration_required':False,'dispatch_connected':any(item.get('dispatch') is not None for item in items),'execution_authorized':False}
 
 
 def tables_available(db):
