@@ -15,6 +15,7 @@ from .publication_setup_contracts import STEPS,load,validate
 from .setup_contracts import SetupUnavailable
 from .state_reader import StateReader,read_file
 from .store import atomic_write
+from .controller_tls import FILES as TLS_FILES,load_identity,_read as tls_read
 
 FILES={'source_configuration_sha256':'source.json','destination_configuration_sha256':'destination.json','public_key_sha256':'key.asc'}
 
@@ -32,6 +33,11 @@ def history(root):
     expected=destination(root,old,intent['repository_alias'],intent['repository_url'],intent['signing_home'],intent['signing_fingerprint'])
     if expected!=new or captured['destination_configuration_sha256']!=canonical(new):
         raise Conflict('publication setup delta differs from explicit choices')
+    tls_directory=Path(old['cert']).parent
+    identity_raw=tls_read(tls_directory,'identity.json');identity=load_identity(identity_raw)
+    if (digest(identity_raw)!=intent['controller_tls_identity_sha256'] or
+            any(digest(tls_read(tls_directory,name))!=identity['files'][name] for name in TLS_FILES)):
+        raise Conflict('publication setup original TLS bytes changed')
     return saved,captured,old,new
 
 
@@ -58,6 +64,15 @@ def verified_successor(root,source_raw,current_raw):
         and current_raw==captured['destination_configuration_sha256'])
 
 
+def response(saved):
+    intent=saved['intent']
+    return {'request_id':saved['request_id'],'configured':True,'repository_url':intent['repository_url'],
+        'repository_alias':intent['repository_alias'],'signing_fingerprint':intent['signing_fingerprint'],
+        'public_key_sha256':intent['public_key_sha256'],'controller_certificate_sha256':intent['controller_certificate_sha256'],
+        'enrollment_available':False,'service_start_required':True,'boot_authorized':False,
+        'next_command':'systemctl --user start '+UNIT}
+
+
 def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,runner=subprocess.run,
               run=subprocess.run,tls_inspector=None,fault_hook=None):
     """Configure only a stopped, idle initial service; no keys, start or target grant."""
@@ -72,6 +87,17 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
     if str(unit)!=str(unit.absolute()) or unit.resolve()!=unit:raise ContractError('native controller unit must be canonical')
     fault=fault_hook or (lambda _:None)
     directory=root/'private/publication-setup'
+    choices={'repository_alias':alias,'repository_url':url,'signing_home':str(signing_home),
+        'signing_fingerprint':fingerprint,'unit':str(unit)}
+    previous=history(root)
+    if previous:
+        saved,captured,old,new=previous
+        if saved['request_id']!=request_id or any(saved['intent'][key]!=value for key,value in choices.items()):
+            raise Conflict('publication setup already has another request or choices')
+        if saved['completed_steps']==list(STEPS):
+            if _strict_read(root/'private','controller-service.json')!=captured['destination_configuration_sha256']:
+                raise Conflict('completed publication configuration is unavailable or maintained separately')
+            return response(saved)
     with private_lock(root/'command.lock') as command_fd,private_lock(root/'coordinator.lock') as owner_fd:
         _idle(root)
         config=configuration(root);current=_strict_read(root/'private','controller-service.json')
@@ -80,17 +106,20 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
         if previous:
             saved,captured,old,new=previous
             intent=saved['intent']
-            choices={'repository_alias':alias,'repository_url':url,'signing_home':str(signing_home),
-                'signing_fingerprint':fingerprint,'unit':str(unit)}
             if saved['request_id']!=request_id or any(intent[key]!=value for key,value in choices.items()):
                 raise Conflict('publication setup already has another request or choices')
             if current not in (captured['source_configuration_sha256'],captured['destination_configuration_sha256']):
                 raise Conflict('publication setup cannot overwrite later configuration maintenance')
+            if saved['completed_steps']==list(STEPS):
+                if current!=captured['destination_configuration_sha256']:raise Conflict('completed publication configuration is unavailable')
+                return response(saved)
         else:
             old=config;new=destination(root,old,alias,url,signing_home,fingerprint)
             captured={'source_configuration_sha256':current,'destination_configuration_sha256':canonical(new)}
             saved=None
         runtime=Path(old['runtime']).parent.parent
+        tls_directory=Path(old['cert']).parent
+        tls_material={name:tls_read(tls_directory,name) for name in (*TLS_FILES,'identity.json')}
         def guard():
             _idle(root)
             for path,fd in ((root/'command.lock',command_fd),(root/'coordinator.lock',owner_fd)):
@@ -106,6 +135,8 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
                 if any(db.execute('SELECT 1 FROM '+table+' LIMIT 1').fetchone() for table in ('devices','enrollment_codes','enrollment_requests','credential_generations')):
                     raise Conflict('already-issued target trust requires explicit maintenance')
             validate_configuration(root,new)
+            if any(tls_read(tls_directory,name)!=raw for name,raw in tls_material.items()):
+                raise Conflict('original controller TLS changed during publication setup')
         guard()
         snapshot=_snapshot(root,tls_inspector=tls_inspector);guard()
         public_key=export_public_key(new['composition_signing'],run=run).encode('ascii');guard()
@@ -115,7 +146,8 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
             repo=root/'repositories'/alias
             if repo.exists() or repo.is_symlink():raise Conflict('initial publication repository already exists; select a fresh explicit alias')
             intent={'state_root':str(root),'repository_alias':alias,'repository_url':url,'signing_home':str(signing_home),
-                'signing_fingerprint':fingerprint,'unit':str(unit),**{key:digest(raw) for key,raw in captured.items()}}
+                'signing_fingerprint':fingerprint,'unit':str(unit),**{key:digest(raw) for key,raw in captured.items()},
+                'controller_tls_identity_sha256':snapshot['identity_sha256'],'controller_certificate_sha256':snapshot['certificate_sha256']}
             saved=validate({'schema_version':1,'record_type':'publication-setup','request_id':request_id,
                 'request_digest':digest(canonical({'kind':'publication-setup','arguments':intent})),'intent':intent,'completed_steps':[]})
             _durable_directory(_private_path(directory))
@@ -159,7 +191,4 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
         atomic_write(root/'private/controller-service.json',captured['destination_configuration_sha256'])
         fault('configuration_written')
         completed('configuration_published')
-        return {'request_id':request_id,'configured':True,'repository_url':url,'repository_alias':alias,
-            'signing_fingerprint':fingerprint,'public_key_sha256':digest(public_key),'controller_certificate_sha256':snapshot['certificate_sha256'],
-            'enrollment_available':False,'service_start_required':True,'boot_authorized':False,
-            'next_command':'systemctl --user start '+UNIT}
+        return response(saved)

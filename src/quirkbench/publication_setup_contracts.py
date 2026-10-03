@@ -17,7 +17,8 @@ def validate(value):
     identifier(value['request_id']);sha256(value['request_digest'])
     intent=value['intent']
     fields={'state_root','repository_alias','repository_url','signing_home','signing_fingerprint',
-        'source_configuration_sha256','destination_configuration_sha256','public_key_sha256','unit'}
+        'source_configuration_sha256','destination_configuration_sha256','public_key_sha256',
+        'controller_tls_identity_sha256','controller_certificate_sha256','unit'}
     if not isinstance(intent,dict) or set(intent)!=fields:raise ContractError('invalid publication setup intent')
     identifier(intent['repository_alias']);endpoint(intent['repository_url'])
     for name in ('state_root','signing_home','unit'):

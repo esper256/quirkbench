@@ -43,6 +43,9 @@ def test_first_publication_zero_targets_exact_setup_retry_without_handwritten_co
     assert setup(installed)==result
     assert sum(call[0]=='ostree' for call in calls)==1
     assert start(tmp_path,services)['background_work_ready']
+    from quirkbench.controller import Controller
+    with Controller(root,reserve_bytes=0).lifecycle():
+        assert setup(installed,runner=lambda *a,**kw:pytest.fail('exact replay inspected native service'))==result
     from quirkbench.state_reader import StateReader
     with StateReader(root).connection() as db:
         for table in ('devices','campaigns','attempts','credential_generations','enrollment_codes'):
@@ -97,6 +100,33 @@ def test_changed_configuration_during_native_key_callback_is_preserved(installed
         return result
     with pytest.raises(Conflict,match='changed'):setup(installed,run=run)
     assert configuration(root)['port']==8445 and not (root/'repositories').exists()
+
+
+def test_changed_tls_during_native_key_callback_cannot_publish(installed):
+    root,services,signing,options,calls=installed;native=options['run']
+    def run(argv,**kwargs):
+        result=native(argv,**kwargs)
+        Path(configuration(root)['key']).write_bytes(b'changed private TLS bytes')
+        return result
+    with pytest.raises(Conflict,match='TLS changed'):setup(installed,run=run)
+    assert not (root/'repositories').exists()
+
+
+def test_missing_public_key_cannot_initialize_repository(installed):
+    root,services,signing,options,calls=installed
+    def unavailable(*args,**kwargs):return subprocess.CompletedProcess(args[0],1,b'',b'private gpg failure')
+    with pytest.raises(ContractError,match='export failed'):setup(installed,run=unavailable)
+    assert not (root/'repositories').exists()
+
+
+def test_exact_cli_success_calls_same_service(installed,monkeypatch,capsys):
+    root,services,signing,options,calls=installed;original=publication.configure
+    monkeypatch.setattr(publication,'configure',lambda *a,**kw:original(*a,**(kw|options)))
+    args=['--state',str(root),'publication','setup','--repository','lab','--url','https://127.0.0.1:8444',
+        '--signing-home',str(signing),'--fingerprint',FPR,'--request-id','publication-1','--json']
+    assert cli.main(args)==0
+    result=json.loads(capsys.readouterr().out)['data'];assert result['configured'] and result['service_start_required']
+    assert cli.main(args)==0 and json.loads(capsys.readouterr().out)['data']==result
 
 
 def test_setup_replay_cannot_accept_unjournaled_additional_settings(installed,tmp_path):
