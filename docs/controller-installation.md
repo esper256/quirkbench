@@ -89,6 +89,11 @@ an extracted directory without a checkout or virtualenv. Python 3.11+ must
 already be available. Archive installation does not change host packages or services;
 initial setup can explicitly enable/start the existing user service.
 
+Archive input paths may use ordinary ancestor aliases (including a linked home
+directory); installation records use canonical paths. The archive itself must be
+a regular file, and changing its bytes, leaf or ancestor alias during capture is
+rejected. Managed runtime destinations retain their existing no-symlink rules.
+
 From the development checkout, choose a new output filename under an existing
 directory:
 

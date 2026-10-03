@@ -51,6 +51,35 @@ def test_install_identity_repeat_and_corrupt_existing_refusal(tmp_path,archive):
     assert (runtime/'lib/quirkbench/cli.py').read_bytes()==b'changed'
 
 
+def test_archive_ancestor_alias_retains_canonical_installation_and_activation(tmp_path,archive):
+    record,root,c,conf,binary,old=configured(tmp_path,archive)
+    alias=tmp_path/'home-alias';alias.symlink_to(tmp_path,target_is_directory=True)
+    through_alias=install(alias/archive.name,data_home=alias/'data')
+    assert through_alias==record
+    assert Path(record['runtime_root']).resolve()==Path(record['runtime_root'])
+    assert activate(through_alias,root,config_home=conf,bin_home=binary,
+        runner=Services(root,record),ready=ready)['activated']
+
+
+@pytest.mark.parametrize('change',['bytes','leaf','ancestor'])
+def test_archive_alias_or_payload_change_during_capture_is_rejected(tmp_path,archive,monkeypatch,change):
+    import quirkbench.controller_install as installer
+    alias=tmp_path/'home-alias';alias.symlink_to(tmp_path,target_is_directory=True)
+    original=installer.read_file
+    def replace_after_read(root,name,**kwargs):
+        raw=original(root,name,**kwargs)
+        if change=='bytes':archive.write_bytes(raw+b'changed')
+        elif change=='leaf':
+            moved=archive.with_suffix('.original');archive.rename(moved);archive.symlink_to(moved)
+        else:
+            other=tmp_path/'other';other.mkdir();alias.unlink();alias.symlink_to(other,target_is_directory=True)
+        return raw
+    monkeypatch.setattr(installer,'read_file',replace_after_read)
+    with pytest.raises(ValueError,match='archive input changed during capture'):
+        install(alias/archive.name,data_home=tmp_path/'data')
+    assert not (tmp_path/'data').exists()
+
+
 @pytest.mark.parametrize('bad_name', ['../escape','/absolute','quirkbench-controller-0.1.0/../escape'])
 def test_archive_traversal_is_rejected_before_install(tmp_path,bad_name):
     output=tmp_path/'bad.tar.gz'
