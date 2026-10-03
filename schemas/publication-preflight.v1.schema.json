@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "publication-preflight.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_type",
+    "statement_sha256",
+    "archive_sha256",
+    "baseline_sha256",
+    "controller_version",
+    "publisher_fingerprint",
+    "publisher_authenticated",
+    "asset_compatibility_checked",
+    "inner_signed",
+    "inner_qualified",
+    "native_package_compatibility_verified",
+    "runtime_ready",
+    "execution_authorized",
+    "published",
+    "qualification_status",
+    "baseline_id",
+    "builder_image_digest",
+    "builder_config_digest",
+    "target_recipes",
+    "input_object_count",
+    "verified_input_count",
+    "verified_input_bytes",
+    "missing_count",
+    "invalid_count",
+    "input_closure_complete",
+    "missing_truncated",
+    "invalid_truncated",
+    "missing",
+    "invalid",
+    "unchecked_baseline_ids",
+    "limitations",
+    "builder_base_marker_verified"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "record_type": {
+      "const": "publication-preflight"
+    },
+    "statement_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "archive_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "baseline_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "controller_version": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "publisher_fingerprint": {
+      "type": "string",
+      "pattern": "^(?:[A-F0-9]{40}|[A-F0-9]{64})$"
+    },
+    "publisher_authenticated": {
+      "const": true
+    },
+    "asset_compatibility_checked": {
+      "const": true
+    },
+    "inner_signed": {
+      "const": false
+    },
+    "inner_qualified": {
+      "const": false
+    },
+    "native_package_compatibility_verified": {
+      "const": false
+    },
+    "runtime_ready": {
+      "const": false
+    },
+    "execution_authorized": {
+      "const": false
+    },
+    "published": {
+      "const": false
+    },
+    "qualification_status": {
+      "const": "unqualified"
+    },
+    "baseline_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "builder_image_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "builder_config_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "target_recipes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "recipe_id",
+          "sha256",
+          "version"
+        ],
+        "properties": {
+          "recipe_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        }
+      },
+      "maxItems": 64
+    },
+    "input_object_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "verified_input_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "verified_input_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "missing_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "invalid_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "input_closure_complete": {
+      "type": "boolean"
+    },
+    "missing_truncated": {
+      "type": "boolean"
+    },
+    "invalid_truncated": {
+      "type": "boolean"
+    },
+    "missing": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sha256",
+          "roles"
+        ],
+        "properties": {
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "maxItems": 8192
+          }
+        }
+      },
+      "maxItems": 20
+    },
+    "invalid": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "reason"
+            ],
+            "properties": {
+              "role": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "reason": {
+                "type": "string",
+                "maxLength": 256
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sha256",
+              "roles",
+              "reason"
+            ],
+            "properties": {
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                "maxItems": 8192
+              },
+              "reason": {
+                "type": "string",
+                "maxLength": 256
+              }
+            }
+          }
+        ]
+      },
+      "maxItems": 20
+    },
+    "unchecked_baseline_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+      },
+      "maxItems": 4096
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 512
+      },
+      "maxItems": 20
+    },
+    "builder_base_marker_verified": {
+      "const": false
+    }
+  }
+}

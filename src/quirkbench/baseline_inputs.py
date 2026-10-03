@@ -48,7 +48,7 @@ def package_closure(store,entry):
     return snapshot,raw
 
 
-def verify_object(store,identity,limit, *,verify=lambda:None):
+def verify_object(store,identity,limit, *,verify=lambda:None,consume=lambda size:None):
     """Bounded streaming CAS read; the held file and its canonical name must agree."""
     from .source_capture import _identity
     sha256(identity);root = Path(cas_root(store));root_fd = objects_fd = fd = -1
@@ -75,6 +75,7 @@ def verify_object(store,identity,limit, *,verify=lambda:None):
             if _identity(before)!=_identity(os.fstat(fd)) or _identity(before)!=_identity(os.stat(identity,dir_fd=objects_fd,follow_symlinks=False)):
                 raise Conflict('candidate CAS object moved or changed: '+identity)
             block = os.read(fd,min(1024**2,limit-total+1))
+            consume(len(block))
             if not block:break
             total += len(block)
             if total>limit:raise ContractError('candidate CAS object exceeds byte bounds: '+identity)
