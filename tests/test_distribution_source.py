@@ -419,11 +419,13 @@ def test_active_git_unlinked_unsafe_mode_is_not_retried(loose_object,monkeypatch
 @pytest.mark.parametrize('active',[False,True],ids=['stopped','active'])
 def test_preliminary_git_head_replacement_requires_strict_retry(loose_object,monkeypatch,active):
     source,_,_=loose_object
-    head=source/'.git/HEAD';native_stat,native_fstat=os.stat,os.fstat
+    head=source/'.git/HEAD';native_lstat,native_fstat=Path.lstat,os.fstat
     expected=distro.import_git_policy(source,recursive=False)
     replaced=[False];retries=[]
-    def named(path,**kwargs):
-        if path==head and kwargs.get('follow_symlinks') is False and not replaced[0]:
+    # Hook the public no-follow observation: pathlib's underlying os call differs
+    # across Python versions (os.stat before 3.14, os.lstat from 3.14).
+    def named(path):
+        if path==head and not replaced[0]:
             fd=os.open(head,os.O_RDONLY)
             try:
                 replacement=source/'.git/HEAD.lock';replacement.write_bytes(head.read_bytes())
@@ -431,8 +433,8 @@ def test_preliminary_git_head_replacement_requires_strict_retry(loose_object,mon
                 metadata=native_fstat(fd);assert metadata.st_nlink==0
                 return metadata
             finally:os.close(fd)
-        return native_stat(path,**kwargs)
-    monkeypatch.setattr(distro.os,'stat',named)
+        return native_lstat(path)
+    monkeypatch.setattr(Path,'lstat',named)
     monkeypatch.setattr(distro.time,'sleep',retries.append)
     if active:
         assert distro.import_git_policy(source,active=True)==expected
