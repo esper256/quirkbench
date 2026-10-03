@@ -36,8 +36,9 @@ def check_replay(spec, directory, *, query=_query):
         observed.append({'name':name,'nevra':nevra,'sha256':sha256_file(path),'file':str(path)})
     required = list(spec['packages'])
     for name in ('kernel-core','kernel-modules-core','kernel-modules','kernel-modules-extra'):
-        if not any(p['name'] == name for p in required):
-            required.append({'name':name,'nevra':name+'-0:'+spec['kernel_release'],'sha256':None})
+        requested = name+'-0:'+spec['kernel_release']
+        if not any(p['name'] == name and p['nevra'] == requested for p in required):
+            required.append({'name':name,'nevra':requested,'sha256':None})
     missing, mismatched = [], []
     for expected in required:
         same_name = [p for p in observed if p['name'] == expected['name']]

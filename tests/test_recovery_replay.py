@@ -89,3 +89,16 @@ def test_malformed_rpm_inspection_is_actionable(tmp_path):
     def query(argv):raise subprocess.CalledProcessError(1,argv)
     with pytest.raises(BuildError,match='cannot inspect retained RPM: glibc-common.rpm'):
         check_replay(selected,directory,query=query)
+
+
+def test_declared_other_kernel_release_cannot_hide_requested_kernel(tmp_path):
+    selected,directory,query=inputs(tmp_path)
+    old='kernel-core-0:7.2.6-200.fc44.x86_64'
+    selected['packages'].append({'name':'kernel-core','nevra':old,'sha256':digest(b'kernel-core')})
+    original=query
+    def query(argv):
+        return 'kernel-core\t'+old+'\n' if Path(argv[-1]).stem=='kernel-core' else original(argv)
+    result=check_replay(selected,directory,query=query)
+    assert not result['selected_inputs_available']
+    assert {'name':'kernel-core','nevra':'kernel-core-0:'+selected['kernel_release'],
+            'sha256':None} in result['missing']

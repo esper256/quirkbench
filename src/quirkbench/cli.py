@@ -1187,7 +1187,7 @@ def _main(argv=None):
                 register(controller.root,'input',[artifact.sha256])
                 answer=asdict(artifact)
             elif args.command == 'recovery-inputs':
-                from .recovery_inputs import acquisition_command,retain_packages,generate_recipe
+                from .recovery_inputs import acquisition_command,acquisition_wrapper,retain_packages,generate_recipe
                 if args.action=='acquire-plan':
                     from .retention import managed_path,register
                     from .recovery_acquisition import load_spec,stage_spec,freeze_legacy_spec,MAX_SPEC
@@ -1205,7 +1205,7 @@ def _main(argv=None):
                     spec_digest=controller.store.put(canonical(spec)).sha256
                     import uuid
                     owner=register(controller.root,'input',[spec_digest],owner='storage:acquisition-v1:'+spec_digest+':'+uuid.uuid4().hex,paths=(directory,),state='WAITING')
-                    answer={'argv':['python3','-m','quirkbench.recovery_inputs','--state',str(controller.root),'--owner',owner],
+                    answer={'argv':acquisition_wrapper(controller.root,owner),
                             'dnf_argv':acquisition_command(directory/'rpms',spec=spec),'spec_sha256':spec_digest,'selection':'explicit' if args.spec else 'historical-candidate-compatibility','directory':str(directory/'rpms'),'executed':False,'retention_owner':owner}
                 elif args.action=='lock':
                     from .retention import verified_acquisition,work,published

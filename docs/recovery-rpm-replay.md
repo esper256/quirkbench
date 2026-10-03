@@ -70,7 +70,7 @@ selected JSON. Package hashes, Fedora/kernel release and full key fingerprint
 remain identical:
 
 ```sh
-python3 - /absolute/selected-candidate.json /absolute/retained-stock.repo \
+PYTHONPATH=/absolute/selected-runtime/lib python3 - /absolute/selected-candidate.json /absolute/retained-stock.repo \
   /absolute/replay-candidate.json <<'PY'
 import sys
 from pathlib import Path
@@ -85,7 +85,14 @@ with Path(sys.argv[3]).open('xb') as output:
 PY
 ```
 
-Use the Python interpreter from the Quirkbench installation. The new canonical
+For an archive installation, use its recorded `runtime_root` in place of
+`/absolute/selected-runtime`: the launcher's library bootstrap is local to that
+launcher, so the specification-editing Python snippet explicitly selects the same installed
+`lib` directory with `PYTHONPATH`. The acquisition wrapper independently carries its own library bootstrap. Use a supported Python3.11+ interpreter. For a pip installation, use
+its interpreter and omit this prefix if Quirkbench is already importable. Do not
+point it at a different runtime than the controller used for planning/locking.
+
+The new canonical
 specification has a new digest because the repository changed. Existing owners
 keep their original binding; do not edit their staged repositories/specification.
 Repo metadata may be regenerated, but selected RPM identities remain pinned and
@@ -101,15 +108,15 @@ quirkbench --state /absolute/controller-state recovery-inputs acquire-plan \
   > /absolute/replay-plan.json
 ```
 
-The plan downloads nothing. Execute its returned **wrapper `argv`**, using the
-Quirkbench installation's Python; the following runs the array without a shell:
+The plan downloads nothing. Execute its returned **wrapper `argv`** unchanged;
+it includes the planning installation's Python executable and library bootstrap.
+The following uses only Python's standard library to run that array without a shell:
 
 ```sh
 python3 - /absolute/replay-plan.json <<'PY'
 import json, subprocess, sys
 plan = json.load(open(sys.argv[1]))
 argv = plan['argv']
-argv[0] = sys.executable
 subprocess.run(argv, check=True)
 PY
 ```
