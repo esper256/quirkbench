@@ -5,7 +5,7 @@ from pathlib import Path
 import os
 import stat
 
-from .contracts import ContractError, Conflict, Experiment, Result, canonical, digest, identifier, sha256
+from .contracts import ContractError, Conflict, Artifact, Experiment, Result, canonical, digest, identifier, sha256
 from .state_reader import StateReader, QUERY_BYTES, read_file, safe_text
 from .attended_views import stored
 from .attended_baseline import document, raw_metadata
@@ -69,7 +69,7 @@ def attribution(reader, db, name, spec):
     from .investigation_pipeline import validate as pipeline_input
     from .source_capture import validate_capture
     from .deployment import DeploymentManifest
-    from .recipe_registry import load_manifest
+    from .recipe_registry import load_manifest, _validate_parameters
     keys = [k for k in ('attended_baseline','proposal_input') if k in spec['artifacts']]
     unknown = {'state':'unavailable', 'reason':'exact_source_input_missing', 'input_sha256':None,
         'input_type':None, 'identities':None, 'metadata_verified':False,
@@ -80,7 +80,9 @@ def attribution(reader, db, name, spec):
     unknown['input_sha256'] = identity
     try:
         bound = (baseline_input if key == 'attended_baseline' else proposal_input)(document(reader, identity, 16384))
-        if (bound['investigation_id'] != name or bound['experiment_id'] != spec['experiment_id']
+        from .investigations import record
+        inv=record(reader,name,db)
+        if (inv is None or bound['baseline_sha256']!=inv['baseline_sha256'] or bound['investigation_id'] != name or bound['experiment_id'] != spec['experiment_id']
                 or bound['recipe_id'] != spec['recipe'] or bound['deployment_sha256'] != spec['artifacts'].get('deployment')
                 or bound['recipe_manifest_sha256'] != spec['artifacts'].get('recipe_manifest')):
             raise Conflict('experiment input identity differs')
@@ -97,32 +99,46 @@ def attribution(reader, db, name, spec):
                 or link['join_input_sha256'] != bound['composition_input_sha256']
                 or link['candidate_operation_id'] != build['candidate_operation_id']
                 or link['build_operation_id'] != join['build_operation_id']
-                or link['source_capture_operation_id'] != build['source_capture_operation_id']):
+                or link['source_capture_operation_id'] != build['source_capture_operation_id']
+                or link['outputs_index_sha256'] != bound['composition_output_sha256']):
             raise Conflict('source/build/composition join differs')
         output = document(reader, bound['composition_output_sha256'], QUERY_BYTES)
-        deployment = DeploymentManifest.from_dict(document(reader, bound['deployment_sha256'], QUERY_BYTES)).to_dict()
+        manifest = DeploymentManifest.from_dict(document(reader, bound['deployment_sha256'], QUERY_BYTES))
+        deployment = manifest.to_dict()
         if (not isinstance(output, dict) or set(output) != {'deployment','artifact'}
                 or output['deployment'] != deployment or output['artifact']['sha256'] != bound['deployment_sha256']
                 or link['deployment_revision'] != deployment['revision']):
             raise Conflict('published candidate metadata differs')
+        artifact=Artifact.from_dict(output['artifact'])
+        if len(raw_metadata(reader,artifact.sha256,QUERY_BYTES))!=artifact.size:raise Conflict('deployment object size differs')
+        from .controller import Controller
+        evidence=Controller._deployment_evidence_shape(manifest)
+        provenance=stored(raw_metadata(reader,evidence['build_provenance'],QUERY_BYTES).decode(),'build provenance')
+        Controller._validate_deployment_build(manifest,evidence,provenance)
         capture = validate_capture(document(reader, bound['source_capture_sha256']))
         base = validate_capture(document(reader, bound['base_capture_sha256']))
         if capture['base_oid'] != bound['base_oid'] or base['base_oid'] != bound['base_oid']:
             raise Conflict('source base identity differs')
         if key == 'attended_baseline' and any(capture[k] != base[k] for k in ('base_oid','archive_sha256','manifest_sha256','file_count','allowed_untracked','provenance')):
             raise Conflict('baseline source is modified')
+        if evidence['kernel_source'] != capture['archive_sha256'] or manifest.provenance.get('baseline_sha256')!=bound['baseline_sha256']:
+            raise Conflict('candidate source or baseline provenance differs')
         recipe = load_manifest(raw_metadata(reader, bound['recipe_manifest_sha256'], QUERY_BYTES))
         if recipe['recipe_id'] != spec['recipe']:raise Conflict('recipe identity differs')
+        _validate_parameters(recipe['parameter_specs'],spec['parameters'])
         owners = ['experiment:'+spec['experiment_id']]
         if db.execute('SELECT 1 FROM storage_retired WHERE owner=?', (owners[0],)).fetchone():
             raise Conflict('experiment payload retired')
         required = {bound[k] for k in bound if k.endswith('_sha256')}
         required.update((capture['archive_sha256'],capture['manifest_sha256'],base['archive_sha256'],base['manifest_sha256']))
         required.add(identity)
+        required.update(evidence.values())
         # The retained experiment closure includes build outputs/symbol references.
         refs = db.execute('SELECT digest FROM refs WHERE owner=? LIMIT 1025', (owners[0],)).fetchall()
         if len(refs) > 1024:raise ContractError('experiment retention closure exceeds report budget')
-        required.update(r[0] for r in refs)
+        owned={r[0] for r in refs}
+        if not required<=owned:raise Conflict('exact report metadata or source closure is no longer retained')
+        required.update(owned)
         items = [presence(reader, item) for item in sorted(required)]
         if len(items) > 128:raise ContractError('experiment object inventory exceeds report budget')
         return {'state':'available', 'reason':None, 'input_sha256':identity, 'input_type':bound['record_type'],
@@ -162,7 +178,7 @@ def observations(db, name, session, attempt):
         'problem_reproduced':None}
 
 
-def attempt_fact(reader, db, name, session, row, source):
+def attempt_fact(reader, db, name, session, row, source, device):
     from .attended_views import attempt_row
     saved=attempt_row(db,row['id'])
     result=asdict(Result.from_dict(stored(saved['result'],'result'))) if saved['result'] else None
@@ -173,7 +189,7 @@ def attempt_fact(reader, db, name, session, row, source):
     if len(receipts)>1024:raise ContractError('attempt evidence exceeds report budget')
     ack={sha256(r['digest']) for r in receipts}
     items=[{**presence(reader,v),'acknowledged':v in ack} for v in sorted(declared)]
-    binding=(source['metadata_verified'] and saved['handoff_revision'] == source['deployment_revision']
+    binding=(saved['device']==device and source['metadata_verified'] and saved['handoff_revision'] == source['deployment_revision']
              and saved['started'] is not None and result is not None)
     obs=observations(db,name,session,row['id'])
     missing=[]
@@ -234,7 +250,7 @@ def report(reader, name, *, plan=None, after=0, limit=5, experiment=None, attemp
             selected=db.execute('''SELECT a.rowid AS cursor,a.id,j.experiment,j.repetition FROM attempts a
                 JOIN jobs j ON j.id=a.job WHERE j.campaign=? AND j.experiment=? AND a.rowid>?
                 ORDER BY a.rowid LIMIT ?''',(name,row['id'],attempt_after,attempt_limit+1)).fetchall()
-            facts=[attempt_fact(reader,db,name,inv['session']['session_id'],r,source) for r in selected[:attempt_limit]]
+            facts=[attempt_fact(reader,db,name,inv['session']['session_id'],r,source,inv['session']['device_id']) for r in selected[:attempt_limit]]
             counts=db.execute('''SELECT COUNT(*) AS attempts,SUM(a.started IS NOT NULL) AS started_attempts,
                 SUM(a.result IS NOT NULL) AS terminal_results,SUM(a.recovery_returned IS NOT NULL) AS recovery_returns
                 FROM attempts a JOIN jobs j ON j.id=a.job WHERE j.campaign=? AND j.experiment=?''',(name,row['id'])).fetchone()

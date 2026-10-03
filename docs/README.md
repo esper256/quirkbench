@@ -25,3 +25,5 @@ read-through. Superseded plans, run logs and investigation histories live in Git
 The executable CLI and installed schemas describe available interfaces. Historical
 record readers remain supported where the code requires them; removing old prose
 does not authorize dropping compatibility or reinterpreting stored evidence.
+
+- [Attributable investigation reports and retention](investigation-reports.md)

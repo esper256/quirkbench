@@ -112,7 +112,11 @@
       "examples/attended-baseline-input.json",
       "src/quirkbench/operator_approval.py",
       "src/quirkbench/target.py",
-      "src/quirkbench/tui.py"
+      "src/quirkbench/tui.py",
+      "src/quirkbench/investigation_report.py",
+      "schemas/investigation-report.v1.schema.json",
+      "examples/investigation-comparison.json",
+      "tests/test_investigation_report.py"
     ],
     "tests": [
       "tests/test_investigation_pipeline.py",
@@ -132,7 +136,8 @@
       "tests/test_physical_handoff.py",
       "tests/test_controller_deployments.py",
       "tests/test_investigation_monitor.py",
-      "tests/test_monitor.py"
+      "tests/test_monitor.py",
+      "tests/test_investigation_report.py"
     ]
   },
   "filesystem": {

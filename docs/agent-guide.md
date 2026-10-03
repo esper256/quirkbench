@@ -247,3 +247,15 @@ expired historical preparation metadata are reported as unavailable; start a fre
 investigation/preparation when historical metadata has expired. A coherent catalog
 and separate native/operator evidence are required for an actual target campaign.
 The legacy manual `build`/`compose` interfaces retain their existing behavior.
+
+## Attributable comparison reports
+
+Use `investigation report INVESTIGATION --json` for bounded exact-source,
+candidate, attempt, recipe and original human-observation facts. Compare explicit
+roles with `--comparison FILE`; passing execution is not reproduction or proof of
+a fix. Exposure counts remain unknown without typed attributable recipe evidence.
+Follow experiment/attempt cursors; do not treat a page as the entire investigation.
+`investigation report-retain INVESTIGATION --note TEXT` atomically preserves current
+owners through existing retention, but cannot restore expired bytes. See
+[investigation reports](investigation-reports.md) and the installed
+[investigation report schema](../schemas/investigation-report.v1.schema.json).

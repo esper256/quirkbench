@@ -190,3 +190,62 @@ def test_joined_published_baseline_report_preserves_exact_chain_and_runtime_evid
     c.store.path(source['input_sha256']).write_bytes(b'corrupt')
     broken=report.report(report.ReportReader(c.root),'investigation')['items'][0]
     assert not broken['attribution']['metadata_verified'] and not broken['attempts'][0]['exact_candidate_adoption']
+
+
+def test_report_and_retention_records_match_strict_installed_schema(lab):
+    from pathlib import Path
+    import jsonschema
+    c,_=lab;populate(c)
+    schema=json.loads((Path(__file__).parents[1]/'schemas/investigation-report.v1.schema.json').read_text())
+    validator=jsonschema.Draft202012Validator(schema)
+    value=report.report(report.ReportReader(c.root),'investigation')
+    validator.validate(value);validator.validate(report.retain(c.root,'investigation','schema check'))
+    validator.validate(plan([('patched','experiment-0')]))
+    value['items'][0]['attempts'][0]['token']='must reject private wire fields'
+    assert not validator.is_valid(value)
+
+
+def test_retention_reports_missing_objects_without_claiming_restoration(lab):
+    c,_=lab;identity=populate(c);c.store.path(identity).unlink()
+    retained=report.retain(c.root,'investigation','retain partial evidence')
+    assert retained['missing_object_count']==1 and retained['missing_objects']==[identity]
+    assert not retained['restored_bytes'] and not retained['payload_bytes_verified']
+
+
+def test_joined_baseline_patch_regression_revert_compare_actual_retained_bytes(published,joined,tmp_path,monkeypatch):
+    from test_proposal_dispatch import capture_proposal, dispatch_and_build, bounded_attempt
+    c,composition=published;candidate=joined[5]
+    with c.lifecycle() as owner:
+        baseline=attended_baseline.admit(c,'investigation',composition,'comparison-baseline',ready=lambda _:None)['data']['experiment_id']
+        hardware,client,step,backend,boot=attended_lab(c,tmp_path)
+        bounded_attempt(c,step,hardware.boot_id,'candidate-base-report','recovery-base-report')
+        with c.transaction() as db:workspace=db.execute('SELECT workspace_id FROM investigations').fetchone()[0]
+        original=(c.root/'workspaces'/workspace/'init/main.c').read_text()
+        declarations=[('baseline',baseline)];recovery='recovery-base-report'
+        for role,content in [('patched','patched report comparison\n'),('regression','different regression conditions\n'),('revert',original)]:
+            op,proposal,_=capture_proposal(c,owner,monkeypatch,'report-'+role,content)
+            _,experiment=dispatch_and_build(c,owner,monkeypatch,op,candidate,'report-dispatch-'+role)
+            bounded_attempt(c,step,recovery,'candidate-report-'+role,'recovery-report-'+role)
+            recovery='recovery-report-'+role;declarations.append((role,experiment))
+        pages=[];cursor=0;reader=report.ReportReader(c.root)
+        with reader.connection():
+            while True:
+                value=report.report(reader,'investigation',plan=plan(declarations),after=cursor)
+                pages.append(value)
+                if value['next_cursor'] is None:break
+                cursor=value['next_cursor']
+    items=[row for page in pages for row in page['items']]
+    assert [row['comparison_role'] for row in items]==['baseline','patched','regression','revert']
+    sources=[]
+    for row in items:
+        assert row['attribution']['metadata_verified'],row['attribution']
+        assert row['baseline_comparison']['state']=='metadata_compared'
+        assert row['baseline_comparison']['conditions_equivalent'] is None
+        assert row['attempts'][0]['exact_candidate_adoption'] and row['attempts'][0]['problem_reproduced'] is None
+        sources.append(row['attribution']['identities']['source_capture_sha256'])
+    assert len(set(sources))>=3
+    assert 'source_capture_sha256' in items[1]['baseline_comparison']['different_identities']
+    assert value['conclusion']=='inconclusive'
+    from pathlib import Path
+    import jsonschema
+    for page in pages:jsonschema.validate(page,json.loads((Path(__file__).parents[1]/'schemas/investigation-report.v1.schema.json').read_text()))
