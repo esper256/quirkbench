@@ -114,6 +114,12 @@ from .proposal_dispatch import MIGRATION as PROPOSAL_DISPATCH_MIGRATION
 MIGRATIONS.append(PROPOSAL_DISPATCH_MIGRATION)
 from .target_shutdown import MIGRATION as SHUTDOWN_MIGRATION
 MIGRATIONS.append(SHUTDOWN_MIGRATION)
+MIGRATIONS.append("""
+CREATE TABLE report_retention_commands(
+ request_id TEXT PRIMARY KEY,request_digest TEXT NOT NULL,
+ campaign TEXT NOT NULL REFERENCES investigations(id),result_document TEXT NOT NULL);
+""")
+
 
 def uid():
     return uuid.uuid4().hex
