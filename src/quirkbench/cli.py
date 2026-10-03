@@ -438,6 +438,7 @@ def _main(argv=None):
         from .contracts import Conflict, ContractError
         from .operations import operation_response
         from .store import StoragePressure
+        from .build import BuildError
         try:
             answer = execute(discover_state_root(args.state), args)
             if args.json:
@@ -459,7 +460,7 @@ def _main(argv=None):
                 from .state_reader import safe_text
                 print(safe_text(json.dumps(answer['data'], indent=2, sort_keys=True)))
             return 0
-        except (OSError, ValueError, sqlite3.Error, StoragePressure) as exc:
+        except (OSError, ValueError, sqlite3.Error, StoragePressure, BuildError) as exc:
             from .investigation_pipeline import PipelineBlocked
             from .candidate_rootfs_operation import CandidateBlocked
             code = 'BLOCKED' if isinstance(exc,(PipelineBlocked,CandidateBlocked,StoragePressure)) else 'CONFLICT' if isinstance(exc, Conflict) else 'INVALID_INPUT' if isinstance(exc, ContractError) else 'INFRASTRUCTURE'
@@ -1335,7 +1336,7 @@ def main(argv=None):
                                'target','endpoint','target-service','serve-repository','release-check') or
               (args.command=='campaign' and args.action=='status') or
               (args.command=='attempt' and args.action in ('status','show')) or
-              (args.command=='investigation' and args.action in ('status','source','brief','baseline','context','history','recipes','proposal-schema','proposals','observations','observation','report')) or args.command=='evidence' or
+              (args.command=='investigation' and args.action in ('status','source','brief','baseline','context','history','recipes','proposal-schema','proposals','observations','observation','report','export')) or args.command=='evidence' or
               (args.command=='settings' and args.action=='show') or
               (args.command=='maintenance' and args.action in ('status','prune')) or
               (args.command=='session' and args.action in ('observations','observation')) or

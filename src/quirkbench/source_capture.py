@@ -52,7 +52,7 @@ def _path(name):
     return path
 
 
-def _git(root,arguments,verify, *,local_fetch=False,timeout_s=60,import_epoch=None,before_launch=None,input_data=None):
+def _git(root,arguments,verify, *,local_fetch=False,local_bundle=False,timeout_s=60,import_epoch=None,before_launch=None,input_data=None):
     if type(timeout_s) is not int or not 1<=timeout_s<=3600:raise ContractError('bounded Git timeout required')
     if input_data is not None and (not isinstance(input_data,bytes) or len(input_data)>MAX_LIST
             or arguments not in (['hash-object','-w','--no-filters','--stdin-paths'],['update-index','-z','--index-info'])):
@@ -64,10 +64,18 @@ def _git(root,arguments,verify, *,local_fetch=False,timeout_s=60,import_epoch=No
                 or str(Path(arguments[6]).resolve())!=arguments[6] or not Path(arguments[6]).is_dir()
                 or not isinstance(arguments[7],str) or not OID.fullmatch(arguments[7])):
             raise ContractError('local transport is restricted to an exact pinned workspace fetch')
+    if local_bundle:
+        if (local_fetch or not isinstance(arguments,list) or len(arguments)!=7
+                or arguments[:5]!=['fetch','--quiet','--no-tags','--no-recurse-submodules','--update-shallow']
+                or not isinstance(arguments[5],str) or not Path(arguments[5]).is_absolute()
+                or str(Path(arguments[5]).resolve())!=arguments[5]
+                or not stat.S_ISREG(Path(arguments[5]).lstat().st_mode)
+                or Path(arguments[5]).lstat().st_nlink!=1 or arguments[6]!='refs/heads/base'):
+            raise ContractError('bundle transport requires an export-owned regular base bundle')
     verify()
     env={key:value for key,value in os.environ.items() if not key.startswith('GIT_')}
     env.update(GIT_CONFIG_NOSYSTEM='1',GIT_CONFIG_GLOBAL='/dev/null',GIT_TERMINAL_PROMPT='0',
-        GIT_NO_LAZY_FETCH='1',GIT_ALLOW_PROTOCOL='file' if local_fetch else '',GIT_NO_REPLACE_OBJECTS='1')
+        GIT_NO_LAZY_FETCH='1',GIT_ALLOW_PROTOCOL='file' if local_fetch or local_bundle else '',GIT_NO_REPLACE_OBJECTS='1')
     if import_epoch is not None:
         if (type(import_epoch) is not int or not 0 <= import_epoch <= 2**31-1
                 or arguments != ['commit','--quiet','--no-gpg-sign','-m','Quirkbench imported distribution source baseline']):

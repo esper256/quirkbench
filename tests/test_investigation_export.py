@@ -11,7 +11,16 @@ from test_source_capture import repository,git
 from test_investigation_context import lab,setup,observations
 from test_investigation_report import populate
 from test_external_proposals import captured
+from test_distribution_source import prepared
+from test_attended_baseline import published,joined,bounded_build,bounded_compose,candidate_setup,assembly_setup
 from test_investigations import start
+
+
+@pytest.fixture(autouse=True)
+def tiny_export_policy(monkeypatch):
+    # Tiny software fixtures don't assume the host has the production 20GiB
+    # reserve. Reserve rejection is exercised separately with explicit evidence.
+    monkeypatch.setattr(export,'reserve_bytes',lambda root:0)
 
 
 class Objects:
@@ -27,7 +36,7 @@ def engine(repository,allowed=()):
     stage=state/'export';stage.mkdir(mode=0o700)
     bundle=stage/'bundle';bundle.mkdir(mode=0o700)
     for name in ('patches','reproduce'): (bundle/name).mkdir(mode=0o700)
-    value=export.patch_series(source,capture,Objects(store),stage,bundle,'Actual Author <author@example.invalid>',lambda:None)
+    value=export.patch_series(source,capture,Objects(store),stage,bundle,'Actual Author <author@example.invalid>',lambda:None,reserve=0)
     return value,stage,bundle
 
 
@@ -70,7 +79,7 @@ def test_report_only_inconclusive_atomic_public_output_excludes_private_control(
     assert value['complete'] and value['source'] is None and value['validation_status']=='unvalidated'
     assert {'README.md','report.md','manifest.json','experiments/report.json','evidence/'+identity}<=set(names)
     with tarfile.open(output) as archive:
-        raw=b''.join(archive.extractfile(n).read() for n in names)
+        raw=b''.join(archive.extractfile(n).read() for n in names if archive.getmember(n).isfile())
     assert b'PRIVATE-TOKEN' not in raw and b'untrusted_secret' not in raw and b'controller.sqlite' not in names
     assert not value['native_qualification'] and not value['execution_authorized']
     with pytest.raises(Conflict):export.export(c.root,'investigation',output)
@@ -111,6 +120,180 @@ def test_cli_exports_existing_state_without_controller_initialization(lab,tmp_pa
     c,_=lab;populate(c)
     def forbidden(*a,**kw):raise AssertionError('export initialized controller')
     monkeypatch.setattr('quirkbench.controller.Controller.__init__',forbidden)
+    monkeypatch.setattr('quirkbench.maintenance.prune',forbidden)
+    with c.transaction() as db:before=list(db.execute('SELECT * FROM refs ORDER BY owner,digest'))
     output=tmp_path/'cli.tar'
     assert cli.main(['--state',str(c.root),'investigation','export','investigation','--output',str(output),'--json'])==0
     assert json.loads(capsys.readouterr().out)['data']['conclusion']=='inconclusive'
+    with c.transaction() as db:assert before==list(db.execute('SELECT * FROM refs ORDER BY owner,digest'))
+
+
+def test_empty_capture_reconstructs_exact_base_without_authored_changes(repository):
+    value,stage,bundle=engine(repository)
+    assert value['empty_changes'] and value['reconstruction_verified']
+    assert (bundle/'patches/0001-captured-changes.patch').read_bytes()==b''
+
+
+@pytest.mark.parametrize('mutation',['delete','replace','archive'])
+def test_declared_or_sealed_output_tamper_cannot_publish(lab,tmp_path,mutation):
+    c,_=lab;populate(c);output=tmp_path/'tampered.tar'
+    def fault(phase):
+        stage=next(tmp_path.glob('.quirkbench-export-*'))
+        if phase=='verified' and mutation=='delete':(stage/'bundle/report.md').unlink()
+        if phase=='verified' and mutation=='replace':(stage/'bundle/report.md').write_text('different')
+        if phase=='before_publish' and mutation=='archive':(stage/'public.tar').write_bytes(b'truncated')
+    with pytest.raises((Conflict,FileNotFoundError)):export.export(c.root,'investigation',output,fault=fault)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize('kind',['unacknowledged','unretained','retired'])
+def test_incidental_cas_owner_does_not_export_original_attempt_evidence(lab,tmp_path,kind):
+    c,_=lab;identity=populate(c)
+    with c.transaction() as db:
+        db.execute('INSERT INTO refs VALUES(?,?)',('unrelated-private-owner',identity))
+        if kind=='unacknowledged':db.execute('DELETE FROM evidence')
+        elif kind=='unretained':db.execute("DELETE FROM refs WHERE owner='attempt:attempt-0-0'")
+        else:db.execute("INSERT INTO storage_retired VALUES('attempt:attempt-0-0',0)")
+    output=tmp_path/'original-owner.tar';export.export(c.root,'investigation',output)
+    value,names=manifest(output)
+    assert not value['evidence'][0]['bytes_exported'] and 'evidence/'+identity not in names
+    assert value['missing'] and value['conclusion']=='inconclusive'
+
+
+def test_retired_capture_cannot_borrow_unrelated_retained_source(captured,tmp_path):
+    c,proposal,private,original=captured;selected=proposal['source']['capture_operation_id']
+    with c.transaction() as db:
+        db.execute('INSERT INTO refs SELECT ?,digest FROM operation_refs WHERE operation=?',('unrelated-source-owner',selected))
+        db.execute('INSERT INTO storage_retired VALUES(?,0)',(selected,))
+    output=tmp_path/'retired.tar'
+    with pytest.raises(Conflict,match='no longer retained'):export.export(c.root,'investigation',output,author='Author <a@example.invalid>')
+    assert not output.exists()
+
+
+@pytest.mark.parametrize('mutation',['alternates','config','staged-source'])
+def test_source_consumption_rejects_changed_git_policy_or_staged_bytes(captured,tmp_path,monkeypatch,mutation):
+    c,proposal,private,original=captured;real=export.patch_series
+    def changed(base,capture,objects,stage,bundle,author,verify,**kw):
+        if mutation=='alternates':(base/'.git/objects/info/alternates').write_text('/unapproved/objects\n')
+        elif mutation=='config':(base/'.git/config').write_text('[core]\nrepositoryformatversion=0\n[include]\npath=/unapproved\n')
+        else:objects.path(capture['archive_sha256']).write_bytes(b'changed staged source')
+        return real(base,capture,objects,stage,bundle,author,verify,**kw)
+    monkeypatch.setattr(export,'patch_series',changed)
+    output=tmp_path/'guarded.tar';receipt=export.export(c.root,'investigation',output,author='Author <a@example.invalid>')
+    value,names=manifest(output)
+    assert not receipt['source_reconstructed'] and value['source'] is None
+    assert not any(n.endswith('.patch') for n in names) and value['validation_status']=='unvalidated'
+
+
+def test_config_change_between_policy_parse_and_snapshot_is_rejected(captured,tmp_path,monkeypatch):
+    from quirkbench import source_prepare_operation
+    c,proposal,private,_=captured;real=source_prepare_operation.git_tree
+    def race(path,base,verify):
+        rows=real(path,base,verify)
+        (path/'.git/config').write_text('[core]\nrepositoryformatversion=0\n[include]\npath=/unapproved\n')
+        return rows
+    monkeypatch.setattr(source_prepare_operation,'git_tree',race)
+    receipt=export.export(c.root,'investigation',tmp_path/'config-race.tar',author='Author <a@example.invalid>')
+    assert not receipt['source_reconstructed']
+
+
+def test_export_honors_configured_reserve_before_any_staging(lab,tmp_path,monkeypatch,capsys):
+    from quirkbench.store import StoragePressure
+    c,_=lab;populate(c)
+    monkeypatch.setattr(export,'reserve_bytes',lambda _:10**20)
+    output=tmp_path/'reserve.tar'
+    with pytest.raises(StoragePressure):export.export(c.root,'investigation',output)
+    assert not output.exists() and not list(tmp_path.glob('.quirkbench-export-*'))
+    assert cli.main(['--state',str(c.root),'investigation','export','investigation','--output',str(output),'--json'])==4
+    assert json.loads(capsys.readouterr().out)['error']['code']=='BLOCKED'
+
+
+def test_export_work_budget_remains_failure_inclusive(lab,tmp_path,monkeypatch):
+    c,_=lab;populate(c);monkeypatch.setattr(export,'MAX_WORK',1)
+    output=tmp_path/'budget.tar'
+    with pytest.raises(ContractError,match='work budget'):export.export(c.root,'investigation',output)
+    assert not output.exists()
+
+
+def test_immutable_capture_does_not_follow_live_cleanup_edits(captured,tmp_path):
+    c,proposal,private,_=captured
+    (private/'driver.c').write_text('different untested cleanup\n')
+    output=tmp_path/'immutable.tar'
+    receipt=export.export(c.root,'investigation',output,author='Author <a@example.invalid>')
+    value,names=manifest(output)
+    assert receipt['source_reconstructed'] and value['validation_status']=='unvalidated'
+    with tarfile.open(output) as archive:
+        patch=archive.extractfile('patches/0001-captured-changes.patch').read()
+    assert b'external agent edit' in patch and b'untested cleanup' not in patch
+    assert (private/'driver.c').read_text()=='different untested cleanup\n'
+
+
+def test_distribution_base_keeps_recorded_patch_ancestry_unknown(prepared):
+    from test_distribution_source import run
+    entry,record,source_stage,stage,store=prepared
+    result=run(prepared);source=stage/'output/workspace'
+    capture=json.loads(store.get(result['capture_sha256']))
+    (source/'driver.c').write_text('new captured distribution edit')
+    fresh=source_capture.capture(source,result['base_oid'],[],stage/'fresh',store,writer_quiesced=True,verify=lambda:None)
+    scratch=stage/'export';scratch.mkdir();bundle=scratch/'bundle';bundle.mkdir()
+    for n in ('patches','reproduce'):(bundle/n).mkdir()
+    value=export.patch_series(source,fresh,Objects(store),scratch,bundle,'Author <a@example.invalid>',lambda:None,reserve=0)
+    assert value['base_oid']==result['base_oid'] and value['reconstruction_verified']
+    provenance=json.loads(store.get(capture['provenance']['distribution_patches_sha256']))
+    assert provenance['upstream_relationship']['upstream_base_oid'] is None
+    assert 'unknown' in value['upstream_ancestry']
+
+
+def test_tested_source_match_and_later_cleanup_remain_separate(published,joined,monkeypatch,tmp_path):
+    from test_proposal_dispatch import capture_proposal,dispatch_and_build,bounded_attempt
+    from test_attended_baseline import attended_lab
+    from quirkbench import attended_baseline,source_workspace
+    c,composition=published
+    with c.lifecycle() as owner:
+        attended_baseline.admit(c,'investigation',composition,'export-baseline',ready=lambda _:None)
+        hardware,client,step,backend,boot=attended_lab(c,tmp_path)
+        bounded_attempt(c,step,hardware.boot_id,'candidate-export-base','recovery-export-base')
+        op,proposal,workspace=capture_proposal(c,owner,monkeypatch,'export-patch','tested export change\n')
+        _,experiment=dispatch_and_build(c,owner,monkeypatch,op,joined[5],'export-dispatch')
+        attempt=bounded_attempt(c,step,'recovery-export-base','candidate-export-patch','recovery-export-patch')
+        # Export after the lifecycle owner has stopped; no owner/service starts.
+    output=tmp_path/'tested.tar';receipt=export.export(c.root,'investigation',output,author='Author <a@example.invalid>')
+    value,_=manifest(output)
+    assert value['tested_source_attempts']==[attempt] and value['validation_status']=='tested-source-match'
+    assert value['conclusion']=='inconclusive' and not value['native_qualification']
+    with c.lifecycle() as owner:
+        c.resume('investigation')
+        capture_proposal(c,owner,monkeypatch,'export-cleanup','different final cleanup\n')
+    newer=tmp_path/'cleanup.tar';export.export(c.root,'investigation',newer,author='Author <a@example.invalid>')
+    value,_=manifest(newer)
+    assert value['validation_status']=='unvalidated' and value['tested_source_attempts']==[]
+
+
+def test_installed_cli_and_resources_export_without_checkout(lab,tmp_path):
+    import subprocess
+    from test_release_plan import archive
+    from quirkbench.controller_install import install
+    c,_=lab;populate(c)
+    assets=tmp_path/'assets';assets.mkdir()
+    catalog=json.loads((Path(__file__).parents[1]/'src/quirkbench/baselines/catalog.v1.json').read_bytes())
+    runtime=Path(install(archive(assets,catalog),data_home=tmp_path/'data')['runtime_root'])
+    # Actual supported service configuration, fixture-only zero reserve. No
+    # process/service starts; existing lab database is the read-only input.
+    private=c.root/'private';private.mkdir(exist_ok=True)
+    placeholder=private/'fixture';placeholder.write_text('injected native input');placeholder.chmod(0o600)
+    config={'runtime':str(runtime/'bin/quirkbench'),'job_worker':str(runtime/'bin/quirkbench-job-worker'),
+            'cert':str(placeholder),'key':str(placeholder),'tokens_file':str(placeholder),'reserve_gib':0}
+    config_path=private/'controller-service.json';config_path.write_text(json.dumps(config));config_path.chmod(0o600)
+    env={k:v for k,v in os.environ.items() if k not in ('PYTHONPATH','PYTHONHOME')}
+    help_run=subprocess.run([str(runtime/'bin/quirkbench'),'investigation','export','--help'],cwd=tmp_path,env=env,capture_output=True,text=True,timeout=15)
+    assert help_run.returncode==0 and '--author' in help_run.stdout
+    output=tmp_path/'installed.tar'
+    run=subprocess.run([str(runtime/'bin/quirkbench'),'--state',str(c.root),'investigation','export','investigation','--output',str(output),'--json'],
+                       cwd=tmp_path,env=env,capture_output=True,text=True,timeout=15)
+    assert run.returncode==0,run.stderr+run.stdout
+    assert json.loads(run.stdout)['data']['conclusion']=='inconclusive'
+    assert (runtime/'lib/quirkbench/guide/investigation-export.md').is_file()
+    assert (runtime/'lib/quirkbench/schemas/investigation-export.v1.schema.json').is_file()
+    from jsonschema import Draft202012Validator
+    schema=json.loads((runtime/'lib/quirkbench/schemas/investigation-export.v1.schema.json').read_bytes())
+    Draft202012Validator(schema).validate(manifest(output)[0])
