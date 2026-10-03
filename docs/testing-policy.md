@@ -35,7 +35,7 @@ possible deployment route; a container without a user manager is development-onl
 Missing runtime capabilities do not prevent software development and must not be
 reported as ready. See [controller installation](controller-installation.md).
 
-## Focused cloud checks: archived evidence and delayed traceback
+## Focused cloud checks: archived evidence
 
 [Issue #7](https://github.com/esper256/quirkbench/issues/7) reported an endpoint
 archive case taking 219.26 seconds across export, drain and replay, each with its
@@ -59,7 +59,7 @@ new disposable child; do not substitute existing state. The deep fixture supplie
 path depth independently of the temporary parent. This is focused software work:
 
 ```sh
-TASK_TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/quirkbench-issues-7-8.XXXXXXXX")"
+TASK_TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/quirkbench-archived-evidence.XXXXXXXX")"
 (umask 022; .venv/bin/python -m pytest -q -s \
   tests/test_archived_evidence_validation.py tests/test_retarget_evidence.py \
   tests/test_retarget_endpoint.py::test_new_target_endpoint_history_can_coexist_with_immutable_original_archive \
@@ -89,96 +89,6 @@ fails that budget at 189. These measurements describe one case, not a new full
 suite result. Repeated reconstruction remains tracked in #19. Entry rejection
 and post-capture mutation tests verify that no client exchange or archived
 journal write follows a failed reader boundary.
-
-[Issue #8](https://github.com/esper256/quirkbench/issues/8) contains one reported
-exit 139 during pytest's 30-second faulthandler dump on Debian 13, CPython 3.12.14,
-pytest 9.1.1, ending in `python3.12/pathlib.py`. Only that excerpt is available here;
-there is no core/native stack or complete crash artifact to assign a cause. The
-local editing runtime is CPython 3.14.7 (GCC 15.3.1, Fedora/glibc 2.42), pytest
-9.1.1; it is not the reported runtime. Inspection of the installed pytest hook
-shows it calls `faulthandler.dump_traceback_later` around the test protocol and
-cancels it afterward. No local reproduction was attempted and no defect is assigned
-to Quirkbench, pytest, CPython or the supplied runtime build.
-
-The bounded stdlib-only probe prints runtime/build identity and forces a delayed
-dump during path resolution. Its paired test leaves timer setup to pytest. Run
-each once on the affected cloud runtime, retain both logs and statuses:
-
-```sh
-TASK_PYTHON_STATUS=0
-timeout 10s .venv/bin/python -I tests/faulthandler_probe.py \
-  --path "$TASK_TEST_ROOT" --duration 1 --delay .25 \
-  >"$TASK_TEST_ROOT/python-dump.log" 2>&1 || TASK_PYTHON_STATUS=$?
-printf '%s\n' "$TASK_PYTHON_STATUS" >"$TASK_TEST_ROOT/python-dump.exit"
-TASK_PYTEST_STATUS=0
-timeout 10s .venv/bin/python -m pytest -q -s tests/test_faulthandler_probe.py \
-  -o faulthandler_timeout=0.1 -o faulthandler_exit_on_timeout=false \
-  --basetemp="$TASK_TEST_ROOT/pytest-dump" \
-  >"$TASK_TEST_ROOT/pytest-dump.log" 2>&1 || TASK_PYTEST_STATUS=$?
-printf '%s\n' "$TASK_PYTEST_STATUS" >"$TASK_TEST_ROOT/pytest-dump.exit"
-```
-
-A crash in the Python-only probe narrows the scope beyond pytest/Quirkbench; a
-pytest-only crash isolates integration for further investigation, without proving
-which component is faulty. Two successful probes do not resolve the original
-fixture-specific report. Preserve its diagnostic form (the original joined case
-with `-o faulthandler_timeout=30`) and recorded exit 139. A faster #7 case that
-never fires that timer provides no #8 crash evidence. These commands leave product
-diagnostics enabled and do not skip the evidence regression or request a runtime
-matrix, image build or qualification campaign.
-
-### Cloud results and isolated runtime diagnosis
-
-On Debian 13 with the supplied Clang-built CPython 3.12.14 and pytest 9.1.1,
-the Python-only probe completed its delayed dump, but the pytest probe exited
-139 during its dump. An isolated test importing only `pathlib` and `time` also
-exited 139, with no Quirkbench imports, repository configuration, fixtures or
-third-party pytest plugins. The same isolated test and the existing pytest probe
-both completed their dumps on Debian's GCC-built CPython 3.13.5 with pytest 9.1.1.
-These results exclude Quirkbench application code from the minimal reproduction;
-they do not distinguish a CPython defect, runtime-build defect or pytest interaction,
-nor establish that every Python 3.12 build is affected. Issue #8 remains open.
-One later run of the copied probe also completed on the supplied Python 3.12
-runtime, so a single successful run there does not establish that the fault is
-gone. Retain both successful and crashing results rather than retrying to obtain
-a passing diagnostic.
-
-To reproduce independently of the repository, choose the interpreter being
-investigated, with pytest installed, and run the copied probe once:
-
-```sh
-TASK_PROBE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/quirkbench-runtime-probe.XXXXXXXX")"
-cp tests/faulthandler_minimal.py "$TASK_PROBE_ROOT/test_minimal_dump.py"
-TASK_PROBE_STATUS=0
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 timeout 10s .venv/bin/python -m pytest \
-  -c /dev/null -q -s "$TASK_PROBE_ROOT/test_minimal_dump.py" \
-  -o faulthandler_timeout=0.1 >"$TASK_PROBE_ROOT/dump.log" 2>&1 \
-  || TASK_PROBE_STATUS=$?
-printf '%s\n' "$TASK_PROBE_STATUS" >"$TASK_PROBE_ROOT/dump.exit"
-```
-
-Disabling third-party plugin discovery above isolates the diagnostic; it is not
-the normal application test command. One diagnostic run with `--assert=plain`
-also completed on the supplied Python 3.12 build. That narrows investigation to
-the runtime/pytest execution context but is not proof that assertion rewriting
-causes the fault. Keep normal test assertions and product diagnostics enabled.
-
-If the selected interpreter crashes in this diagnostic, retain its build identity,
-log and exit status and use a supported Python 3.11+ interpreter that passes it
-for development. Recreate the virtualenv using that interpreter and reinstall
-`.[test]`; virtualenvs and native extensions cannot be moved between interpreters.
-For example, on a host providing a working Python 3.13:
-
-```sh
-python3.13 -m venv .venv-python313
-.venv-python313/bin/python -m pip install -e '.[test]'
-make test PYTHON=.venv-python313/bin/python TESTS=tests/test_faulthandler_probe.py
-```
-
-Install the distribution's venv/ensurepip support if its Python packages split
-those components. This interpreter choice changes no application platform checks,
-deadlines, storage rules, assertions or dependency declarations. A passing alternate
-runtime is a development route while the original crash remains under investigation.
 
 ## Validation scope
 
