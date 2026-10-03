@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "record_type": "backup-coverage",
+  "cut": {
+    "database_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "backup_manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "database_user_version": 22
+  },
+  "contents": {
+    "controller_complete": true,
+    "whole_session_complete": false,
+    "captured_source_count": 1,
+    "checkpoint_count": 1,
+    "retained_artifact_count": 8,
+    "retained_deployment_count": 1,
+    "pending_upload_count": 0
+  },
+  "source_workspaces": [
+    {
+      "workspace_id": "kernel",
+      "campaign_id": "investigation",
+      "writer_state": "QUIESCED",
+      "preparation_operation_id": "prepared",
+      "scope_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "base_oid": "dddddddddddddddddddddddddddddddddddddddd",
+      "capture_operation_id": "captured",
+      "capture_state": "SUCCEEDED",
+      "capture_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "captured_source_complete": true,
+      "current_source_covered": true,
+      "captured_dirty_state": "modified"
+    }
+  ],
+  "active_operations": [],
+  "targets": [
+    {
+      "device_id": "target",
+      "last_reported_mode": "recovery",
+      "pending_return_count": 0,
+      "unresolved_attempt_count": 0,
+      "target_only_backlog": "unknown"
+    }
+  ],
+  "limitations": [
+    "editable-workspaces-and-git-omitted",
+    "operator-configuration-omitted",
+    "partial-upload-bytes-omitted",
+    "private-identity-files-omitted",
+    "target-only-evidence-unknown"
+  ],
+  "restore_requirements": [
+    "editable-git-workspaces",
+    "explicit-resume",
+    "operator-configuration",
+    "private-identity",
+    "target-reconciliation"
+  ]
+}
