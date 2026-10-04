@@ -195,7 +195,10 @@
       "src/quirkbench/controller_install.py",
       "src/quirkbench/development_container.py",
       "src/quirkbench/development_run.py",
-      "tests/test_build_launcher.py"
+      "tests/test_build_launcher.py",
+      "src/quirkbench/process_ownership.py",
+      "src/quirkbench/retention.py",
+      "tests/test_retained_process.py"
     ],
     "tests": [
       "tests/test_build_storage.py",
@@ -229,7 +232,8 @@
       "tests/test_enrollment_maintenance.py",
       "tests/test_recipe_registry.py",
       "tests/test_manual_provisioning.py",
-      "tests/test_build_launcher.py"
+      "tests/test_build_launcher.py",
+      "tests/test_retained_process.py"
     ]
   },
   "release-preparation": {
