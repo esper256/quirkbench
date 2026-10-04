@@ -1,6 +1,7 @@
 """Bounded local queries, without initialization, migrations or execution ownership."""
 from __future__ import annotations
 
+from .filesystem import read_file, held_parent
 import base64
 from contextlib import contextmanager
 import errno
@@ -26,40 +27,6 @@ def safe_text(value):
     return ''.join(c for c in str(value) if c in '\n\t' or not unicodedata.category(c).startswith('C'))
 
 
-def read_file(root, relative, *, limit=LOG_BYTES, tail=False):
-    """Traverse beneath a canonical root using no-follow directory descriptors."""
-    root, relative = Path(root), Path(relative)
-    # realpath performs the same fresh filesystem traversal without constructing
-    # and comparing another Path for every retained record. Strict traversal also
-    # rejects ancestor symlink loops consistently on all supported Python versions.
-    try:
-        resolved=os.path.realpath(root,strict=True)
-    except OSError as exc:
-        if exc.errno==errno.ELOOP:
-            raise ContractError('diagnostic path is not canonical') from exc
-        raise
-    if resolved != str(root) or root.is_symlink() or relative.is_absolute() or '..' in relative.parts:
-        raise ContractError('diagnostic path is not canonical')
-    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    try:
-        for part in relative.parts[:-1]:
-            new = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-            os.close(fd)
-            fd = new
-        source = os.open(relative.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
-        with os.fdopen(source, 'rb') as stream:
-            info = os.fstat(stream.fileno())
-            if not stat.S_ISREG(info.st_mode):
-                raise ContractError('diagnostic must be a regular file')
-            if tail:
-                stream.seek(max(0, info.st_size - limit))
-            elif info.st_size > limit:
-                raise ContractError('record exceeds read budget')
-            raw = stream.read(limit)
-            observe_read(root, relative, raw, limit=limit, tail=tail)
-            return raw
-    finally:
-        os.close(fd)
 
 
 def bounded_items(items, budget=QUERY_BYTES - 1024):
@@ -321,27 +288,3 @@ class ReadOnlyStore:
             return before.st_size
 
 
-@contextmanager
-def held_parent(path):
-    """Hold and recheck every nofollow ancestor of an absolute named file."""
-    path=Path(path)
-    if not path.is_absolute():raise ContractError('held path must be absolute')
-    fds=[os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)];links=[]
-    identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid)
-    def guard():
-        for parent,name,child,before in links:
-            if (identity(os.fstat(child))!=before or
-                    identity(os.stat(name,dir_fd=parent,follow_symlinks=False))!=before):
-                raise ContractError('held path ancestor changed')
-    try:
-        for part in path.parts[1:-1]:
-            child=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fds[-1])
-            fds.append(child);parent=fds[-2];before=identity(os.fstat(child))
-            links.append((parent,part,child,before));guard()
-        yield fds[-1],guard
-        guard()
-    except OSError as exc:
-        if exc.errno in (errno.ELOOP,errno.ENOTDIR):raise ContractError('held path is linked') from exc
-        raise
-    finally:
-        for fd in reversed(fds):os.close(fd)

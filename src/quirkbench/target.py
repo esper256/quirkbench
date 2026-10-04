@@ -617,7 +617,7 @@ class TargetAgent:
                 if shutdown.get('waiting') is False:
                     if set(shutdown)!={'waiting','intent','execution_authorized'} or shutdown['execution_authorized'] is not True:
                         raise ContractError('shutdown execution requires exact authorization')
-                    from .target_shutdown import validate_intent
+                    from .shutdown_records import validate_intent
                     intent=validate_intent(shutdown.get('intent'))
                     if intent['device_id']!=self.report.device_id or intent['boot_id']!=self.report.boot_id or self.report.mode!='recovery':
                         raise Conflict('shutdown request differs from actual target recovery boot')

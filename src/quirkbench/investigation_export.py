@@ -17,7 +17,8 @@ from .investigation_report import ReportReader,report,load_comparison
 from .source_capture import _git,_identity,validate_capture
 from .source_workspace import validate as workspace_document,owned_path
 from .external_proposals import document
-from .state_reader import StateReader,held_parent
+from .state_reader import StateReader
+from .filesystem import held_parent
 from .store import sync_directory
 
 MAX_BYTES=16*1024**3
@@ -191,8 +192,8 @@ def _capture(reader,db,name,selected):
 
 def export(root,name,output,*,capture_id=None,author=None,plan=None,timeout_s=300,fault=None):
     """One bounded snapshot and atomic new tar file, never a private-state backup."""
-    from .maintenance import private_lock
-    from .state_config import canonical_user_path
+    from .filesystem import private_lock
+    from .filesystem import canonical_user_path
     root=Path(root).expanduser().absolute();output=Path(output).expanduser().absolute()
     identifier(name)
     if type(timeout_s) is not int or not 1<=timeout_s<=600:raise ContractError('export timeout must be 1..600 seconds')
@@ -339,7 +340,7 @@ def export(root,name,output,*,capture_id=None,author=None,plan=None,timeout_s=30
                         from .source_prepare_operation import git_tree
                         # Fence the config bytes across the policy parser and full
                         # namespace snapshot; a mutation after parsing is rejected.
-                        from .state_reader import read_file
+                        from .filesystem import read_file
                         git_bytes=0;git_nodes=0
                         for current,dirs,files in os.walk(base_path/'.git',followlinks=False):
                             for leaf in dirs+files:
@@ -354,7 +355,7 @@ def export(root,name,output,*,capture_id=None,author=None,plan=None,timeout_s=30
                         approved_git=git_tree(base_path,capture['base_oid'],budget)
                         approved={path:identity for path,identity,_ in approved_git}
                         config_row=next(row for row in approved_git if row[0]=='config')
-                        from .state_reader import read_file
+                        from .filesystem import read_file
                         if config_before!=read_file(base_path,'.git/config',limit=16384) or digest(config_before)!=config_row[2]:raise Conflict('Git config changed after policy validation')
                         def source_guard():
                             budget();owned_path(root,workspace)

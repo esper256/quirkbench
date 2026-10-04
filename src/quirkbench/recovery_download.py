@@ -12,7 +12,8 @@ from urllib.parse import urlsplit
 
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
 from .controller_release import ASSET_LIMIT,bounded_file,verify_statement,verify_recovery_assets,_recovery_compatibility
-from .controller_setup import _managed_path,_database_present
+from .filesystem import _managed_path
+from .controller_setup import _database_present
 from .release_http import _response,_length,fetch_metadata
 from .release_trust import load_bundle
 from .state_config import _config_home
@@ -45,7 +46,7 @@ def submit(root,request_id=None, *, trust_bundle=None,config_home=None,ready=Non
     trust_path=Path(trust_bundle) if trust_bundle is not None else target_assets_dir()/'production-release-trust.json'
     trust_path=trust_path.expanduser().absolute();trust=load_bundle(trust_path)
     from .controller_service import configuration,require_ready
-    from .maintenance import private_lock
+    from .filesystem import private_lock
     from .controller import Controller
     from .job_operations import envelope
     if request_id is not None:identifier(request_id)

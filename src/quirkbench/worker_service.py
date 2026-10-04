@@ -5,6 +5,7 @@ manager participates in admission, execution or shutdown.
 """
 from __future__ import annotations
 
+from .process_identity import WorkerServiceError, verify_empty_cgroup
 import json
 import math
 import os
@@ -15,8 +16,9 @@ import time
 import uuid
 
 from .contracts import canonical, Conflict, digest
-from .controller import controller_boot_id, validate_boot_id
-from .state_reader import read_file, StateReader
+from .process_identity import controller_boot_id, validate_boot_id
+from .filesystem import read_file
+from .state_reader import StateReader
 from .store import atomic_write
 from .build import BuildError
 
@@ -25,10 +27,6 @@ LEGACY_UNIT = re.compile(r'quirkbench-worker-[0-9a-f]{32}-[1-9][0-9]*\.service\Z
 LABEL = 'org.quirkbench.worker-v2'
 
 
-class WorkerServiceError(RuntimeError):
-    def __init__(self, message, *, possibly_started=False):
-        super().__init__(message)
-        self.possibly_started = possibly_started
 
 
 def _run(argv, timeout=30):
@@ -349,26 +347,3 @@ class ContainerWorkerServices:
             self._claim_reader.close();self._claim_reader=None
         return 'stopped'
 
-def verify_empty_cgroup(root, group):
-    """Shared native stop proof, including all descendants in a cgroup v2 unit."""
-    if not group:
-        return
-    if not group.startswith('/') or '//' in group or any(part in ('.', '..') for part in group.split('/')):
-        raise WorkerServiceError('worker cgroup path is invalid')
-    root = Path(root)
-    if root.is_symlink() or not root.is_dir() or not (root / 'cgroup.controllers').is_file():
-        raise WorkerServiceError('cgroup v2 hierarchy is unavailable')
-    path = root / group.lstrip('/')
-    if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
-        raise WorkerServiceError('worker cgroup path escapes hierarchy')
-    if not path.exists():
-        return
-    events = path / 'cgroup.events'
-    if events.is_symlink() or not events.is_file() or events.stat().st_size > 4096:
-        raise WorkerServiceError('worker cgroup population is unreadable')
-    lines = [line.split() for line in events.read_text().splitlines()]
-    if any(len(parts) != 2 for parts in lines):
-        raise WorkerServiceError('worker cgroup population is malformed')
-    values = [parts[1] for parts in lines if len(parts) == 2 and parts[0] == 'populated']
-    if values != ['0']:
-        raise WorkerServiceError('worker cgroup may still contain descendants')

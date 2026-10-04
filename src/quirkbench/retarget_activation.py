@@ -8,13 +8,13 @@ import time
 
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _managed_path,_durable_directory
-from .controller_tls import _read
-from .enrollment import _document,_now
+from .filesystem import _managed_path, _durable_directory
+from .filesystem import _read
+from .enrollment_records import _document, _now
 from .enrollment_result import validate_result
 from .enrollment_target import _intent,_media
 from .retarget_local import _location,validate_intent,validate_source
-from .state_reader import read_file
+from .filesystem import read_file
 from .store import atomic_write,sync_directory
 from .retained_inputs import entries,is_directory,is_present
 
@@ -224,7 +224,7 @@ def activate(control,config,request_id,controller_url,approved_certificate_pem,a
     from .retarget_enrollment import exchange,_paused_source,_same_source_scope
     from .provisioning import _publish_generation
     from .runtime import load_provisioning
-    from .maintenance import private_lock
+    from .filesystem import private_lock
     fault=fault_hook or (lambda _:None)
     # Completed replay observes an existing selection; it grants no new remote
     # authority. Require stopped native recovery and exact same local request.

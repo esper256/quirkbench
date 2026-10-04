@@ -7,15 +7,15 @@ import time
 
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,identifier,sha256
-from .controller_tls import _read
-from .enrollment import _document
+from .filesystem import _read
+from .enrollment_records import _document
 from .enrollment_client import endpoint,inspect_certificate,PinnedEnrollmentClient
 from .enrollment_console import _answer,_secret,require_native_tools
 from .enrollment_target import _storage
 from .retarget_local import pending_intent,_location,prepare_retarget,validate_intent
 from .retarget_enrollment import prepare_request
 from .retarget_activation import activate,completed
-from .maintenance import private_lock
+from .filesystem import private_lock
 
 
 def run_retarget(control,config, *,verify_target,input_stream=None,output_stream=None,read_secret=None,

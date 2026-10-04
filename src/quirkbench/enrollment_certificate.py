@@ -15,11 +15,15 @@ import tempfile
 import time
 
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _durable_directory,_managed_path
-from .controller_tls import _read,_openssl,inspect_identity,load_identity
-from .enrollment import _document,_now,_snapshot,observe_clock
-from .enrollment_proof import _bytes,validate_request,validate_public_key,row_request,_invitation
-from .maintenance import private_lock
+from .filesystem import _durable_directory, _managed_path
+from .filesystem import _read
+from .tls_primitives import _openssl
+from .controller_tls import inspect_identity, load_identity
+from .enrollment_records import _document, _now
+from .enrollment import _snapshot, observe_clock
+from .enrollment_crypto import _bytes, validate_request, validate_public_key
+from .enrollment_proof import row_request, _invitation
+from .filesystem import private_lock
 from .store import atomic_write
 
 

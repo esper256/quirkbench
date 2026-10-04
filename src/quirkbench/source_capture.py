@@ -19,7 +19,7 @@ import tarfile
 
 from .agent import SENSITIVE
 from .contracts import Conflict,ContractError,canonical,sha256
-from .controller_setup import _managed_path
+from .filesystem import _managed_path
 
 MAX_FILES=250000
 MAX_LIST=32*1024**2
@@ -82,7 +82,7 @@ def _git(root,arguments,verify, *,local_fetch=False,local_bundle=False,timeout_s
         env.update(GIT_AUTHOR_NAME='Quirkbench source import', GIT_COMMITTER_NAME='Quirkbench source import',
             GIT_AUTHOR_EMAIL='source-import@quirkbench.invalid', GIT_COMMITTER_EMAIL='source-import@quirkbench.invalid',
             GIT_AUTHOR_DATE='@'+str(import_epoch)+' +0000', GIT_COMMITTER_DATE='@'+str(import_epoch)+' +0000')
-    from .retention import launch
+    from .process_ownership import launch
     if before_launch is not None: before_launch()
     process=launch(['git','--no-optional-locks','-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false','-C',str(root),*arguments],
         env=env,stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,

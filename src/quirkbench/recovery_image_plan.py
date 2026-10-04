@@ -1,6 +1,6 @@
 """Bind audited stock recovery to the regular-file image adapter."""
 from pathlib import Path
-from .boot import _check_recovery_unit_links
+from .target_install import _check_recovery_unit_links
 from .build import BuildError
 from .image import ImageInputs
 from .recovery_recipe import require_executable_recipe

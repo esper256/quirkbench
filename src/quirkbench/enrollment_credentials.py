@@ -13,15 +13,17 @@ import tempfile
 import time
 
 from .contracts import Conflict,ContractError,canonical,digest
-from .controller_setup import _durable_directory,_managed_path
-from .controller_tls import _read
+from .filesystem import _durable_directory, _managed_path
+from .filesystem import _read
 from .credential_registry import record_generation_in_transaction
-from .enrollment import _document,_now,_snapshot,observe_clock
+from .enrollment_records import _document, _now
+from .enrollment import _snapshot, observe_clock
 from .enrollment_certificate import issue_certificate
 from .enrollment_client import endpoint
-from .enrollment_proof import row_request,_invitation,validate_request
+from .enrollment_proof import row_request, _invitation
+from .enrollment_crypto import validate_request
 from .enrollment_result import validate_result
-from .maintenance import private_lock
+from .filesystem import private_lock
 from .setup_contracts import SetupUnavailable
 from .store import atomic_write
 
@@ -42,7 +44,7 @@ def publication(controller, *, run=subprocess.run,tls_inspector=None):
         raise ContractError('repository endpoint must use the controller certificate host and a separate port')
     if not isinstance(roots,dict) or not 1<=len(roots)<=8:raise ContractError('invalid enrollment repository aliases')
     from .contracts import identifier
-    from .state_reader import read_file
+    from .filesystem import read_file
     for alias,value in roots.items():
         identifier(alias);path=Path(value)
         if (not path.is_absolute() or path.resolve()!=path or not path.is_relative_to(controller.root/'repositories')

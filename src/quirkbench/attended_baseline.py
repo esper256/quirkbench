@@ -23,7 +23,7 @@ def raw_metadata(reader,identity,limit=1024**2):
     from .store import ArtifactStore
     from .recovery_podman import _metadata_object
     from .build import BuildError
-    from .state_reader import held_parent
+    from .filesystem import held_parent
     root=reader.store.root if isinstance(reader.store,ArtifactStore) else reader.root/'artifacts'
     try:
         with held_parent(root/'objects'/sha256(identity)) as (_,guard):
@@ -210,9 +210,10 @@ def admit(controller,name,composition,request_id, *,ready=None):
 
 
 def execute(root,args, *,ready=None):
-    from .state_reader import StateReader,read_file
+    from .state_reader import StateReader
+    from .filesystem import read_file
     from .controller import Controller
-    from .maintenance import private_lock
+    from .filesystem import private_lock
     from .ostree_repository import OstreeRepository
     from .product_contracts import _pairs,_depth
     reader=StateReader(root)

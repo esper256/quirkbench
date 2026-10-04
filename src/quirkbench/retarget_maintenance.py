@@ -9,9 +9,9 @@ import time
 
 from .binding import read_system_uuid
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _managed_path
-from .controller_tls import _read
-from .enrollment import _document
+from .filesystem import _managed_path
+from .filesystem import _read
+from .enrollment_records import _document
 from .enrollment_client import endpoint
 from .enrollment_target import _prepare_at
 from .enrollment_maintenance import (_SelectionView,_select_locked,_pending_choice_locked,

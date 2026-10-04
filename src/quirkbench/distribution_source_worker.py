@@ -9,8 +9,8 @@ from pathlib import Path
 
 from .baseline_catalog import validate_entry
 from .contracts import Conflict, ContractError, canonical, sha256, identifier
-from .controller_setup import _managed_path
-from .state_reader import read_file
+from .filesystem import _managed_path
+from .filesystem import read_file
 from .store import atomic_write
 
 

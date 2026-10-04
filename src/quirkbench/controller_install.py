@@ -26,8 +26,9 @@ from .contracts import Conflict, ContractError, canonical
 from .controller_archive import MAX_PACKAGE_BYTES
 from .controller_service import configuration, require_ready
 from .product_contracts import _pairs
-from .state_config import canonical_user_path
-from .state_reader import StateReader, read_file
+from .filesystem import canonical_user_path
+from .state_reader import StateReader
+from .filesystem import read_file
 from .store import atomic_write, sync_directory
 
 LIMIT = 64 * 1024**2

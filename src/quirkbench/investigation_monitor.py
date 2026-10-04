@@ -23,7 +23,7 @@ def _facts(reader,name):
             if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='target_shutdown_requests'").fetchone() else None)
         if shutdown:
             if shutdown['preparation_bytes'] is not None and shutdown['preparation_bytes']>16384:raise ContractError('shutdown preparation exceeds query budget')
-            from .target_shutdown import validate_preparation
+            from .shutdown_records import validate_preparation
             preparation=validate_preparation(json.loads(shutdown['preparation'])) if shutdown['preparation'] else None
             shutdown={'request_id':shutdown['request_id'],'state':shutdown['state'],'preparation':preparation}
         oversized=db.execute('''SELECT 1 FROM (SELECT length(CAST(q.document AS BLOB)) AS question_bytes,

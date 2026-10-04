@@ -1,6 +1,7 @@
 """Command-triggered housekeeping under existing ownership and publication locks."""
 from __future__ import annotations
 
+from .filesystem import private_lock, nested_mounts
 from contextlib import contextmanager
 import fcntl
 import json
@@ -11,17 +12,10 @@ import stat
 import time
 
 from .contracts import Conflict, ContractError, canonical
-from .state_reader import read_file, StateReader
+from .filesystem import read_file
+from .state_reader import StateReader
 from .store import atomic_write
 
-def nested_mounts(path):
-    def unescape(value):
-        for old, new in (('\\040', ' '), ('\\011', '\t'), ('\\012', '\n'), ('\\134', '\\')):
-            value = value.replace(old, new)
-        return value
-    path = Path(path)
-    return [unescape(line.split()[4]) for line in Path('/proc/self/mountinfo').read_text().splitlines()
-            if Path(unescape(line.split()[4])).is_relative_to(path)]
 
 
 def disposable(path, root):
@@ -53,20 +47,6 @@ def tree_bytes(path):
     return total
 
 
-@contextmanager
-def private_lock(path, *, shared=False):
-    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-    try:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
-            raise Conflict('maintenance lock must be an owned regular file')
-        try:
-            fcntl.flock(fd, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise Conflict('active execution protects this workspace') from exc
-        yield fd
-    finally:
-        os.close(fd)
 
 
 def retain_diagnostics(root, stage, destination):

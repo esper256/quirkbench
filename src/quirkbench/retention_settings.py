@@ -11,7 +11,7 @@ DEFAULTS = {'completed_attempts': 5, 'recovery_releases': 2, 'completed_builds':
 
 
 def settings(root):
-    from .state_reader import read_file
+    from .filesystem import read_file
     try:
         value = json.loads(read_file(Path(root), 'settings.json', limit=65536))
     except FileNotFoundError:

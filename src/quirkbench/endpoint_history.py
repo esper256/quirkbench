@@ -2,9 +2,9 @@
 from pathlib import Path
 
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_endpoint import _strict_read
-from .controller_setup import _managed_path
-from .enrollment import _document
+from .filesystem import _strict_read
+from .filesystem import _managed_path
+from .enrollment_records import _document
 from .retained_inputs import entries
 
 MAX_HISTORY=32

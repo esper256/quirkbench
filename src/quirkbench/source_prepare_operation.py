@@ -12,7 +12,8 @@ from .source_workspace import validate as validate_workspace,location,owned_path
 from .source_preparation import prepare,validate as validate_preparation,_git_metadata,_source_owner
 from .source_capture import capture as capture_source,validate_capture,_directory_owner
 from .source_operation import verify_tree
-from .state_reader import StateReader,read_file
+from .state_reader import StateReader
+from .filesystem import read_file
 
 KIND=STAGE='source_prepare'
 
@@ -22,7 +23,7 @@ KIND=STAGE='source_prepare'
 def private_workspace(path):
     # A product source workspace is intentionally a Git root; its containing
     # state/staging directory must remain separate from the source being captured.
-    from .controller_setup import _managed_path
+    from .filesystem import _managed_path
     _managed_path(path.parent)
     info=path.lstat()
     if path.resolve()!=path or not stat.S_ISDIR(info.st_mode) or info.st_uid!=os.geteuid():
@@ -142,7 +143,7 @@ def selection(root,operation_id,value):
     if path.exists() or path.is_symlink():owned_path(root,workspace)
     else:
         path=stage/'preparation/output/workspace'
-        from .controller_setup import _managed_path
+        from .filesystem import _managed_path
         with private_workspace(path) as guard:guard()
         info=path.lstat()
         if (info.st_dev,info.st_ino)!=(workspace['root_device'],workspace['root_inode']):raise Conflict('retained staged workspace changed')
@@ -335,7 +336,7 @@ def consume_prepared(coordinator,claim,intent,data,value, *,fault_hook=None,extr
     # The durable journal precedes the rename. Until atomic operation completion,
     # there is no EDITING record and interrupted private selection is not granted.
     destination=location(c.root,value['workspace_id']);destination.parent.mkdir(mode=0o700,exist_ok=True)
-    from .controller_setup import _managed_path
+    from .filesystem import _managed_path
     _managed_path(destination.parent);coordinator.verify(claim)
     if path!=destination:
         if destination.exists() or destination.is_symlink():raise Conflict('source workspace destination already exists')

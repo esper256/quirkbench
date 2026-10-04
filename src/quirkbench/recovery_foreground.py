@@ -85,7 +85,7 @@ def _stopped(engine, record, run=_run):
 
 def cleanup(output, *, run=_run):
     output = user_build_path(output)
-    from .state_reader import read_file
+    from .filesystem import read_file
     record = json.loads(read_file(output, 'build.json', limit=65536))
     if (record.get('schema_version') != 1 or not re.fullmatch('qb-image-[0-9a-f]{32}', record.get('name', ''))
             or not re.fullmatch('sha256:[0-9a-f]{64}', record.get('image', ''))):
@@ -169,7 +169,7 @@ def build(*, cas_root, recipe_sha256, image, output, engine='podman', cpus=None,
             run([*command, 'cp', identity+':/workspace/output/'+name, str(output/name)], timeout=300)
             if (output/name).is_symlink() or not (output/name).is_file():
                 raise BuildError('container output is not a regular artifact')
-        from .state_reader import read_file
+        from .filesystem import read_file
         result = json.loads(read_file(output, 'image-result.json', limit=1024**2))
         candidate = result['candidate']
         from .recovery_stock_release import validate_candidate

@@ -50,7 +50,7 @@ def validate(record, root):
         raise ContractError('invalid worker operation')
     for field in ('worker_epoch','worker_generation'):
         if type(claim[field]) is not int or claim[field]<1: raise ContractError('invalid claim generation')
-    from .controller import validate_boot_id
+    from .process_identity import validate_boot_id
     from .job_operations import STAGES
     validate_boot_id(claim['worker_boot_id']);sha256(claim['input_digest'])
     if ((claim['kind'],claim['stage']) not in STAGES

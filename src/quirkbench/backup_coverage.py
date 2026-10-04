@@ -8,7 +8,8 @@ import stat
 
 from .contracts import ContractError,canonical,digest,sha256
 from .backup_contracts import validate,load,LIMITATIONS,REQUIREMENTS
-from .state_reader import ReadOnlyStore,read_file,held_parent
+from .state_reader import ReadOnlyStore
+from .filesystem import read_file, held_parent
 
 NAME='coverage.v1.json'
 

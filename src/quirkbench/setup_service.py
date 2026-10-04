@@ -11,14 +11,14 @@ from contextlib import nullcontext
 from .contracts import Conflict, ContractError, canonical, digest
 from .controller_install import _idle, _link, verify_installation
 from .controller_service import require_ready
-from .controller_setup import (_durable_directory, _manifest_digest, _managed_path,
-                               _database_present, SetupFilesystem, setup_progress as initial_progress)
+from .filesystem import _durable_directory, _managed_path
+from .controller_setup import _manifest_digest, _database_present, SetupFilesystem, setup_progress as initial_progress
 from .controller_tls import create_identity, inspect_identity
-from .maintenance import private_lock
+from .filesystem import private_lock
 from .setup_contracts import STEPS as INITIAL_STEPS, SetupUnavailable
 from .setup_service_contracts import LIMIT, STEPS, load_progress, validate_progress
 from .state_config import _config_home, discover_state_root
-from .state_reader import read_file
+from .filesystem import read_file
 from .store import atomic_write
 
 
