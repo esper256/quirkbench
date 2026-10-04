@@ -11,10 +11,41 @@ The test extra includes setuptools and wheel for archive packaging; pip's isolat
 build-system dependencies alone do not install these into a development virtualenv.
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -e '.[test]'
-make smoke
+make bootstrap
+# Or choose an interpreter and environment explicitly:
+python3 environments/bootstrap.py --python python3.13 --venv .venv
 ```
+
+Bootstrap installs the checked-in `development/constraints.txt` stack over the
+existing `.[test]` extra and ends with smoke. It never starts a controller or
+runs the full suite. Missing Git/Make or distro venv/ensurepip support produces
+an actionable failure; install those prerequisites through your package manager.
+An existing incompatible or incomplete environment is preserved: choose a new
+`--venv` destination and remove the old one yourself when no longer needed.
+
+Each attempt retains capped phase logs, exit statuses and a report in a new
+evidence directory; its path is printed even on failure. With `--report`, that
+directory is created beside the report so CI uploads failed setup evidence too.
+The latest successful nonsecret `<venv>/bootstrap-report.json` records the source, interpreter/build,
+dependency versions, native-tool availability and elapsed time. Download caching is
+keyed by interpreter/platform, project metadata and constraints; virtualenvs are
+never moved between interpreters. Use `--cache-dir /writable/cache` on restricted
+hosts and `--report /existing/directory/report.json` to retain another copy.
+Optional OpenSSL/GnuPG coverage is reported separately from smoke readiness.
+
+`--check-archive` exercises unsigned controller packaging in ordinary temporary
+storage with the selected virtualenv. `--diagnose-runtime` explicitly runs the
+bounded stdlib/isolated-pytest diagnostic once and retains its logs and exit statuses;
+a passing probe does not resolve a historically intermittent runtime fault (#8).
+Neither option runs images or hardware. CI calls this same bootstrap with
+`--skip-smoke` before its separately selected existing test suite.
+
+For a deliberate dependency update, create a fresh virtualenv, install the current
+`.[test]` ranges, record all resolved development dependencies in
+`development/constraints.txt`, then run fresh bootstrap, smoke and archive checks on
+the supported CI interpreters. Review the dependency diff and retained evidence in
+a PR. Constraints define the tested development stack; the package's Python 3.11+
+compatibility and public dependency ranges remain unchanged.
 
 Keep temporary test state and build staging outside the checkout. Pytest's normal
 temporary directory is suitable, including a sandbox parent with an empty `.git`

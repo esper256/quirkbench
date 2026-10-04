@@ -30,11 +30,17 @@ runs:
     - uses: actions/setup-python@v5
       with:
         python-version: ${{ inputs.python-version }}
-    - name: Install test dependencies
+    - uses: actions/cache@v4
+      with:
+        path: ~/.cache/quirkbench/development
+        key: development-${{ runner.os }}-${{ runner.arch }}-${{ inputs.python-version }}-${{ hashFiles('development/constraints.txt', 'pyproject.toml') }}
+    - name: Bootstrap development dependencies
       shell: bash
+      env:
+        QB_UMASK: ${{ inputs.umask }}
       run: |
-        python -m venv .venv
-        .venv/bin/python -m pip install -e '.[test]'
+        umask "$QB_UMASK"
+        python environments/bootstrap.py --python python --venv .venv --skip-smoke --report "$QB_EVIDENCE/bootstrap.json"
     - name: Run software selection
       shell: bash
       env:

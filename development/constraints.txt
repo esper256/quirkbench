@@ -1,0 +1,16 @@
+# Tested development stack. See docs/testing-policy.md for deliberate updates.
+attrs==26.1.0
+cffi==2.1.1
+cryptography==50.0.2
+iniconfig==2.3.0
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
+packaging==26.3
+pluggy==1.6.0
+pycparser==3.0
+Pygments==2.21.0
+pytest==9.1.1
+referencing==0.37.0
+rpds-py==2026.6.3
+setuptools==84.0.0
+wheel==0.48.0
