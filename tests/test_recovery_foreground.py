@@ -27,10 +27,15 @@ class Engine:
             return json.dumps([{'Id': self.image, 'Architecture': 'amd64', 'Os': 'linux', 'Config': {}}])
         if action == 'create':
             self.record = {'name': argv[argv.index('--name')+1]}
+            option=lambda name:next(a.split('=',1)[1] for a in argv if a.startswith(name+'='))
+            self.limits={'Memory':int(option('--memory')), 'MemorySwap':int(option('--memory-swap')),
+                         'NanoCpus':int(option('--cpus'))*10**9, 'PidsLimit':4096,
+                         'PidMode':'private', 'RestartPolicy':{'Name':'no'}, 'Privileged':False}
             return self.identity+'\n'
         if action == 'inspect':
             return json.dumps([{'Id': self.identity, 'Image': self.image, 'Config': {'Labels': {
                 foreground.LABEL: 'different' if self.changed else self.record['name']}},
+                'HostConfig':self.limits,
                 'State': {'Running': self.running, 'Pid': 100 if self.running else 0, 'ExitCode': self.exit}}])
         if action == 'stop':
             self.running = False
@@ -84,7 +89,7 @@ def test_interrupted_build_stops_whole_container_and_retains_diagnostics(inputs)
     assert (output/'build.log').read_text() == 'interrupted during installroot\n'
     assert not (output/'recovery.img').exists()
     create = next(call for call in engine.calls if call[1]=='create')
-    assert '--network=none' in create and '--memory=4g' in create and '--pids-limit=4096' in create
+    assert '--network=none' in create and '--memory='+str(4*1024**3) in create and '--pids-limit=4096' in create
     mounts = [create[i+1] for i,x in enumerate(create) if x=='--volume']
     assert len(mounts)==2 and all(mount.endswith(':ro,Z') for mount in mounts)
     assert not any(call[1] in ('cp','rm') for call in engine.calls)
@@ -220,3 +225,30 @@ def test_default_cpu_cap_works_on_small_linux_hosts(inputs, monkeypatch):
         foreground.build(**kwargs, execute=lambda *a,**k: (_ for _ in ()).throw(KeyboardInterrupt()))
     create = next(call for call in engine.calls if call[1]=='create')
     assert '--cpus=1' in create
+
+
+def test_unapplied_resource_limit_never_starts_build(inputs):
+    kwargs,engine=inputs
+    def run(argv,**options):
+        result=engine(argv,**options)
+        if argv[1]=='create':engine.limits['Memory']=0
+        return result
+    kwargs['run']=run
+    with pytest.raises(BuildError,match='containment'):
+        foreground.build(**kwargs,execute=lambda *a,**k:pytest.fail('unbounded build must not start'))
+    assert not any(call[1] in ('start','cp') for call in engine.calls)
+
+
+def test_lost_create_acknowledgement_reconciles_recorded_name(inputs):
+    kwargs,engine=inputs
+    def run(argv,**options):
+        result=engine(argv,**options)
+        if argv[1]=='create':raise OSError('lost create acknowledgement')
+        return result
+    kwargs['run']=run
+    with pytest.raises(BuildError,match='lost create'):
+        foreground.build(**kwargs)
+    record=json.loads((kwargs['output']/'build.json').read_bytes())
+    assert record['stopped'] and not record['complete'] and 'container_id' not in record
+    assert not any(call[1] in ('start','cp') for call in engine.calls)
+    assert any(call[1:]==['inspect',record['name']] for call in engine.calls)
