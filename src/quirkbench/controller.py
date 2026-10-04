@@ -284,7 +284,10 @@ class _LifecycleOwner:
     def dispatch(self, operation_id, *, stage, deadline, services):
         """Claim before requesting a service; ambiguous launch retains its unit."""
         from .process_identity import WorkerServiceError
-        services.preflight(self.controller.root, deadline)
+        if hasattr(services, 'preflight_operation'):
+            services.preflight_operation(self.controller.root, deadline, operation_id)
+        else:
+            services.preflight(self.controller.root, deadline)
         claimed = self.claim(operation_id, stage=stage, deadline=deadline,
                              worker_identity=getattr(services,'worker_identity',None))
         try:

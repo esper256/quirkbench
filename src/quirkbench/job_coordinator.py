@@ -73,6 +73,7 @@ class JobCoordinator:
             owner.housekeep_requested()
             return result
         if physical: return None
+        unavailable = None
         for row in queued:
             if row['kind']=='operation_resume': return self.resume_request(row)
             from .proposal_dispatch import guard_child
@@ -99,7 +100,17 @@ class JobCoordinator:
             elif row['kind']=='builder_prepare':stage='builder_capture' if row['prepared_digest'] is None else 'builder_import'
             else:stage='job_inputs' if row['prepared_digest'] is None else 'kernel_build' if row['kind']=='build' else 'os_compose'
             timeout=min(self.timeout,3599) if row['kind']=='recovery_download' else self.timeout
-            return owner.dispatch(row['id'],stage=stage,deadline=c.clock()+timeout,services=self.services)
+            from .process_identity import WorkerServiceError
+            try:
+                return owner.dispatch(row['id'],stage=stage,deadline=c.clock()+timeout,services=self.services)
+            except WorkerServiceError as exc:
+                with c.transaction() as db:
+                    retained = db.execute('SELECT state,worker_unit FROM operations WHERE id=?', (row['id'],)).fetchone()
+                if retained['state']!='QUEUED' or retained['worker_unit'] is not None:
+                    raise
+                unavailable = exc
+        if unavailable is not None:
+            raise unavailable
         return None
 
     def verify(self,claim):
