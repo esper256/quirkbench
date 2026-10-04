@@ -26,7 +26,7 @@ def stock_candidate_spec(candidate, repository, repository_ids):
     """Select reviewed pairing inputs; bind explicitly supplied repository bytes."""
     if candidate != 'fedora44-pairing-v1':
         raise BuildError('unknown stock acquisition candidate')
-    from .state_reader import read_file
+    from .filesystem import read_file
     path = Path(repository).expanduser().absolute()
     content = read_file(path.parent.resolve(strict=True), path.name, limit=65536).decode()
     profile = Path(__file__).with_name('profiles')/'stock-fedora44-pairing-rpm-candidate.v1.json'
@@ -113,7 +113,7 @@ def acquisition_command(destination, spec):
 
 def bound_spec(root, owner, generation):
     """Versioned owner identity binds new plans; missing bytes cannot select legacy."""
-    from .state_reader import read_file
+    from .filesystem import read_file
     match = re.fullmatch(r'storage:acquisition-v1:([0-9a-f]{64}):([0-9a-f]{32})', owner)
     path = Path(generation)/'acquisition-spec.v1.json'
     if match is None:

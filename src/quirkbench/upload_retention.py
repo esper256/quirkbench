@@ -54,7 +54,7 @@ def _needed(db, attempt):
 
 def recover_legacy(root,db,*,dry_run=False):
     """Existing activity records link the opaque scoped ID to an attempt."""
-    from .state_reader import read_file
+    from .filesystem import read_file
     directory=Path(root)/'artifacts/uploads'
     unknown=[]; recovered_roots=set(); unidentified=False
     for path in directory.iterdir():
@@ -116,7 +116,7 @@ def collect(root,db,*,dry_run=False,grace_days=7):
 def abandon(root,upload):
     """Explicit idle operation; caller excludes upload publishers and execution."""
     from .retention import connection
-    from .maintenance import private_lock
+    from .filesystem import private_lock
     upload=sha256(upload)
     with private_lock(Path(root)/'artifacts/store.lock'),connection(root) as db:
         from .maintenance import disposable

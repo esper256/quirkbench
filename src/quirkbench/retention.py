@@ -1,4 +1,5 @@
 """Count-based retention in the controller database; no scheduler or execution owner."""
+from .process_ownership import record_process, launch
 from contextlib import contextmanager
 import json
 from contextvars import ContextVar
@@ -20,7 +21,7 @@ CREATE TABLE storage_pins(owner TEXT PRIMARY KEY, note TEXT NOT NULL);
 CREATE TABLE storage_retired(owner TEXT PRIMARY KEY, retired REAL NOT NULL);
 CREATE TABLE storage_garbage(digest TEXT PRIMARY KEY, discovered REAL NOT NULL);
 '''
-ACTIVE_WORK=ContextVar('quirkbench_storage_work',default=None)
+from .process_ownership import ACTIVE_WORK
 HASH=re.compile(r'[0-9a-f]{64}\Z')
 COUNTS={'build':'completed_builds','deployment':'completed_builds','input':'input_generations',
         'recipe':'input_generations','recovery':'recovery_releases','qualification':'qualification_runs','development':'completed_builds'}
@@ -160,7 +161,7 @@ def _retire_candidates(db,config,root):
     # Legacy rootfs-only publications are preparation outputs, not image releases.
     preparations=[]
     from .operations import recovery_rootfs_arguments
-    from .state_reader import read_file
+    from .filesystem import read_file
     from .contracts import digest
     for row in images:
         if row['state']!='SUCCEEDED' or row['worker_unit'] is not None or row['id'] in retired: continue
@@ -209,7 +210,7 @@ def _roots(db,retiring=()):
 
 def closure(root,roots):
     """Conservative content-addressed JSON closure; never treat filenames as ownership."""
-    from .state_reader import read_file
+    from .filesystem import read_file
     live=set(roots); pending=list(roots)
     while pending:
         value=pending.pop(); path=Path(root)/'artifacts/objects'/value
@@ -230,7 +231,8 @@ def closure(root,roots):
 
 def collect(root,*,dry_run=False):
     """Caller holds exclusive publication, coordinator and build locks."""
-    from .maintenance import private_lock,remove_tree,disposable
+    from .filesystem import private_lock
+    from .maintenance import remove_tree, disposable
     config=settings(root); removed=[]; blocked=[]
     with private_lock(Path(root)/'artifacts/store.lock'), connection(root) as db:
         db.execute('BEGIN IMMEDIATE')
@@ -298,7 +300,8 @@ def collect(root,*,dry_run=False):
             if group and group['kind']=='development':
                 # Work disposal has its own verified publication/whole-service
                 # checks. Only expire logs after that disposal has completed.
-                from .state_reader import development_run,read_file
+                from .state_reader import development_run
+                from .filesystem import read_file
                 run=managed_path(root,Path(root)/'development-runs'/owner)
                 try:
                     record=development_run(root,owner)
@@ -351,7 +354,7 @@ def collect(root,*,dry_run=False):
         elif not shutil.which('ostree'):
             blocked.append('OSTree collection needs the existing ostree tool in the execution environment')
         else:
-            from .state_reader import read_file
+            from .filesystem import read_file
             from .ostree_repository import OstreeRepository
             mapping=json.loads(read_file(Path(root),'repositories.json',limit=65536))
             checked={}
@@ -366,23 +369,11 @@ def collect(root,*,dry_run=False):
     return {'retired':retiring,'removed':removed,'blocked':blocked}
 
 
-def record_process(workspace,pid):
-    from .store import atomic_write
-    from .controller import controller_boot_id
-    path=Path(workspace)/'process-groups.json'
-    if path.exists():
-        from .state_reader import read_file
-        record=json.loads(read_file(Path(workspace),'process-groups.json',limit=65536))
-    else:
-        record={'boot':controller_boot_id(),'pid_namespace':os.readlink('/proc/self/ns/pid'),'groups':[]}
-    record['groups'].append(pid)
-    record['unresolved_launch']=False
-    atomic_write(path,canonical(record))
 
 
 def stop_proof(workspace):
-    from .controller import controller_boot_id
-    from .state_reader import read_file
+    from .process_identity import controller_boot_id
+    from .filesystem import read_file
     record=json.loads(read_file(Path(workspace),'process-groups.json',limit=65536))
     if record['boot']!=controller_boot_id(): return {'kind':'previous_boot','at':time.time()}
     if record.get('unresolved_launch'):
@@ -401,7 +392,7 @@ def stop_proof(workspace):
 def work(root,kind,path):
     """Synchronous fixed adapters record every subprocess group before publication."""
     from .store import atomic_write
-    from .controller import controller_boot_id
+    from .process_identity import controller_boot_id
     path=managed_path(root,path)
     if path.exists(): raise ContractError('use a fresh managed workspace for each run')
     path.mkdir(parents=True,mode=0o700)
@@ -473,27 +464,6 @@ def abandon(root,owner):
     return {'owner':owner,'abandoned':True,'retained_for_days':settings(root)['failed_staging_days']}
 
 
-def launch(*args,workspace=None,**kwargs):
-    """Record uncertainty before spawning; recording failure cannot fabricate a stop."""
-    import signal
-    import subprocess
-    from .store import atomic_write
-    from .state_reader import read_file
-    workspace=ACTIVE_WORK.get() or workspace
-    tracked=workspace is not None and (Path(workspace)/'process-groups.json').is_file()
-    if tracked:
-        record=json.loads(read_file(Path(workspace),'process-groups.json',limit=65536))
-        record['unresolved_launch']=True
-        atomic_write(Path(workspace)/'process-groups.json',canonical(record))
-    process=subprocess.Popen(*args,**kwargs)
-    if tracked:
-        try: record_process(workspace,process.pid)
-        except BaseException:
-            try: os.killpg(process.pid,signal.SIGKILL)
-            except ProcessLookupError: pass
-            process.wait(timeout=10)
-            raise
-    return process
 
 
 def release_group(root,owner):

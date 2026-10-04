@@ -4,7 +4,8 @@ import time
 from contextlib import contextmanager
 
 from .contracts import Conflict,ContractError,canonical,digest,identifier
-from .enrollment import create_code,row_code,_now,_document
+from .enrollment import create_code, row_code
+from .enrollment_records import _now, _document
 from .state_reader import StateReader
 
 
@@ -17,8 +18,9 @@ def add_target(root,name,request_id=None, *, ttl_seconds=None,ready=None,tls_ins
     """
     from .controller import Controller
     from .enrollment_runtime import require_enrollment
-    from .controller_setup import _managed_path,_database_present
-    from .maintenance import private_lock
+    from .filesystem import _managed_path
+    from .controller_setup import _database_present
+    from .filesystem import private_lock
     identifier(name)
     request_id=request_id or 'target-add-'+digest(name.encode())[:32]
     identifier(request_id)
@@ -39,8 +41,8 @@ def _add_target(root,name,request_id, *, ttl_seconds,ready,tls_inspector,clock,f
     if ttl_seconds is None:
         retained=row_code(old) if old else None
         if retained is None:
-            from .controller_tls import _read
-            from .enrollment import validate_code
+            from .filesystem import _read
+            from .enrollment_records import validate_code
             directory=root/'private/enrollment/codes'/digest(request_id.encode())
             try:retained=validate_code(_document(_read(directory,'issuance.json'))['record'])
             except FileNotFoundError:pass

@@ -10,7 +10,7 @@ import threading
 
 from .contracts import canonical, sha256
 from .store import ArtifactStore, atomic_write
-from .state_reader import read_file
+from .filesystem import read_file
 from .worker_claim import read_active_worker_claim
 from .job_operations import binding
 from .worker_progress import StageProgress, heartbeat_writer

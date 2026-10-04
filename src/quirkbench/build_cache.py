@@ -114,7 +114,7 @@ class BuildStageCache:
     def __init__(self, root: Path, *, reserve_bytes=None):
         from .resource_budget import disk_reserve
         self.reserve_bytes=disk_reserve(reserve_bytes,RESERVE)
-        from .state_config import canonical_user_path
+        from .filesystem import canonical_user_path
         self.root = Path(root)
         if self.root.is_symlink():
             raise BuildError("build cache root cannot be linked")
@@ -274,7 +274,8 @@ class BuildStageCache:
 
     def publish(self, lineage: str, stage: str, identity: dict,
                 trees: dict[str, Path], metadata: dict) -> str | None:
-        from .maintenance import enforce_cache_limit, private_lock, tree_bytes
+        from .maintenance import enforce_cache_limit, tree_bytes
+        from .filesystem import private_lock
         from .contracts import Conflict
         key = self.key(stage, identity)
         try:

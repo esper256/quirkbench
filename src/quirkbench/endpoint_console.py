@@ -6,9 +6,9 @@ import time
 
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,digest,identifier,sha256
-from .controller_endpoint import _strict_read
-from .controller_setup import _managed_path
-from .enrollment import _document
+from .filesystem import _strict_read
+from .filesystem import _managed_path
+from .enrollment_records import _document
 from .enrollment_client import endpoint,inspect_certificate
 from .enrollment_console import _answer
 from .enrollment_target import _storage

@@ -3,11 +3,13 @@ from pathlib import Path
 import ssl
 
 from .contracts import Conflict,digest,identifier
-from .controller_setup import _managed_path,_database_present
-from .controller_endpoint import _strict_read,stage_identity,renew_expired_identity
+from .filesystem import _managed_path
+from .controller_setup import _database_present
+from .filesystem import _strict_read
+from .controller_endpoint import stage_identity, renew_expired_identity
 from .controller_service import configuration
 from .controller_tls import load_identity
-from .enrollment import _document
+from .enrollment_records import _document
 from .endpoint_switch import switch_stopped,rollback_stopped,validate_switch
 from .setup_contracts import SetupUnavailable
 

@@ -159,7 +159,7 @@ def test_installed_cli_propose_schema_replay_and_readonly_listing(captured,monke
     assert cli._main(command)==0;assert json.loads(capsys.readouterr().out)==answer
     monkeypatch.setattr(Controller,'__init__',lambda *a,**kw:pytest.fail('read initialized state'))
     monkeypatch.setattr('quirkbench.maintenance.prune',lambda *a,**kw:pytest.fail('read pruned state'))
-    monkeypatch.setattr('quirkbench.maintenance.private_lock',lambda *a,**kw:pytest.fail('read acquired publication lock'))
+    monkeypatch.setattr('quirkbench.filesystem.private_lock',lambda *a,**kw:pytest.fail('read acquired publication lock'))
     for action in ('proposals','proposal-schema','context'):
         assert cli.main(['--state',str(c.root),'investigation',action,'investigation','--json'])==0
         assert not json.loads(capsys.readouterr().out)['data']['execution_authorized']
@@ -229,7 +229,7 @@ def test_legacy_readonly_context_and_listing_need_no_migration_or_housekeeping(s
         db.execute('PRAGMA user_version='+str(len(MIGRATIONS)-1))
     def forbidden(*a,**kw):pytest.fail('read initialized/locked/pruned old state')
     monkeypatch.setattr(Controller,'__init__',forbidden)
-    monkeypatch.setattr('quirkbench.maintenance.private_lock',forbidden)
+    monkeypatch.setattr('quirkbench.filesystem.private_lock',forbidden)
     monkeypatch.setattr('quirkbench.maintenance.prune',forbidden)
     for action in ('context','proposals','proposal-schema'):
         assert cli.main(['--state',str(c.root),'investigation',action,'investigation','--json'])==0

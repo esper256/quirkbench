@@ -4,9 +4,9 @@ from urllib.parse import urlsplit
 
 from .binding import verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _managed_path
-from .controller_endpoint import _strict_read
-from .enrollment import _document
+from .filesystem import _managed_path
+from .filesystem import _strict_read
+from .enrollment_records import _document
 from .enrollment_client import endpoint
 from .retarget_activation import _active
 from .retained_inputs import entries

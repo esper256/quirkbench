@@ -14,7 +14,9 @@
       "tests/test_job_*",
       "tests/test_builder_setup.py",
       "src/quirkbench/container_worker.py",
-      "tests/test_container_workers.py"
+      "tests/test_container_workers.py",
+      "src/quirkbench/container_engine.py",
+      "tests/test_container_engine.py"
     ],
     "tests": [
       "tests/test_distribution_source.py",
@@ -25,7 +27,8 @@
       "tests/test_worker_claim.py",
       "tests/test_worker.py",
       "tests/test_container_workers.py",
-      "tests/test_worker_service.py"
+      "tests/test_worker_service.py",
+      "tests/test_container_engine.py"
     ]
   },
   "endpoint-control": {
@@ -244,7 +247,11 @@
       "tests/test_recovery_space.py",
       "tests/test_recovery_vendor.py",
       "src/quirkbench/recovery_vendor.py",
-      "src/quirkbench/profiles/vendor-fedora44.v1.json"
+      "src/quirkbench/profiles/vendor-fedora44.v1.json",
+      "src/quirkbench/target_install.py",
+      "src/quirkbench/target_payload.py",
+      "src/quirkbench/recovery_runtime_revision.py",
+      "tests/test_recovery_runtime_revision.py"
     ],
     "tests": [
       "tests/test_release_plan.py",
@@ -259,7 +266,8 @@
       "tests/test_stock_recovery_flow.py",
       "tests/test_recovery_foreground.py",
       "tests/test_recovery_space.py",
-      "tests/test_recovery_vendor.py"
+      "tests/test_recovery_vendor.py",
+      "tests/test_recovery_runtime_revision.py"
     ]
   }
 }

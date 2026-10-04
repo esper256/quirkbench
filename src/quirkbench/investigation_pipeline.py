@@ -467,7 +467,7 @@ def verify_composed(coordinator,claim,args,manifest,values,checkout):
 
 def execute(root,args, *,ready=None):
     from .state_reader import StateReader
-    from .maintenance import private_lock
+    from .filesystem import private_lock
     from .controller import Controller
     from .investigations import record
     root=Path(root).expanduser().absolute()

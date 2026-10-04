@@ -36,3 +36,40 @@ def test_duplicate_or_missing_runtime_source_manifest_fails():
         load_runtime_revision(canonical(manifest))
     with pytest.raises(BuildError, match="invalid recovery runtime revision JSON"):
         load_runtime_revision(b'{"schema_version":1,"schema_version":1,"files":[]}')
+
+
+def test_controller_changes_do_not_change_target_identity(tmp_path):
+    import shutil
+    package=tmp_path/'quirkbench'
+    shutil.copytree(ROOT/'src/quirkbench',package,ignore=shutil.ignore_patterns('__pycache__'))
+    before=capture_runtime_revision(package,ROOT/'target-assets')
+    (package/'controller.py').write_text('# controller-only edit\n')
+    (package/'target_install.py').write_text('# host installer-only edit\n')
+    (package/'new_controller_feature.py').write_text('# new host code\n')
+    assert capture_runtime_revision(package,ROOT/'target-assets')==before
+    (package/'runtime.py').write_bytes((package/'runtime.py').read_bytes()+b'\n# target change\n')
+    assert capture_runtime_revision(package,ROOT/'target-assets')!=before
+
+
+def test_isolated_payload_imports_and_target_entrypoint_help(tmp_path):
+    import shutil,subprocess,sys
+    from quirkbench.target_payload import TARGET_MODULES
+    package=tmp_path/'quirkbench';package.mkdir()
+    for name in TARGET_MODULES:
+        shutil.copyfile(ROOT/'src/quirkbench'/(name+'.py'),package/(name+'.py'))
+    shutil.copytree(ROOT/'src/quirkbench/recipes',package/'recipes')
+    # -S excludes editable-install import hooks as well as site dependencies.
+    # An absent target dependency cannot be rescued by the full checkout.
+    program=('import sys,importlib; sys.path.insert(0,'+repr(str(tmp_path))+'); '
+             '[importlib.import_module("quirkbench."+n) for n in '+repr(TARGET_MODULES)+']; '
+             'assert not any("quirkbench."+n in sys.modules for n in '
+             '["controller","cli","build","target_install","worker_service","state_reader"])')
+    invitation=json.loads((ROOT/'examples/retarget-invitation.json').read_bytes())
+    program+='; from quirkbench.retarget_records import validate_invitation; validate_invitation('+repr(invitation)+')'
+    result=subprocess.run([sys.executable,'-I','-S','-B','-c',program],capture_output=True,text=True,timeout=10)
+    assert result.returncode==0,result.stderr
+    for module in ('boot','runtime','library_maintenance'):
+        code='import sys,runpy; sys.path.insert(0,'+repr(str(tmp_path))+'); sys.argv=["target","--help"]; runpy.run_module("quirkbench.'+module+'",run_name="__main__")'
+        result=subprocess.run([sys.executable,'-I','-S','-B','-c',code],capture_output=True,text=True,timeout=10)
+        assert result.returncode==0,result.stderr
+        assert 'usage:' in result.stdout

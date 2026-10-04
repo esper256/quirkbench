@@ -438,7 +438,7 @@ def _create_image(inputs: ImageInputs, *, reserve_bytes=20*1024**3) -> Path:
     p1,p2,p3,p4=parts
     extra_uuids=[str(uuid.uuid4()),str(uuid.uuid4())]
     config={'schema_version':2,'disk_guid':disk_guid,'esp_partuuid':p1['partuuid'],'root_partuuid':p2['partuuid'],'state_partuuid':p3['partuuid'],'data_partuuid':p4['partuuid'],'library_partuuid':extra_uuids[0],'evidence_partuuid':extra_uuids[1]}
-    from .boot import install_runtime
+    from .target_install import install_runtime
     with tempfile.TemporaryDirectory(prefix='.quirkbench-image-',dir=inputs.output.parent) as name:
         work=Path(name);image=work/'image.img'
         with image.open('xb') as stream:stream.truncate(inputs.size_mib*MIB)
@@ -575,7 +575,7 @@ def export_image(source: Path, output: Path) -> Path:
     Build staging remains managed separately. A failed export may leave completed
     files for inspection; it never deletes user files or treats the parent as staging.
     """
-    from .state_reader import held_parent
+    from .filesystem import held_parent
     with held_parent(output) as (parent_fd, guard):
         for suffix in ('', '.sha256', '.json'):
             destination = Path(str(output) + suffix)

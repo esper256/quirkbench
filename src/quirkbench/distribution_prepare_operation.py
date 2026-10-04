@@ -7,7 +7,8 @@ from pathlib import Path
 
 from .contracts import Conflict, ContractError, canonical, digest, identifier, sha256
 from .source_workspace import location
-from .state_reader import StateReader,read_file
+from .state_reader import StateReader
+from .filesystem import read_file
 
 
 def document(store,digest,limit=4*1024**2):

@@ -14,7 +14,7 @@ from .contracts import ContractError, Conflict, canonical, digest, identifier, s
 from .baseline_catalog import validate_entry, NEVRA
 from .recovery_rootfs import validate_snapshot, MAX_RPM_BYTES, MAX_CLOSURE_BYTES
 from .source_capture import load_document
-from .state_reader import read_file
+from .filesystem import read_file
 
 FIELDS={'entry_file','entry_sha256','snapshot_file','snapshot_sha256','rpms_file','rpms_sha256'}
 GENERATED=frozenset({'kernel-quirkbench','quirkbench-experiment-userspace'})
@@ -93,7 +93,7 @@ def package_archive(path,packages, *,destination=None,verify=lambda:None,reserve
     expected={p['sha256']+'.rpm':p for p in packages} if names is None else names
     if not expected or any(not re.fullmatch(r'[A-Za-z0-9._+-]{1,96}\.rpm',name) for name in expected):
         raise ContractError('invalid RPM archive names')
-    from .state_reader import held_parent
+    from .filesystem import held_parent
     from .source_capture import _identity
     import os
     from contextlib import nullcontext

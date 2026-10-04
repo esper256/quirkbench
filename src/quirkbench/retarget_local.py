@@ -11,12 +11,12 @@ import stat
 import time
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _managed_path,_durable_directory
-from .controller_tls import _read
-from .enrollment import _document
+from .filesystem import _managed_path, _durable_directory
+from .filesystem import _read
+from .enrollment_records import _document
 from .enrollment_target import _storage,_media
-from .maintenance import private_lock
-from .state_reader import read_file
+from .filesystem import private_lock
+from .filesystem import read_file
 from .store import atomic_write
 from .retained_inputs import entries
 
@@ -174,7 +174,7 @@ def _private_journal(agent, *,name='journal.json'):
 
 def _capture_source(control,intent,verify, *,locations=None):
     """Called only after native one-shot clearance; no old credentials are used."""
-    from .enrollment_proof import validate_request
+    from .enrollment_crypto import validate_request
     from .enrollment_result import validate_result
     from .product_contracts import _depth,_pairs
     import json

@@ -4,8 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from .boot import (_check_recovery_unit_links, install_recovery_runtime_base,
-                   sanitize_recovery_etc_enablement)
+from .target_install import _check_recovery_unit_links, install_recovery_runtime_base, sanitize_recovery_etc_enablement
 from .build import BuildError, _safe_build_path
 from .build_pipeline import CommandRunner, ResourceLimits
 from .contracts import canonical, digest

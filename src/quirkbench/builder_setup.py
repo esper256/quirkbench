@@ -11,7 +11,8 @@ import tempfile
 import time
 
 from .contracts import ContractError, Conflict, canonical, digest, sha256
-from .state_reader import StateReader, read_file
+from .state_reader import StateReader
+from .filesystem import read_file
 
 KIND = 'builder_prepare'
 STAGES = {'builder_capture', 'builder_import'}
@@ -51,10 +52,11 @@ def prepare(root, runtime, archive, request_id, *, config_home=None, release_ins
             which=None):
     """Admit promptly; the lifecycle owns hashing, retention and native import."""
     from .controller_service import require_ready, configuration
-    from .controller_setup import _database_present, _managed_path
+    from .controller_setup import _database_present
+    from .filesystem import _managed_path
     from .controller import Controller
     from .installed_release import inspect_selected
-    from .maintenance import private_lock
+    from .filesystem import private_lock
     from .job_operations import envelope
     root = _managed_path(root)
     if not _database_present(root):

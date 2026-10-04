@@ -1,6 +1,8 @@
 """Private, resumable initial controller CA/server identity; never publisher trust."""
 from __future__ import annotations
 
+from .tls_primitives import _openssl
+from .filesystem import _read, _secret_read
 import ipaddress
 import json
 import os
@@ -12,11 +14,11 @@ import tempfile
 import uuid
 
 from .contracts import Conflict, ContractError, canonical, digest, identifier, sha256
-from .controller_setup import _durable_directory, _managed_path
-from .maintenance import private_lock
+from .filesystem import _durable_directory, _managed_path
+from .filesystem import private_lock
 from .product_contracts import _depth, _pairs
 from .setup_contracts import SetupUnavailable
-from .state_reader import read_file
+from .filesystem import read_file
 from .store import atomic_write
 
 FILES = ('ca.key', 'ca.crt', 'controller.key', 'controller.crt')
@@ -64,34 +66,10 @@ def load_identity(raw):
     return value
 
 
-def _read(directory, name, *, limit=LIMIT):
-    path = directory / name
-    info = path.lstat()
-    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()):
-        raise ContractError('controller records must be owned regular files')
-    from .retained_inputs import observe_policy
-    observe_policy(path)
-    return read_file(directory, name, limit=limit)
 
 
-def _secret_read(directory, name, *, limit=LIMIT, stores=()):
-    """Private keys/tokens may rely on their declared enclosing secret store."""
-    raw = _read(directory, name, limit=limit)
-    if ((directory / name).stat().st_mode & 0o077
-            and all(store.stat().st_mode & 0o077 for store in (directory, *stores))):
-        raise ContractError('credential requires a private file or enclosing secret store')
-    return raw
 
 
-def _openssl(arguments, *, run):
-    try:
-        answer = run(['openssl', *arguments], capture_output=True, check=False, timeout=15,
-                     stdin=subprocess.DEVNULL, env={**os.environ, 'OPENSSL_CONF': os.devnull})
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise SetupUnavailable('native OpenSSL 3 unavailable; install it through the host package manager') from exc
-    if answer.returncode or not isinstance(answer.stdout, bytes) or len(answer.stdout) > LIMIT:
-        raise ContractError('controller TLS validation/generation failed; check endpoint, clock and native openssl')
-    return answer.stdout
 
 
 def inspect_identity(directory, *, host=None, request_id=None, run=subprocess.run,temporary_parent=None):

@@ -6,7 +6,8 @@ import os
 import stat
 
 from .contracts import ContractError, Conflict, Artifact, Experiment, Result, canonical, digest, identifier, sha256
-from .state_reader import StateReader, QUERY_BYTES, read_file, safe_text
+from .state_reader import StateReader, QUERY_BYTES, safe_text
+from .filesystem import read_file
 from .attended_views import stored
 from .attended_baseline import document, raw_metadata
 

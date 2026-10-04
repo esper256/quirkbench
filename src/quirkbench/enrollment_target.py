@@ -14,12 +14,13 @@ import time
 
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _durable_directory,_managed_path
-from .controller_tls import _openssl,_read
-from .enrollment import _document,_now
+from .filesystem import _durable_directory, _managed_path
+from .tls_primitives import _openssl
+from .filesystem import _read
+from .enrollment_records import _document, _now
 from .enrollment_client import endpoint
-from .enrollment_proof import _bytes,validate_request,validate_challenge,verify_signature
-from .maintenance import private_lock,nested_mounts
+from .enrollment_crypto import _bytes, validate_request, validate_challenge, verify_signature
+from .filesystem import private_lock, nested_mounts
 from .store import atomic_write
 
 
