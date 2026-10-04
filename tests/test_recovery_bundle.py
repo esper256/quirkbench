@@ -26,9 +26,13 @@ def prepared(tmp_path):
     def query(argv):
         name=Path(argv[-1]).read_text()
         return name+'\t'+name+'-0:'+lock['kernel_release']+'\n'
+    inventory=tmp_path/'reviewed-vendor.json'
+    inventory.write_bytes(canonical({'schema_version':1,'inventory_id':'reviewed-test',
+        'fedora_release':'44','architecture':'x86_64','required_packages':selected['packages'],
+        'enabled_links':{},'generators':{},'etc_links':{}}))
     output=tmp_path/'bundle'
     answer=bundle.prepare(packages=packages,public_key=key,spec=selection,output=output,
-        builder_image=lock['builder_image_digest'],epoch=0,reserve_bytes=0,query=query,signature_runner=signatures)
+        builder_image=lock['builder_image_digest'],epoch=0,reserve_bytes=0,query=query,signature_runner=signatures,vendor_inventory=inventory)
     return output,answer
 
 
@@ -41,6 +45,13 @@ def test_preparation_and_transfer_preserve_complete_selected_closure(prepared,tm
     imported=tmp_path/'imported'
     bundle.transfer(exported,imported,expected=answer['manifest_sha256'],reserve_bytes=0)
     assert bundle.verify(imported,signature_runner=signatures)['ready']
+    manifest,checked,problems=bundle.inspect_bundle(imported)
+    from quirkbench.recovery_rootfs import CASReader
+    store=CASReader(imported)
+    assert not problems and checked['profile']['schema_version']==2
+    vendor_sha=checked['profile']['vendor_inventory_sha256']
+    assert vendor_sha in {p['sha256'] for p in manifest['objects']}
+    assert json.loads(store.get(vendor_sha))['inventory_id']=='reviewed-test'
     with pytest.raises(BuildError,match='new directory'):bundle.transfer(root,exported,reserve_bytes=0)
     with pytest.raises(BuildError,match='expected digest'):bundle.transfer(root,tmp_path/'wrong',expected='f'*64)
     assert not (tmp_path/'wrong').exists()

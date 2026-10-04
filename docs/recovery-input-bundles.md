@@ -24,6 +24,12 @@ quirkbench recovery-bundle verify recovery-inputs --engine podman
 quirkbench recovery-bundle build recovery-inputs --engine podman --output recovery-output
 ```
 
+For changed Fedora package pins, supply an explicitly reviewed vendor inventory
+with `prepare --vendor-inventory /path/to/reviewed.json`. See
+[reviewed vendor inventories](recovery-base.md#reviewed-vendor-inventories). The
+bundle carries this object through export/import and binds it through the storage
+profile; observing installed bytes never grants approval.
+
 Choose the source-date epoch for your selected input snapshot. `prepare` verifies
 every RPM against the specification's fingerprint, creates the existing lock and
 recipe, and writes `manifest.json` last. Interrupted preparation retains its input
@@ -52,7 +58,7 @@ quirkbench recovery-bundle import exported-inputs --output local-inputs \
 A v1 bundle contains canonical `manifest.json` and content-addressed `objects/`.
 The manifest identifies the acquisition specification, recipe, immutable builder
 configuration ID and exact size/hash inventory. The inventory closes over repository
-specification bytes, RPMs and public key, rootfs lock, stock policy, dracut settings,
+specification bytes, RPMs and public key, rootfs lock, stock policy and its selected vendor inventory, dracut settings,
 unit allowlist, runtime revision and exact target Python/boot-asset bytes. Transfer
 copies only those objects into a new directory and commits the same manifest last;
 it never extracts an archive or overwrites an existing destination.
