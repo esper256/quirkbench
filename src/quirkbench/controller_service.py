@@ -1,4 +1,4 @@
-"""Manually configured controller service and read-only live-owner readiness."""
+"""Foreground controller entry point and read-only live-owner readiness."""
 import argparse
 import json
 import os
@@ -23,25 +23,19 @@ def require_ready(root,*,runner=subprocess.run,clock=time.time):
         with StateReader(root).connection() as db:
             row=db.execute('SELECT * FROM controller_job_service WHERE id=1').fetchone()
             epoch=db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
-        if row is None or row['epoch']!=epoch or row['boot']!=controller_boot_id() or row['unit']!=UNIT or not 0<=clock()-row['heartbeat']<15:
+        if row is None or row['epoch']!=epoch or row['boot']!=controller_boot_id() or not row['unit'].startswith('foreground-v1:') or not 0<=clock()-row['heartbeat']<15:
             raise ValueError('no current supported controller owner')
         config=configuration(root)
-        if config['runtime']!=row['runtime']: raise ValueError('service configuration differs; restart the controller unit')
+        if config['runtime']!=row['runtime']: raise ValueError('service configuration differs; restart the foreground controller')
         runtime=Path(row['runtime'])
         if not runtime.is_absolute() or runtime.resolve()!=runtime or not runtime.is_file() or not os.access(runtime,os.X_OK):
             raise ValueError('canonical installed runtime unavailable')
-        answer=runner(['systemctl','--user','show',UNIT,'--property=ActiveState','--property=MainPID','--property=KillMode','--property=ExecStart'],capture_output=True,text=True,timeout=5,check=False)
-        if answer.returncode or len(answer.stdout)>16384: raise ValueError('user service manager unavailable')
-        fields=dict(line.split('=',1) for line in answer.stdout.splitlines())
-        if fields.get('ActiveState')!='active' or fields.get('MainPID')!=str(row['pid']) or fields.get('KillMode')!='control-group' or str(runtime) not in fields.get('ExecStart',''):
-            raise ValueError('configured controller service is not active')
-        groups=Path('/proc/'+str(row['pid'])+'/cgroup').read_text().splitlines()
-        if not any(line.startswith('0::') and line.endswith('/'+UNIT) for line in groups):
-            raise ValueError('controller owner is outside its configured user unit')
+        from .foreground_owner import verify
+        verify(Path(root), row['pid'], row['unit'])
         return {'background_work_ready':True,'service_installation':'verified',
-                'controller_unit':UNIT,'epoch':epoch}
+                'controller_unit':row['unit'],'epoch':epoch}
     except (OSError,ValueError,sqlite3.Error,subprocess.TimeoutExpired) as exc:
-        raise Conflict('Background work unavailable: install/configure quirkbench-controller.service, start it, and run quirkbench setup-check. '+str(exc)) from exc
+        raise Conflict('Background work unavailable: run the configured foreground controller, then run quirkbench setup-check. '+str(exc)) from exc
 
 
 def advertise(owner,runtime,capabilities=None):
@@ -50,14 +44,15 @@ def advertise(owner,runtime,capabilities=None):
     if feature is not None:
         from .enrollment_runtime import validate_capabilities
         validate_capabilities(feature)
-    if not any(line.startswith('0::') and line.endswith('/'+UNIT) for line in Path('/proc/self/cgroup').read_text().splitlines()):
-        raise Conflict('background ownership advertisement requires the configured controller user unit')
+    from .foreground_owner import identity, verify
+    execution = identity(os.getpid())
+    verify(c.root, os.getpid(), execution)
     with c.transaction() as db:
         epoch=db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
         if owner.closed or c._lifecycle_owner is not owner or epoch!=owner.epoch:
             raise Conflict('controller service ownership ended')
         db.execute('INSERT OR REPLACE INTO controller_job_service VALUES(1,?,?,?,?,?,?)',
-            (owner.epoch,controller_boot_id(),UNIT,str(runtime),os.getpid(),c.clock()))
+            (owner.epoch,controller_boot_id(),execution,str(runtime),os.getpid(),c.clock()))
         if feature is None:db.execute('DELETE FROM controller_service_capabilities')
         else:
             from .contracts import canonical
