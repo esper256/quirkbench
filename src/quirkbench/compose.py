@@ -483,6 +483,7 @@ class FedoraComposer:
                     marker.parent.mkdir(parents=True, exist_ok=True)
                     marker.write_bytes(canonical({"build_identity": identity, "kernel_release": inputs.kernel_release,
                                                    "protection_profile": inputs.protection_profile}) + b"\n")
+                    marker.chmod(0o644)
                 spec = top / "SPECS/experiment.spec"
                 spec.write_text(rpm_spec(name, version, payload, kernel_release=inputs.kernel_release if is_kernel else None))
                 run(["rpmbuild", "-bb", "--define", f"_topdir {top}", str(spec)], f"package-{name}")
