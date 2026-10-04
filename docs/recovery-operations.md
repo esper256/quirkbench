@@ -448,8 +448,8 @@ a running controller, target enrollment or signing credentials. It uses the same
 verified RPM inputs, DNF5 installroot, dracut audits and regular-file GRUB/GPT
 assembler as managed image preparation. Docker and local Podman are supported
 container engines; no privileged container or physical device mount is requested.
-Systemd is optional host integration under the revised C2 contract. Remaining
-controller background adapter portability is tracked in #92.
+The controller and its workers have no host systemd requirement. Target images
+retain systemd as their normal Linux init system.
 
 First build the [Fedora tool image](../environments/README.md), inspect its exact
 local configuration ID (`docker image inspect --format '{{.Id}}' IMAGE` or

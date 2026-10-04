@@ -288,63 +288,6 @@ class KernelBuild:
             Command(("make", "-C", source, f"O={out}", X86_UEFI_USB.kernel_arch_arg, "olddefconfig"), self.source),
         )
 
-    def stage_recovery_config(self, base: bytes, fragment: bytes,
-                              expected_sha256: str) -> Path:
-        """Stage only the pinned Fedora config plus reviewed recovery overrides.
-
-        A new object directory is required so interruption never causes an old
-        or partially written .config to be mistaken for this input.
-        """
-        from .contracts import sha256
-        from .recovery_fragment import merge_recovery_config
-
-        sha256(expected_sha256)
-        merged = merge_recovery_config(base, fragment)
-        if hashlib.sha256(merged).hexdigest() != expected_sha256:
-            raise BuildError("staged recovery config differs from recipe preflight")
-        _safe_build_path(self.build_dir)
-        if self.build_dir.exists() or self.build_dir.is_symlink():
-            raise BuildError("recovery kernel object directory must be new")
-        self.build_dir.mkdir(parents=True, mode=0o700)
-        config = self.build_dir / ".config"
-        with config.open("xb") as handle:
-            handle.write(merged)
-            handle.flush()
-            os.fsync(handle.fileno())
-        directory_fd = os.open(self.build_dir, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-        return config
-
-    def recovery_configure_plan(self, expected_sha256: str) -> tuple[Command, ...]:
-        """Resolve Kconfig dependencies from the staged Fedora configuration."""
-        from .contracts import sha256
-
-        sha256(expected_sha256)
-        config = self.build_dir / ".config"
-        if (not self.source.is_dir() or not self.build_dir.is_dir()
-                or config.is_symlink() or not config.is_file()
-                or sha256_file(config) != expected_sha256):
-            raise BuildError("staged recovery config missing or changed")
-        return (Command(("make", "-C", str(self.source),
-                         f"O={self.build_dir}", X86_UEFI_USB.kernel_arch_arg, "olddefconfig"),
-                        self.source),)
-
-    def recovery_compile_plan(self, profile: dict) -> tuple[Command, ...]:
-        """Reject an unsafe resolved config before planning recovery compilation."""
-        from .recovery_module_audit import validate_recovery_final_config
-
-        validate_recovery_final_config(self.build_dir / ".config", profile)
-        return self.compile_plan()
-
-    def kernel_release_plan(self) -> tuple[Command, ...]:
-        return (Command(("make", "-C", str(self.source),
-                         f"O={self.build_dir}", X86_UEFI_USB.kernel_arch_arg,
-                         "--no-print-directory", "-s", "kernelrelease"),
-                        self.source),)
-
     def compile_plan(self) -> tuple[Command, ...]:
         source, out = str(self.source), str(self.build_dir)
         common = ("make", "-C", source, f"O={out}", X86_UEFI_USB.kernel_arch_arg)

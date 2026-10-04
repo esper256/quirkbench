@@ -271,7 +271,7 @@ def test_public_verification_rejects_candidate_wire_changes(tmp_path, monkeypatc
     if change == "spacing":
         raw = b" " + raw
     elif change == "duplicate":
-        raw = raw.replace(b'"schema_version":1', b'"schema_version":1,"schema_version":1')
+        raw = raw.replace(b'"schema_version":2', b'"schema_version":2,"schema_version":2')
     elif change == "qualification":
         raw = raw.replace(b'"qualification_status":"unqualified"',
                           b'"qualification_status":"qualified"')

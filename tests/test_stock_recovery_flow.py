@@ -78,15 +78,8 @@ def test_stock_publication_rechecks_storage_and_private_state(tmp_path,change):
 
 
 def assembled_stock(tmp_path,monkeypatch):
-    import test_recovery_release as fixture
-    def stock_prepared(root,_monkeypatch):
-        recipe,lock,store,stage,result,_=prepared(root)
-        return None,recipe,store,stage,result['initramfs']
-    monkeypatch.setattr(fixture,'prepared',stock_prepared)
-    values=fixture.assembled(tmp_path,monkeypatch)
-    import quirkbench.recovery_stock_release as stock_release
-    monkeypatch.setattr(stock_release,'_image_identity',lambda _:('a'*64,4096*1024**2))
-    return values
+    from test_recovery_release import assembled
+    return assembled(tmp_path,monkeypatch)
 
 
 def test_stock_release_v2_and_signed_checksum_reuse(tmp_path,monkeypatch):
@@ -167,3 +160,17 @@ def test_pairing_executable_may_use_confined_relative_symlink(tmp_path):
     program=root/'usr/bin/openssl';program.rename(program.with_name('openssl-real'))
     program.symlink_to('openssl-real')
     audit_pairing_executables(root)
+
+
+def test_runtime_mutation_during_dracut_cannot_produce_image_inputs(tmp_path):
+    recipe,lock,store,_=stock_fixture(tmp_path)
+    stage=tmp_path/'stock-stage'
+    class ChangingRunner(Runner):
+        def run(self, command, *, phase, **kwargs):
+            super().run(command,phase=phase,**kwargs)
+            if phase=='initramfs-stock-recovery':
+                (stage/'rootfs/usr/lib/quirkbench/quirkbench/runtime.py').write_text('changed')
+    with pytest.raises(BuildError,match='runtime file differs'):
+        prepare_recovery_image_stage(recipe,None,store,stage,tmp_path/'image.raw',
+            runner=ChangingRunner(),limits=LIMITS,rootfs_installer=installer)
+    assert not (tmp_path/'image.raw').exists()
