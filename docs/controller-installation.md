@@ -311,13 +311,22 @@ reconciles interrupted workers; explicit operation resume uses a fresh generatio
 A paused campaign still blocks the next stage. Foreground execution does not install
 automatic login/boot restart, and sleep pauses execution.
 
-Load a verified builder archive into the selected local engine before first startup
-(`podman load --input /absolute/builder.tar`, or `docker load` for supported Docker
-paths), then select its exact image config ID with `--worker-image`. The image needs
-Quirkbench's Fedora builder tools; a plain Fedora base image is insufficient.
-This bootstrap load does not replace the application's signed builder binding or
-its later retained import/provenance checks. Configuration may persist `worker_engine`
-and `worker_image`; a complete `builder_config_digest` also supplies the image default.
+Start the configured foreground controller before preparing its first builder.
+Authenticated status, target communication and evidence remain available when the
+local engine or selected image is missing. `status`/`setup-check` report
+`compute_ready` separately from controller availability and worker reconciliation.
+New compute remains blocked until its prerequisites and exact prior-worker stop
+are established; an engine outage never proves an uncertain worker stopped.
+
+For a signed release-set v2 installation, admit the matching archive with
+`setup --builder-archive /absolute/builder.tar --builder-request-id ID`. The existing
+owner captures and verifies signed bytes, imports them through the selected local
+engine, then checks the exact image/base marker in a bounded container. This path
+requires no pre-existing builder image. Interrupted preparation requires explicit
+resume after exact subprocess/container stop reconciliation. Configuration can
+still select `worker_engine`, `worker_image` or `builder_config_digest` for development
+bindings. A plain Fedora base image is insufficient. Software fixtures establish
+the bootstrap boundaries; native backend commissioning remains separate.
 
 ## Signed release acquisition software foundation
 

@@ -19,9 +19,12 @@ def validate(record, root):
     required = {'schema_version', 'unit', 'engine', 'engine_identity', 'claim',
                 'worker_image', 'reserve_bytes', 'payload_args', 'executions', 'phase', 'complete', 'monotonic_deadline'}
     if (not isinstance(record, dict) or not required <= set(record)
-            or set(record)-required-{'stopped'} or type(record['schema_version']) is not int
-            or record['schema_version'] != 2):
+            or set(record)-required-{'stopped','bootstrap'} or type(record['schema_version']) is not int
+            or record['schema_version'] not in (2,3)):
         raise ContractError('invalid container execution journal')
+    bootstrap = record['schema_version'] == 3
+    if ('bootstrap' in record) != bootstrap or (bootstrap and record['bootstrap'] is not True):
+        raise ContractError('invalid bootstrap journal version')
     if (not isinstance(record['unit'],str) or not UNIT.fullmatch(record['unit'])
             or record['engine'] not in ('docker','podman')
             or not isinstance(record['engine_identity'],str)
@@ -46,6 +49,8 @@ def validate(record, root):
     claim=record['claim']
     if not isinstance(claim,dict) or set(claim)!=set(CLAIM_FIELDS):
         raise ContractError('invalid recorded worker claim')
+    if bootstrap and (claim['kind'] != 'builder_prepare' or claim['stage'] not in ('builder_capture','builder_import')):
+        raise ContractError('bootstrap is restricted to signed builder preparation')
     if not isinstance(claim['id'],str) or not re.fullmatch('[0-9a-f]{32}',claim['id']):
         raise ContractError('invalid worker operation')
     for field in ('worker_epoch','worker_generation'):
@@ -85,7 +90,10 @@ def validate(record, root):
         if execution.get('removed') and execution['start_requested'] and not execution.get('stopped'):
             raise ContractError('removing a started execution requires verified stop')
     if executions:
-        if executions[0]['phase']!='prepare':raise ContractError('execution must begin with preparation')
+        if bootstrap:
+            if claim['stage'] != 'builder_import' or len(executions) != 1 or executions[0]['phase'] != 'builder-marker':
+                raise ContractError('invalid bootstrap marker execution')
+        elif executions[0]['phase']!='prepare':raise ContractError('execution must begin with preparation')
         if len(executions)==3 and [e['phase'] for e in executions]!=['prepare','distribution','distribution-import']:
             raise ContractError('unsupported fixed phase sequence')
         if any(e['phase']=='prepare' for e in executions[1:]):raise ContractError('preparation cannot restart in the same claim')

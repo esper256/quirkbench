@@ -68,9 +68,10 @@ def prepare(root, runtime, archive, request_id, *, config_home=None, release_ins
     release = (release_inspector or inspect_selected)(runtime, config_home=config_home)
     args = arguments(release['verification']['statement'], release['verification']['statement_sha256'])
     import shutil
-    if (which or shutil.which)('podman') is None:
+    engine = config.get('worker_engine', 'podman')
+    if (which or shutil.which)(engine) is None:
         from .setup_contracts import SetupUnavailable
-        raise SetupUnavailable('Install rootless Podman, then retry builder preparation; setup installs no host packages.')
+        raise SetupUnavailable('Install the configured local container engine, then retry builder preparation; setup installs no host packages.')
     archive = Path(archive).expanduser().absolute()
     if archive.resolve() != archive or not archive.is_file() or archive.is_symlink():
         raise ContractError('builder archive must be an existing canonical regular file')
@@ -130,7 +131,7 @@ def capture(intent, stage, verify, report, *, state_root):
             raise ContractError('builder archive changed or differs from signed release')
         from .recovery_builder_archive import inspect_builder_archive
         with destination.open('rb') as stream:
-            inspect_builder_archive(stream, args['builder_config_digest'], require_no_entrypoint=True)
+            inspect_builder_archive(stream, args['builder_config_digest'], require_no_entrypoint=True, verify=verify)
         verify()
         return {'schema_version': 1, 'archive_path': 'output/builder.tar',
                 'archive_sha256': args['builder_archive_sha256'], 'size_bytes': total}
