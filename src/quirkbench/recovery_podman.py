@@ -338,10 +338,11 @@ def rootfs_command(*, image_id: str, claim: dict, state_root: Path, stage: Path,
     payload=('python3','-m','quirkbench.recovery_image_worker',arguments['recipe_sha256'],'/workspace/cas','/workspace/output') if 'recipe_sha256' in arguments else ('python3','-m','quirkbench.recovery_rootfs','-' if stock else '/workspace/catalog.json','/workspace/rootfs-lock.json','/workspace/cas',f'/workspace/output/{output_name}')
     remaining=min(86400,math.ceil(verified.deadline-time.time()))
     if remaining<=0:raise BuildError('rootfs worker deadline expired')
+    from .container_containment import command_directory
     return ('env', '-u', 'CONTAINER_HOST', '-u', 'CONTAINER_CONNECTION',
             '-u', 'DOCKER_HOST',
             'python3','-m','quirkbench.container_command','--workload=recovery',
-            '--record-dir',str(stage/'diagnostics/container-command'),'--timeout='+str(remaining),
+            '--record-dir',str(command_directory(state_root,stage)),'--timeout='+str(remaining),
             '--deadline='+str(verified.deadline),'--',
             '--rm','--pull=never','--network=none','--user=0',
             '--security-opt=no-new-privileges',

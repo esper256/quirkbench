@@ -225,3 +225,23 @@ def test_standalone_entry_keeps_pid1_alarm_and_checks_controls_before_child(tmp_
     else:
         assert entry.main([str(gate),'60','payload'],proc=proc,cgroup_root=root)==0
         assert spawned==[['payload']] and alarm==[60]
+
+
+@pytest.mark.parametrize('alias',[False,True])
+def test_writable_alias_of_owner_record_is_rejected_before_create(podman,tmp_path,alias):
+    from quirkbench.container_command import run
+    c,service,engine,_,calls,_=podman
+    mount=tmp_path/'alias'
+    if alias:mount.symlink_to(tmp_path,target_is_directory=True)
+    else:mount=tmp_path
+    with pytest.raises(WorkerServiceError,match='owner execution records'):
+        run(['--volume='+str(mount)+':/workspace:rw,z',service.worker_image,'true'],tmp_path/'command',
+            backend=ContainerEngine('podman',runner=service.runner),timeout=60)
+    assert not any('create' in argv for argv in calls)
+    assert not engine.containers
+
+
+def test_fixed_helper_record_is_outside_payload_stage(tmp_path):
+    root=tmp_path/'state';stage=root/'workers/operation/stage'
+    record=containment.command_directory(root,stage)
+    assert record.is_relative_to(root/'worker-executions') and not record.is_relative_to(stage)

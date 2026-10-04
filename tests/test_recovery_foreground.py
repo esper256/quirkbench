@@ -74,7 +74,7 @@ def test_podman_foreground_gate_and_recorded_manager_cleanup(inputs,monkeypatch)
     output=kwargs['output'];record=json.loads((output/'build.json').read_bytes())
     assert record['schema_version']==2 and record['cgroup_manager']=='systemd' and record['payload_released']
     create=next(argv for argv in calls if 'create' in argv)
-    assert ['/usr/bin/python3','-I','/__quirkbench_entry.py']==create[create.index(kwargs['image'])+1:create.index(kwargs['image'])+4]
+    assert ['/usr/bin/python3','-I','-S','/__quirkbench_entry.py']==create[create.index(kwargs['image'])+1:create.index(kwargs['image'])+5]
     configured[0]='cgroupfs';calls.clear();populated[0]=True
     with pytest.raises(WorkerServiceError,match='descendants'):foreground.cleanup(output,run=run)
     assert not json.loads((output/'build.json').read_bytes())['removed']

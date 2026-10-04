@@ -165,15 +165,16 @@ class DevelopmentServices(ContainerWorkerServices):
         budget=resolve('kernel',**self.resource_options)
         self.cpu_count=budget.cpus
         memory=budget.memory_bytes
-        from .container_containment import gate_mounts,release
+        from .container_containment import gate_mounts,release,protect_owner_paths
         gate=directory/'containment-gate'
+        protect_owner_paths(options,[directory/name for name in ('container.json','run.json','stopped.json','containment-gate')])
         mounts=gate_mounts(gate)
         code=130
         try:
             args=['create','--name',execution['name'],'--label',LABEL+'='+run['unit'],
                 '--pull=never','--network=none','--timeout=86400',
                 *self.backend.containment_args(self.cpu_count,memory),
-                *options,'--env=LD_PRELOAD=','--env=LD_LIBRARY_PATH=','--env=QUIRKBENCH_OPERATION_DEADLINE='+str(deadline),*mounts,image,'/usr/bin/python3','-I','/__quirkbench_entry.py','/__quirkbench_gate','86400',*payload]
+                *options,'--env=LD_PRELOAD=','--env=LD_LIBRARY_PATH=','--env=LD_AUDIT=','--env=QUIRKBENCH_OPERATION_DEADLINE='+str(deadline),*mounts,image,'/usr/bin/python3','-I','-S','/__quirkbench_entry.py','/__quirkbench_gate','86400',*payload]
             identity=self.backend.create(*args[1:])
             execution['id']=identity;self._save(record)
             value=self._inspect(record,execution)

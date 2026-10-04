@@ -12,7 +12,7 @@ import time
 import uuid
 
 from .container_engine import ContainerEngine
-from .container_containment import gate_mounts, release
+from .container_containment import gate_mounts, release, protect_owner_paths
 from .contracts import canonical
 from .development_container import arguments
 from .recovery_foreground import LABEL, _owned_container, _stopped
@@ -33,6 +33,8 @@ def run(values, output, *, workload='kernel', timeout=86400, deadline=None, mana
     from .build import user_build_path
     output=user_build_path(output)
     if output.resolve()!=output or output.exists():raise ValueError('retained command directory must be new and canonical')
+    protect_owner_paths(options,[output])
+    output.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
     output.mkdir(mode=0o700)
     name='qb-image-'+uuid.uuid4().hex
     record={'schema_version':2,'engine':'podman','cgroup_manager':selected,'gated':True,
@@ -49,7 +51,7 @@ def run(values, output, *, workload='kernel', timeout=86400, deadline=None, mana
         identity=backend.create('--name',name,'--label',LABEL+'='+name,'--pull=never',
             '--ipc=private','--timeout='+str(timeout),*backend.containment_args(budget.cpus,budget.memory_bytes),
             '--env=QUIRKBENCH_OPERATION_DEADLINE='+str(deadline),
-            *options,'--env=LD_PRELOAD=','--env=LD_LIBRARY_PATH=',*gate_mounts(output/'containment-gate'),image,'/usr/bin/python3','-I','/__quirkbench_entry.py',
+            *options,'--env=LD_PRELOAD=','--env=LD_LIBRARY_PATH=','--env=LD_AUDIT=',*gate_mounts(output/'containment-gate'),image,'/usr/bin/python3','-I','-S','/__quirkbench_entry.py',
             '/__quirkbench_gate',str(timeout),*payload)
         record['container_id']=identity;save()
         backend.validate_limits(_owned_container(command,record,backend.runner),budget.cpus,budget.memory_bytes)

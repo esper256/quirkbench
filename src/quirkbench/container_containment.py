@@ -47,6 +47,29 @@ def gate_mounts(directory):
             '--volume',str(script)+':/__quirkbench_entry.py:ro,z','--cgroupns=host']
 
 
+def command_directory(root,stage):
+    from .contracts import digest
+    return Path(root)/'worker-executions'/('legacy-'+digest(str(Path(stage)).encode()))/'command'
+
+
+def protect_owner_paths(values,paths):
+    """Reject writable aliases of host journals/gates, including symlink sources."""
+    iterator=iter(values)
+    for option in iterator:
+        if option=='--volume':value=next(iterator)
+        elif option.startswith('--volume='):value=option.split('=',1)[1]
+        else:continue
+        fields=value.split(':')
+        if len(fields)<2:raise WorkerServiceError('volume requires an explicit target')
+        modes=fields[2].split(',') if len(fields)>2 else []
+        if 'ro' in modes:continue
+        source=Path(fields[0]).expanduser().resolve()
+        for protected in paths:
+            path=Path(protected).resolve()
+            if path==source or path.is_relative_to(source):
+                raise WorkerServiceError('writable payload mount overlaps owner execution records or release gate')
+
+
 def release(value, execution, bounds, save, directory):
     from .store import atomic_write
     from .contracts import canonical

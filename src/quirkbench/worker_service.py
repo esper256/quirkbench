@@ -249,7 +249,7 @@ class ContainerWorkerServices:
         command += ['--env=QUIRKBENCH_WORKER_RECORD='+str(self._path(record['unit']))]
         entry=['python3','-m','quirkbench.container_worker']
         if record['schema_version']==4:
-            command+=['--env=LD_PRELOAD=','--env=LD_LIBRARY_PATH=']
+            command+=['--env=LD_PRELOAD=','--env=LD_LIBRARY_PATH=','--env=LD_AUDIT=']
             entry=['/usr/bin/python3','-I','-c',
                    'import sys,runpy;sys.path.insert(0,sys.argv.pop(1));runpy.run_module("quirkbench.container_worker",run_name="__main__")',spec['pythonpath']]
         command += [spec['image'],*entry,str(remaining),*spec['payload']]

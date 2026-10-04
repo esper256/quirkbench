@@ -132,7 +132,8 @@ def build(*, cas_root, recipe_sha256, image, output, engine='podman', cpus=None,
     if engine=='podman':
         from .container_containment import gate_mounts
         argv+=gate_mounts(output/'containment-gate')+['--timeout='+str(timeout),'--env=QUIRKBENCH_OPERATION_DEADLINE='+str(deadline)]
-        payload=['/usr/bin/python3','-I','/__quirkbench_entry.py','/__quirkbench_gate',str(timeout),*payload]
+        argv+=['--env=LD_PRELOAD=','--env=LD_LIBRARY_PATH=','--env=LD_AUDIT=']
+        payload=['/usr/bin/python3','-I','-S','/__quirkbench_entry.py','/__quirkbench_gate',str(timeout),*payload]
     argv += [image,*payload]
     try:
         identity = backend.create(*argv[len(command)+1:])
