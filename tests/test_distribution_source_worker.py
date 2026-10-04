@@ -60,7 +60,7 @@ def test_joined_fixed_native_plan_and_private_distribution_import(fixture):
     mounts = [command[n+1] for n,value in enumerate(command) if value == '--volume']
     assert len(mounts) == 2 and mounts[0] == f'{stage}/distribution:{stage}/distribution:rw,z'
     assert not any(str(root/'private') in item or str(root/'artifacts') in item or 'controller.sqlite' in item for item in command)
-    assert commands[0][-6] == builder['builder_config_digest']
+    assert command[command.index('/usr/bin/python3')-1] == builder['builder_config_digest']
 
 
 def test_retained_manifest_and_config_are_distinct_from_fedora_base(fixture):

@@ -75,3 +75,17 @@ def test_small_selected_disk_reserve_reaches_packaging_and_composition(tmp_path,
     rpms=tmp_path/'rpms';rpms.mkdir();(rpms/'package.rpm').write_bytes(b'package')
     archive_rpms(rpms,tmp_path/'rpms.tar',0,reserve_bytes=64*1024)
     assert (tmp_path/'rpms.tar').is_file()
+
+
+def test_shell_launcher_uses_shared_budget_with_bounded_engine_arguments(tmp_path):
+    import os,subprocess,sys
+    from pathlib import Path
+    engine=tmp_path/'podman';engine.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n');engine.chmod(0o755)
+    env={**os.environ,'PATH':str(tmp_path)+':'+os.environ['PATH'],'PYTHON':sys.executable,
+         'QUIRKBENCH_CPUS':'1','QUIRKBENCH_MEMORY_GIB':'1'}
+    script=Path(__file__).parents[1]/'environments/run-bounded-podman.sh'
+    result=subprocess.run(['bash',str(script),'--workload=preparation','sha256:'+'1'*64,'true'],
+        env=env,text=True,capture_output=True,timeout=10)
+    assert result.returncode==0,result.stderr
+    assert '--cpus=1' in result.stdout and f'--memory={GIB}' in result.stdout
+    assert '--pids-limit=4096' in result.stdout and '--timeout=86400' in result.stdout
