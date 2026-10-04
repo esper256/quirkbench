@@ -102,7 +102,7 @@ class DevelopmentServices(ContainerWorkerServices):
         found=self._invoke('ps','--all','--no-trunc','--filter','name=^'+execution['name']+'$','--format','{{.ID}}').strip()
         if found:
             value=self._stop(record,execution)
-            self._invoke('rm',value.get('Id',value.get('ID')))
+            self.backend.remove(value.get('Id',value.get('ID')))
         execution['removed']=True;self._save(record)
 
     def stop_and_verify(self,unit,boot):
@@ -141,23 +141,17 @@ class DevelopmentServices(ContainerWorkerServices):
         code=130
         try:
             args=['create','--name',execution['name'],'--label',LABEL+'='+run['unit'],
-                '--pull=never','--network=none','--restart=no','--timeout=86400','--pid=private',
-                '--cpus='+str(self.cpu_count),'--memory='+str(memory),'--memory-swap='+str(memory),
-                '--pids-limit=4096','--security-opt=no-new-privileges','--log-driver=k8s-file','--log-opt=max-size=8m',
+                '--pull=never','--network=none','--timeout=86400',
+                *self.backend.containment_args(self.cpu_count,memory),
                 *options,image,*payload]
-            identity=self._invoke(*args).strip()
-            if not re.fullmatch('[0-9a-f]{64}',identity):raise WorkerServiceError('invalid created development container identity')
+            identity=self.backend.create(*args[1:])
             execution['id']=identity;self._save(record)
-            value=self._inspect(record,execution);limits=value.get('HostConfig',{})
-            cpu=limits.get('NanoCpus',0)/10**9 or limits.get('CpuQuota',0)/max(1,limits.get('CpuPeriod',0))
-            if (limits.get('Memory')!=memory or limits.get('MemorySwap')!=memory or cpu!=self.cpu_count
-                    or limits.get('PidsLimit')!=4096 or limits.get('Privileged') is not False):
-                raise WorkerServiceError('development resource bounds were not applied')
+            value=self._inspect(record,execution)
+            self.backend.validate_limits(value,self.cpu_count,memory)
             atomic_write(directory/run['status'],b'running\n')
             execution['start_requested']=True;self._save(record)
-            from .recovery_worker import execute_rootfs
-            execute_rootfs(self.command('start','--attach',identity),directory/run['log'],verify=lambda:None,
-                           deadline=time.time()+86400,max_duration=86400)
+            self.backend.stream('start',identity,directory/run['log'],
+                                deadline=time.time()+86400,max_duration=86400)
             value=self._stop(record,execution)
             code=value['State']['ExitCode']
             if type(code) is not int or not 0<=code<=255:raise WorkerServiceError('invalid development exit status')

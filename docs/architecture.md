@@ -206,3 +206,13 @@ only eligible candidate recipes may exercise reviewed sleep modes. The planned g
 starts with guided setup/pairing and attended operator-approved attempts. Guided backup
 completeness belongs to M5; managed scheduling and unattended grants are optional M7
 capabilities. Current manual setup and backup commands retain their stated limits.
+
+Controller workers, foreground image builds and development builds share the
+bounded container engine in `container_engine.py`: engine commands, capped
+responses, identity inspection, resource verification, attachment/log deadlines
+and whole-container stop proofs. Their adapters retain workload plans and their
+existing journals and approval boundaries. A missing create/start acknowledgement
+never proves that a worker is absent. Cleanup must establish exact ownership and
+stopped state before releasing a fence or removing diagnostics. Podman uses the
+local cgroup filesystem; Docker uses engine limits plus the fixed worker's PID1
+deadline. No controller-side systemd service is required.

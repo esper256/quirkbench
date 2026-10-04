@@ -10,7 +10,6 @@ import os
 from pathlib import Path
 import re
 import signal
-import subprocess
 import sys
 import uuid
 
@@ -26,61 +25,21 @@ LABEL = 'org.quirkbench.foreground-build'
 FILES = ('recovery.img', 'recovery.img.json', 'recovery.img.sha256', 'image-result.json')
 
 
-def _engine(name):
-    if name == 'podman':
-        return ['podman', '--remote=false', '--cgroup-manager=cgroupfs']
-    if name == 'docker':
-        return ['docker']
-    raise BuildError('select docker or podman')
-
-
-def _run(argv, *, timeout=30):
-    from .ostree import CommandRunner
-    # The existing runner caps stdout while reading, retains only a stderr tail,
-    # enforces the deadline and kills/reaps its direct process group on failure.
-    diagnostic = {}
-    def retain(raw):
-        diagnostic['stderr'] = raw[-4096:].decode('utf-8', errors='replace')
-        return 'bounded container response'
-    try:
-        output = CommandRunner(lambda *_: None, lambda: None, timeout_s=timeout,
-                               diagnostic=retain, operation='Container command',
-                               phase='recovery-image-build',
-                               failure_guidance='inspect retained build state before retrying')(argv)
-    except (OSError, ValueError) as exc:
-        raise BuildError(str(exc)+' '+diagnostic.get('stderr', '')) from exc
-    if len(output) > 1024**2:
-        raise BuildError('container response exceeds budget')
-    return output
+from .container_engine import ContainerEngine, engine_command as _engine, bounded_run as _run
 
 
 def _inspect(engine, identity, run=_run):
-    value = json.loads(run([*engine, 'inspect', identity]))
-    if not isinstance(value, list) or len(value) != 1 or not isinstance(value[0], dict):
-        raise BuildError('container identity is ambiguous')
-    return value[0]
+    return ContainerEngine(engine[0], runner=run).inspect(identity)
 
 
 def _owned_container(engine, record, run=_run):
-    value = _inspect(engine, record.get('container_id', record['name']), run)
-    identity = value.get('Id', value.get('ID', ''))
-    if (not re.fullmatch('[0-9a-f]{64}', identity)
-            or value.get('Config', {}).get('Labels', {}).get(LABEL) != record['name']
-            or value.get('Image', '').removeprefix('sha256:') != record['image'].removeprefix('sha256:')
-            or (record.get('container_id') and identity != record['container_id'])):
-        raise BuildError('container identity differs from recorded build')
-    return value
+    return ContainerEngine(engine[0], runner=run).owned(
+        record['name'], record['image'], LABEL, record['name'], record.get('container_id'))
 
 
 def _stopped(engine, record, run=_run):
-    value = _owned_container(engine, record, run)
-    identity = value.get('Id', value.get('ID'))
-    if value.get('State', {}).get('Running'):
-        run([*engine, 'stop', '--time', '10', identity], timeout=30)
-        value = _owned_container(engine, record, run)
-    if value.get('State', {}).get('Running') is not False or value['State'].get('Pid') != 0:
-        raise BuildError('container shutdown is unverified; retain build and reconcile before retrying')
-    return value
+    return ContainerEngine(engine[0], runner=run).stop(
+        record['name'], record['image'], LABEL, record['name'], record.get('container_id'))
 
 
 def cleanup(output, *, run=_run):
@@ -93,7 +52,7 @@ def cleanup(output, *, run=_run):
     engine = _engine(record['engine'])
     if not record.get('removed'):
         value = _stopped(engine, record, run)
-        run([*engine, 'rm', value.get('Id', value.get('ID'))])
+        ContainerEngine(engine[0], runner=run).remove(value.get('Id', value.get('ID')))
         record.update(stopped=True, removed=True)
         atomic_write(output/'build.json', canonical(record))
     return {'removed': True, 'output': str(output), 'image_ready': record.get('complete', False)}
@@ -114,6 +73,7 @@ def build(*, cas_root, recipe_sha256, image, output, engine='podman', cpus=None,
             or type(timeout) is not int or not 1 <= timeout <= 86400):
         raise BuildError('pinned builder ID and bounded CPU/memory/deadline required')
     command = _engine(engine)
+    backend = ContainerEngine(engine, runner=run)
     inspected = _inspect(command, image, run)
     if (inspected.get('Id', inspected.get('ID', '')).removeprefix('sha256:') != image[7:]
             or inspected.get('Architecture') != 'amd64' or inspected.get('Os', inspected.get('OS')) != 'linux'
@@ -140,9 +100,7 @@ def build(*, cas_root, recipe_sha256, image, output, engine='podman', cpus=None,
     atomic_write(output/'build.json', canonical(record))
     argv = [*command, 'create', '--name', name, '--label', LABEL+'='+name,
             '--pull=never', '--network=none', '--ipc=private', '--user=0',
-            '--security-opt=no-new-privileges', '--cpus='+str(cpus),
-            '--memory='+str(memory_gib)+'g', '--memory-swap='+str(memory_gib)+'g',
-            '--pids-limit=4096', '--env=PYTHONDONTWRITEBYTECODE=1',
+            *backend.containment_args(cpus, memory_gib*1024**3), '--env=PYTHONDONTWRITEBYTECODE=1',
             '--env=PYTHONPATH=/workspace/code',
             '--env=QUIRKBENCH_BUILDER_CONFIG_DIGEST='+image]
     for source, target in ((stage/'inputs/code', '/workspace/code'), (stage/'inputs/cas', '/workspace/cas')):
@@ -150,18 +108,14 @@ def build(*, cas_root, recipe_sha256, image, output, engine='podman', cpus=None,
     argv += [image, 'python3', '-B', '-m', 'quirkbench.recovery_foreground',
              recipe_sha256, str(timeout), str(reserve_gib*1024**3)]
     try:
-        identity = run(argv).strip()
-        if not re.fullmatch('[0-9a-f]{64}', identity):
-            raise BuildError('container creation returned an invalid identity; reconcile named build')
+        identity = backend.create(*argv[len(command)+1:])
         record['container_id'] = identity
         atomic_write(output/'build.json', canonical(record))
-        _owned_container(command, record, run)
-        if execute is None:
-            from .recovery_worker import execute_rootfs
-            execute = execute_rootfs
+        value = _owned_container(command, record, run)
+        backend.validate_limits(value, cpus, memory_gib*1024**3)
         import time
-        metrics = execute([*command, 'start', '--attach', identity], output/'build.log',
-                          verify=lambda: None, deadline=time.time()+timeout+30, max_duration=timeout+30)
+        metrics = backend.stream('start', identity, output/'build.log', execute=execute,
+                                 deadline=time.time()+timeout+30, max_duration=timeout+30)
         stopped = _stopped(command, record, run)
         record.update(stopped=True, metrics=metrics)
         atomic_write(output/'build.json', canonical(record))

@@ -19,6 +19,7 @@ from .controller import controller_boot_id, validate_boot_id
 from .state_reader import read_file, StateReader
 from .store import atomic_write
 from .build import BuildError
+from .container_engine import ContainerEngine, bounded_run
 
 UNIT = re.compile(r'qb-worker-v2-[0-9a-f]{32}-[1-9][0-9]*\Z')
 LEGACY_UNIT = re.compile(r'quirkbench-worker-[0-9a-f]{32}-[1-9][0-9]*\.service\Z')
@@ -32,8 +33,7 @@ class WorkerServiceError(RuntimeError):
 
 
 def _run(argv, timeout=30):
-    from .recovery_foreground import _run as bounded
-    return bounded(argv, timeout=timeout)
+    return bounded_run(argv, timeout=timeout)
 
 
 class ContainerWorkerServices:
@@ -55,23 +55,15 @@ class ContainerWorkerServices:
     def worker_identity(operation, generation):
         return f'qb-worker-v2-{operation}-{generation}'
 
+    @property
+    def backend(self):
+        return ContainerEngine(self.engine, runner=self.runner, error=WorkerServiceError)
+
     def command(self, *args):
-        # Rootless Podman uses the kernel cgroup filesystem directly; its default
-        # manager must not silently reintroduce a host systemd dependency.
-        if self.engine == 'podman':
-            return ['podman', '--remote=false', '--cgroup-manager=cgroupfs', *args]
-        if self.engine == 'docker':
-            return ['docker', *args]
-        raise WorkerServiceError('select a local docker or podman engine')
+        return self.backend.command(*args)
 
     def _invoke(self, *args, timeout=30):
-        try:
-            result = self.runner(self.command(*args), timeout=timeout)
-            if not isinstance(result, str) or len(result) > 1024**2:
-                raise ValueError('engine response exceeds its budget')
-            return result
-        except (OSError, ValueError, BuildError) as exc:
-            raise WorkerServiceError('container engine command failed: '+str(exc)[:1024]) from exc
+        return self.backend.invoke(*args, timeout=timeout)
 
     def _engine_identity(self):
         field = '{{.ID}}' if self.engine == 'docker' else '{{.Store.GraphRoot}}'
@@ -157,28 +149,12 @@ class ContainerWorkerServices:
             raise WorkerServiceError('worker claim changed or expired')
 
     def _inspect(self, record, execution):
-        identity=execution.get('id',execution['name'])
-        raw=json.loads(self._invoke('inspect',identity))
-        if not isinstance(raw,list) or len(raw)!=1:
-            raise WorkerServiceError('worker container identity is ambiguous')
-        value=raw[0]; actual=value.get('Id',value.get('ID',''))
-        if (not re.fullmatch('[0-9a-f]{64}',actual)
-                or (execution.get('id') and actual!=execution['id'])
-                or value.get('Config',{}).get('Labels',{}).get(LABEL)!=record['unit']
-                or value.get('Image','').removeprefix('sha256:')!=execution['image'][7:]):
-            raise WorkerServiceError('container differs from immutable worker identity')
-        return value
+        return self.backend.owned(execution['name'], execution['image'], LABEL,
+                                  record['unit'], execution.get('id'))
 
     def _stop(self, record, execution):
-        value=self._inspect(record,execution)
-        if value.get('State',{}).get('Running'):
-            self._invoke('stop','--time','10',value.get('Id',value.get('ID')),timeout=30)
-            value=self._inspect(record,execution)
-        if (value.get('State',{}).get('Running') is not False or value['State'].get('Pid')!=0
-                or value['State'].get('Restarting') is True
-                or value.get('HostConfig',{}).get('RestartPolicy',{}).get('Name') not in ('no','')):
-            raise WorkerServiceError('whole worker container shutdown is unverified')
-        return value
+        return self.backend.stop(execution['name'], execution['image'], LABEL,
+                                 record['unit'], execution.get('id'))
 
     def _start(self, record, phase):
         from .worker_container_plan import plan
@@ -200,17 +176,14 @@ class ContainerWorkerServices:
         remaining=max(1,math.ceil(min(record['claim']['deadline']-self.clock(),
                                       record['monotonic_deadline']-self.monotonic())))
         command=['create','--name',execution['name'],'--label',LABEL+'='+record['unit'],
-                 '--pull=never','--restart=no','--network='+spec.get('network','none'),
+                 '--pull=never','--network='+spec.get('network','none'),
                  '--ipc=private','--cgroupns=host',
-                 '--cpus='+str(self.cpu_count),'--memory='+str(self.memory_limit),
-                 '--memory-swap='+str(self.memory_limit),'--pids-limit=4096',
-                 '--security-opt=no-new-privileges','--user='+spec.get('user',str(os.getuid())+':'+str(os.getgid())),
+                 *self.backend.containment_args(self.cpu_count,self.memory_limit),
+                 '--user='+spec.get('user',str(os.getuid())+':'+str(os.getgid())),
                  '--env=PYTHONDONTWRITEBYTECODE=1','--env=PYTHONPATH='+spec['pythonpath'],
                  '--env=QUIRKBENCH_BUILDER_CONFIG_DIGEST='+spec['image']]
-        command+=['--log-driver='+('json-file' if self.engine=='docker' else 'k8s-file'),
-                  '--log-opt=max-size=8m']
         if self.engine=='podman' and spec.get('user')!='0': command+=['--userns=keep-id']
-        if self.engine=='podman': command+=['--pid=private','--timeout='+str(remaining)]
+        if self.engine=='podman': command+=['--timeout='+str(remaining)]
         command+=spec.get('options',[])
         for source,target,mode in spec['mounts']:
             from .recovery_podman import _canonical
@@ -218,28 +191,17 @@ class ContainerWorkerServices:
             command+=['--volume',str(source)+':'+str(target)+':'+mode]
         command += ['--env=QUIRKBENCH_WORKER_RECORD='+str(self._path(record['unit']))]
         command += [spec['image'],'python3','-m','quirkbench.container_worker',str(remaining),*spec['payload']]
-        identity=self._invoke(*command).strip()
-        if not re.fullmatch('[0-9a-f]{64}',identity):
-            raise WorkerServiceError('invalid created container identity')
+        identity=self.backend.create(*command[1:])
         execution['id']=identity;self._save(record)
         value=self._inspect(record,execution)
-        limits=value.get('HostConfig',{})
-        cpu=(limits.get('NanoCpus',0)/10**9 or
-             limits.get('CpuQuota',0)/max(1,limits.get('CpuPeriod',0)))
-        if (limits.get('Memory')!=self.memory_limit or limits.get('MemorySwap')!=self.memory_limit
-                or cpu!=self.cpu_count
-                or limits.get('PidsLimit')!=4096
-                or limits.get('PidMode') not in ('','private')
-                or limits.get('RestartPolicy',{}).get('Name') not in ('no','')
-                or limits.get('Privileged') is not False):
-            raise WorkerServiceError('worker containment settings differ from requested bounds')
+        self.backend.validate_limits(value,self.cpu_count,self.memory_limit)
         self._current(record)
         execution['start_requested']=True;self._save(record)
         # Workers observe a separate immutable dispatch copy, never the host's
         # authoritative stop/reconciliation journal. This also keeps privileged
         # rootless composition mounts away from controller execution records.
         atomic_write(self._handshake(record,phase)/(record['unit']+'.json'),canonical(record))
-        self._invoke('start',identity)
+        self.backend.start(identity)
 
     def launch(self, claim, state_root):
         self.preflight(state_root,claim['deadline'])
@@ -296,7 +258,6 @@ class ContainerWorkerServices:
             self._save(record)
 
     def _capture_log(self, record, execution):
-        from .recovery_worker import execute_rootfs
         log=Path(record['claim']['stage_dir'])/'diagnostics'/(execution['phase']+'.log')
         if log.parent.resolve()!=log.parent:
             raise WorkerServiceError('worker diagnostics path is linked')
@@ -306,8 +267,8 @@ class ContainerWorkerServices:
                 raise WorkerServiceError('retained worker diagnostics changed')
             return
         attempt=log.with_name(log.stem+'-'+uuid.uuid4().hex+'.log')
-        result=execute_rootfs(self.command('logs',execution.get('id',execution['name'])),attempt,
-            verify=lambda:None,deadline=self.clock()+60,max_duration=60)
+        result=self.backend.stream('logs',execution.get('id',execution['name']),attempt,
+            deadline=self.clock()+60,max_duration=60)
         if result['exit_code']!=0:
             raise WorkerServiceError('worker log retrieval failed; stopped container and attempt log retained')
         value=digest(read_file(attempt.parent,attempt.name,limit=8*1024**2))
@@ -341,7 +302,7 @@ class ContainerWorkerServices:
             value=self._stop(record,execution)
             execution['stopped']=True;self._save(record)
             self._capture_log(record,execution)
-            self._invoke('rm',value.get('Id',value.get('ID')))
+            self.backend.remove(value.get('Id',value.get('ID')))
             execution['removed']=True;self._save(record)
         record['stopped']=True;self._save(record)
         runtime=self._path(record['unit']).parent/record['unit']
