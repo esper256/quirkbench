@@ -469,7 +469,11 @@ quirkbench recovery-image-build --engine docker \
 The default CPU cap reserves half the visible CPUs, up to four; `--cpus` selects
 an explicit cap. The builder needs at least 4 GiB and enforces the existing
 half-host CPU/RAM reserve, so smaller hosts should use suitable limits before
-building. The output directory must be new and outside Git. The command copies only the
+building. `--free-space-reserve-gib` defaults to 2 for foreground builds; dracut
+staging checks that reserve continuously, and assembly additionally requires twice
+the image's size for image/temporary files. This is independent of the controller's
+state-storage reserve. Existing managed build callers retain their existing default.
+The output directory must be new and outside Git. The command copies only the
 recipe's selected inputs, mounts those copies read-only, runs an offline bounded
 container, verifies it has stopped, and exports `recovery.img`, its manifest,
 checksum and unsigned candidate record. The image checksum is checked after export.

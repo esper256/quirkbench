@@ -100,13 +100,14 @@ def cleanup(output, *, run=_run):
 
 
 def build(*, cas_root, recipe_sha256, image, output, engine='podman', cpus=None,
-          memory_gib=4, timeout=3600, run=_run, execute=None):
+          memory_gib=4, timeout=3600, reserve_gib=2, run=_run, execute=None):
     sha256(recipe_sha256)
     if cpus is None:
         cpus = min(4, max(1, (os.cpu_count() or 1)//2))
     if (not re.fullmatch('sha256:[0-9a-f]{64}', image)
             or type(cpus) is not int or not 1 <= cpus <= 128
             or type(memory_gib) is not int or not 4 <= memory_gib <= 1024
+            or type(reserve_gib) is not int or not 0 <= reserve_gib <= 1048576
             or type(timeout) is not int or not 1 <= timeout <= 86400):
         raise BuildError('pinned builder ID and bounded CPU/memory/deadline required')
     command = _engine(engine)
@@ -134,7 +135,8 @@ def build(*, cas_root, recipe_sha256, image, output, engine='podman', cpus=None,
     name = 'qb-image-' + uuid.uuid4().hex
     record = {'schema_version': 1, 'engine': engine, 'name': name, 'image': image,
               'recipe_sha256': recipe_sha256, 'complete': False, 'stopped': False,
-              'removed': False, 'signed': False, 'qualified': False}
+              'removed': False, 'signed': False, 'qualified': False,
+              'reserve_bytes': reserve_gib*1024**3}
     atomic_write(output/'build.json', canonical(record))
     argv = [*command, 'create', '--name', name, '--label', LABEL+'='+name,
             '--pull=never', '--network=none', '--ipc=private', '--user=0',
@@ -146,7 +148,7 @@ def build(*, cas_root, recipe_sha256, image, output, engine='podman', cpus=None,
     for source, target in ((stage/'inputs/code', '/workspace/code'), (stage/'inputs/cas', '/workspace/cas')):
         argv += ['--volume', str(source)+':'+target+':ro,Z']
     argv += [image, 'python3', '-B', '-m', 'quirkbench.recovery_foreground',
-             recipe_sha256, str(timeout)]
+             recipe_sha256, str(timeout), str(reserve_gib*1024**3)]
     try:
         identity = run(argv).strip()
         if not re.fullmatch('[0-9a-f]{64}', identity):
@@ -207,7 +209,7 @@ def build(*, cas_root, recipe_sha256, image, output, engine='podman', cpus=None,
         raise
 
 
-def worker(recipe_sha256, timeout):
+def worker(recipe_sha256, timeout, reserve_bytes):
     """PID1 deadline applies even if the initiating terminal disappears."""
     from .build import _require_container
     from .build_pipeline import ResourceLimits
@@ -218,12 +220,13 @@ def worker(recipe_sha256, timeout):
     signal.alarm(timeout)
     output = Path('/workspace/output')
     output.mkdir(mode=0o700)
-    build_stock_image(recipe_sha256, CASReader('/workspace/cas'), output, limits=limits)
+    build_stock_image(recipe_sha256, CASReader('/workspace/cas'), output, limits=limits,
+                      reserve_bytes=reserve_bytes)
 
 
 if __name__ == '__main__':
     try:
-        worker(sys.argv[1], int(sys.argv[2]))
+        worker(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]))
     except Exception as exc:
         print('Stock image failed; container diagnostics retained: '+str(exc), file=sys.stderr)
         raise SystemExit(1)

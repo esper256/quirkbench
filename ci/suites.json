@@ -227,7 +227,8 @@
       "schemas/publication-preflight.v1.schema.json",
       "src/quirkbench/controller_install.py",
       "src/quirkbench/recovery_foreground.py",
-      "tests/test_recovery_foreground.py"
+      "tests/test_recovery_foreground.py",
+      "tests/test_recovery_space.py"
     ],
     "tests": [
       "tests/test_release_plan.py",
@@ -240,7 +241,8 @@
       "tests/test_baseline_inputs.py",
       "tests/test_recovery_distribution.py",
       "tests/test_stock_recovery_flow.py",
-      "tests/test_recovery_foreground.py"
+      "tests/test_recovery_foreground.py",
+      "tests/test_recovery_space.py"
     ]
   }
 }

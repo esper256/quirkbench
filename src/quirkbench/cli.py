@@ -323,6 +323,7 @@ def parser():
     foreground.add_argument('--cpus',type=int,help='default: up to four CPUs, reserving half the visible host CPUs')
     foreground.add_argument('--memory-gib',type=int,default=4)
     foreground.add_argument('--timeout',type=int,default=3600,help='whole-container deadline in seconds')
+    foreground.add_argument('--free-space-reserve-gib',type=int,default=2,help='free disk space retained during staging and in addition to image/temp capacity (default: 2 GiB)')
     cleanup=commands.add_parser('recovery-image-cleanup',help='stop and remove only the container recorded by a foreground image build; preserve files')
     cleanup.add_argument('output',type=Path)
     recovery_images=commands.add_parser('recovery-images',help='list published recovery images and exact retained file paths; read-only')
@@ -1392,7 +1393,7 @@ def main(argv=None):
             answer=(cleanup(args.output) if args.command=='recovery-image-cleanup' else
                     build(cas_root=args.store,recipe_sha256=args.recipe,image=args.builder_image,
                           output=args.output,engine=args.engine,cpus=args.cpus,
-                          memory_gib=args.memory_gib,timeout=args.timeout))
+                          memory_gib=args.memory_gib,timeout=args.timeout,reserve_gib=args.free_space_reserve_gib))
             print(json.dumps(answer,sort_keys=True));return 0
         except (BuildError,OSError,ValueError,KeyError,subprocess.TimeoutExpired) as exc:
             print('Recovery image unavailable: '+str(exc),file=sys.stderr);return 2
