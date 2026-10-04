@@ -132,6 +132,8 @@ def test_bundle_schema_and_rejected_link_leave_destination_untouched(prepared,tm
 def test_cli_defaults_reach_real_foreground_admission(prepared,tmp_path,monkeypatch):
     from quirkbench.cli import main
     from quirkbench import recovery_foreground
+    from quirkbench.resource_budget import Capacity
+    monkeypatch.setattr('quirkbench.resource_budget.capacity',lambda:Capacity(2,16*1024**3))
     from test_recovery_foreground import Engine
     root,_=prepared;manifest=bundle.load((root/'manifest.json').read_bytes())
     monkeypatch.setattr(bundle,'verify',lambda *a,**k:{'ready':True,'recipe_sha256':manifest['recipe_sha256'],
