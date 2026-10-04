@@ -38,7 +38,7 @@ def run(fixture, *,execute=None,verify=lambda:None):
 
 
 def injected(argv, log, **kwargs):
-    stage = Path(argv[-1])
+    stage = Path(argv[argv.index('--stage-dir')+1])
     worker.inner(stage,runner=FakeRunner(),limits=LIMITS)
     return {'exit_code':0}
 
@@ -56,11 +56,11 @@ def test_joined_fixed_native_plan_and_private_distribution_import(fixture):
     command = commands[0]
     assert '--network=none' in command and '--pull=never' in command and '--userns=keep-id' in command
     assert '--security-opt=no-new-privileges' in command
-    assert command[-5:] == ['/usr/bin/python3','-m','quirkbench.distribution_source_worker','--stage-dir',str(stage/'distribution')]
+    assert command[-7:] == ['/usr/bin/python3','-m','quirkbench.distribution_source_worker','--stage-dir',str(stage/'distribution'),'--reserve-bytes','0']
     mounts = [command[n+1] for n,value in enumerate(command) if value == '--volume']
     assert len(mounts) == 2 and mounts[0] == f'{stage}/distribution:{stage}/distribution:rw,z'
     assert not any(str(root/'private') in item or str(root/'artifacts') in item or 'controller.sqlite' in item for item in command)
-    assert commands[0][-6] == builder['builder_config_digest']
+    assert command[command.index('/usr/bin/python3')-1] == builder['builder_config_digest']
 
 
 def test_retained_manifest_and_config_are_distinct_from_fedora_base(fixture):
@@ -185,8 +185,8 @@ def test_native_inner_checks_distinct_correct_base_then_uses_existing_runner(fix
     monkeypatch.setattr(worker,'read_file',fake_read)
     monkeypatch.setattr(build,'_require_container',lambda:None)
     class InjectedRunner(FakeRunner):
-        def __init__(self,workspace):super().__init__();self.workspace=workspace
+        def __init__(self,workspace,*,reserve_bytes):super().__init__();self.workspace=workspace
     monkeypatch.setattr(build_pipeline,'BoundedRunner',InjectedRunner)
-    monkeypatch.setattr(build_pipeline.ResourceLimits,'from_cgroup',lambda:LIMITS)
+    monkeypatch.setattr(build_pipeline.ResourceLimits,'from_cgroup',lambda **kwargs:LIMITS)
     worker.inner(stage)
     assert (stage/'prepared.json').is_file()

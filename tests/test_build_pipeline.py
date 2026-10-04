@@ -567,7 +567,9 @@ def test_failed_stage_keeps_log_but_excludes_target_rootfs(tmp_path: Path, monke
     assert not (pending[0] / "sysroot").exists()
 
 
-def test_resource_limits_require_enforced_half_controller_cgroup(tmp_path: Path, monkeypatch) -> None:
+def test_resource_limits_require_enforcement_without_desktop_policy(tmp_path: Path, monkeypatch) -> None:
+    # Explicit leaf fixtures must not inherit the runner's /proc/self/cgroup path.
+    monkeypatch.setattr("quirkbench.resource_budget.cgroup_directory", lambda root: root/"foreign-host-group")
     (tmp_path / "memory.max").write_text(str(4 * 1024**3))
     (tmp_path / "cpu.max").write_text("400000 100000\n")
     original_read_text = Path.read_text
@@ -579,12 +581,19 @@ def test_resource_limits_require_enforced_half_controller_cgroup(tmp_path: Path,
 
     monkeypatch.setattr(Path, "read_text", read_text)
     monkeypatch.setattr("quirkbench.build_pipeline.os.cpu_count", lambda: 16)
+    monkeypatch.setattr("quirkbench.build_pipeline.os.sched_getaffinity", lambda _:set(range(16)))
     limits = ResourceLimits.from_cgroup(tmp_path)
     assert limits.cpus == 4 and limits.memory_bytes == 4 * 1024**3 and limits.jobs == 2
     (tmp_path / "memory.max").write_text(str(8 * 1024**3))
     assert ResourceLimits.from_cgroup(tmp_path).jobs == 4
     (tmp_path / "cpu.max").write_text("100000 100000\n")
     assert ResourceLimits.from_cgroup(tmp_path).jobs == 1
+    (tmp_path / "cpu.max").write_text("1600000 100000\n")
+    (tmp_path / "memory.max").write_text(str(24 * 1024**3))
+    assert ResourceLimits.from_cgroup(tmp_path).jobs == 12
+    (tmp_path / "memory.max").write_text(str(1024**3))
+    assert ResourceLimits.from_cgroup(tmp_path,workload='preparation').cpus == 16
+    with pytest.raises(BuildError,match='workload minimum'):ResourceLimits.from_cgroup(tmp_path)
     (tmp_path / "cpu.max").write_text("400000 0\n")
     with pytest.raises(BuildError, match="positive enforced"):
         ResourceLimits.from_cgroup(tmp_path)

@@ -134,9 +134,10 @@ class DevelopmentServices(ContainerWorkerServices):
                 'engine':'podman','engine_identity':self._engine_identity(),
                 'executions':[execution],'complete':False,'stopped':False}
         self._save(record)
-        memory_total=next(int(line.split()[1])*1024 for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemTotal:'))
-        memory=min(8*1024**3,memory_total//2)
-        if memory<4*1024**3:raise ContractError('less than 4 GiB within the half-host memory budget')
+        from .resource_budget import resolve
+        budget=resolve('kernel',**self.resource_options)
+        self.cpu_count=budget.cpus
+        memory=budget.memory_bytes
         code=130
         try:
             args=['create','--name',execution['name'],'--label',LABEL+'='+run['unit'],
