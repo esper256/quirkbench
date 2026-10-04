@@ -10,6 +10,7 @@ from __future__ import annotations
 from .platform_adapters import X86_UEFI_USB
 
 import ast
+from functools import partial
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import fcntl
@@ -101,7 +102,7 @@ def _tree_hash(root: Path, *, excluded_paths: frozenset[str] = frozenset(EXCLUDE
     return digest.hexdigest()
 
 
-def _sync_incremental_source(source: Path, destination: Path) -> None:
+def _sync_incremental_source(source: Path, destination: Path, *, reserve_bytes=None) -> None:
     """Update only changed source files at Kbuild's stable absolute path."""
     if (not source.is_dir() or source.is_symlink()
             or not destination.is_dir() or destination.is_symlink()):
@@ -141,7 +142,7 @@ def _sync_incremental_source(source: Path, destination: Path) -> None:
                     shutil.rmtree(target)
                 else:
                     target.unlink()
-            _copy_file(str(original), str(target))
+            _copy_file(str(original), str(target),reserve_bytes=reserve_bytes)
         else:
             raise BuildError("incremental source contains a special file")
     if _tree_hash(source, excluded_paths=frozenset()) != _tree_hash(destination, excluded_paths=frozenset()):
@@ -1300,7 +1301,7 @@ class BuildPipeline:
                     for name in structural)
                 if same_structure:
                     if restored["identity"]["source"] != inputs.kernel_source_sha256:
-                        _sync_incremental_source(extracted_source, work / "source")
+                        _sync_incremental_source(extracted_source, work / "source",reserve_bytes=self.reserve_bytes)
                     restored_objects = True
                     self._report("kernel-cache", "verified Kbuild objects restored")
                 else:
@@ -1311,7 +1312,7 @@ class BuildPipeline:
                 compatible = False
             if not compatible and not resumed_objects:
                 shutil.copytree(extracted_source, work / "source", symlinks=True,
-                                copy_function=_copy_file)
+                                copy_function=partial(_copy_file,reserve_bytes=self.reserve_bytes))
                 (work / "objects").mkdir()
                 self._report("kernel-cache", "fresh Kbuild object tree required")
             source, object_dir = work / "source", work / "objects"
@@ -1405,7 +1406,7 @@ class BuildPipeline:
                     != _tree_hash(extracted_source, excluded_paths=frozenset())):
                 raise BuildError("incremental experiment source changed")
             shutil.copytree(object_dir, stage / "kernel-obj", symlinks=True,
-                            copy_function=_copy_file)
+                            copy_function=partial(_copy_file,reserve_bytes=self.reserve_bytes))
             snapshot_build = KernelBuild(source, stage / "kernel-obj", sysroot,
                                          output_dir, jobs=limits.jobs)
             kernel_artifacts = snapshot_build.artifacts(release)

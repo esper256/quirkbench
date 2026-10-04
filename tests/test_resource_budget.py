@@ -77,15 +77,46 @@ def test_small_selected_disk_reserve_reaches_packaging_and_composition(tmp_path,
     assert (tmp_path/'rpms.tar').is_file()
 
 
-def test_shell_launcher_uses_shared_budget_with_bounded_engine_arguments(tmp_path):
+@pytest.mark.parametrize('script_path',['environments/run-bounded-podman.sh','src/quirkbench/run-bounded-podman.sh'])
+def test_shell_launcher_uses_shared_budget_with_bounded_engine_arguments(tmp_path,script_path):
     import os,subprocess,sys
     from pathlib import Path
     engine=tmp_path/'podman';engine.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n');engine.chmod(0o755)
     env={**os.environ,'PATH':str(tmp_path)+':'+os.environ['PATH'],'PYTHON':sys.executable,
          'QUIRKBENCH_CPUS':'1','QUIRKBENCH_MEMORY_GIB':'1'}
-    script=Path(__file__).parents[1]/'environments/run-bounded-podman.sh'
+    script=Path(__file__).parents[1]/script_path
+    if script_path.startswith('src/'):
+        import shutil
+        installed=tmp_path/'installed/lib/quirkbench'
+        shutil.copytree(script.parent,installed,ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
+        script=installed/script.name
+        env.pop('PYTHONDONTWRITEBYTECODE',None)
+        env.pop('PYTHONPATH',None)
     result=subprocess.run(['bash',str(script),'--workload=preparation','sha256:'+'1'*64,'true'],
         env=env,text=True,capture_output=True,timeout=10)
     assert result.returncode==0,result.stderr
     assert '--cpus=1' in result.stdout and f'--memory={GIB}' in result.stdout
     assert '--pids-limit=4096' in result.stdout and '--timeout=86400' in result.stdout
+    if script_path.startswith('src/'):assert not list(installed.rglob('__pycache__'))
+
+
+def test_selected_reserve_allows_managed_capture_and_cache_on_small_disk(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from quirkbench.build import sha256_file
+    from quirkbench.build_cache import BuildStageCache
+    from quirkbench.job_worker import capture
+    monkeypatch.setattr('shutil.disk_usage',lambda _:SimpleNamespace(free=256*1024))
+    source=tmp_path/'repo';source.write_bytes(b'[fedora]\n')
+    raw={'fedora_repo_file':str(source),'fedora_repo_sha256':sha256_file(source),
+         'artifact_paths':{},'evidence_paths':{}}
+    stage=tmp_path/'stage';stage.mkdir()
+    record=capture('compose',raw,stage,lambda:None,lambda *args:None,reserve_bytes=64*1024)
+    captured=stage/record['files']['fedora_repo_file']['path']
+    assert captured.read_bytes()==source.read_bytes()
+    cache=BuildStageCache(tmp_path/'cache',reserve_bytes=64*1024)
+    cache.publish('recipe','source',{}, {'inputs':captured.parent},{'captured':True})
+    restored=tmp_path/'restored'
+    assert cache.load('recipe','source',{}, {'inputs':restored})=={'captured':True}
+    assert (restored/captured.name).read_bytes()==source.read_bytes()
+    with pytest.raises(BuildError,match='reserve'):
+        BuildStageCache(tmp_path/'default-cache').publish('recipe','source',{}, {'inputs':captured.parent},{})

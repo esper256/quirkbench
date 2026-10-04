@@ -7,10 +7,10 @@ from .store import atomic_write
 
 
 class DeferredCache(BuildStageCache):
-    def __init__(self,root,proposals,*,limit=50*1024**3):
-        super().__init__(Path(proposals)/'work-cache')
-        self.hints=BuildStageCache(root)
-        self.proposals=BuildStageCache(Path(proposals)/'entries')
+    def __init__(self,root,proposals,*,limit=50*1024**3,reserve_bytes=None):
+        super().__init__(Path(proposals)/'work-cache',reserve_bytes=reserve_bytes)
+        self.hints=BuildStageCache(root,reserve_bytes=reserve_bytes)
+        self.proposals=BuildStageCache(Path(proposals)/'entries',reserve_bytes=reserve_bytes)
         self.records=[]
         self.limit=limit
         atomic_write(Path(proposals)/'settings.json',canonical({'schema_version':1,'retention':{'cache_gib':limit//1024**3}}))
@@ -55,8 +55,10 @@ def approve(root,stage,*,verify,inputs):
     lineage_expected=BuildPipeline._incremental_lineage(None,inputs)
     if set(record)!={'entries'} or not isinstance(record['entries'],list) or len(record['entries'])>1:
         raise ValueError('invalid bounded cache proposals')
-    cache=BuildStageCache(Path(root)/'intermediate-cache')
-    staged=BuildStageCache(proposals)
+    from .builder_setup import reserve_bytes
+    selected_reserve=reserve_bytes(root)
+    cache=BuildStageCache(Path(root)/'intermediate-cache',reserve_bytes=selected_reserve)
+    staged=BuildStageCache(proposals,reserve_bytes=selected_reserve)
     for entry in record['entries']:
         verify()
         lineage,phase,key=entry['lineage'],entry['stage'],entry['key']

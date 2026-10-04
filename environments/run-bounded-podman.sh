@@ -35,7 +35,7 @@ $payload && ! $expect_value || fail 'immutable image ID and complete options req
 script_parent=$(cd -- "$(dirname -- "$0")/.." && pwd)
 module_path=$script_parent
 [[ ! -d $script_parent/src/quirkbench ]] || module_path=$script_parent/src
-budget=$(PYTHONPATH="$module_path${PYTHONPATH:+:$PYTHONPATH}" "${PYTHON:-python3}" -m quirkbench.resource_budget "$workload") || fail 'resource budget unavailable'
+budget=$(PYTHONPATH="$module_path${PYTHONPATH:+:$PYTHONPATH}" "${PYTHON:-python3}" -B -m quirkbench.resource_budget "$workload") || fail 'resource budget unavailable'
 read -r cpus memory <<< "$budget"
 exec podman --remote=false --cgroup-manager=cgroupfs run \
   --cgroups=enabled --pid=private --restart=no --timeout=86400 \

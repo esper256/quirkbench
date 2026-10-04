@@ -60,9 +60,10 @@ def reject_private_inputs(kind,raw,excluded):
             raise ValueError('target sysroot overlaps private signing/control state')
 
 
-def capture(kind,raw,stage,verify,report,*,state_root=None,excluded_roots=()):
+def capture(kind,raw,stage,verify,report,*,state_root=None,excluded_roots=(),reserve_bytes=None):
     from .build_pipeline import BuildInputs, _tree_hash, _reject_credentials, _safe_build_path
     from .build import sha256_file
+    from functools import partial
     reject_private_inputs(kind,raw,excluded_roots)
     output=stage/'output'; output.mkdir(mode=0o700,exist_ok=True)
     files=output/'inputs'; files.mkdir(mode=0o700)
@@ -82,7 +83,7 @@ def capture(kind,raw,stage,verify,report,*,state_root=None,excluded_roots=()):
         if sha256_file(path)!=sha256(expected): raise ValueError('declared input changed: '+role)
         destination=files/str(number)
         from .build_cache import _copy_file
-        _copy_file(str(path),str(destination))
+        _copy_file(str(path),str(destination),reserve_bytes=reserve_bytes)
         if sha256_file(destination)!=sha256(expected) or sha256_file(path)!=expected:
             raise ValueError('declared input changed: '+role)
         retained[role]={'path':str(destination.relative_to(stage)),'sha256':expected}
@@ -94,7 +95,7 @@ def capture(kind,raw,stage,verify,report,*,state_root=None,excluded_roots=()):
         def ignore(directory,names):
             relative=Path(directory).relative_to(source).as_posix()
             return {name for name in names if f'{relative}/{name}' in EXCLUDED_CREDENTIAL_FILES}
-        copy=stage/'captured-sysroot'; shutil.copytree(source,copy,symlinks=True,ignore=ignore,copy_function=_copy_file)
+        copy=stage/'captured-sysroot'; shutil.copytree(source,copy,symlinks=True,ignore=ignore,copy_function=partial(_copy_file,reserve_bytes=reserve_bytes))
         if _tree_hash(copy)!=raw['target_tree_sha256'] or _tree_hash(source)!=raw['target_tree_sha256']:
             raise ValueError('target sysroot changed during capture')
         archive=files/'sysroot.tar'
@@ -110,7 +111,7 @@ def capture(kind,raw,stage,verify,report,*,state_root=None,excluded_roots=()):
     return {'schema_version':1,'kind':kind,'files':retained}
 
 
-def restore(kind,raw,prepared,root,stage):
+def restore(kind,raw,prepared,root,stage,*,reserve_bytes=None):
     from .build_pipeline import _extract_archive
     target=stage/'inputs'; target.mkdir(mode=0o700)
     result=json.loads(canonical(raw)); replacements={}
@@ -119,7 +120,7 @@ def restore(kind,raw,prepared,root,stage):
         replacements[role]=str(path)
     if kind=='build':
         sysroot=stage/'sysroot'
-        _extract_archive(Path(replacements.pop('target_sysroot')),sysroot,preserve_mode=True,rootfs_links=True)
+        _extract_archive(Path(replacements.pop('target_sysroot')),sysroot,preserve_mode=True,rootfs_links=True,reserve_bytes=reserve_bytes)
         result.update(replacements); result['target_sysroot']=str(sysroot)
     else:
         result['fedora_repo_file']=replacements['fedora_repo_file']
@@ -136,6 +137,8 @@ def restore(kind,raw,prepared,root,stage):
 def run_worker(root,operation,epoch,generation,stage,*,prepare_only=False):
     root,stage=Path(root),Path(stage)
     from .state_reader import StateReader
+    from .builder_setup import reserve_bytes as selected_reserve
+    reserve=selected_reserve(root)
     row=StateReader(root).operation_status(operation)['data']
     def verify(): return read_active_worker_claim(root,operation,epoch,generation,stage,expected_stage=row['stage'])
     claim=verify()
@@ -189,7 +192,7 @@ def run_worker(root,operation,epoch,generation,stage,*,prepare_only=False):
             if args.get('schema_version')==3:
                 from .investigation_pipeline import manifest
                 raw=manifest(root,args,claim.kind,stage=stage,verify=verify)
-            result=capture(claim.kind,raw,stage,verify,report,state_root=root,excluded_roots=args['excluded_roots'])
+            result=capture(claim.kind,raw,stage,verify,report,state_root=root,excluded_roots=args['excluded_roots'],reserve_bytes=reserve)
         else:
             _verify_retained_builder_archive(root,args['builder_archive_sha256'],args['builder_config_digest'])
             if not row['prepared_digest']: raise ValueError('retained inputs required before build')
@@ -198,7 +201,7 @@ def run_worker(root,operation,epoch,generation,stage,*,prepare_only=False):
             if args.get('schema_version')==3:
                 from .investigation_pipeline import manifest
                 raw=manifest(root,args,claim.kind,prepared=prepared)
-            raw=restore(claim.kind,raw,prepared,root,stage)
+            raw=restore(claim.kind,raw,prepared,root,stage,reserve_bytes=reserve)
             atomic_write(stage/'worker-manifest.json',canonical(raw))
             # Mount no private configuration, controller database or signing home.
             # The inner process has only captured inputs, private outputs and cache hints.
@@ -256,7 +259,7 @@ def inner(kind,stage,cache,*,reserve_bytes=20*1024**3):
         if kind=='build':
             store=ArtifactStore(output/'artifacts',reserve_bytes=reserve_bytes)
             pipeline=BuildPipeline(stage/'work',stage/'private-state',store,activity=report,reserve_bytes=reserve_bytes,
-                                   incremental_cache=DeferredCache(cache,stage/'cache-proposals',limit=document(stage,'cache-policy.json')['cache_gib']*1024**3))
+                                   incremental_cache=DeferredCache(cache,stage/'cache-proposals',reserve_bytes=reserve_bytes,limit=document(stage,'cache-policy.json')['cache_gib']*1024**3))
             from .worker_progress import ReportingRunner
             pipeline.runner=ReportingRunner(pipeline.runner,report)
             values=pipeline.build(BuildInputs.from_mapping(raw))
