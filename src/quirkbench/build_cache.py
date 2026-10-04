@@ -6,6 +6,7 @@ The lock protects one recipe lineage, including its mutable Kbuild workspace.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from functools import partial
 import errno
 import fcntl
 import hashlib
@@ -41,10 +42,12 @@ def _directory(path: Path) -> Path:
     return path
 
 
-def _copy_file(source: str, destination: str) -> str:
+def _copy_file(source: str, destination: str, *, reserve_bytes=None) -> str:
     """Prefer copy-on-write bytes; never hardlink mutable build files."""
-    if shutil.disk_usage(Path(destination).parent).free - os.stat(source).st_size < RESERVE:
-        raise BuildError("20 GiB build cache free-space reserve reached")
+    from .resource_budget import disk_reserve
+    reserve_bytes=disk_reserve(reserve_bytes,RESERVE)
+    if shutil.disk_usage(Path(destination).parent).free - os.stat(source).st_size < reserve_bytes:
+        raise BuildError("configured build cache free-space reserve reached")
     try:
         with open(source, "rb") as old, open(destination, "xb") as new:
             try:
@@ -108,7 +111,9 @@ def _sync_directory(root: Path) -> None:
 class BuildStageCache:
     """One latest complete snapshot per stage and reviewed recipe lineage."""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, *, reserve_bytes=None):
+        from .resource_budget import disk_reserve
+        self.reserve_bytes=disk_reserve(reserve_bytes,RESERVE)
         from .filesystem import canonical_user_path
         self.root = Path(root)
         if self.root.is_symlink():
@@ -262,7 +267,7 @@ class BuildStageCache:
                 raise BuildError("build cache destination must be new")
         for name, destination in destinations.items():
             shutil.copytree(entry / name, destination, symlinks=True,
-                            copy_function=_copy_file)
+                            copy_function=partial(_copy_file,reserve_bytes=self.reserve_bytes))
             if _tree_digest(destination) != record["trees"][name]:
                 raise BuildError("restored build cache tree differs")
         return record
@@ -297,8 +302,8 @@ class BuildStageCache:
         if final.exists():
             self._verify_entry(final, stage, key, identity, trees)
             return key
-        if shutil.disk_usage(slot).free < RESERVE:
-            raise BuildError("20 GiB build cache free-space reserve reached")
+        if shutil.disk_usage(slot).free < self.reserve_bytes:
+            raise BuildError("configured build cache free-space reserve reached")
         pending = Path(tempfile.mkdtemp(prefix=".pending-", dir=slot))
         try:
             hashes = {}
@@ -307,7 +312,7 @@ class BuildStageCache:
                 source = _directory(Path(source))
                 before = _tree_digest(source)
                 shutil.copytree(source, pending / name, symlinks=True,
-                                copy_function=_copy_file)
+                                copy_function=partial(_copy_file,reserve_bytes=self.reserve_bytes))
                 after = _tree_digest(source)
                 if before != after or _tree_digest(pending / name) != before:
                     raise BuildError("build cache source changed during snapshot")

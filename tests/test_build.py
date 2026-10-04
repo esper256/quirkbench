@@ -11,13 +11,13 @@ from quirkbench.build import (
 
 @pytest.mark.parametrize('memory_gib,quota,jobs', [(4, '400000 100000', 2),
                                                   (8, '400000 100000', 4),
-                                                  (4, '100000 100000', 1)])
+                                                  (4, '100000 100000', 1), (16, '800000 100000', 8)])
 def test_job_selection_uses_worker_capacity_and_cpu_quota(monkeypatch, tmp_path,
                                                         memory_gib, quota, jobs):
     import quirkbench.build as module
 
     readings = {
-        '/proc/meminfo': 'MemAvailable: 25165824 kB\n',
+        '/proc/meminfo': 'MemTotal: 33554432 kB\nMemAvailable: 25165824 kB\n',
         '/sys/fs/cgroup/memory.max': str(memory_gib * 1024**3),
         '/sys/fs/cgroup/memory.current': str(memory_gib * 1024**3 - 1024),
         '/sys/fs/cgroup/cpu.max': quota,
@@ -26,6 +26,8 @@ def test_job_selection_uses_worker_capacity_and_cpu_quota(monkeypatch, tmp_path,
     monkeypatch.setattr(Path, 'read_text', lambda path, *a, **kw:
                         readings[str(path)] if str(path) in readings else original(path, *a, **kw))
     monkeypatch.setattr(module.os, 'cpu_count', lambda: 16)
+    monkeypatch.setattr(module.os, 'sched_getaffinity', lambda _:set(range(16)))
+    monkeypatch.setattr('quirkbench.resource_budget.cgroup_directory',lambda root:root)
     assert module.recommended_jobs() == jobs
     build = KernelBuild(*(tmp_path / name for name in ('source', 'obj', 'root', 'out')))
     assert f'-j{jobs}' in build.compile_plan()[0].argv
@@ -42,8 +44,8 @@ def test_job_budget_rejects_insufficient_memory():
         kernel_job_budget(4, 1024**3)
 
 
-@pytest.mark.parametrize('available_gib,jobs', [(12, 4), (6, 2)])
-def test_bounded_worker_reserves_desktop_headroom_without_double_halving(monkeypatch,
+@pytest.mark.parametrize('available_gib,jobs', [(12, 4), (6, 4)])
+def test_bounded_worker_does_not_reserve_desktop_headroom_twice(monkeypatch,
                                                                      available_gib, jobs):
     import quirkbench.build as module
     readings = {
@@ -55,6 +57,8 @@ def test_bounded_worker_reserves_desktop_headroom_without_double_halving(monkeyp
     monkeypatch.setattr(Path, 'read_text', lambda path, *a, **kw:
                         readings[str(path)] if str(path) in readings else original(path, *a, **kw))
     monkeypatch.setattr(module.os, 'cpu_count', lambda: 16)
+    monkeypatch.setattr(module.os, 'sched_getaffinity', lambda _:set(range(16)))
+    monkeypatch.setattr('quirkbench.resource_budget.cgroup_directory',lambda root:root)
     assert module.recommended_jobs() == jobs
 
 

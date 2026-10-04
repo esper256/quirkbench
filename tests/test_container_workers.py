@@ -224,12 +224,13 @@ def test_serve_interrupt_stops_running_worker_before_owner_lock_release(worker,m
     assert (Path(claims[0]['stage_dir'])/'diagnostics/prepare.log').read_bytes()
 
 
-def test_managed_development_admission_leaves_half_the_host_memory(worker,monkeypatch):
-    c,_,engine=worker
-    original=Path.read_text
-    monkeypatch.setattr(Path,'read_text',lambda path,*a,**kw:
-        'MemTotal: 6291456 kB\n' if str(path)=='/proc/meminfo' else original(path,*a,**kw))
-    service=ContainerWorkerServices(engine='docker',worker_image=IMAGE,runner=engine,development=True)
-    with pytest.raises(WorkerServiceError,match='half-host'):
-        service.preflight(c.root,c.clock()+60)
-    assert not engine.calls
+def test_small_preparation_worker_keeps_enforced_limits(worker,monkeypatch):
+    from quirkbench.resource_budget import Capacity,GIB
+    c,service,engine=worker
+    monkeypatch.setattr('quirkbench.resource_budget.capacity',lambda:Capacity(2,2*GIB))
+    with c.lifecycle() as owner:
+        operation=c.admit_operation('request','source_capture',{})
+        claim=owner.dispatch(operation['id'],stage='source_capture',deadline=c.clock()+60,services=service)
+        create=next(args for args in engine.calls if args[0]=='create')
+        assert '--memory='+str(GIB) in create and '--cpus=1' in create
+        service.stop_and_verify(claim['worker_unit'],BOOT)

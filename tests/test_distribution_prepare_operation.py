@@ -196,7 +196,7 @@ def test_large_provenance_closure_is_retained_without_breaking_bounded_output_qu
                 for n in range(260):
                     (command.cwd/'rpm-topdir/SOURCES'/f'input-{n:04}.patch').write_text('input-'+str(n))
     def execute(argv,log,**kwargs):
-        inner(Path(argv[-1]),runner=PackageInputs(),limits=LIMITS)
+        inner(Path(argv[argv.index("--stage-dir")+1]),runner=PackageInputs(),limits=LIMITS)
         return {'exit_code':0}
     monkeypatch.setattr(recovery_worker,'execute_rootfs',execute)
     with c.lifecycle() as owner:
