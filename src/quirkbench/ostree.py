@@ -59,15 +59,24 @@ def run(argv):
 
 class CommandRunner:
     """Bounded output and live activity for slow pulls and deployment commands."""
-    def __init__(self, progress, guard, timeout_s=1800, diagnostic=None):
+    def __init__(self, progress, guard, timeout_s=1800, diagnostic=None, *,
+                 operation='OSTree command', phase='deployment-command',
+                 failure_guidance='deployment remains unarmed'):
         self.progress, self.guard, self.timeout_s = progress, guard, timeout_s
         self.diagnostic = diagnostic or (lambda raw: None)
+        self.operation, self.phase = operation, phase
+        self.failure_guidance = failure_guidance
 
     def __call__(self, argv):
         start = time.monotonic()
         from .retention import launch
-        process = launch(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   start_new_session=True)
+        try:
+            process = launch(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             start_new_session=True)
+        except OSError as exc:
+            log = self.diagnostic(str(exc).encode())
+            raise OSError(f'{self.operation} could not start (errno={exc.errno}); '
+                          f'{self.failure_guidance}; diagnostic={log}') from exc
         selector = selectors.DefaultSelector()
         selector.register(process.stdout, selectors.EVENT_READ, 'stdout')
         selector.register(process.stderr, selectors.EVENT_READ, 'stderr')
@@ -79,7 +88,7 @@ class CommandRunner:
         try:
             while selector.get_map():
                 if time.monotonic() - start > self.timeout_s:
-                    raise TimeoutError('OSTree command deadline exceeded')
+                    raise TimeoutError(f'{self.operation} deadline exceeded')
                 self.guard()
                 for key, _ in selector.select(timeout=1):
                     block = os.read(key.fileobj.fileno(), 65536)
@@ -93,12 +102,14 @@ class CommandRunner:
                         del errors[:-65536]
                     if key.data == 'stdout':
                         if len(captured) + len(block) > 16 * 1024**2:
-                            raise ContractError('OSTree command response exceeds bounded output size')
+                            log = self.diagnostic(bytes(errors))
+                            raise ContractError(f'{self.operation} response exceeds bounded output size; '
+                                                f'{self.failure_guidance}; diagnostic={log}')
                         captured.extend(block)
                 if time.monotonic() - last_report >= 5:
                     now = time.monotonic()
-                    self.progress('deployment-command',
-                                  f'OSTree command output: {count} bytes; '
+                    self.progress(self.phase,
+                                  f'{self.operation} output: {count} bytes; '
                                   f'last output {now - last_output:.0f}s ago; '
                                   f'elapsed {now - start:.0f}s; deadline in '
                                   f'{max(0, self.timeout_s - (now - start)):.0f}s; waiting for completion')
@@ -106,8 +117,13 @@ class CommandRunner:
             code = process.wait(timeout=max(1, self.timeout_s - (time.monotonic() - start)))
             if code:
                 log = self.diagnostic(bytes(errors))
-                raise ContractError(f'OSTree command failed with exit status {code}; deployment remains unarmed; diagnostic={log}')
+                raise ContractError(f'{self.operation} failed with exit status {code}; '
+                                    f'{self.failure_guidance}; diagnostic={log}')
             return captured.decode('utf-8')
+        except (TimeoutError, subprocess.TimeoutExpired) as exc:
+            log = self.diagnostic(bytes(errors))
+            raise TimeoutError(f'{self.operation} deadline exceeded; '
+                               f'{self.failure_guidance}; diagnostic={log}') from exc
         finally:
             if process.poll() is None:
                 os.killpg(process.pid, signal.SIGKILL)

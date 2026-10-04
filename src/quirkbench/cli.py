@@ -1221,6 +1221,7 @@ def _main(argv=None):
                     answer={'argv':acquisition_wrapper(controller.root,owner),
                             'dnf_argv':acquisition_command(directory/'rpms',spec=spec),'spec_sha256':spec_digest,'selection':'explicit' if args.spec else 'historical-candidate-compatibility','directory':str(directory/'rpms'),'executed':False,'retention_owner':owner}
                 elif args.action=='lock':
+                    from .build import BuildError
                     from .retention import verified_acquisition,work,published
                     verified_acquisition(controller.root,args.directory.resolve())
                     from .recovery_acquisition import load_spec,MAX_SPEC
@@ -1234,12 +1235,23 @@ def _main(argv=None):
                         from .ostree import CommandRunner
                         from .store import atomic_write
                         def failure_log(raw):
-                            atomic_write(args.diagnostics.resolve()/'package-verification.log',raw)
-                            return 'retained private package-verification.log'
+                            path=args.diagnostics.resolve()/'package-verification.log'
+                            atomic_write(path,raw)
+                            return str(path)
+                        def checked(argv,timeout_s,phase):
+                            try:
+                                return CommandRunner(lambda *args:None,lambda:None,timeout_s=timeout_s,
+                                    diagnostic=failure_log,operation=phase,phase='recovery-verification',
+                                    failure_guidance='no verified lock published; inspect the log and retry with fresh diagnostics')(argv)
+                            except OSError as exc:
+                                raise BuildError(str(exc)) from exc
                         def query(argv):
-                            return CommandRunner(lambda *args:None,lambda:None,timeout_s=60,diagnostic=failure_log)(argv)
+                            return checked(argv,60,'Recovery RPM header query')
                         def verify(argv,timeout_s):
-                            return CommandRunner(lambda *args:None,lambda:None,timeout_s=timeout_s,diagnostic=failure_log)(argv)
+                            phase=('Recovery signing-key fingerprint inspection' if argv[0]=='gpg' else
+                                   'Recovery private RPM database key import' if '--import' in argv else
+                                   'Recovery RPM signature verification')
+                            return checked(argv,timeout_s,phase)
                         lock=retain_packages(args.directory.resolve(),args.public_key.resolve(),controller.store,
                             args.diagnostics.resolve()/'diagnostics',builder_image_digest=args.builder_image_digest,
                             query=query,signature_runner=verify,spec=spec)
