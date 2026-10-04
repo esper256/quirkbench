@@ -43,9 +43,11 @@ def test_serve_exposes_authenticated_server_without_compute_preflight(worker,mon
     assert observed==['serving']
 
 
-def test_gate_retries_exact_reconciliation_without_advancing_work():
+def test_gate_retries_exact_reconciliation_without_advancing_work(worker):
     now=[0]; calls=[]
+    c, _, _ = worker
     class Owner:
+        controller = c
         def reconcile_units(self, services):
             calls.append('reconcile')
             if len(calls)==1: raise WorkerServiceError('engine unavailable')
@@ -58,8 +60,8 @@ def test_gate_retries_exact_reconciliation_without_advancing_work():
     assert calls==['reconcile','reconcile','tick']
 
 
-def test_gate_keeps_authenticated_owner_after_active_engine_outage():
-    owner=SimpleNamespace(reconcile_units=lambda _:None)
+def test_gate_keeps_authenticated_owner_after_active_engine_outage(worker):
+    owner=SimpleNamespace(controller=worker[0], reconcile_units=lambda _:None)
     def tick():raise WorkerServiceError('cannot inspect active exact worker')
     gate=ComputeGate(owner,[SimpleNamespace(services=object(),tick=tick)])
     assert gate.tick()==[] and gate.reconciled
@@ -87,7 +89,8 @@ def test_image_unavailable_blocks_claim_until_exact_image_restored(worker,failur
         assert c.operation_status(operation['id'])['data']['worker_unit'] is None
 
 
-def test_first_signed_builder_bootstraps_without_prior_image(worker,monkeypatch,tmp_path):
+@pytest.mark.parametrize('older_job', [False, True])
+def test_first_signed_builder_bootstraps_without_prior_image(worker,monkeypatch,tmp_path,older_job):
     c,services,engine=worker
     loaded=[False]
     native=engine.__call__
@@ -97,7 +100,8 @@ def test_first_signed_builder_bootstraps_without_prior_image(worker,monkeypatch,
             loaded[0]=True
             return 'loaded'
         if argv[1:3]==['image','inspect']:
-            assert loaded[0], 'bootstrap must not inspect a missing image before import'
+            if not loaded[0]:
+                raise OSError('worker image unavailable')
             return json.dumps([{'Id':IMAGE,'Os':'linux','Config':{'Entrypoint':None}}])
         result=native(argv,timeout)
         if argv[1]=='create':engine.containers[result]['Image']=IMAGE
@@ -105,6 +109,10 @@ def test_first_signed_builder_bootstraps_without_prior_image(worker,monkeypatch,
     services.runner=invoke; services.worker_image=None
     archive=tmp_path/'builder.tar';archive.write_bytes(builder_archive())
     with c.lifecycle() as owner:
+        if older_job:
+            ordinary=c.admit_operation('older-download','recovery_download',
+                {'schema_version':1,'version':'1','controller_archive_sha256':'1'*64,'trust_bundle_sha256':'2'*64},
+                local_paths={'runtime':str(tmp_path/'runtime'),'trust_bundle':str(tmp_path/'trust'),'config_home':str(tmp_path/'config')})
         row=intent(c,archive)
         jobs=JobCoordinator(owner,services)
         first=jobs.tick()
@@ -122,6 +130,56 @@ def test_first_signed_builder_bootstraps_without_prior_image(worker,monkeypatch,
         for container in engine.containers.values():container['State'].update(Running=False,Pid=0)
         assert jobs.tick()['state']=='SUCCEEDED'
         assert not engine.containers
+        if older_job:
+            assert c.operation_status(ordinary['id'])['data']['state']=='QUEUED'
+
+
+def test_gate_reconciles_ambiguous_launch_after_engine_restoration(worker):
+    c,services,engine=worker; now=[0]
+    with c.lifecycle() as owner:
+        operation=c.admit_operation('ambiguous','image_prepare',{})
+        attempted=[False]
+        def tick():
+            if attempted[0]:return None
+            attempted[0]=True
+            return owner.dispatch(operation['id'],stage='recovery_rootfs',deadline=c.clock()+60,services=services)
+        gate=ComputeGate(owner,[SimpleNamespace(services=services,tick=tick)],monotonic=lambda:now[0])
+        engine.fail_start=True;engine.fail_stop=True
+        assert gate.tick()==[]
+        saved=c.operation_status(operation['id'])['data']
+        assert saved['state']=='INTERRUPTED' and saved['worker_unit']
+        now[0]=30
+        assert gate.tick()==[]
+        assert c.operation_status(operation['id'])['data']['worker_unit']
+        engine.fail_start=False;engine.fail_stop=False;now[0]=60
+        assert gate.tick()==[]
+        saved=c.operation_status(operation['id'])['data']
+        assert saved['state']=='INTERRUPTED' and saved['worker_unit'] is None
+        assert not engine.containers
+
+
+def test_gate_allows_bootstrap_after_earlier_coordinator_image_failure(worker,tmp_path):
+    c,services,_=worker
+    def unavailable():raise WorkerServiceError('recovery image unavailable')
+    archive=tmp_path/'builder.tar';archive.write_bytes(builder_archive())
+    with c.lifecycle() as owner:
+        row=intent(c,archive)
+        jobs=JobCoordinator(owner,services)
+        gate=ComputeGate(owner,[SimpleNamespace(services=services,tick=unavailable),jobs])
+        result=gate.tick()
+        assert result[0]['id']==row['id'] and result[0]['stage']=='builder_capture'
+
+
+def test_readiness_keeps_clear_reconciliation_when_image_unavailable(worker,monkeypatch):
+    from quirkbench.controller_compute import readiness
+    c,services,_=worker
+    def unavailable(*_):raise WorkerServiceError('exact image missing')
+    services.preflight=unavailable
+    monkeypatch.setattr('quirkbench.worker_service.ContainerWorkerServices',lambda **_:services)
+    with c.lifecycle():
+        result=readiness(c.root)
+    assert result['compute_ready'] is False and result['worker_reconciliation']=='clear'
+    assert 'exact image missing' in result['compute_instructions'][0]
 
 
 def test_interrupted_bootstrap_import_cannot_invent_subprocess_stop(worker,tmp_path):

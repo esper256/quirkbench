@@ -91,6 +91,8 @@ class ContainerWorkerServices:
             from .builder_setup import retained_builder
             try:
                 config = configuration(self.root)
+                if not config.get('runtime'):
+                    raise ValueError('no installed controller runtime is configured')
                 selected = retained_builder(self.root, inspect_selected(Path(config['runtime']).parent.parent))
             except (OSError, ValueError) as exc:
                 raise WorkerServiceError('prepare the signed first builder with setup --builder-archive; no verified worker image is selected') from exc
