@@ -39,8 +39,8 @@ remain enabled. Without the secret, DNF uses Fedora's default trust. Docker with
 BuildKit accepts the same `--secret` option when preparing this builder image
 (omit Podman's `--pull=never`). Registry pulls use the container engine's own trust
 configuration, so configure that separately if pulling the base fails. Building
-the tool image does not change the supported systemd/rootless-Podman ownership of
-controller workloads.
+the tool image does not select a workload supervisor; use the foreground image
+command or an explicitly configured controller backend for execution.
 
 This locally built image is a builder candidate until its installed package and
 toolchain locks are captured and reviewed. `assemble.ini` describes a rootless
