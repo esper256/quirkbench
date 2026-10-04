@@ -57,7 +57,8 @@ For ad hoc kernel builds, `start-bounded-podman-build.sh` runs one recorded
 rootless Podman container in the foreground. Defaults use up to four CPUs and 8 GiB RAM, reserving half an unconstrained
 host for interactive use. Already constrained cgroups are not halved again.
 Kernel builds require at least 4 GiB. Zero additional swap, 4,096 processes and
-a 24-hour timeout remain enforced. See resource overrides below. It uses cgroupfs directly and requires no user service manager.
+a 24-hour timeout remain enforced. See resource overrides below. It uses Podman's
+configured supported cgroup manager; Quirkbench requires no controller user service.
 
 Use a fresh run identity, canonical owned stage and exact locked image:
 
@@ -141,8 +142,10 @@ linker memory consumption; cgroups enforce the actual bounds. Controller resourc
 reserves still apply, and explicit `jobs=1` stays serial. Do not edit a running run's inputs.
 
 The starter creates one foreground rootless Podman container with CPU, memory,
-swap, task and elapsed-time bounds, using the cgroupfs manager. It verifies the
-engine's recorded limits before starting. `podman stats` reports that container's
+swap, task and elapsed-time bounds, recording Podman's selected manager. It verifies
+requested engine settings and actual kernel controls before releasing the payload.
+Its trusted PID1 wrapper retains the deadline and stop proof checks descendant
+population in the recorded cgroup. `podman stats` reports that container's
 resource use. The container is the aggregate limit and shutdown boundary, including
 detached descendants. Each build has a unique stage, log and exit-status record;
 do not reuse a running build's stage or identity. Recovery workers retain their

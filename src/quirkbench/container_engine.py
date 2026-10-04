@@ -9,9 +9,11 @@ import re
 from .build import BuildError
 
 
-def engine_command(name):
+def engine_command(name, manager=None):
     if name == 'podman':
-        return ['podman', '--remote=false', '--cgroup-manager=cgroupfs']
+        if manager not in (None, 'systemd', 'cgroupfs'):
+            raise BuildError('select the supported systemd or cgroupfs Podman manager')
+        return ['podman', '--remote=false', *([] if manager is None else ['--cgroup-manager='+manager])]
     if name == 'docker':
         return ['docker']
     raise BuildError('select a local docker or podman engine')
@@ -39,12 +41,30 @@ def bounded_run(argv, *, timeout=30):
 
 
 class ContainerEngine:
-    def __init__(self, engine, *, runner=bounded_run, error=BuildError):
+    def __init__(self, engine, *, runner=bounded_run, error=BuildError, manager=None):
         self.engine, self.runner, self.error = engine, runner, error
+        self.manager = manager
+
+    def select_manager(self, override=None):
+        if self.engine != 'podman':
+            if override is not None:raise self.error('Podman manager override requires Podman')
+            return None
+        if override not in (None, 'systemd', 'cgroupfs'):
+            raise self.error('select systemd or cgroupfs as the Podman manager')
+        # Query the selected configuration; do not silently fall back on failure.
+        probe=ContainerEngine('podman',runner=self.runner,error=self.error,manager=override)
+        try:
+            host=json.loads(probe.invoke('info','--format','json'))['host']
+            manager=host['cgroupManager']
+            if manager not in ('systemd','cgroupfs') or host['cgroupVersion']!='v2' or (override and manager!=override):
+                raise ValueError('unsupported or changed cgroup configuration')
+        except (ValueError,KeyError,TypeError) as exc:
+            raise self.error('Podman requires a supported manager and cgroup v2; check rootless delegation') from exc
+        return manager
 
     def command(self, *args):
         try:
-            return [*engine_command(self.engine), *args]
+            return [*engine_command(self.engine, self.manager), *args]
         except BuildError as exc:
             raise self.error(str(exc)) from exc
 
@@ -118,12 +138,12 @@ class ContainerEngine:
                 '--log-driver='+('json-file' if self.engine == 'docker' else 'k8s-file'),
                 '--log-opt=max-size=8m']
 
-    def stream(self, action, identity, log, *, deadline, max_duration, execute=None):
+    def stream(self, action, identity, log, *, deadline, max_duration, execute=None, follow=False):
         if action not in ('start', 'logs'):
             raise self.error('unsupported container stream action')
         if execute is None:
             from .recovery_worker import execute_rootfs
             execute = execute_rootfs
-        args = ('start', '--attach', identity) if action == 'start' else ('logs', identity)
+        args = ('start', '--attach', identity) if action == 'start' else ('logs', *(['--follow'] if follow else []), identity)
         return execute(self.command(*args), log, verify=lambda: None,
                        deadline=deadline, max_duration=max_duration)

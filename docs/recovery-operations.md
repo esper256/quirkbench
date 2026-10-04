@@ -473,6 +473,13 @@ building. `--free-space-reserve-gib` defaults to 2 for foreground builds; dracut
 staging checks that reserve continuously, and assembly additionally requires twice
 the image's size for image/temporary files. This is independent of the controller's
 state-storage reserve. Existing managed build callers retain their existing default.
+
+Podman preserves its configured `systemd` or `cgroupfs` manager; a deliberate
+`--podman-cgroup-manager` override is available. The retained build record pins
+that manager for cleanup. Before payload release, the owner verifies the actual
+container cgroup's CPU, memory, zero-swap and PID limits. Cleanup requires both
+exact engine shutdown and an empty recorded cgroup, including descendants.
+Unsupported delegation fails with retained diagnostics rather than relaxed limits.
 The output directory must be new; checkout-local paths and ordinary ancestor aliases are allowed. The command copies only the
 recipe's selected inputs, mounts those copies read-only, runs an offline bounded
 container, verifies it has stopped, and exports `recovery.img`, its manifest,

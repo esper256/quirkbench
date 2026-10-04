@@ -17,6 +17,11 @@
       "src/quirkbench/container_worker.py",
       "tests/test_container_workers.py",
       "src/quirkbench/container_engine.py",
+      "src/quirkbench/container_*.py",
+      "src/quirkbench/controller_compute.py",
+      "schemas/worker-execution.*.schema.json",
+      "tests/test_controller_compute.py",
+      "tests/test_podman_manager.py",
       "tests/test_container_engine.py"
     ],
     "tests": [
@@ -30,6 +35,8 @@
       "tests/test_container_workers.py",
       "tests/test_worker_service.py",
       "tests/test_scoped_attempt_fences.py",
+      "tests/test_controller_compute.py",
+      "tests/test_podman_manager.py",
       "tests/test_container_engine.py"
     ]
   },

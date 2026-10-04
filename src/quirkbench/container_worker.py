@@ -33,6 +33,10 @@ def verify_execution(root, unit, record_path, cgroup_reader=lambda:Path('/proc/s
     groups=[line[3:] for line in cgroup_reader().splitlines() if line.startswith('0::')]
     if len(groups)!=1 or not re.search(r'(?:^|[-/])'+identity+r'(?:\.scope)?(?:/|$)',groups[0]):
         raise Conflict('worker is outside its recorded container cgroup')
+    if record['schema_version']==4:
+        from .container_containment import limits
+        bounds=execution['bounds']
+        limits(Path('/sys/fs/cgroup'),groups[0],bounds['cpus'],bounds['memory'],bounds['pids'])
     return record
 
 
@@ -74,6 +78,13 @@ def main(argv=None):
     record=execution_record()
     verify_execution(root,record['unit'],os.environ['QUIRKBENCH_WORKER_RECORD'])
     signal.alarm(min(timeout,remaining_seconds(record)))
+    if record['schema_version']==4:
+        release=Path(os.environ['QUIRKBENCH_WORKER_RECORD']).parent/'release'
+        while not release.exists():
+            remaining_seconds(record)
+            time.sleep(.05)
+        if json.loads(read_file(release.parent,release.name,limit=256))!={'id':record['executions'][-1]['id']}:
+            raise Conflict('container payload release differs from recorded identity')
     claim=record['claim']
     if stage!=Path(claim['stage_dir']) or phase!=record['phase']:
         raise Conflict('fixed container stage differs from its execution record')
