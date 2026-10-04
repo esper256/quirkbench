@@ -473,7 +473,7 @@ building. `--free-space-reserve-gib` defaults to 2 for foreground builds; dracut
 staging checks that reserve continuously, and assembly additionally requires twice
 the image's size for image/temporary files. This is independent of the controller's
 state-storage reserve. Existing managed build callers retain their existing default.
-The output directory must be new and outside Git. The command copies only the
+The output directory must be new; checkout-local paths and ordinary ancestor aliases are allowed. The command copies only the
 recipe's selected inputs, mounts those copies read-only, runs an offline bounded
 container, verifies it has stopped, and exports `recovery.img`, its manifest,
 checksum and unsigned candidate record. The image checksum is checked after export.
@@ -491,3 +491,12 @@ quirkbench recovery-image-cleanup /absolute/new-image-build
 A generated image is unqualified and untested on hardware. Foreground generation
 neither signs/publishes a release nor authorizes flashing, commissioning or an
 experiment. Existing managed operations and their stored records remain compatible.
+
+
+Explicit build/output paths may be inside a checkout. Ordinary ancestor aliases
+are resolved once when selected; existing outputs and protected system destinations
+remain rejected. This does not make the output directory disposable. Foreground
+cleanup stops only its recorded container. The low-level `image` command assembles
+in managed staging and exports the image plus `.sha256` and `.json` sidecars without
+overwriting files. Its selected output parent must already exist. An interrupted
+export may leave completed files for inspection; select a new destination to retry.

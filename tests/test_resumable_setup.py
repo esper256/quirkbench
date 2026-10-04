@@ -176,7 +176,7 @@ def test_completed_steps_do_not_regenerate_missing_state(tmp_path, removed):
     assert not path.exists()
 
 
-def test_journal_symlink_and_checkout_state_refused(tmp_path):
+def test_journal_symlink_refused_and_explicit_checkout_state_accepted(tmp_path):
     config = tmp_path / 'config/quirkbench'
     config.mkdir(parents=True, mode=0o700)
     (config / 'setup-progress.json').symlink_to(tmp_path / 'elsewhere')
@@ -186,9 +186,9 @@ def test_journal_symlink_and_checkout_state_refused(tmp_path):
     tree = tmp_path / 'checkout'
     tree.mkdir(); (tree / '.git').mkdir()
     (tree / '.git/HEAD').write_text('ref: refs/heads/main\n')
-    with pytest.raises(ContractError, match='outside a Git checkout'):
-        setup_controller(tree / 'state', config_home=tmp_path / 'config', **observations())
-    assert not (tree / 'state').exists()
+    setup_controller(tree / 'state', config_home=tmp_path / 'config', **observations())
+    assert (tree / 'state/controller.sqlite').is_file()
+    assert (tree / '.git/HEAD').read_text() == 'ref: refs/heads/main\n'
 
 
 def test_cli_contract_errors_and_readonly_status(tmp_path, monkeypatch, capsys):

@@ -11,8 +11,9 @@ quirkbench investigation export input-device-investigation --output /absolute/pu
 quirkbench investigation export input-device-investigation --capture CAPTURE_OPERATION --comparison comparison.json --output /absolute/public/earlier-investigation.tar --author 'Actual Author <actual@example.org>' --timeout 300 --json
 ```
 
-The output parent must exist, be canonical, outside Git checkouts and outside private
-controller state. Existing output is never overwritten. The default capture is the
+The output parent must exist and be outside private controller state. Ancestor
+aliases are resolved at admission; checkout-local exports are allowed. Existing
+output is never overwritten. The default capture is the
 investigation's latest completed handed-off capture; `--capture` selects a completed,
 stopped capture from that same investigation/workspace. The source writer must remain
 quiesced to read the recorded Git base. Live edits are never substituted for captured

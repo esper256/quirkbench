@@ -16,7 +16,7 @@ from .enrollment import LIMIT,_document
 from .enrollment_target import _storage
 from .maintenance import private_lock
 from .state_reader import read_file
-from .state_config import outside_checkout
+from .state_config import canonical_user_path
 from .store import atomic_write,sync_directory
 from .target import read_sealed_evidence
 from .target_shutdown import validate_intent,validate_preparation
@@ -126,7 +126,7 @@ def pending(control):
     control=Path(control).expanduser().absolute()
     if control.resolve()!=control or control==Path('/'):
         raise ContractError('shutdown needs a canonical control directory')
-    control=outside_checkout(control);pointer=control/'shutdown/active.json'
+    control=canonical_user_path(control);pointer=control/'shutdown/active.json'
     if not pointer.exists() and not pointer.is_symlink():return None
     # The complete continuation is itself the atomic authoritative writer fence.
     # Optional history publication can fail without releasing restart admission.

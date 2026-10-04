@@ -14,7 +14,7 @@ from typing import Callable, Mapping
 
 from .contracts import Conflict, ContractError, canonical, digest, identifier
 from .setup_contracts import MAX_SETUP_BYTES, STEPS, load_progress, validate_intent, validate_progress
-from .state_config import _ancestors, _config_home, configure_state_root, discover_state_root, default_state_root, outside_checkout
+from .state_config import _ancestors, _config_home, configure_state_root, discover_state_root, default_state_root, canonical_user_path
 from .state_reader import StateReader, read_file
 from .store import atomic_write, sync_directory
 
@@ -73,7 +73,7 @@ def _managed_path(path):
     path = Path(path).expanduser().absolute()
     if any(part.is_symlink() for part in _ancestors(path)):
         raise ContractError('setup paths cannot contain symlinks')
-    path = outside_checkout(path)
+    path = canonical_user_path(path)
     if path == Path('/'):
         raise ContractError('setup path cannot be filesystem root')
     if path.exists():
@@ -382,7 +382,7 @@ def setup_controller(root=None, *, request_id=None, runtime_root=None, cache_gib
             installed = Path(__file__).resolve().parents[2]
             if (installed / 'installation.json').exists() and (installed / 'controller-manifest.json').exists():
                 runtime = installed
-        runtime_record = verify_installation(outside_checkout(Path(runtime))) if runtime is not None else None
+        runtime_record = verify_installation(canonical_user_path(Path(runtime))) if runtime is not None else None
         values = {'cache_gib': cache_gib, 'reserve_gib': reserve_gib, 'host': host,
                   'port': port, 'allow_lan': allow_lan, 'logout_policy': logout_policy}
         defaults = {'cache_gib': 50, 'reserve_gib': 20.0, 'host': '127.0.0.1',

@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 from .contracts import Conflict,ContractError
-from .state_config import discover_state_root,outside_checkout
+from .state_config import discover_state_root
 from .state_reader import StateReader,read_file
 from .store import StoragePressure
 
@@ -29,7 +29,7 @@ def run(args):
     checking_ready=False;checking_wait=False;answer=None
     try:
         from .controller_service import require_ready
-        root=discover_state_root(args.state).expanduser().absolute(); outside_checkout(root)
+        root=discover_state_root(args.state).expanduser().absolute()
         checking_ready=True;require_ready(root);checking_ready=False
         from .maintenance import private_lock
         from .controller import Controller

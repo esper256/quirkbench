@@ -21,7 +21,7 @@ KIND=STAGE='source_prepare'
 @contextmanager
 def private_workspace(path):
     # A product source workspace is intentionally a Git root; its containing
-    # state/staging directory must remain outside any checkout.
+    # state/staging directory must remain separate from the source being captured.
     from .controller_setup import _managed_path
     _managed_path(path.parent)
     info=path.lstat()

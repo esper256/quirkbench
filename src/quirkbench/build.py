@@ -14,11 +14,9 @@ import fcntl
 import hashlib
 import json
 import os
-import pwd
 from pathlib import Path
 import re
 import shutil
-import stat
 import subprocess
 from typing import Iterable
 
@@ -110,74 +108,27 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-_BUILD_STORAGE_ROOTS = (Path('/var/tmp'), Path('/mnt'), Path('/media'))
-
-
-def _private_build_storage(path: Path, root: Path) -> None:
-    """Admit dedicated private scratch on an explicitly supplied build volume.
-
-    This is admission, not a replacement for the worker's owned staging, mount
-    and publication checks. Never create/chmod directories or mount storage here.
-    """
-    from .maintenance import nested_mounts
-
-    try:
-        mounts = {Path(value) for value in nested_mounts(root)}
-        # A rootless development namespace may expose host root as an unmapped
-        # uid. That mapping is ambiguous for arbitrary host users, so accept it
-        # only on the fixed infrastructure prefix, never below the storage root.
-        infrastructure_owner = Path('/').stat().st_uid
-        private = None
-        for directory in (*reversed(path.parents), path):
-            try:
-                info = directory.lstat()
-            except FileNotFoundError:
-                break  # New descendants are allowed only below an existing anchor.
-            owners = {0, os.geteuid()}
-            if directory == root or directory in root.parents:
-                owners.add(infrastructure_owner)
-            if not stat.S_ISDIR(info.st_mode) or info.st_uid not in owners:
-                raise BuildError(f'build storage ancestor must be an owned directory: {directory}')
-            if private is not None and info.st_uid != os.geteuid():
-                raise BuildError(f'private build storage must remain user-owned: {directory}')
-            if (private is None and root in directory.parents and directory not in mounts
-                    and info.st_uid == os.geteuid()):
-                private = directory
-        if private is None:
-            raise BuildError(f'build storage needs an existing user-owned subdirectory below {root}: {path}')
-        if any(mount.is_relative_to(private) for mount in mounts):
-            raise BuildError(f'private build storage must not contain mount points: {private}')
-    except (OSError, ValueError, IndexError) as exc:
-        raise BuildError(f'cannot inspect build storage: {path}') from exc
-
-
 def _safe_build_path(path: Path) -> None:
-    if not path.is_absolute() or path.is_symlink():
-        raise BuildError(f"build path must be absolute and not a symlink: {path}")
-    # Inspect lexical paths too: resolving first could hide a symlink escaping
-    # a newly admitted volume into a normally allowed location.
-    if '..' in path.parts:
-        raise BuildError(f'build path must not contain parent traversal: {path}')
-    storage_root = next((root for root in _BUILD_STORAGE_ROOTS if root in path.parents), None)
-    if storage_root is not None:
-        _private_build_storage(path, storage_root)
+    """Reject system destinations; location alone never grants cleanup authority."""
+    path = Path(path)
+    if not path.is_absolute() or path.is_symlink() or '..' in path.parts:
+        raise BuildError(f"build path must be absolute without a leaf link or parent traversal: {path}")
     resolved = path.resolve()
-    if storage_root is not None and resolved != path:
-        raise BuildError(f'build storage changed or contains a symlink: {path}')
-    forbidden = (Path("/"), Path("/dev"), Path("/proc"), Path("/sys"),
-                 Path("/run"), Path("/usr"), Path("/etc"), Path("/boot"),
-                 Path("/lib"), Path("/lib64"), Path("/var"), Path("/mnt"),
-                 Path("/media"))
-    # Linux homes can live under /var (including canonical /var/home). Treat the
-    # current account's actual home like /home, without allowing arbitrary /var.
-    account_home = Path(pwd.getpwuid(os.geteuid()).pw_dir).resolve()
-    private_home_path = account_home != Path('/') and account_home in resolved.parents
-    if storage_root is not None:
-        return
-    if any(resolved == root or (root != Path('/') and root in resolved.parents
-                               and not (root == Path('/var') and private_home_path))
-           for root in forbidden):
-        raise BuildError(f"refusing system or mounted build path: {path}")
+    forbidden = (Path('/dev'), Path('/proc'), Path('/sys'), Path('/run'),
+                 Path('/usr'), Path('/etc'), Path('/boot'), Path('/lib'), Path('/lib64'),
+                 Path('/var/lib'), Path('/var/log'), Path('/var/cache'))
+    if resolved in (Path('/'), Path('/var'), Path('/mnt'), Path('/media')) or any(
+            resolved == root or root in resolved.parents for root in forbidden):
+        raise BuildError(f"refusing system build path: {path}")
+
+
+def user_build_path(path: Path) -> Path:
+    """Normalize an ordinary user destination once, before owned work begins."""
+    path = Path(path).expanduser().absolute()
+    _safe_build_path(path)
+    resolved = path.resolve()
+    _safe_build_path(resolved)
+    return resolved
 
 
 def kernel_job_budget(cpus: int, memory_bytes: int) -> int:
@@ -266,8 +217,8 @@ class KernelBuild:
             raise ValueError("all build paths must be absolute")
         if len({str(path.resolve()) for path in paths}) != len(paths):
             raise ValueError("build paths must be distinct")
-        for path in paths:
-            _safe_build_path(path)
+        for name in ("source", "build_dir", "sysroot", "output_dir"):
+            object.__setattr__(self, name, user_build_path(getattr(self, name)))
 
     @property
     def effective_jobs(self) -> int:

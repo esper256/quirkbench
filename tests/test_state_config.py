@@ -1,93 +1,30 @@
+"""Explicit paths are independent of Git metadata; record reads stay confined."""
 import os
 from pathlib import Path
-import subprocess
-
 import pytest
-
-from quirkbench.state_config import outside_checkout, StateConfigurationError
 from quirkbench.contracts import ContractError
+from quirkbench.state_config import canonical_user_path,default_state_root
 
 
-def test_empty_sandbox_git_guard_allows_state_without_creating_it(tmp_path):
-    (tmp_path / '.git').mkdir()
-    state = tmp_path / 'state'
-    assert outside_checkout(state) == state
-    assert not state.exists()
+def test_explicit_checkout_path_is_accepted_without_touching_git_metadata(tmp_path):
+    marker=tmp_path/'.git';marker.write_text('gitdir: /unavailable/worktree')
+    path=tmp_path/'build/state'
+    assert canonical_user_path(path)==path
+    assert marker.read_text()=='gitdir: /unavailable/worktree'
+    assert not path.exists()
 
 
-def test_existing_file_paths_still_check_their_ancestor_checkout(tmp_path):
-    file = tmp_path / 'service'; file.write_text('fixture')
-    assert outside_checkout(file) == file
-    (tmp_path / '.git').write_text('gitdir: elsewhere')
-    with pytest.raises(StateConfigurationError, match='outside a Git checkout'):
-        outside_checkout(file)
+def test_default_state_uses_xdg_location_not_working_directory(tmp_path,monkeypatch):
+    home=tmp_path/'home';home.mkdir()
+    checkout=tmp_path/'checkout';checkout.mkdir();monkeypatch.chdir(checkout)
+    monkeypatch.setenv('XDG_STATE_HOME',str(home))
+    assert default_state_root()==home/'quirkbench'
 
 
-@pytest.mark.parametrize('kind', ['partial', 'file', 'link', 'dangling', 'fifo'])
-def test_ambiguous_git_metadata_remains_blocked(tmp_path, kind):
-    marker = tmp_path / '.git'
-    if kind == 'partial':
-        marker.mkdir(); (marker / 'HEAD').write_text('ref: refs/heads/main\n')
-    elif kind == 'file':
-        marker.write_text('gitdir: /elsewhere/worktrees/example\n')
-    elif kind in ('link', 'dangling'):
-        target = tmp_path / 'metadata'
-        if kind == 'link': target.mkdir()
-        marker.symlink_to(target)
-    else:
-        os.mkfifo(marker)
-    with pytest.raises(StateConfigurationError, match='outside a Git checkout'):
-        outside_checkout(tmp_path / 'state')
-
-
-def test_real_checkout_and_linked_worktree_remain_blocked(tmp_path):
-    repo = tmp_path / 'repository'
-    subprocess.run(['git', 'init', '--template=', str(repo)], check=True, capture_output=True)
-    subprocess.run(['git', '-C', str(repo), '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
-                    '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'fixture'],
-                   check=True, capture_output=True)
-    worktree = tmp_path / 'worktree'
-    subprocess.run(['git', '-C', str(repo), 'worktree', 'add', '--detach', str(worktree)],
-                   check=True, capture_output=True)
-    for directory in (repo, worktree):
-        with pytest.raises(StateConfigurationError, match='outside a Git checkout'):
-            outside_checkout(directory / 'state')
-
-
-def test_unreadable_git_guard_is_not_assumed_empty(tmp_path, monkeypatch):
-    marker = tmp_path / '.git'; marker.mkdir()
-    original = os.open
-    def denied(path, *args, **kwargs):
-        if Path(path) == marker: raise PermissionError('fixture inaccessible metadata')
-        return original(path, *args, **kwargs)
-    monkeypatch.setattr(os, 'open', denied)
-    with pytest.raises(StateConfigurationError, match='cannot inspect'):
-        outside_checkout(tmp_path / 'state')
-
-
-def test_git_guard_replacement_during_inspection_is_rejected(tmp_path, monkeypatch):
-    marker = tmp_path / '.git'; marker.mkdir()
-    original = os.scandir
-    def replaced(fd):
-        entries = original(fd)
-        marker.rename(tmp_path / 'old-marker'); marker.mkdir()
-        return entries
-    monkeypatch.setattr(os, 'scandir', replaced)
-    with pytest.raises(StateConfigurationError, match='outside a Git checkout'):
-        outside_checkout(tmp_path / 'state')
-
-
-def test_repeated_path_checks_preserve_permissions_and_recheck_checkout(tmp_path):
-    from quirkbench.controller_setup import _managed_path
-    state=tmp_path/'state';state.mkdir(mode=0o700)
-    for _ in range(3):assert _managed_path(state)==state
-    state.chmod(0o755)
-    assert _managed_path(state)==state
-    assert state.stat().st_mode & 0o777 == 0o755
-    marker=tmp_path/'.git';marker.mkdir()
-    assert _managed_path(state)==state
-    (marker/'HEAD').write_text('ref: refs/heads/main\n')
-    with pytest.raises(StateConfigurationError,match='outside a Git checkout'):_managed_path(state)
+def test_selected_path_resolves_ordinary_ancestor_alias(tmp_path):
+    real=tmp_path/'real';real.mkdir()
+    alias=tmp_path/'alias';alias.symlink_to(real,target_is_directory=True)
+    assert canonical_user_path(alias/'build')==real/'build'
 
 
 def test_repeated_path_checks_reject_new_symlink_ancestors(tmp_path):
