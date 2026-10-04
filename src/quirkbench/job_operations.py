@@ -16,6 +16,22 @@ STAGES = {('image_prepare','recovery_rootfs'),('build','job_inputs'),('build','k
 KINDS = {'candidate_prepare','build','compose','builder_prepare','recovery_download','source_capture','source_prepare'}
 
 
+def physical_fenced(db,device):
+    """Only the bound target's unresolved attempt blocks a new controller stage."""
+    if device is None:return False
+    return db.execute("SELECT 1 FROM attempts WHERE device=? AND (state IN ('CLAIMED','RUNNING','BOOT_PENDING','UNCERTAIN') OR (handoff_revision IS NOT NULL AND recovery_returned IS NULL)) LIMIT 1",(device,)).fetchone() is not None
+
+
+def operation_target(db,row):
+    """Retain campaign scope even for an incomplete historical operation row."""
+    device=row['device']
+    if row['campaign'] is None:return device
+    campaign=db.execute('SELECT device FROM campaigns WHERE id=?',(row['campaign'],)).fetchone()
+    if campaign is None or (device is not None and campaign[0]!=device):
+        raise Conflict('operation campaign target is unavailable or differs')
+    return campaign[0]
+
+
 def manifest(kind, raw):
     """Shape validation only; copying/hashing belongs to the input worker."""
     if not isinstance(raw,dict): raise ContractError('job manifest must be an object')

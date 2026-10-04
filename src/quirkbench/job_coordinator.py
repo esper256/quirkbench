@@ -46,7 +46,6 @@ class JobCoordinator:
         with c.transaction() as db:
             active=[dict(r) for r in db.execute('SELECT * FROM operations WHERE worker_unit IS NOT NULL')]
             queued=[dict(r) for r in db.execute("SELECT * FROM operations WHERE state='QUEUED' AND kind IN ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare','candidate_prepare','operation_resume') AND queued_epoch=? ORDER BY created",(owner.epoch,))]
-            physical=db.execute("SELECT 1 FROM attempts WHERE state IN ('CLAIMED','RUNNING','BOOT_PENDING','UNCERTAIN') OR (handoff_revision IS NOT NULL AND recovery_returned IS NULL) LIMIT 1").fetchone()
         if active:
             if len(active)!=1: raise Conflict('multiple workers require reconciliation')
             claim=active[0]
@@ -72,13 +71,15 @@ class JobCoordinator:
             self.cleanup_committed(claim)
             owner.housekeep_requested()
             return result
-        if physical: return None
         unavailable = None
         for row in queued:
             if row['kind']=='operation_resume': return self.resume_request(row)
             from .proposal_dispatch import guard_child
+            from .job_operations import physical_fenced, operation_target
             with c.transaction() as db:
-                try:guard_child(owner,db,row)
+                try:
+                    if physical_fenced(db,operation_target(db,row)):continue
+                    guard_child(owner,db,row)
                 except (OSError,ValueError,BuildError):continue
             if row['campaign']:
                 with c.transaction() as db:
@@ -103,6 +104,20 @@ class JobCoordinator:
             from .process_identity import WorkerServiceError
             try:
                 return owner.dispatch(row['id'],stage=stage,deadline=c.clock()+timeout,services=self.services)
+            except Conflict:
+                # Admission may race a new physical claim, pause or shutdown.
+                # Skip only a still-queued row with a current authoritative fence.
+                with c.transaction() as db:
+                    fresh=db.execute('SELECT * FROM operations WHERE id=?',(row['id'],)).fetchone()
+                    if (owner.closed or c._lifecycle_owner is not owner or
+                            db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]!=owner.epoch
+                            or fresh is None or fresh['state']!='QUEUED' or fresh['queued_epoch']!=owner.epoch or fresh['worker_unit'] is not None):
+                        raise
+                    from .target_shutdown import fenced
+                    target=operation_target(db,fresh)
+                    blocked=(physical_fenced(db,target) or (target is not None and fenced(db,target)) or
+                             (fresh['campaign'] is not None and c._campaign(db,fresh['campaign'])['state']!='RUNNING'))
+                    if not blocked:raise
             except WorkerServiceError as exc:
                 with c.transaction() as db:
                     retained = db.execute('SELECT state,worker_unit FROM operations WHERE id=?', (row['id'],)).fetchone()

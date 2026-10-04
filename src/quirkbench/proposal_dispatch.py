@@ -189,7 +189,8 @@ def fence(owner,db,parent, *,physical=True):
             (fresh['state']=='WAITING' and fresh['worker_epoch']!=owner.epoch) or
             c._campaign(db,parent['campaign'])['state']!='RUNNING'):
         raise Conflict('proposal owner, stage or campaign changed')
-    if physical and db.execute("SELECT 1 FROM attempts WHERE state IN ('CLAIMED','BOOT_PENDING','RUNNING','UNCERTAIN') OR (handoff_revision IS NOT NULL AND recovery_returned IS NULL) LIMIT 1").fetchone():
+    from .job_operations import physical_fenced, operation_target
+    if physical and physical_fenced(db,operation_target(db,parent)):
         raise Conflict('unresolved physical execution blocks proposal dispatch')
 
 
@@ -316,8 +317,8 @@ def tick(owner):
             AND c.state='RUNNING' AND ((o.state='QUEUED' AND o.queued_epoch=?) OR (o.state='WAITING' AND o.worker_epoch=?))
             AND (o.state='QUEUED' OR (d.composition_operation IS NULL AND (b.id IS NULL OR b.state IN ('SUCCEEDED','FAILED')))
                 OR (d.composition_operation IS NOT NULL AND (p.id IS NULL OR p.state IN ('SUCCEEDED','FAILED'))))
-            AND (q.action!='experiment' OR NOT EXISTS(SELECT 1 FROM attempts WHERE state IN ('CLAIMED','BOOT_PENDING','RUNNING','UNCERTAIN')
-                OR (handoff_revision IS NOT NULL AND recovery_returned IS NULL))) ORDER BY o.created,o.id LIMIT 100''',(owner.epoch,owner.epoch))]
+            AND (q.action!='experiment' OR NOT EXISTS(SELECT 1 FROM attempts a WHERE a.device=c.device AND (a.state IN ('CLAIMED','BOOT_PENDING','RUNNING','UNCERTAIN')
+                OR (a.handoff_revision IS NOT NULL AND a.recovery_returned IS NULL)))) ORDER BY o.created,o.id LIMIT 100''',(owner.epoch,owner.epoch))]
     for row in rows:
         try:
             result=advance(owner,row)

@@ -11,6 +11,7 @@
       "tests/test_distribution_*",
       "tests/test_source_*",
       "tests/test_worker*",
+      "tests/test_scoped_attempt_fences.py",
       "tests/test_job_*",
       "tests/test_builder_setup.py",
       "src/quirkbench/container_worker.py",
@@ -28,6 +29,7 @@
       "tests/test_worker.py",
       "tests/test_container_workers.py",
       "tests/test_worker_service.py",
+      "tests/test_scoped_attempt_fences.py",
       "tests/test_container_engine.py"
     ]
   },
