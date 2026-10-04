@@ -39,7 +39,7 @@ def inner(stage, *,runner=None,limits=None):
         _require_container()
         verify_base(value['entry'])
         runner = BoundedRunner(stage)
-        limits = ResourceLimits.from_cgroup()
+        limits = ResourceLimits.from_cgroup(workload="preparation")
     elif limits is None:
         raise ContractError('injected distribution runner requires explicit limits')
     result = run_recovery_source_stage(srpm=stage/'input.src.rpm',entry=value['entry'],stage=stage,
@@ -82,7 +82,7 @@ def prepare(root, stage, entry, builder, epoch, workspace_id, verify, report, de
         guard(); atomic_write(source/'manifest.json',canonical({'schema_version':1,'entry':entry,'source_date_epoch':epoch})); guard()
         if stage_only: return {'payload_staged':True}
         package = Path(__file__).resolve().parent
-        argv = ['/usr/bin/bash',str(package/'run-bounded-podman.sh'),'--rm','--pull=never','--network=none',
+        argv = ['/usr/bin/bash',str(package/'run-bounded-podman.sh'),'--workload=preparation','--rm','--pull=never','--network=none',
             '--userns=keep-id','--security-opt=no-new-privileges',
             '--volume',f'{source}:{source}:rw,z','--volume',f'{package}:{package}:ro,z',
             '--env',f'PYTHONPATH={package.parent}','--env','PYTHONDONTWRITEBYTECODE=1',builder['builder_config_digest'],

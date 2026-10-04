@@ -100,10 +100,13 @@ def cleanup(output, *, run=_run):
 
 
 def build(*, cas_root, recipe_sha256, image, output, engine='podman', cpus=None,
-          memory_gib=4, timeout=3600, reserve_gib=2, run=_run, execute=None):
+          memory_gib=None, timeout=3600, reserve_gib=2, run=_run, execute=None):
     sha256(recipe_sha256)
-    if cpus is None:
-        cpus = min(4, max(1, (os.cpu_count() or 1)//2))
+    from .resource_budget import resolve
+    if memory_gib is not None and type(memory_gib) is not int:raise BuildError('memory GiB must be an integer')
+    budget=resolve('recovery',cpus=cpus,memory_bytes=None if memory_gib is None else memory_gib*1024**3)
+    cpus=budget.cpus
+    memory_gib=budget.memory_bytes//1024**3
     if (not re.fullmatch('sha256:[0-9a-f]{64}', image)
             or type(cpus) is not int or not 1 <= cpus <= 128
             or type(memory_gib) is not int or not 4 <= memory_gib <= 1024

@@ -187,6 +187,6 @@ def test_native_inner_checks_distinct_correct_base_then_uses_existing_runner(fix
     class InjectedRunner(FakeRunner):
         def __init__(self,workspace):super().__init__();self.workspace=workspace
     monkeypatch.setattr(build_pipeline,'BoundedRunner',InjectedRunner)
-    monkeypatch.setattr(build_pipeline.ResourceLimits,'from_cgroup',lambda:LIMITS)
+    monkeypatch.setattr(build_pipeline.ResourceLimits,'from_cgroup',lambda **kwargs:LIMITS)
     worker.inner(stage)
     assert (stage/'prepared.json').is_file()

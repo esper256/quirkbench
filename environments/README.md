@@ -46,18 +46,18 @@ toolchain locks are captured and reviewed. `assemble.ini` describes a rootless
 Distrobox development profile with a private home and 4 CPU / 4 GiB cgroup caps.
 Its current Distrobox-generated command uses `--privileged` and binds the host
 `/dev`; it must not run the recovery rootfs, image or other storage-sensitive
-stages. The pipeline checks that those caps are no more than half the
-controller resources and refuses to build if the cgroup limits are missing.
+stages. The pipeline requires enforced cgroup CPU/memory bounds and resolves them against
+effective capacity; missing bounds still prevent a build.
 Adjust the caps downward on smaller hosts. Its controller-wide file lock permits
 one build at a time.
 
 ### Observable bounded kernel builds
 
 For ad hoc kernel builds, `start-bounded-podman-build.sh` runs one recorded
-rootless Podman container in the foreground. The engine enforces at most four CPUs,
-at most half the reported host CPU/RAM, at most 8 GiB RAM, zero additional swap,
-4,096 processes, and a 24-hour timeout. At least 4 GiB within that memory budget is
-required for a build. It uses cgroupfs directly and requires no user service manager.
+rootless Podman container in the foreground. Defaults use up to four CPUs and 8 GiB RAM, reserving half an unconstrained
+host for interactive use. Already constrained cgroups are not halved again.
+Kernel builds require at least 4 GiB. Zero additional swap, 4,096 processes and
+a 24-hour timeout remain enforced. See resource overrides below. It uses cgroupfs directly and requires no user service manager.
 
 Use a fresh run identity, canonical owned stage and exact locked image:
 
@@ -175,9 +175,9 @@ The planner verifies an OCI archive's sole manifest, expected x86-64/Linux
 config and referenced layer hashes before returning an argv. A rebuilt builder
 needs its own newly retained archive, image ID and operation input record.
 
-The controller container adapter requests at most four CPUs (and half the host's
-reported CPUs), 4 GiB memory for recovery (managed development jobs use up to
-8 GiB within half the host's memory), no extra swap and 4096 tasks, then checks the engine's
+The controller container adapter resolves workload budgets against effective
+capacity: 1 GiB for preparation/capture/download, 4 GiB for recovery, up to 8 GiB
+for kernel work by default. It requests no extra swap and 4096 tasks, then checks the engine's
 recorded bounds before accepting a launch. Every phase has a fixed entry point and
 elapsed deadline; the journal records the engine, immutable container ID and claim.
 The owner verifies whole-container termination and retains bounded logs before
@@ -352,3 +352,29 @@ The foreground controller owns durable container workers; see
 The optional assemble development environment has no execution ownership role.
 Its temporary home is not a place for persistent state, signing keys or agent
 credentials. Controller setup publishes configuration without installing a daemon.
+
+
+### Resource overrides
+
+The controller, foreground recovery builder and bounded Podman helpers share the
+same budget resolver. Set `QUIRKBENCH_RESOURCE_MODE=dedicated` for a headless machine
+that need not reserve desktop capacity. Set `QUIRKBENCH_CPUS` and
+`QUIRKBENCH_MEMORY_GIB` to positive integers for explicit budgets; foreground
+`--cpus`/`--memory-gib` take precedence. Overrides may exceed interactive defaults
+but cannot exceed effective CPU affinity/cgroup/memory capacity. Recovery and kernel
+work retain a 4 GiB minimum; preparation needs 1 GiB. These are admission floors,
+not guarantees that every input fits. Out-of-memory failures retain diagnostics.
+
+Example: `QUIRKBENCH_RESOURCE_MODE=dedicated QUIRKBENCH_CPUS=8
+QUIRKBENCH_MEMORY_GIB=16 quirkbench ...` (on one shell line). Worker-side compiler
+planning uses the actual enforced budget, with 2 GiB per compiler job; it does not
+reserve desktop capacity again. Container identity, task/deadline limits and verified
+whole-container shutdown are unaffected. The shell helper supports
+`--workload=preparation` before Podman arguments for its fixed preparation callers;
+use `PYTHON=/path/to/python` when Quirkbench is installed in a selected interpreter.
+
+Free-space reserve remains independent: managed workers use configured
+`reserve_gib`, foreground recovery uses `--free-space-reserve-gib` (default 2),
+and low-level `run_commands(..., reserve_bytes=...)` accepts the caller's reserve
+instead of imposing another hardcoded value. No reserve override grants cleanup
+or target-device access.

@@ -148,3 +148,11 @@ def test_bounded_runner_routes_macro_check_through_fixed_source_allowlist(tmp_pa
         BoundedRunner(stage).run(command, phase='check-recovery-rpm-macros',
                                  log=stage / 'macro.log', timeout_s=0, env={},
                                  limits=LIMITS, on_activity=lambda *_: None)
+
+
+def test_source_preparation_uses_smaller_enforced_budget(tmp_path):
+    srpm,stage,entry=fixture(tmp_path)
+    runner=FakeRunner()
+    result=run_recovery_source_stage(srpm=srpm,entry=entry,stage=stage,runner=runner,
+        limits=ResourceLimits(1,1024**3,1),source_date_epoch=1740000000)
+    assert result['source_tree_sha256'] and 'prepare-recovery-source' in runner.phases

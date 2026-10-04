@@ -1,0 +1,60 @@
+"""Budgets follow workload and effective capacity, not desktop assumptions."""
+import pytest
+from quirkbench.build import BuildError
+from quirkbench.resource_budget import Capacity, resolve, GIB
+
+
+def test_small_preparation_does_not_require_a_kernel_build_machine():
+    budget=resolve('preparation',available=Capacity(2,2*GIB),environ={})
+    assert (budget.cpus,budget.memory_bytes)==(1,GIB)
+    with pytest.raises(BuildError,match='minimum'):resolve('kernel',available=Capacity(2,2*GIB),environ={})
+
+
+def test_dedicated_and_explicit_budgets_can_use_more_than_half_host():
+    host=Capacity(8,8*GIB)
+    assert resolve('kernel',available=host,environ={}).memory_bytes==4*GIB
+    assert resolve('kernel',available=host,mode='dedicated',environ={}).memory_bytes==8*GIB
+    selected=resolve('kernel',available=host,environ={'QUIRKBENCH_CPUS':'8','QUIRKBENCH_MEMORY_GIB':'8'})
+    assert (selected.cpus,selected.memory_bytes)==(8,8*GIB)
+
+
+def test_nested_capacity_is_not_halved_again():
+    budget=resolve('recovery',available=Capacity(2,4*GIB,True,True),environ={})
+    assert (budget.cpus,budget.memory_bytes)==(2,4*GIB)
+
+
+@pytest.mark.parametrize('options',[{'cpus':0},{'cpus':True},{'cpus':9},{'memory_bytes':9*GIB},
+    {'memory_bytes':3*GIB},{'mode':'unbounded'}])
+def test_invalid_or_excess_budgets_fail(options):
+    with pytest.raises(BuildError):resolve('recovery',available=Capacity(8,8*GIB),environ={},**options)
+
+
+def test_cgroup_ancestry_and_affinity_limit_host_capacity(tmp_path,monkeypatch):
+    from pathlib import Path
+    from quirkbench import resource_budget as budget
+    root=tmp_path/'cgroup';current=root/'parent/worker';current.mkdir(parents=True)
+    (current/'memory.max').write_text('max');(current/'cpu.max').write_text('max 100000')
+    (current.parent/'memory.max').write_text(str(4*GIB));(current.parent/'cpu.max').write_text('200000 100000')
+    original=Path.read_text
+    def read(path,*args,**kwargs):
+        if path==Path('/proc/meminfo'):return 'MemTotal: 16777216 kB\n'
+        return original(path,*args,**kwargs)
+    monkeypatch.setattr(Path,'read_text',read)
+    monkeypatch.setattr(budget,'cgroup_directory',lambda root:current)
+    monkeypatch.setattr(budget.os,'cpu_count',lambda:16)
+    monkeypatch.setattr(budget.os,'sched_getaffinity',lambda _:set(range(4)))
+    result=budget.capacity(cgroup_root=root)
+    assert result==Capacity(2,4*GIB,True,True)
+    (current.parent/'cpu.max').write_text('max 100000')
+    assert budget.capacity(cgroup_root=root).cpu_limited
+    (current/'memory.max').unlink()
+    with pytest.raises(BuildError,match='effective'):budget.capacity(cgroup_root=root)
+
+
+def test_resource_cli_is_usable_by_shell_launcher(monkeypatch,tmp_path):
+    import os,subprocess,sys
+    env={**os.environ,'QUIRKBENCH_CPUS':'1','QUIRKBENCH_MEMORY_GIB':'1'}
+    result=subprocess.run([sys.executable,'-m','quirkbench.resource_budget','preparation'],
+        env=env,text=True,capture_output=True,timeout=10)
+    assert result.returncode==0,result.stderr
+    assert result.stdout.strip()==f'1 {GIB}'

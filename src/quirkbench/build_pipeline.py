@@ -312,41 +312,32 @@ class ResourceLimits:
     jobs: int
 
     @classmethod
-    def from_cgroup(cls, root: Path = Path("/sys/fs/cgroup")) -> "ResourceLimits":
-        """Require kernel-enforced CPU and memory cgroup limits at half the controller resources.
+    def from_cgroup(cls, root: Path = Path("/sys/fs/cgroup"), *, workload="kernel") -> "ResourceLimits":
+        """Require kernel-enforced CPU and memory bounds for the selected workload.
 
         The build container must be launched with Podman --cpus and --memory. A soft
         estimate or a per-process RLIMIT alone does not cap all compiler jobs.
         """
+        hierarchy_root=root
         try:
             if root == Path('/sys/fs/cgroup'):
-                # A worker may use the host cgroup namespace to verify its
-                # immutable container identity. Read its own enforced limits,
-                # rather than the hierarchy root's unrelated host limits.
-                groups=[line[3:] for line in Path('/proc/self/cgroup').read_text().splitlines()
-                        if line.startswith('0::')]
-                if len(groups)!=1 or not groups[0].startswith('/') or '..' in Path(groups[0]).parts:
-                    raise ValueError('current cgroup is unavailable')
-                current=root/groups[0].lstrip('/')
-                if current.resolve()!=current:
-                    raise ValueError('current cgroup path is linked')
-                root=current
-            mem_total = next(int(line.split()[1]) * 1024 for line in Path("/proc/meminfo").read_text().splitlines()
-                             if line.startswith("MemTotal:"))
+                from .resource_budget import cgroup_directory
+                root=cgroup_directory(root)
             memory = int((root / "memory.max").read_text().strip())
             quota, period = (root / "cpu.max").read_text().split()
             cpu_quota, cpu_period = int(quota), int(period)
         except (OSError, ValueError, StopIteration) as exc:
             raise BuildError("enforced cgroup CPU and memory limits required") from exc
-        controller_cpus = os.cpu_count() or 0
         if cpu_quota < 1 or cpu_period < 1:
             raise BuildError("positive enforced cgroup CPU limits required")
-        if controller_cpus < 1 or memory > mem_total // 2 or cpu_quota > max(1, controller_cpus // 2) * cpu_period:
-            raise BuildError("container cgroup exceeds half of controller CPU or RAM")
-        if memory < 4 * GIB:
-            raise BuildError("container memory limit below 4 GiB; defer build")
-        cpus = max(1, cpu_quota // cpu_period)
-        jobs = build_module.kernel_job_budget(cpus, memory)
+        from .resource_budget import MINIMUM, capacity
+        effective=capacity(cgroup_root=hierarchy_root)
+        memory=min(memory,effective.memory_bytes)
+        if workload not in MINIMUM or memory < MINIMUM[workload]:
+            raise BuildError('enforced memory below selected workload minimum')
+        cpus = min(effective.cpus,max(1, cpu_quota // cpu_period))
+        if cpus<1:raise BuildError("at least one effective CPU is required")
+        jobs = min(cpus,128) if workload=='preparation' else build_module.kernel_job_budget(cpus,memory)
         return cls(cpus, memory, jobs)
 
 
@@ -507,8 +498,8 @@ def run_recovery_source_stage(*, srpm: Path, entry: dict, stage: Path,
     _safe_build_path(stage)
     if not stage.is_dir() or stage.is_symlink():
         raise BuildError("recovery source staging directory missing")
-    if type(limits.jobs) is not int or limits.jobs < 1 or type(limits.memory_bytes) is not int or limits.memory_bytes < 4 * GIB:
-        raise BuildError("bounded recovery source limits required")
+    if type(limits.jobs) is not int or limits.jobs < 1 or type(limits.memory_bytes) is not int or limits.memory_bytes < GIB:
+        raise BuildError("bounded source preparation requires at least 1 GiB")
     if isinstance(runner, BoundedRunner) and runner.workspace != stage:
         raise BuildError("bounded runner workspace must match recovery source stage")
     _file_identity(srpm, entry["kernel_srpm_sha256"])

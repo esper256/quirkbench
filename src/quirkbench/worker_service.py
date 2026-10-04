@@ -39,16 +39,16 @@ def _run(argv, timeout=30):
 class ContainerWorkerServices:
     def __init__(self, *, worker_program=None, engine='podman', worker_image=None,
                  runner=_run, boot_id_reader=controller_boot_id, clock=time.time,
-                 development=False, monotonic=time.monotonic):
+                 development=False, monotonic=time.monotonic, resource_options=None):
         self.worker_program = worker_program  # compatibility with installed launchers
         self.engine, self.worker_image = engine, worker_image
         self.runner, self.boot_id_reader, self.clock = runner, boot_id_reader, clock
         self.monotonic=monotonic
         self.root = None
-        self.cpu_count = min(4, max(1, (os.cpu_count() or 1)//2))
         self.development = development
-        memory_total=int(next(line.split()[1] for line in Path("/proc/meminfo").read_text().splitlines() if line.startswith("MemTotal:")))*1024
-        self.memory_limit = min(8*1024**3,memory_total//2) if development else 4*1024**3
+        self.resource_options = resource_options or {}
+        self.cpu_count = None
+        self.memory_limit = None
         self._claim_reader = None
 
     @staticmethod
@@ -94,8 +94,6 @@ class ContainerWorkerServices:
         return item
 
     def preflight(self, state_root, deadline):
-        if self.development and self.memory_limit<4*1024**3:
-            raise WorkerServiceError("controller capacity below the 4 GiB builder minimum within the half-host budget")
         root=Path(state_root)
         if not root.is_absolute() or root.resolve()!=root or root.is_symlink():
             raise WorkerServiceError('worker state root must be canonical')
@@ -185,6 +183,13 @@ class ContainerWorkerServices:
     def _start(self, record, phase):
         from .worker_container_plan import plan
         self._current(record)
+        from .resource_budget import resolve
+        workload=('preparation' if record['claim']['kind'] in ('source_prepare','source_capture','builder_prepare','recovery_download')
+                  else 'recovery' if record['claim']['kind']=='image_prepare' else 'kernel')
+        try:
+            budget=resolve(workload,**self.resource_options)
+        except BuildError as exc:raise WorkerServiceError(str(exc)) from exc
+        self.cpu_count,self.memory_limit=budget.cpus,budget.memory_bytes
         spec=plan(self,record,phase)
         self._image(spec['image'])
         execution={'name':'qb-'+uuid.uuid4().hex,'image':spec['image'],'phase':phase,
