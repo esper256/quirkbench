@@ -26,13 +26,16 @@ def cgroup_directory(root=Path('/sys/fs/cgroup')):
     return current
 
 
-def capacity(*, cgroup_root=Path("/sys/fs/cgroup")):
+def capacity(*, cgroup_root=Path("/sys/fs/cgroup"), current=None):
     host_cpus=os.cpu_count() or 1
     cpus=host_cpus
     if hasattr(os,'sched_getaffinity'):cpus=min(cpus,len(os.sched_getaffinity(0)))
     try:
         memory=next(int(line.split()[1])*1024 for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemTotal:'))
-        root=cgroup_root;current=cgroup_directory(root)
+        root=cgroup_root
+        current=cgroup_directory(root) if current is None else current
+        if current.resolve()!=current or not current.is_relative_to(root):
+            raise ValueError("current cgroup must be canonical within hierarchy")
         cpu_limit=cpus;memory_limit=memory
         for directory in (current,*current.parents):
             if directory!=root and not directory.is_relative_to(root):break

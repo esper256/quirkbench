@@ -327,7 +327,7 @@ class ResourceLimits:
         if cpu_quota < 1 or cpu_period < 1:
             raise BuildError("positive enforced cgroup CPU limits required")
         from .resource_budget import MINIMUM, capacity
-        effective=capacity(cgroup_root=hierarchy_root)
+        effective=capacity(cgroup_root=hierarchy_root,current=root)
         memory=min(memory,effective.memory_bytes)
         if workload not in MINIMUM or memory < MINIMUM[workload]:
             raise BuildError('enforced memory below selected workload minimum')

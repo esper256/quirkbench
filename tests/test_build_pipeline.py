@@ -568,6 +568,8 @@ def test_failed_stage_keeps_log_but_excludes_target_rootfs(tmp_path: Path, monke
 
 
 def test_resource_limits_require_enforcement_without_desktop_policy(tmp_path: Path, monkeypatch) -> None:
+    # Explicit leaf fixtures must not inherit the runner's /proc/self/cgroup path.
+    monkeypatch.setattr("quirkbench.resource_budget.cgroup_directory", lambda root: root/"foreign-host-group")
     (tmp_path / "memory.max").write_text(str(4 * 1024**3))
     (tmp_path / "cpu.max").write_text("400000 100000\n")
     original_read_text = Path.read_text
