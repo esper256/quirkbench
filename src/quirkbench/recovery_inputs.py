@@ -13,7 +13,7 @@ import subprocess
 
 from .build import BuildError
 from .contracts import canonical,digest
-from .recovery_stock import installed_stock_profile,preflight_lock,preflight_recipe,POLICY
+from .recovery_stock import preflight_lock,preflight_recipe,POLICY
 from .recovery_dracut import STOCK_DRACUT_CONFIG
 from .recovery_recipe import REQUIRED_UNITS
 from .recovery_rootfs import _rpm_row,verify_stock_rpm_signatures
@@ -71,7 +71,7 @@ def _query(argv):
 
 def retain_packages(directory,public_key,store,diagnostics,*,builder_image_digest,
                     release=FEDORA_RELEASE,kernel=KERNEL_RELEASE,fingerprint=RPM_FINGERPRINT,
-                    query=_query,signature_runner=None,spec=None):
+                    query=_query,signature_runner=None,spec=None,vendor_inventory=None):
     if spec is not None:
         spec = load_spec(canonical(spec))
         release, kernel, fingerprint = spec['fedora_release'], spec['kernel_release'], spec['rpm_key_fingerprint']
@@ -102,13 +102,15 @@ def retain_packages(directory,public_key,store,diagnostics,*,builder_image_diges
         for expected in (spec['packages'] if spec is not None else recorded_packages()):
             if actual.get(expected['name'])!=expected:
                 raise BuildError('retained userspace package differs from recorded Fedora candidate')
+    from .recovery_vendor import retained_profile
+    profile=retained_profile(store,packages,release,inventory=vendor_inventory)
     snapshot=store.put(canonical({'schema_version':1,'packages':packages})).sha256
     lock={'schema_version':2,'architecture':'x86_64','fedora_release':release,
           'kernel_release':kernel,'builder_image_digest':builder_image_digest,
           'rpm_snapshot_sha256':snapshot,
           'target_rpm_lock_sha256':store.put(('\n'.join(sorted(_rpm_row(p['name'],p['nevra']) for p in packages))+'\n').encode()).sha256,
           'rpm_key_sha256':store.put_file(public_key).sha256,'rpm_key_fingerprint':fingerprint,
-          'storage_policy_sha256':store.put(canonical(installed_stock_profile())).sha256}
+          'storage_policy_sha256':store.put(canonical(profile)).sha256}
     preflight_lock(lock,store)
     # Signature failure leaves diagnostics and unreferenced CAS inputs, no usable lock.
     kwargs={'runner':signature_runner} if signature_runner else {}

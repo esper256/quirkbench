@@ -227,6 +227,8 @@ def stage_rootfs_inputs(*, catalog_sha256: str | None, lock_sha256: str, cas_roo
         if sha256_file(objects/value)!=value: raise BuildError('staged recovery metadata changed')
     if lock['schema_version']==2:
         digests={lock[name] for name in ('rpm_snapshot_sha256','target_rpm_lock_sha256','rpm_key_sha256','storage_policy_sha256')}
+        profile=_json(store.get(lock['storage_policy_sha256']),'storage policy')
+        if profile['schema_version']==2:digests.add(profile['vendor_inventory_sha256'])
     else:
         digests = {entry[name] for name in INPUT_DIGEST_FIELDS}
         digests.add(lock['recovery_fragment_sha256'])

@@ -78,12 +78,12 @@ class ImageInputs:
             if not all(isinstance(value,str) and value for value in recovery_identity):
                 raise ImageError('incomplete reviewed recovery profile identity')
             if self.recovery_storage_policy is not None:
-                from .recovery_stock import validate_policy, installed_stock_profile, audit_stock_modules
+                from .recovery_stock import validate_policy, core_profile, installed_stock_profile, audit_stock_modules
                 policy_path = self.recovery_storage_policy
                 if not policy_path.is_absolute() or policy_path.is_symlink() or not policy_path.is_file() or policy_path.stat().st_size > 65536:
                     raise ImageError('stock storage policy must be a bounded regular file')
                 profile = validate_policy(json.loads(policy_path.read_bytes()))
-                if (profile != installed_stock_profile() or profile['profile_id'] != self.recovery_profile_id
+                if (core_profile(profile) != installed_stock_profile() or profile['profile_id'] != self.recovery_profile_id
                         or digest(canonical(profile)) != self.recovery_profile_digest):
                     raise ImageError('stock recovery policy differs from installed profile')
                 from .recovery_storage import audit_guard

@@ -37,11 +37,20 @@ def _fields(value, fields, version, label):
 
 
 def validate_policy(value):
-    _fields(value, set(PROFILE), 1, "recovery storage profile")
-    if (value != PROFILE or any(type(value["policy"].get(k)) is not type(v)
-                                 for k, v in POLICY.items())):
-        raise BuildError("unreviewed recovery storage profile")
+    version=value.get('schema_version') if isinstance(value,dict) else None
+    fields=set(PROFILE)|({'vendor_inventory_sha256'} if version==2 else set())
+    _fields(value,fields,version if version in (1,2) else 1,'recovery storage profile')
+    core={k:v for k,v in value.items() if k!='vendor_inventory_sha256'}
+    core['schema_version']=1
+    if (core!=PROFILE or any(type(value['policy'].get(k)) is not type(v) for k,v in POLICY.items())):
+        raise BuildError('unreviewed recovery storage profile')
+    if version==2:sha256(value['vendor_inventory_sha256'])
     return value
+
+
+def core_profile(value):
+    validate_policy(value)
+    return {**{k:v for k,v in value.items() if k!='vendor_inventory_sha256'},'schema_version':1}
 
 
 def installed_stock_profile():
@@ -97,7 +106,7 @@ def preflight_lock(lock, store):
     from .recovery_rootfs import _json, _rpm_row, validate_snapshot
     validate_lock(lock)
     profile = validate_policy(_json(store.get(lock["storage_policy_sha256"]), "storage policy"))
-    if profile != installed_stock_profile():
+    if core_profile(profile) != installed_stock_profile():
         raise BuildError("stock recovery profile differs from installed policy")
     snapshot = validate_snapshot(_json(store.get(lock["rpm_snapshot_sha256"]), "RPM snapshot"))
     if not lock["kernel_release"].endswith(".fc"+lock["fedora_release"]+".x86_64"):
@@ -107,6 +116,10 @@ def preflight_lock(lock, store):
         store.verify(p["sha256"])
         if p["name"] == "gpg-pubkey":
             raise BuildError("stock lock cannot contain an unpinned key import")
+    if profile['schema_version']==2:
+        from .recovery_vendor import load_inventory,verify_packages
+        inventory=load_inventory(store.get(profile['vendor_inventory_sha256']))
+        verify_packages(inventory,packages,lock['fedora_release'])
     by_name = {p["name"]: p for p in packages}
     required = {"kernel-core", "kernel-modules-core", "kernel-modules", "linux-firmware"}
     if not required <= by_name.keys():
@@ -139,7 +152,7 @@ def preflight_recipe(recipe, store):
             raise BuildError("stock recipe differs from rootfs lock: " + key)
     entry, _, _ = preflight_lock(lock, store)
     return {"entry": entry, "rootfs_lock": lock,
-            "profile": installed_stock_profile(), "recipe_digest": digest(canonical(recipe)),
+            "profile": validate_policy(_json(store.get(lock["storage_policy_sha256"]), "storage policy")), "recipe_digest": digest(canonical(recipe)),
             "dracut_policy": validate_stock_dracut_config(store.get(recipe["dracut_config_sha256"])),
             "runtime_revision": load_runtime_revision(store.get(recipe["runtime_revision_sha256"])),
             "unit_allowlist": _unit_allowlist(store.get(recipe["unit_allowlist_sha256"]))}

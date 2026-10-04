@@ -16,6 +16,16 @@ def prepare_recovery_image_inputs(recipe: dict, catalog: dict, store,
 
 def audit_factory_root(rootfs, checked):
     """Shared publication boundary: no extra units, secrets or enrolled factory state."""
+    if checked['profile']['schema_version']==2:
+        from .state_reader import read_file
+        from .contracts import canonical,digest
+        from .recovery_vendor import PROFILE_PATH
+        from .boot import _check_recovery_vendor_unit_links,_check_recovery_vendor_generators
+        path=rootfs/PROFILE_PATH
+        if digest(read_file(path.parent,path.name,limit=65536))!=digest(canonical(checked['profile'])):
+            raise BuildError('staged storage profile differs from recipe')
+        _check_recovery_vendor_unit_links(rootfs)
+        _check_recovery_vendor_generators(rootfs)
     _check_recovery_unit_links(rootfs, strict_direct_links=True)
     units = rootfs / "etc/systemd/system"
     installed_units = sorted(path.name for path in units.iterdir()

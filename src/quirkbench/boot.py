@@ -728,6 +728,9 @@ def _fedora44_recovery_root(rootfs: Path) -> bool:
 
 def _recovery_vendor_policy(rootfs: Path) -> tuple[dict[str, str], dict[str, str]]:
     """Select the exact reviewed vendor graph for this installed Fedora root."""
+    from .recovery_vendor import staged_inventory
+    selected=staged_inventory(rootfs)
+    if selected is not None:return selected['enabled_links'],selected['generators']
     if _fedora44_recovery_root(rootfs):
         from .recovery_vendor_fedora44 import FEDORA44_ENABLED_LINKS, FEDORA44_GENERATORS
         return FEDORA44_ENABLED_LINKS, FEDORA44_GENERATORS
@@ -735,11 +738,15 @@ def _recovery_vendor_policy(rootfs: Path) -> tuple[dict[str, str], dict[str, str
 
 
 def sanitize_recovery_etc_enablement(rootfs: Path) -> None:
-    """Remove only exact Fedora 44 RPM/scriptlet enables unwanted in recovery."""
+    """Remove only reviewed RPM/scriptlet enables unwanted in recovery."""
     rootfs = Path(rootfs)
-    if not _fedora44_recovery_root(rootfs):
-        return
-    from .recovery_vendor_fedora44 import FEDORA44_ETC_LINKS
+    from .recovery_vendor import staged_inventory
+    selected=staged_inventory(rootfs)
+    if selected is not None:expected=selected['etc_links']
+    elif _fedora44_recovery_root(rootfs):
+        from .recovery_vendor_fedora44 import FEDORA44_ETC_LINKS
+        expected=FEDORA44_ETC_LINKS
+    else:return
     units = rootfs / "etc/systemd/system"
     if units.is_symlink() or not units.is_dir() or not units.resolve().is_relative_to(rootfs.resolve()):
         raise BootError("staged Fedora unit directory is invalid")
@@ -747,12 +754,12 @@ def sanitize_recovery_etc_enablement(rootfs: Path) -> None:
     for path in units.rglob("*"):
         if path.is_symlink():
             observed[path.relative_to(units).as_posix()] = str(path.readlink())
-    retained = {name: target for name, target in FEDORA44_ETC_LINKS.items()
+    retained = {name: target for name, target in expected.items()
                 if name in {"dbus.service", "sockets.target.wants/dbus.socket",
                             "multi-user.target.wants/NetworkManager.service"}}
     if observed == retained:
         return
-    if observed != FEDORA44_ETC_LINKS:
+    if observed != expected:
         # Image assembly binds GPT identity after generic runtime staging. A
         # fully installed, strictly reviewed graph is valid on that second pass;
         # partial or unknown graphs must still fail before any mutation.

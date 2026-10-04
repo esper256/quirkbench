@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "inventory_id",
+    "fedora_release",
+    "architecture",
+    "required_packages",
+    "enabled_links",
+    "etc_links",
+    "generators"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "inventory_id": {
+      "type": "string"
+    },
+    "fedora_release": {
+      "type": "string",
+      "pattern": "^[0-9]{2}$"
+    },
+    "architecture": {
+      "const": "x86_64"
+    },
+    "required_packages": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8192,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "nevra",
+          "sha256"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "nevra": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "enabled_links": {
+      "type": "object",
+      "maxProperties": 4096,
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "etc_links": {
+      "type": "object",
+      "maxProperties": 4096,
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "generators": {
+      "type": "object",
+      "maxProperties": 4096,
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    }
+  }
+}
