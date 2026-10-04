@@ -183,9 +183,12 @@ class _LifecycleOwner:
                 raise Conflict('operation is not queued in the current lifecycle')
             from .proposal_dispatch import guard_child
             guard_child(self,db,row)
-            from .job_operations import STAGES
+            from .job_operations import STAGES, physical_fenced, operation_target
             if (row['kind'],stage) not in STAGES:
                 raise Conflict('worker kind/stage is not allowed')
+            target=operation_target(db,row)
+            if physical_fenced(db,target):
+                raise Conflict('bound target has unresolved physical execution')
             if row['kind'] in ('build','compose'):
                 expected='job_inputs' if row['prepared_digest'] is None else 'kernel_build' if row['kind']=='build' else 'os_compose'
                 if stage!=expected: raise Conflict('job stage does not match retained inputs')
@@ -196,11 +199,11 @@ class _LifecycleOwner:
                 campaign = controller._campaign(db, row['campaign'])
                 if campaign['state'] != 'RUNNING':
                     raise Conflict('campaign pause blocks the next operation stage')
-            if row['device'] is not None:
+            if target is not None:
                 from .target_shutdown import fenced
-                if fenced(db,row['device']):raise Conflict('target shutdown blocks new worker claims')
+                if fenced(db,target):raise Conflict('target shutdown blocks new worker claims')
                 from .credential_registry import require_execution_credentials
-                require_execution_credentials(db,row['device'],controller.clock())
+                require_execution_credentials(db,target,controller.clock())
             generation = row['worker_generation'] + 1
             unit = (worker_identity(operation_id, generation) if worker_identity else
                     f'quirkbench-worker-{operation_id}-{generation}.service')

@@ -278,6 +278,18 @@ finishes and returns to recovery. Pause never turns success into failure or eras
 queued work. Non-campaign image preparation has explicit operation resume after
 restart; do not auto-resume it just because it has no campaign.
 
+Unresolved physical execution fences the next controller stage for that operation's
+bound target, including its campaign target. An unresolved attempt or missing
+recovery return on another target does not block independent source capture,
+downloads, preparation, builds or composition. Controller-only preparation has no
+target fence. The authoritative worker claim rechecks scope inside its transaction;
+the single active compute worker and exact stop/restart fences still apply globally.
+Already claimed controller workers may drain, and physical-attempt admission and
+exact operator approval remain unchanged. A physical claim may therefore follow
+an existing controller claim. This is scoped stage admission, not a promise of
+measurement isolation or a quiet controller. Native experiment protocols must
+record any workload constraints they require.
+
 One controller lifecycle owner holds an OS file lock for the state directory.
 It advances a persistent startup epoch and runs `Controller.startup()` once, before
 accepting new scheduling. Repository-serving and read-only CLI processes do not

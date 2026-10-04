@@ -128,7 +128,9 @@ def configure_build(monkeypatch):
         assert '--network=none' in argv
         kw['verify']()
         stage=Path(argv[argv.index('--stage-dir')+1]);kind=argv[argv.index('--inner')+1]
-        result=job_worker.inner(kind,stage,Path(argv[argv.index('--cache')+1]))
+        # The joined controller fixture explicitly configures a zero reserve.
+        # Match container_worker, which forwards its retained execution reserve.
+        result=job_worker.inner(kind,stage,Path(argv[argv.index('--cache')+1]),reserve_bytes=0)
         kw['verify']();return {'exit_code':result}
     monkeypatch.setattr(recovery_worker,'execute_rootfs',execute)
     return runner

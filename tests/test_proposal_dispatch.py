@@ -86,6 +86,19 @@ def start_build(c,owner,monkeypatch,candidate,decision='failure'):
     return operation,value,receipt,build
 
 
+def test_unrelated_target_uncertainty_does_not_stall_proposal_child(published,joined,monkeypatch):
+    from test_scoped_attempt_fences import pending
+    c,_=published
+    with c.lifecycle() as owner:
+        attempt=pending(c,state='UNCERTAIN')
+        operation,_,_,build=start_build(c,owner,monkeypatch,joined[5],'other-target')
+        claim=JobCoordinator(owner,Workers()).tick()
+        assert claim['id']==build and claim['stage']=='job_inputs'
+        with c.transaction() as db:
+            assert db.execute('SELECT state FROM attempts WHERE id=?',(attempt,)).fetchone()[0]=='UNCERTAIN'
+            assert db.execute('SELECT experiment FROM proposal_dispatch_commands WHERE operation=?',(operation,)).fetchone()[0] is None
+
+
 def stopped_composition(c,owner,monkeypatch,candidate):
     operation,value,receipt,build=start_build(c,owner,monkeypatch,candidate)
     complete_job(c,owner,monkeypatch)
