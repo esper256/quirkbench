@@ -7,6 +7,7 @@ campaign nor physical-target identity verification.
 """
 from __future__ import annotations
 
+from .credential_records import validate_generation
 import hmac
 import json
 import math
@@ -28,21 +29,6 @@ CREATE UNIQUE INDEX credential_active_uuid ON credential_generations(system_uuid
 """
 
 
-def validate_generation(value):
-    fields = {'schema_version', 'generation', 'device_id', 'media_instance_id', 'system_uuid',
-              'device_token_sha256', 'repository_certificate_sha256', 'expires_at'}
-    if not isinstance(value, dict) or set(value) != fields:
-        raise ContractError('invalid credential generation fields')
-    if type(value['schema_version']) is not int or value['schema_version'] != 1:
-        raise ContractError('unsupported credential generation version')
-    for key in ('generation', 'device_id', 'media_instance_id'):
-        identifier(value[key])
-    system_uuid(value['system_uuid'])
-    sha256(value['device_token_sha256'])
-    sha256(value['repository_certificate_sha256'])
-    if type(value['expires_at']) is not int or not 1 <= value['expires_at'] <= 4102444800:
-        raise ContractError('invalid credential expiry')
-    return value
 
 
 def _document(row):

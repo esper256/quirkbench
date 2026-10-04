@@ -4,9 +4,9 @@ import ssl
 from urllib.parse import urlsplit
 
 from .contracts import Conflict,ContractError,canonical,digest,identifier
-from .credential_registry import validate_generation
+from .credential_records import validate_generation
 from .enrollment_client import endpoint,MAX_BODY
-from .enrollment_proof import validate_request
+from .enrollment_crypto import validate_request
 
 
 def validate_result(value,request):
@@ -22,7 +22,7 @@ def validate_result(value,request):
     identifier(value['device_id']);endpoint(value['controller_url'])
     generation=validate_generation(value['credential_generation'])
     if version==2:
-        from .retarget_invitation import validate_invitation
+        from .retarget_records import validate_invitation
         authority=validate_invitation(value['retarget_invitation']);scope=authority['scope'];code=authority['code']
         if (code['code_id']!=request['code_id'] or code['controller_url']!=value['controller_url']
                 or scope['media_instance_id']!=request['media_instance_id']

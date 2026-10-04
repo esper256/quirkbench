@@ -16,7 +16,7 @@ from .baseline_catalog import validate_entry
 from .contracts import Conflict, ContractError, canonical, identifier, sha256
 from .source_capture import _directory_owner, _git, _identity, _observe, _path, _parent, _staged_identity, MAX_FILES
 from .source_preparation import prepare
-from .controller_setup import _managed_path
+from .filesystem import _managed_path
 
 
 def snapshot(root, verify, *, git=False):
@@ -209,7 +209,7 @@ def _import_git_policy(source, *,recursive=True,active=False,settling_deadline=N
         if settling_deadline is not None and time.monotonic() >= settling_deadline:
             raise ContractError('distribution Git metadata publication exceeded settling budget')
     budget()
-    from .state_reader import read_file
+    from .filesystem import read_file
     directory = source/'.git'; info = directory.lstat()
     if (not stat.S_ISDIR(info.st_mode) or directory.resolve() != directory or info.st_uid != os.geteuid()
             or info.st_mode & 0o7000): raise ContractError('distribution Git directory is not freshly owned')

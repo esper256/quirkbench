@@ -180,7 +180,7 @@ def test_queries_are_readonly_and_approval_json_requires_retry_id(published,monk
     def forbidden(*a,**kw):raise AssertionError('query acquired authority or initialized/pruned state')
     monkeypatch.setattr(Controller,'__init__',forbidden)
     monkeypatch.setattr('quirkbench.maintenance.prune',forbidden)
-    monkeypatch.setattr('quirkbench.maintenance.private_lock',forbidden)
+    monkeypatch.setattr('quirkbench.filesystem.private_lock',forbidden)
     for args in ([ 'experiment','list','--investigation','investigation','--json'],
         ['experiment','review',response['data']['experiment_id'],'--json'],['attempt','show',attempt,'--json'],['attempt','status',attempt]):
         assert cli.main(['--state',str(c.root),*args])==0

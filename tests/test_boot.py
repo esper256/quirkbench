@@ -1,3 +1,4 @@
+from quirkbench import target_install
 from dataclasses import asdict
 import hashlib
 import json
@@ -285,7 +286,7 @@ def test_recovery_vendor_allowlist_requires_exact_link_and_target(tmp_path, monk
     (vendor/'reviewed.service').write_text('[Service]\nType=oneshot\n')
     link = wants/'reviewed.service'
     link.symlink_to('../reviewed.service')
-    monkeypatch.setattr(boot, 'RECOVERY_VENDOR_ENABLED_LINKS', {
+    monkeypatch.setattr(target_install, 'RECOVERY_VENDOR_ENABLED_LINKS', {
         'multi-user.target.wants/reviewed.service': '../reviewed.service'})
     boot.install_recovery_runtime_base(root)
     link.unlink()
@@ -389,7 +390,7 @@ def test_recovery_vendor_generator_requires_exact_reviewed_bytes(tmp_path, monke
     generator = generators / 'reviewed-generator'
     generator.write_bytes(b'reviewed')
     generator.chmod(0o755)
-    monkeypatch.setattr(boot, 'RECOVERY_VENDOR_GENERATORS', {
+    monkeypatch.setattr(target_install, 'RECOVERY_VENDOR_GENERATORS', {
         generator.name: hashlib.sha256(b'reviewed').hexdigest()})
     boot.install_recovery_runtime_base(root)
     generator.write_bytes(b'changed')
@@ -803,7 +804,7 @@ def test_fedora44_runtime_can_bind_image_identity_after_verified_staging(tmp_pat
         'sockets.target.wants/dbus.socket':'/usr/lib/systemd/system/dbus.socket',
         'multi-user.target.wants/NetworkManager.service':'/usr/lib/systemd/system/NetworkManager.service'}
     monkeypatch.setattr(vendor,'FEDORA44_ETC_LINKS',links)
-    monkeypatch.setattr(boot,'_recovery_vendor_policy',lambda root: ({},{}))
+    monkeypatch.setattr(target_install,'_recovery_vendor_policy',lambda root: ({},{}))
     units=root/'etc/systemd/system'
     for name,target in links.items():
         link=units/name;link.parent.mkdir(parents=True,exist_ok=True);link.symlink_to(target)

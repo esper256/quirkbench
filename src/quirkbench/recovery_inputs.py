@@ -142,9 +142,9 @@ def generate_recipe(lock_digest,store,*,recipe_id,builder_image_digest,source_da
 def download(root,owner):
     """Execute the printed acquisition explicitly; never runs during housekeeping."""
     from .retention import connection,managed_path,register,stop_proof,ACTIVE_WORK
-    from .maintenance import private_lock
+    from .filesystem import private_lock
     from .ostree import CommandRunner
-    from .state_reader import read_file
+    from .filesystem import read_file
     root=Path(root)
     with private_lock(root/'command.lock',shared=True):
         with connection(root) as db:

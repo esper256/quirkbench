@@ -20,7 +20,7 @@ import time
 
 from .contracts import ContractError, canonical, digest, sha256
 from .product_contracts import _depth, _pairs
-from .state_reader import read_file
+from .filesystem import read_file
 
 LIMIT = 16384
 ASSET_LIMIT = 1024**4

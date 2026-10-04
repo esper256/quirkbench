@@ -44,7 +44,7 @@ def location(root,workspace_id):
 
 
 def owned_path(root,value):
-    from .controller_setup import _managed_path
+    from .filesystem import _managed_path
     path=location(root,value['workspace_id'])
     if not path.is_dir() or path.is_symlink() or path.resolve()!=path:raise Conflict('registered source workspace is missing or linked')
     info=path.lstat()

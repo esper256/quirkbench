@@ -268,20 +268,6 @@ armed watchdog; the caller must stop scheduling and report the observed state.
     return observed
 
 
-def validate_watchdog_kernel(path: str | Path, *, driver: str, lockup_detection: bool = True) -> None:
-    """Optional post-olddefconfig build gate, in addition to storage protection."""
-    from .build import BuildError, _parse_config, validate_kernel_config
-    path = Path(path)
-    validate_kernel_config(path)
-    if driver not in {"CONFIG_WDAT_WDT", "CONFIG_SP5100_TCO", "CONFIG_ITCO_WDT"}:
-        raise ValueError("watchdog driver needs profile review")
-    required = {"CONFIG_WATCHDOG", "CONFIG_WATCHDOG_CORE", "CONFIG_WATCHDOG_SYSFS", driver}
-    if lockup_detection:
-        required.update({"CONFIG_SOFTLOCKUP_DETECTOR", "CONFIG_HARDLOCKUP_DETECTOR"})
-    values = _parse_config(path)
-    missing = sorted(key for key in required if values.get(key) != "y")
-    if missing:
-        raise BuildError("watchdog qualification kernel requires built-in: " + ", ".join(missing))
 
 
 def sd_notify(message: str) -> bool:
@@ -423,3 +409,10 @@ def failure_main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(failure_main())
+
+
+def __getattr__(name):
+    if name == 'validate_watchdog_kernel':
+        from .watchdog_build import validate_watchdog_kernel
+        return validate_watchdog_kernel
+    raise AttributeError(name)

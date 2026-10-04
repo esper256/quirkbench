@@ -5,9 +5,9 @@ booting or network replay; callers own NEW binding/recovery before private proof
 """
 from pathlib import Path
 from .contracts import Conflict,canonical,digest
-from .controller_endpoint import _strict_read
-from .controller_setup import _managed_path
-from .enrollment import _document
+from .filesystem import _strict_read
+from .filesystem import _managed_path
+from .enrollment_records import _document
 
 
 def public(control,intent):

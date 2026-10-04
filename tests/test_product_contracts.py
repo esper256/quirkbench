@@ -1,4 +1,4 @@
-"""P0 fixtures freeze planned product syntax and reject unsafe documents."""
+"""Public contracts and executable syntax reject unsafe documents."""
 import json
 from pathlib import Path
 import subprocess
@@ -8,7 +8,7 @@ import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 
 from quirkbench.contracts import ContractError, canonical, digest
-from quirkbench.product_cli import parser
+from quirkbench.cli import parser
 from quirkbench.product_contracts import load_document, validate_document
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,17 +95,13 @@ def test_observation_types_and_deadline_fail_closed(kind, patch):
 
 
 @pytest.mark.parametrize("argv,expected", [
-    (["session", "start", "--device", "target-01", "--driver", "external"], {"command": "session", "action": "start", "device": "target-01", "driver": "external"}),
-    (["session", "propose", "session-01", "--file", "proposal.json", "--request-id", "r1"], {"command": "session", "action": "propose", "session_id": "session-01", "request_id": "r1"}),
-    (["session", "capture-source", "session-01", "--request-id", "r2"], {"action": "capture-source", "request_id": "r2"}),
     (["session", "respond", "session-01", "--request", "o1", "--file", "answer.json", "--request-id", "r3"], {"action": "respond", "request": "o1", "request_id": "r3"}),
-    (["target", "qualify", "target-01"], {"command": "target", "action": "qualify", "target_id": "target-01"}),
-    (["experiment", "list", "--session", "session-01", "--json"], {"command": "experiment", "action": "list", "json": True}),
-    (["evidence", "read", "a" * 64, "--offset", "0", "--length", "4096"], {"command": "evidence", "action": "read", "offset": 0, "length": 4096}),
-    (["backup", "--output", "backup-dir"], {"command": "backup", "output": Path("backup-dir")}),
+    (["experiment", "list", "--investigation", "investigation-01", "--json"], {"command": "experiment", "action": "list", "json": True}),
+    (["evidence", "read", "a" * 64, "--investigation", "investigation-01", "--length", "4096"], {"command": "evidence", "action": "read", "length": 4096}),
+    (["backup", "--output", "backup-dir"], {"command": "backup", "destination": Path("backup-dir")}),
     (["backup", "backup-dir"], {"command": "backup", "destination": Path("backup-dir")}),
 ])
-def test_planned_cli_argument_fixture(argv, expected):
+def test_executable_cli_argument_contract(argv, expected):
     args = vars(parser().parse_args(argv))
     assert {key: args[key] for key in expected} == expected
 
@@ -117,7 +113,7 @@ def test_planned_cli_argument_fixture(argv, expected):
     ["session", "start", "--device", "target-01", "--driver", "shell"],
     ["operation", "status"],
 ])
-def test_planned_cli_rejects_missing_or_unsupported_arguments(argv):
+def test_executable_cli_rejects_missing_or_unsupported_arguments(argv):
     with pytest.raises(SystemExit) as exc:
         parser().parse_args(argv)
     assert exc.value.code == 2
@@ -132,8 +128,7 @@ def test_existing_executable_does_not_claim_planned_session_works(tmp_path):
     assert not state.exists()
 
 
-def test_help_freezes_roles_and_distinct_readiness_language():
+def test_executable_help_keeps_evidence_scope_visible():
     help_text = " ".join(parser().format_help().split())
     assert "session" in help_text and "operation" in help_text
-    assert "target" in help_text and "targets" in help_text
-    assert "recovery, enrollment and experiment readiness" in help_text
+    assert "without private CAS access" in help_text

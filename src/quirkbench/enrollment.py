@@ -1,6 +1,7 @@
 """Private operator-created enrollment intents; exchange grants no boot authority."""
 from __future__ import annotations
 
+from .enrollment_records import _now, _document, validate_code
 import json
 import math
 from pathlib import Path
@@ -26,51 +27,10 @@ INSERT INTO enrollment_clock VALUES(1,0);
 LIMIT = 16384
 
 
-def _now(clock):
-    now = clock()
-    if type(now) not in (int, float) or not math.isfinite(now) or not 0 < now < 4102444800:
-        raise ContractError('known valid controller clock required for enrollment')
-    return int(now)
 
 
-def validate_code(value):
-    fields = {'schema_version', 'record_type', 'code_id', 'request_id', 'request_digest',
-              'name', 'controller_url', 'certificate_sha256', 'created_at', 'expires_at'}
-    if (not isinstance(value, dict) or set(value) != fields or type(value['schema_version']) is not int
-            or value['schema_version'] != 1 or value['record_type'] != 'enrollment-code'):
-        raise ContractError('invalid enrollment code record')
-    for name in ('code_id', 'request_id', 'name'):
-        identifier(value[name])
-    for name in ('request_digest', 'certificate_sha256'):
-        sha256(value[name])
-    from urllib.parse import urlsplit
-    url = value['controller_url']
-    if not isinstance(url, str) or len(url) > 4096:
-        raise ContractError('invalid enrollment controller endpoint')
-    parts = urlsplit(url)
-    if (parts.scheme != 'https' or not parts.hostname or parts.username or parts.password
-            or parts.path or parts.query or parts.fragment or not parts.port):
-        raise ContractError('enrollment requires an exact HTTPS controller endpoint')
-    for key in ('created_at', 'expires_at'):
-        if type(value[key]) is not int or not 0 < value[key] <= 4102444800:
-            raise ContractError('invalid enrollment code time')
-    if not 60 <= value['expires_at'] - value['created_at'] <= 900:
-        raise ContractError('enrollment code lifetime must be 60 to 900 seconds')
-    return value
 
 
-def _document(raw):
-    if not isinstance(raw, bytes) or len(raw) > LIMIT:
-        raise ContractError('enrollment private record exceeds byte limit')
-    try:
-        value = json.loads(raw, object_pairs_hook=_pairs,
-            parse_constant=lambda _: (_ for _ in ()).throw(ContractError('nonfinite enrollment JSON')))
-        _depth(value)
-    except (UnicodeError, ValueError, RecursionError) as exc:
-        raise ContractError('invalid enrollment private record') from exc
-    if raw != canonical(value):
-        raise ContractError('enrollment private record must be canonical')
-    return value
 
 
 def _snapshot(root, *, tls_inspector=None):
@@ -90,8 +50,8 @@ def _snapshot(root, *, tls_inspector=None):
 
 def create_code(controller, name, request_id, *, ttl_seconds=300, ready=None, tls_inspector=None,
                 clock=time.time, fault_hook=None):
-    from .maintenance import private_lock
-    from .controller_setup import _managed_path
+    from .filesystem import private_lock
+    from .filesystem import _managed_path
     _managed_path(controller.root)
     with private_lock(controller.root / 'command.lock', shared=True):
         return _create_code(controller,name,request_id,ttl_seconds=ttl_seconds,ready=ready,
@@ -118,14 +78,14 @@ def _create_code(controller, name, request_id, *, ttl_seconds, ready, tls_inspec
     if type(ttl_seconds) is not int or not 60 <= ttl_seconds <= 900:
         raise ContractError('enrollment code lifetime must be 60 to 900 seconds')
     from .controller_service import require_ready
-    from .controller_setup import _durable_directory, _managed_path
-    from .maintenance import private_lock
+    from .filesystem import _durable_directory, _managed_path
+    from .filesystem import private_lock
     (ready or require_ready)(controller.root)
     snapshot = _snapshot(controller.root, tls_inspector=tls_inspector)
     intent = {'schema_version': 1, 'kind': 'enrollment_code', 'request_id': request_id,
               'name': name, 'ttl_seconds': ttl_seconds, **snapshot}
     if retarget_scope is not None:
-        from .retarget_invitation import validate_scope
+        from .retarget_records import validate_scope
         retarget_scope=validate_scope(_document(canonical(retarget_scope)))
         intent={**intent,'kind':'retarget_enrollment_code','retarget_scope':retarget_scope}
     request_digest = digest(canonical(intent))
@@ -137,7 +97,7 @@ def _create_code(controller, name, request_id, *, ttl_seconds, ready, tls_inspec
         observe_clock(controller,now)
         path = directory / 'issuance.json'
         if path.exists() or path.is_symlink():
-            from .controller_tls import _read
+            from .filesystem import _read
             saved = _document(_read(directory, path.name))
             if (not isinstance(saved, dict) or set(saved) != {'schema_version','intent','record','code'}
                     or type(saved['schema_version']) is not int or saved['schema_version'] != 1

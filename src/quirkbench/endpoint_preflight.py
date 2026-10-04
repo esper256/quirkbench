@@ -8,16 +8,16 @@ import time
 
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _managed_path
-from .controller_endpoint import _strict_read
-from .enrollment import _document
-from .enrollment_proof import validate_request
+from .filesystem import _managed_path
+from .filesystem import _strict_read
+from .enrollment_records import _document
+from .enrollment_crypto import validate_request
 from .enrollment_result import validate_result
 from .enrollment_target import _storage,_media
 from .endpoint_local import pending,location,_public_retarget
 from .endpoint_generation import validate_transition,read_generation,verify_transition
 from .endpoint_probe import probe
-from .maintenance import private_lock
+from .filesystem import private_lock
 from .release_http import _remaining
 
 

@@ -16,7 +16,7 @@ import stat
 import time
 from urllib.parse import quote
 
-from .controller import controller_boot_id, validate_boot_id
+from .process_identity import controller_boot_id, validate_boot_id
 from .job_operations import STAGES
 
 

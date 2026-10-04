@@ -6,9 +6,9 @@ Original enrollment records and retarget activation remain immutable.
 from pathlib import Path
 
 from .contracts import Conflict,canonical,digest
-from .controller_endpoint import _strict_read
-from .controller_setup import _managed_path
-from .enrollment import _document
+from .filesystem import _strict_read
+from .filesystem import _managed_path
+from .enrollment_records import _document
 from .endpoint_generation import read_generation
 from .retained_inputs import entries
 

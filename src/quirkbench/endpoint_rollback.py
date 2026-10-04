@@ -5,15 +5,15 @@ import time
 
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_endpoint import _strict_read
-from .controller_setup import _managed_path
-from .enrollment import _document
+from .filesystem import _strict_read
+from .filesystem import _managed_path
+from .enrollment_records import _document
 from .enrollment_target import _storage,_media
 from .endpoint_activation import (_source_records,_expected_activation,_completion,_selection,_journal,_original_bundle)
 from .endpoint_generation import read_generation,_active
 from .endpoint_local import location,validate_intent,_public_retarget
 from .endpoint_preflight import validate_source
-from .maintenance import private_lock
+from .filesystem import private_lock
 from .release_http import _remaining
 from .store import atomic_write
 from .retained_inputs import entries

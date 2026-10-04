@@ -9,13 +9,13 @@ import configparser
 from .contracts import Conflict,ContractError,canonical,sha256
 from .job_operations import binding,current,adopt_inputs,resume
 from .job_worker import document,input_files
-from .state_reader import read_file
+from .filesystem import read_file
 from .build import BuildError
 
 
 def repository_tree(path):
     """Native OSTree must not follow any worker-controlled repository link."""
-    from .maintenance import nested_mounts
+    from .filesystem import nested_mounts
     path=Path(path)
     if path.resolve()!=path or path.is_symlink() or not path.is_dir() or nested_mounts(path):
         raise ValueError('repository path is linked or mounted')
@@ -271,7 +271,7 @@ class JobCoordinator:
                 if not peer.is_symlink() or path.readlink()!=peer.readlink(): raise ValueError('composed module link differs')
             elif peer.is_symlink() or peer.resolve()!=peer or sha256_file(path)!=sha256_file(peer):
                 raise ValueError('composed module content differs')
-        from .boot import install_candidate_runtime
+        from .target_install import install_candidate_runtime
         expected_runtime=stage/'validation-runtime';expected_runtime.mkdir(mode=0o700);install_candidate_runtime(expected_runtime)
         for path in (expected_runtime/'usr/lib/quirkbench').rglob('*'):
             if path.is_file() and not path.is_symlink():
@@ -284,7 +284,7 @@ class JobCoordinator:
         self.verify(claim)
         self.owner.record_activity(claim,{'phase':'signing','state':'ACTIVE','message':'Controller signing the validated stopped worker revision.'})
         from .compose import compose_lock
-        from .state_reader import held_parent
+        from .filesystem import held_parent
         parent=c.root
         for part in destination.parent.relative_to(c.root).parts:
             self.verify(claim);parent=parent/part

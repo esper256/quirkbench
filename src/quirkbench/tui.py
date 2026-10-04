@@ -11,7 +11,8 @@ import time
 from .contracts import ContractError, canonical
 from .monitor import duration, render_operation, render_operation_events
 from .operations import operation_response
-from .state_reader import StateReader, development_run, read_file, safe_text
+from .state_reader import StateReader, development_run, safe_text
+from .filesystem import read_file
 
 
 def timing(row, now):

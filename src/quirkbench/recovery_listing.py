@@ -7,7 +7,8 @@ import stat
 from .contracts import ContractError,sha256
 from .build import BuildError
 from .operations import operation_response
-from .state_reader import bounded_items,read_file,safe_text
+from .state_reader import bounded_items, safe_text
+from .filesystem import read_file
 
 
 def _size(root,value):

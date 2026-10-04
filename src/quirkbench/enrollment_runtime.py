@@ -1,4 +1,5 @@
 """Repository/enrollment adapters inside the existing controller service owner."""
+from .tls_primitives import _dates
 from contextlib import contextmanager
 from dataclasses import dataclass
 import ipaddress
@@ -12,8 +13,10 @@ import time
 from .contracts import Conflict,ContractError,canonical,digest
 from .enrollment_client import endpoint
 from .enrollment_service import EnrollmentService
-from .enrollment import _document,_now
-from .controller_tls import FILES,_read,_openssl,inspect_identity,load_identity
+from .enrollment_records import _document, _now
+from .controller_tls import FILES, inspect_identity, load_identity
+from .tls_primitives import _openssl
+from .filesystem import _read
 from .store import atomic_write
 
 
@@ -24,15 +27,6 @@ class Publication:
     tls_context: object = None
 
 
-def _dates(raw):
-    from email.utils import parsedate_to_datetime
-    try:
-        lines=raw.decode('ascii').strip().splitlines()
-        if len(lines)!=2 or not lines[0].startswith('notBefore=') or not lines[1].startswith('notAfter='):
-            raise ValueError()
-        return tuple(int(parsedate_to_datetime(line.split('=',1)[1]).timestamp()) for line in lines)
-    except (ValueError,TypeError,UnicodeError,OverflowError) as exc:
-        raise ContractError('invalid native listener certificate validity') from exc
 
 
 def _contexts(config, *, run,tls_inspector):
@@ -143,7 +137,7 @@ def require_enrollment(root, *, ready=None,clock=time.time):
         owner=db.execute('SELECT * FROM controller_job_service WHERE id=1').fetchone()
         capability=db.execute('SELECT * FROM controller_service_capabilities WHERE id=1').fetchone()
         epoch=db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
-    from .controller import controller_boot_id
+    from .process_identity import controller_boot_id
     if (owner is None or capability is None or owner['epoch']!=epoch or owner['boot']!=controller_boot_id()
             or not 0<=now-owner['heartbeat']<15 or not 0<=now-capability['heartbeat']<15
             or any(capability[key]!=owner[key] for key in ('epoch','boot','pid'))

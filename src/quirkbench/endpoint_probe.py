@@ -5,10 +5,10 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .contracts import Conflict,ContractError,canonical,digest
-from .controller_setup import _managed_path
-from .enrollment import _now,_document
+from .filesystem import _managed_path
+from .enrollment_records import _now, _document
 from .enrollment_activation import _bundle,_validate_native
-from .enrollment_proof import validate_request,_bytes
+from .enrollment_crypto import validate_request, _bytes
 from .enrollment_result import validate_result
 from .enrollment_target import _public
 from .endpoint_generation import verify_transition,_bundle as validate_bundle
@@ -68,8 +68,8 @@ def probe(record,source_files,destination_files,request,result,approved_certific
     exact()
     import tempfile
     from .store import atomic_write
-    from .controller_tls import _openssl
-    from .enrollment_runtime import _dates
+    from .tls_primitives import _openssl
+    from .tls_primitives import _dates
     with tempfile.TemporaryDirectory(prefix='.endpoint-validity-',dir=parent) as temporary:
         for name,raw in {'ca.pem':destination_files['ca.pem'],'controller.pem':approved_certificate_pem.encode(),
                          'repository.crt':destination_files['repository.crt']}.items():

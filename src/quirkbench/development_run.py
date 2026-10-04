@@ -9,9 +9,11 @@ import sqlite3
 import time
 
 from .contracts import ContractError, canonical, identifier, digest, sha256
-from .controller import controller_boot_id
-from .state_config import discover_state_root, canonical_user_path
-from .state_reader import development_run,read_file
+from .process_identity import controller_boot_id
+from .state_config import discover_state_root
+from .filesystem import canonical_user_path
+from .state_reader import development_run
+from .filesystem import read_file
 from .store import ArtifactStore, atomic_write
 from .development_container import DevelopmentServices
 
@@ -24,7 +26,7 @@ def validate_run(record):
     if not re.fullmatch(r'quirkbench-build-[a-z0-9-]+',run_id):raise ContractError('invalid development run name')
     if record['unit']!='qb-development-v2-'+run_id or record['work']!='work':
         raise ContractError('development run identity differs')
-    from .controller import validate_boot_id
+    from .process_identity import validate_boot_id
     import math
     validate_boot_id(record['boot_id']);sha256(record['command_sha256'])
     if type(record['started']) not in (int,float) or not math.isfinite(record['started']):

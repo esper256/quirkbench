@@ -278,7 +278,7 @@ class ComposeRunner:
             # namespace. Bubblewrap itself rejects non-root ambient caps.
             if argv[0] == "rpm-ostree" and os.geteuid() != 0:
                 argv = ["setpriv", "--inh-caps=-all", "--ambient-caps=-all", *argv]
-            from .retention import launch
+            from .process_ownership import launch
             process = launch(argv, workspace=self.workspace, cwd=cwd, env=env, stdout=subprocess.PIPE,
                                        stderr=subprocess.STDOUT, start_new_session=True)
             selector = selectors.DefaultSelector()
@@ -452,7 +452,7 @@ class FedoraComposer:
                     shutil.copyfile(inputs.artifact_paths["initramfs"], saved_initrd)
                 else:
                     extract_payload(inputs.artifact_paths["userspace"], payload, userspace=True,reserve_bytes=self.reserve_bytes)
-                    from .boot import install_candidate_runtime
+                    from .target_install import install_candidate_runtime
                     install_candidate_runtime(payload)
                     policy = payload / "usr/etc/systemd/system"
                     policy.mkdir(parents=True, exist_ok=True)

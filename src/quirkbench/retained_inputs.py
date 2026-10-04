@@ -94,9 +94,9 @@ class RetainedInputs:
 
     def check(self):
         """Fresh filesystem checks and bytes, preserving each reader's predicates."""
-        from .controller_setup import _managed_path
-        from .controller_tls import _read
-        from .state_reader import read_file
+        from .filesystem import _managed_path
+        from .filesystem import _read
+        from .filesystem import read_file
 
         for directory, present in self.directories.items():
             if _managed_path(directory).is_dir() != present:

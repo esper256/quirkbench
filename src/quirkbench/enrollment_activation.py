@@ -9,13 +9,14 @@ import time
 
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest
-from .controller_setup import _durable_directory,_managed_path
-from .controller_tls import _read,_openssl
-from .enrollment import _document,_now
+from .filesystem import _durable_directory, _managed_path
+from .filesystem import _read
+from .tls_primitives import _openssl
+from .enrollment_records import _document, _now
 from .enrollment_client import endpoint
 from .enrollment_result import validate_result
 from .enrollment_target import _storage,_saved,_media
-from .maintenance import private_lock
+from .filesystem import private_lock
 from .provisioning import activate_bundle,validate_signing_key
 from .store import atomic_write
 

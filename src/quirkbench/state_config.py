@@ -1,6 +1,7 @@
 """Read the controller state selection without creating or migrating state."""
 from __future__ import annotations
 
+from .filesystem import _lexical_ancestors, _ancestors, canonical_user_path
 import json
 import fcntl
 from functools import lru_cache
@@ -20,28 +21,10 @@ class StateConfigurationError(ContractError):
     pass
 
 
-@lru_cache(maxsize=512)
-def _lexical_ancestors(raw):
-    """Cache only immutable path syntax; callers still check the live filesystem."""
-    path=Path(raw)
-    return (path,*path.parents)
 
 
-def _ancestors(path):
-    raw=str(path)
-    # Deep/large unusual paths still work, without retaining a large layout.
-    if len(raw)>4096 or raw.count('/')>32:
-        return (path,*path.parents)
-    return _lexical_ancestors(raw)
 
 
-def canonical_user_path(path: Path) -> Path:
-    """Resolve an explicitly selected path without imposing checkout policy.
-
-    This grants no mutation or cleanup authority. Each owner still validates its
-    managed records, publication destinations and disposable staging separately.
-    """
-    return Path(path).expanduser().resolve()
 
 
 def default_state_root(state_home: Path | None = None) -> Path:

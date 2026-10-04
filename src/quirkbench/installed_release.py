@@ -9,7 +9,7 @@ import subprocess
 from .contracts import Conflict, ContractError, canonical, digest, identifier, sha256
 from .controller_install import _verified_archive, verify_installation
 from .controller_release import bounded_file, verify_statement
-from .controller_setup import _managed_path
+from .filesystem import _managed_path
 from .product_contracts import _depth, _pairs
 from .release_trust import load_bundle, ReleaseUnavailable
 from .state_config import _config_home

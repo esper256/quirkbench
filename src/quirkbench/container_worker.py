@@ -9,7 +9,7 @@ import signal
 import sys
 
 from .contracts import canonical, Conflict
-from .state_reader import read_file
+from .filesystem import read_file
 from .store import atomic_write
 
 

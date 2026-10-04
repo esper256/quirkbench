@@ -1,5 +1,6 @@
 """Authoritative state machine. Each externally visible acknowledgement follows commit."""
 from __future__ import annotations
+from .process_identity import validate_boot_id, controller_boot_id
 from contextlib import closing, contextmanager
 from dataclasses import asdict
 import base64
@@ -125,22 +126,8 @@ def uid():
     return uuid.uuid4().hex
 
 
-def validate_boot_id(value):
-    if not isinstance(value, str):
-        raise ContractError('invalid controller boot identity')
-    try:
-        parsed = str(uuid.UUID(value))
-    except (ValueError, AttributeError) as exc:
-        raise ContractError('invalid controller boot identity') from exc
-    if parsed != value:
-        raise ContractError('invalid controller boot identity')
-    return parsed
 
 
-def controller_boot_id():
-    """Identify the current kernel boot, not a target boot or machine identity."""
-    raw = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
-    return validate_boot_id(raw)
 
 
 class _LifecycleOwner:
@@ -296,7 +283,7 @@ class _LifecycleOwner:
 
     def dispatch(self, operation_id, *, stage, deadline, services):
         """Claim before requesting a service; ambiguous launch retains its unit."""
-        from .worker_service import WorkerServiceError
+        from .process_identity import WorkerServiceError
         services.preflight(self.controller.root, deadline)
         claimed = self.claim(operation_id, stage=stage, deadline=deadline,
                              worker_identity=getattr(services,'worker_identity',None))
@@ -437,7 +424,7 @@ class _LifecycleOwner:
                     (canonical(current).decode(),now if beat_changed else row['heartbeat'],now,claim['id']))
 
     def collect_activity(self, claim):
-        from .state_reader import read_file
+        from .filesystem import read_file
         stage=Path(claim['stage_dir'])
         if not stage.is_relative_to(self.controller.root/'workers'/claim['id']):
             raise ContractError('worker activity path outside claim')
@@ -566,7 +553,7 @@ class _LifecycleOwner:
 class Controller(OperatorApprovals):
     def __init__(self, root, clock=time.time, reserve_bytes=20 * 1024**3, deployment_repository=None,
                  boot_id_reader=controller_boot_id):
-        from .state_config import canonical_user_path
+        from .filesystem import canonical_user_path
         self.root = canonical_user_path(Path(root))
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.clock = clock
