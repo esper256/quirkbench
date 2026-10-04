@@ -110,3 +110,15 @@ def test_locked_stock_stages_keep_final_generator_and_unit_policy(tmp_path):
 def test_inventory_rejects_malformed_data(field,value):
     inventory=copy.deepcopy(bundled_inventory('44'));inventory[field]=value
     with pytest.raises((BuildError,ValueError)):load_inventory(canonical(inventory))
+
+
+def test_legacy_inventory_rejects_changed_data_without_explicit_profile(tmp_path,monkeypatch):
+    import importlib
+    import quirkbench.recovery_vendor as vendor
+    import quirkbench.recovery_vendor_fedora44 as legacy
+    selected=copy.deepcopy(bundled_inventory('44'))
+    selected['generators']['new-generator']='a'*64
+    with monkeypatch.context() as patch:
+        patch.setattr(vendor,'bundled_inventory',lambda release:selected)
+        with pytest.raises(BuildError,match='historical'):importlib.reload(legacy)
+    importlib.reload(legacy)
