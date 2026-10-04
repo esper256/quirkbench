@@ -4,11 +4,15 @@ FROM ${BASE_IMAGE}
 ARG BASE_IMAGE
 ARG FEDORA_RELEASE
 
-RUN printf '%s\n' "$BASE_IMAGE" | grep -Eq '^registry\.fedoraproject\.org/fedora@sha256:[0-9a-f]{64}$' \
+RUN --mount=type=secret,id=ca_bundle \
+    printf '%s\n' "$BASE_IMAGE" | grep -Eq '^registry\.fedoraproject\.org/fedora@sha256:[0-9a-f]{64}$' \
     && test -n "$FEDORA_RELEASE" \
     && . /etc/os-release \
     && test "$ID" = fedora && test "$VERSION_ID" = "$FEDORA_RELEASE" \
-    && dnf -y --setopt=install_weak_deps=False install \
+    && if [ -f /run/secrets/ca_bundle ]; then \
+         set -- --setopt=sslcacert=/run/secrets/ca_bundle; \
+       else set --; fi \
+    && dnf "$@" -y --setopt=install_weak_deps=False install \
     gcc make bc bison flex openssl-devel elfutils-libelf-devel dwarves \
     ncurses-devel perl python3 python3-gobject-base openssl util-linux cpio kmod dracut grub2-efi-x64-modules \
     grub2-tools grub2-tools-extra gdisk dosfstools mtools e2fsprogs parted \
