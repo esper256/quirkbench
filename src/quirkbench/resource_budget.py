@@ -81,6 +81,12 @@ def resolve(workload, *, cpus=None, memory_bytes=None, mode=None, available=None
     return Budget(cpus,memory_bytes)
 
 
+def disk_reserve(value, default):
+    value=default if value is None else value
+    if type(value) is not int or value<0:raise BuildError('free-space reserve must be a nonnegative byte count')
+    return value
+
+
 if __name__=='__main__':
     import argparse
     parser=argparse.ArgumentParser(description=__doc__)

@@ -967,7 +967,9 @@ def _validate_userspace_command(command: Command, workspace: Path) -> None:
         raise BuildError("userspace DESTDIR must remain under build workspace")
 
 
-def _tar_directory(directory: Path, output: Path, epoch: int) -> None:
+def _tar_directory(directory: Path, output: Path, epoch: int, *, reserve_bytes=None) -> None:
+    from .resource_budget import disk_reserve
+    reserve_bytes=disk_reserve(reserve_bytes,DISK_RESERVE)
     with tarfile.open(output, "w:xz", format=tarfile.PAX_FORMAT) as handle:
         for path in sorted(directory.rglob("*")):
             if path.is_symlink():
@@ -983,8 +985,8 @@ def _tar_directory(directory: Path, output: Path, epoch: int) -> None:
             info.uname = info.gname = ""
             info.mtime = epoch
             if path.is_file() and not path.is_symlink():
-                if shutil.disk_usage(output.parent).free - path.stat().st_size < DISK_RESERVE:
-                    raise BuildError("20 GiB reserve reached while packaging build artifact")
+                if shutil.disk_usage(output.parent).free - path.stat().st_size < reserve_bytes:
+                    raise BuildError("configured reserve reached while packaging build artifact")
                 with path.open("rb") as source:
                     handle.addfile(info, source)
             else:
@@ -1019,14 +1021,16 @@ class BuildPipeline:
                  activity: Callable[[str, str], None] | None = None,
                  controller=None, campaign_id: str | None = None,
                  incremental_cache: BuildStageCache | None = None,
-                 resume_reconciled: bool = False):
+                 resume_reconciled: bool = False, reserve_bytes=None):
         from .build import user_build_path
         workspace = user_build_path(workspace)
         controller_state = user_build_path(controller_state)
         self.workspace = workspace
         self.controller_state = controller_state
         self.repository = repository
-        self.runner = runner or BoundedRunner(workspace)
+        from .resource_budget import disk_reserve
+        self.reserve_bytes=disk_reserve(reserve_bytes,DISK_RESERVE)
+        self.runner = runner or BoundedRunner(workspace,reserve_bytes=self.reserve_bytes)
         self.activity = activity or (lambda phase, message: None)
         self.controller = controller
         self.campaign_id = campaign_id
@@ -1174,8 +1178,8 @@ class BuildPipeline:
                 return self._publish_cached(final, key)
             self._verify_environment(inputs)
             limits = ResourceLimits.from_cgroup()
-            if shutil.disk_usage(self.workspace).free < DISK_RESERVE:
-                raise BuildError("20 GiB build free-space reserve reached")
+            if shutil.disk_usage(self.workspace).free < self.reserve_bytes:
+                raise BuildError("configured build free-space reserve reached")
             stage = Path(tempfile.mkdtemp(prefix=".pending-", dir=cache))
             try:
                 if self.incremental_cache is None:
@@ -1204,8 +1208,8 @@ class BuildPipeline:
                      limits: ResourceLimits, key: str,
                      identity: dict[str, str | int]) -> dict[str, Path]:
         self._report("extract", "verifying and extracting pinned sources")
-        extracted_source = _extract_archive(inputs.kernel_source_tar, stage / "kernel-source")
-        userspace = _extract_archive(inputs.userspace_source_tar, stage / "userspace-source")
+        extracted_source = _extract_archive(inputs.kernel_source_tar, stage / "kernel-source",reserve_bytes=self.reserve_bytes)
+        userspace = _extract_archive(inputs.userspace_source_tar, stage / "userspace-source",reserve_bytes=self.reserve_bytes)
         object_dir, output_dir = stage / "kernel-obj", stage / "artifacts"
         source = extracted_source
         restored_objects = False
@@ -1325,8 +1329,8 @@ class BuildPipeline:
             return {name for name in names if f"{relative}/{name}" in EXCLUDED_CREDENTIAL_FILES}
 
         def copy_checked(source_file: str, destination_file: str) -> str:
-            if shutil.disk_usage(stage).free - Path(source_file).stat().st_size < DISK_RESERVE:
-                raise BuildError("20 GiB reserve reached while copying target sysroot")
+            if shutil.disk_usage(stage).free - Path(source_file).stat().st_size < self.reserve_bytes:
+                raise BuildError("configured reserve reached while copying target sysroot")
             return shutil.copy2(source_file, destination_file)
 
         shutil.copytree(inputs.target_sysroot, sysroot, symlinks=True,
@@ -1393,8 +1397,8 @@ class BuildPipeline:
         user_common = ("make", "-C", str(userspace), f"DESTDIR={userspace_dest}", "PREFIX=/usr")
         self._run(Command((*user_common, "all"), userspace), stage, "compile-userspace", inputs, limits, 3600)
         self._run(Command((*user_common, "install"), userspace), stage, "install-userspace", inputs, limits, 1800)
-        _tar_directory(module_tree, output_dir / "modules.tar.xz", inputs.source_date_epoch)
-        _tar_directory(userspace_dest, output_dir / "userspace.tar.xz", inputs.source_date_epoch)
+        _tar_directory(module_tree, output_dir / "modules.tar.xz", inputs.source_date_epoch,reserve_bytes=self.reserve_bytes)
+        _tar_directory(userspace_dest, output_dir / "userspace.tar.xz", inputs.source_date_epoch,reserve_bytes=self.reserve_bytes)
         if work is not None:
             if (sha256_file(inputs.kernel_source_tar) != inputs.kernel_source_sha256
                     or _tree_hash(source, excluded_paths=frozenset())

@@ -242,7 +242,7 @@ def run_worker(root,operation,epoch,generation,stage,*,prepare_only=False):
     return 0 if record['state'] in ('COMPLETE','PAYLOAD_STAGED') else 1
 
 
-def inner(kind,stage,cache):
+def inner(kind,stage,cache,*,reserve_bytes=20*1024**3):
     from .build_pipeline import BuildInputs, BuildPipeline
     from .compose import ComposeInputs,FedoraComposer
     from .job_cache import DeferredCache
@@ -254,8 +254,8 @@ def inner(kind,stage,cache):
     raw=document(stage,'worker-manifest.json')
     try:
         if kind=='build':
-            store=ArtifactStore(output/'artifacts')
-            pipeline=BuildPipeline(stage/'work',stage/'private-state',store,activity=report,
+            store=ArtifactStore(output/'artifacts',reserve_bytes=reserve_bytes)
+            pipeline=BuildPipeline(stage/'work',stage/'private-state',store,activity=report,reserve_bytes=reserve_bytes,
                                    incremental_cache=DeferredCache(cache,stage/'cache-proposals',limit=document(stage,'cache-policy.json')['cache_gib']*1024**3))
             from .worker_progress import ReportingRunner
             pipeline.runner=ReportingRunner(pipeline.runner,report)
@@ -263,7 +263,7 @@ def inner(kind,stage,cache):
             result={'outputs':{role:{'path':str((output/'artifacts/objects'/artifact.sha256).relative_to(stage)),**asdict(artifact)} for role,artifact in values.items()}}
         else:
             composer=FedoraComposer(stage/'work',stage/'unsigned-publication',controller_state=stage/'private-state',
-                event=compose_event,stage_only=True)
+                event=compose_event,stage_only=True,reserve_bytes=reserve_bytes)
             manifest=composer.compose(ComposeInputs.from_mapping(raw))
             result={'deployment':manifest.to_dict(),'repo':str(composer.staged_repo.relative_to(stage)),
                     'evidence':{role:{'path':str(path.relative_to(stage)),'sha256':manifest.provenance['build_evidence']['artifacts'][role]} for role,path in composer.evidence_files.items()}}

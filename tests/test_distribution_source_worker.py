@@ -38,7 +38,7 @@ def run(fixture, *,execute=None,verify=lambda:None):
 
 
 def injected(argv, log, **kwargs):
-    stage = Path(argv[-1])
+    stage = Path(argv[argv.index('--stage-dir')+1])
     worker.inner(stage,runner=FakeRunner(),limits=LIMITS)
     return {'exit_code':0}
 
@@ -185,7 +185,7 @@ def test_native_inner_checks_distinct_correct_base_then_uses_existing_runner(fix
     monkeypatch.setattr(worker,'read_file',fake_read)
     monkeypatch.setattr(build,'_require_container',lambda:None)
     class InjectedRunner(FakeRunner):
-        def __init__(self,workspace):super().__init__();self.workspace=workspace
+        def __init__(self,workspace,*,reserve_bytes):super().__init__();self.workspace=workspace
     monkeypatch.setattr(build_pipeline,'BoundedRunner',InjectedRunner)
     monkeypatch.setattr(build_pipeline.ResourceLimits,'from_cgroup',lambda **kwargs:LIMITS)
     worker.inner(stage)

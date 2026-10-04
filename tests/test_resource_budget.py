@@ -58,3 +58,20 @@ def test_resource_cli_is_usable_by_shell_launcher(monkeypatch,tmp_path):
         env=env,text=True,capture_output=True,timeout=10)
     assert result.returncode==0,result.stderr
     assert result.stdout.strip()==f'1 {GIB}'
+
+
+def test_small_selected_disk_reserve_reaches_packaging_and_composition(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from quirkbench.build_pipeline import _tar_directory
+    from quirkbench.compose import extract_payload,archive_rpms
+    source=tmp_path/'source';source.mkdir();(source/'program').write_bytes(b'payload')
+    monkeypatch.setattr('shutil.disk_usage',lambda _:SimpleNamespace(free=256*1024))
+    with pytest.raises(BuildError,match='reserve'):_tar_directory(source,tmp_path/'blocked.tar.xz',0)
+    archive=tmp_path/'payload.tar.xz'
+    _tar_directory(source,archive,0,reserve_bytes=64*1024)
+    destination=tmp_path/'unpacked';destination.mkdir()
+    extract_payload(archive,destination,userspace=True,reserve_bytes=64*1024)
+    assert (destination/'program').read_bytes()==b'payload'
+    rpms=tmp_path/'rpms';rpms.mkdir();(rpms/'package.rpm').write_bytes(b'package')
+    archive_rpms(rpms,tmp_path/'rpms.tar',0,reserve_bytes=64*1024)
+    assert (tmp_path/'rpms.tar').is_file()
