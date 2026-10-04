@@ -1,3 +1,4 @@
+from quirkbench import target_install
 from dataclasses import asdict
 import hashlib
 import json

@@ -206,3 +206,13 @@ only eligible candidate recipes may exercise reviewed sleep modes. The planned g
 starts with guided setup/pairing and attended operator-approved attempts. Guided backup
 completeness belongs to M5; managed scheduling and unattended grants are optional M7
 capabilities. Current manual setup and backup commands retain their stated limits.
+
+The target Python payload is the reviewed module list in `target_payload.py`, plus
+recipe metadata and target boot assets. Runtime capture and installation use the
+same list. Controller commands, database services and host installation code are
+outside that payload; shared wire validators, file operations, process recording
+and kernel policy live in shared modules. `target_install.py` owns image-side
+installation/audits. Historical Python imports remain available through aliases
+or lazy host factories; target services do not invoke those factories. Software
+checks import the payload with site packages disabled and exercise safe entrypoint
+help. This verifies packaging, not native boot readiness.
