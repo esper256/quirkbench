@@ -90,11 +90,13 @@ def configuration(root):
 
 def validate_configuration(root, config):
     """Validate the existing service contract without publishing configuration."""
-    allowed={'worker_engine','worker_image','reserve_gib','credential_registry','runtime','job_worker','host','port','cert','key','tokens_file','allow_lan','builder_image_digest','builder_config_digest','builder_archive_sha256','repositories','repository_endpoint','composition_signing','recovery_worker','recovery_signing_home','recovery_public_key','recovery_fingerprint'}
+    allowed={'worker_cgroup_manager','worker_engine','worker_image','reserve_gib','credential_registry','runtime','job_worker','host','port','cert','key','tokens_file','allow_lan','builder_image_digest','builder_config_digest','builder_archive_sha256','repositories','repository_endpoint','composition_signing','recovery_worker','recovery_signing_home','recovery_public_key','recovery_fingerprint'}
     if not isinstance(config,dict) or set(config)-allowed or not {'runtime','job_worker','cert','key'}<=set(config):
         raise ContractError('incomplete or unknown controller service configuration')
     if config.get('worker_engine','podman') not in ('podman','docker'):
         raise ContractError('worker_engine must select docker or podman')
+    if 'worker_cgroup_manager' in config and (config['worker_cgroup_manager'] not in ('systemd','cgroupfs') or config.get('worker_engine','podman')!='podman'):
+        raise ContractError('worker_cgroup_manager requires Podman systemd or cgroupfs')
     if 'worker_image' in config:
         import re
         if not isinstance(config['worker_image'],str) or not re.fullmatch('sha256:[0-9a-f]{64}',config['worker_image']):
@@ -132,12 +134,15 @@ def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--state',required=True,type=Path)
     p.add_argument('--engine',choices=['podman','docker'])
     p.add_argument('--worker-image')
+    p.add_argument('--podman-cgroup-manager',choices=['systemd','cgroupfs'])
     a=p.parse_args(argv);config=configuration(a.state)
     from .cli import main as cli
     args=['--state',str(a.state),'--reserve-gib',str(config.get('reserve_gib',20)),'serve','--host',config.get('host','127.0.0.1'),'--port',str(config.get('port',8443)),
           '--cert',config['cert'],'--key',config['key'],
           '--job-worker',config['job_worker'],'--service-runtime',config['runtime']]
     args+=['--worker-engine',a.engine or config.get('worker_engine','podman')]
+    manager=a.podman_cgroup_manager or config.get('worker_cgroup_manager')
+    if manager:args+=['--podman-cgroup-manager',manager]
     image=a.worker_image or config.get('worker_image') or config.get('builder_config_digest')
     if image: args+=['--worker-image',image]
     if config.get('credential_registry'): args.append('--credential-registry')

@@ -218,7 +218,7 @@ def run_worker(root,operation,epoch,generation,stage,*,prepare_only=False):
                 payload_pending=True
                 result={}
             else:
-                argv=['/usr/bin/bash',str(helper),'--rm','--pull=never','--network=none' if claim.kind=='build' or args.get('schema_version')==3 else '--network=slirp4netns',
+                argv=['/usr/bin/bash',str(helper),'--record-dir='+str(diagnostics/'container-command'),'--deadline='+str(claim.deadline),'--rm','--pull=never','--network=none' if claim.kind=='build' or args.get('schema_version')==3 else '--network=slirp4netns',
                       '--userns=keep-id','--security-opt=no-new-privileges',
                       '--volume',f'{stage}:{stage}:rw,z','--volume',f'{package}:{package}:ro,z',
                       '--volume',f'{cache}:{cache}:ro,z','--env',f'PYTHONPATH={package.parent}',

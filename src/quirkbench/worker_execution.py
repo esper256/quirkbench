@@ -19,12 +19,16 @@ def validate(record, root):
     required = {'schema_version', 'unit', 'engine', 'engine_identity', 'claim',
                 'worker_image', 'reserve_bytes', 'payload_args', 'executions', 'phase', 'complete', 'monotonic_deadline'}
     if (not isinstance(record, dict) or not required <= set(record)
-            or set(record)-required-{'stopped','bootstrap'} or type(record['schema_version']) is not int
-            or record['schema_version'] not in (2,3)):
+            or set(record)-required-{'stopped','bootstrap','cgroup_manager'} or type(record['schema_version']) is not int
+            or record['schema_version'] not in (2,3,4)):
         raise ContractError('invalid container execution journal')
-    bootstrap = record['schema_version'] == 3
-    if ('bootstrap' in record) != bootstrap or (bootstrap and record['bootstrap'] is not True):
+    bootstrap = record.get('bootstrap',False)
+    if (record['schema_version']==2 and 'bootstrap' in record) or (record['schema_version']==3 and not bootstrap) or ('bootstrap' in record and record['bootstrap'] is not True):
         raise ContractError('invalid bootstrap journal version')
+    if record['schema_version']==4:
+        if record['engine']!='podman' or record.get('cgroup_manager') not in ('systemd','cgroupfs'):
+            raise ContractError('invalid recorded Podman manager')
+    elif 'cgroup_manager' in record:raise ContractError('manager requires versioned execution journal')
     if (not isinstance(record['unit'],str) or not UNIT.fullmatch(record['unit'])
             or record['engine'] not in ('docker','podman')
             or not isinstance(record['engine_identity'],str)
@@ -73,12 +77,26 @@ def validate(record, root):
     for execution in executions:
         required={'name','image','phase','start_requested'}
         if (not isinstance(execution,dict) or not required<=set(execution)
-                or set(execution)-required-{'id','stopped','removed','log_sha256'}
+                or set(execution)-required-{'id','stopped','removed','log_sha256','bounds','cgroup','payload_released'}
                 or not isinstance(execution['name'],str)
                 or not re.fullmatch('qb-[0-9a-f]{32}',execution['name'])
                 or execution['phase'] not in PHASES[1:]):
             raise ContractError('invalid container execution identity')
         image(execution['image'])
+        extra={'bounds','cgroup','payload_released'} & set(execution)
+        if record['schema_version']!=4 and extra:raise ContractError('containment requires versioned execution journal')
+        if record['schema_version']==4:
+            bounds=execution.get('bounds')
+            if (not isinstance(bounds,dict) or set(bounds)!={'cpus','memory','pids'}
+                    or any(type(v) is not int or v<=0 for v in bounds.values())
+                    or bounds['cpus']>128 or bounds['pids']!=4096):
+                raise ContractError('invalid recorded container bounds')
+            if 'cgroup' in execution:
+                from .container_containment import container_group
+                try:container_group(execution.get('id',''),'0::'+execution['cgroup'])
+                except (TypeError,ValueError,RuntimeError) as exc:raise ContractError('invalid recorded container cgroup') from exc
+            if 'payload_released' in execution and (execution['payload_released'] is not True or 'cgroup' not in execution):
+                raise ContractError('payload release requires recorded kernel containment')
         if 'log_sha256' in execution: sha256(execution['log_sha256'])
         if 'id' in execution and (not isinstance(execution['id'],str) or not re.fullmatch('[0-9a-f]{64}',execution['id'])):
             raise ContractError('invalid immutable container ID')

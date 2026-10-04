@@ -112,7 +112,8 @@ def prepare(root,stage,value,builder,verify,report,deadline, *,execute=None,stag
             package = Path(__file__).resolve().parent
             # Container UID 0 maps to the rootless controller user. No host privilege
             # or device is passed; installroot writes are confined to private output.
-            argv = ['/usr/bin/bash',str(package/'run-bounded-podman.sh'),'--rm','--pull=never','--network=none',
+            argv = ['/usr/bin/bash',str(package/'run-bounded-podman.sh'),
+                '--record-dir='+str(stage/'diagnostics/container-command'),'--deadline='+str(deadline),'--timeout=7200','--rm','--pull=never','--network=none',
                 '--user=0','--security-opt=no-new-privileges',
                 '--volume',f'{inputs}:/workspace/inputs:ro,z','--volume',f'{output}:/workspace/output:rw,z',
                 '--volume',f'{package}:/workspace/code/quirkbench:ro,z','--env','PYTHONPATH=/workspace/code',

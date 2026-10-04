@@ -321,6 +321,7 @@ def parser():
     foreground.add_argument('--recipe',required=True)
     foreground.add_argument('--builder-image',required=True,help='exact local sha256 image configuration ID from the verified recipe')
     foreground.add_argument('--engine',choices=('podman','docker'),default='podman')
+    foreground.add_argument('--podman-cgroup-manager',choices=['systemd','cgroupfs'])
     foreground.add_argument('--output',type=Path,required=True,help='new output directory (checkout-local paths are allowed)')
     foreground.add_argument('--cpus',type=int,help='explicit CPU budget within effective capacity (default: interactive profile)')
     foreground.add_argument('--memory-gib',type=int,help='explicit GiB budget; default recovery profile is 4 GiB')
@@ -380,7 +381,9 @@ def parser():
     foreground = commands.add_parser('controller-run',help='run the configured controller in the foreground; no host service manager')
     foreground.add_argument('--engine',choices=['podman','docker'],default=None)
     foreground.add_argument('--worker-image',help='exact local worker image configuration ID (sha256:...)')
+    foreground.add_argument('--podman-cgroup-manager',choices=['systemd','cgroupfs'],help='deliberate Podman manager override; otherwise use its configuration')
     serve.add_argument('--worker-engine',choices=['podman','docker'],default='podman')
+    serve.add_argument('--podman-cgroup-manager',choices=['systemd','cgroupfs'])
     serve.add_argument('--worker-image',help='exact local worker image configuration ID (sha256:...)')
     serve.add_argument('--job-worker',type=Path,help='installed fixed build/compose worker')
     serve.add_argument('--service-runtime',type=Path,help=argparse.SUPPRESS)
@@ -406,6 +409,7 @@ def _main(argv=None):
         options=['--state',str(discover_state_root(args.state))]
         if args.engine: options+=['--engine',args.engine]
         if args.worker_image: options+=['--worker-image',args.worker_image]
+        if args.podman_cgroup_manager:options+=['--podman-cgroup-manager',args.podman_cgroup_manager]
         return run_controller(options)
     if args.command=='publication':
         from .publication_setup import configure
@@ -1333,14 +1337,14 @@ def _main(argv=None):
                             raise ValueError('recovery coordinator requires explicit signing trust and worker configuration')
                         from .worker_service import ContainerWorkerServices
                         from .recovery_coordinator import RecoveryImageCoordinator
-                        services=ContainerWorkerServices(worker_program=args.recovery_worker.resolve(),engine=args.worker_engine,worker_image=args.worker_image)
+                        services=ContainerWorkerServices(worker_program=args.recovery_worker.resolve(),engine=args.worker_engine,worker_image=args.worker_image,cgroup_manager=args.podman_cgroup_manager)
                         coordinator=RecoveryImageCoordinator(owner,services,signing_home=args.recovery_signing_home,
                             trusted_public_key=args.recovery_public_key,fingerprint=args.recovery_fingerprint)
                     jobs=None
                     if args.job_worker is not None:
                         from .worker_service import ContainerWorkerServices
                         from .job_coordinator import JobCoordinator
-                        services=ContainerWorkerServices(worker_program=args.job_worker.resolve(),development=True,engine=args.worker_engine,worker_image=args.worker_image)
+                        services=ContainerWorkerServices(worker_program=args.job_worker.resolve(),development=True,engine=args.worker_engine,worker_image=args.worker_image,cgroup_manager=args.podman_cgroup_manager)
                         jobs=JobCoordinator(owner,services)
                     from .controller_compute import ComputeGate
                     compute=ComputeGate(owner,[item for item in (coordinator,jobs) if item is not None])
@@ -1405,6 +1409,7 @@ def main(argv=None):
         from .recovery_bundle_cli import run
         return run(args)
     if args.command in ('recovery-image-build','recovery-image-cleanup'):
+        from .process_identity import WorkerServiceError
         from .recovery_foreground import build,cleanup
         from .build import BuildError
         import subprocess
@@ -1412,9 +1417,9 @@ def main(argv=None):
             answer=(cleanup(args.output) if args.command=='recovery-image-cleanup' else
                     build(cas_root=args.store,recipe_sha256=args.recipe,image=args.builder_image,
                           output=args.output,engine=args.engine,cpus=args.cpus,
-                          memory_gib=args.memory_gib,timeout=args.timeout,reserve_gib=args.free_space_reserve_gib))
+                          memory_gib=args.memory_gib,timeout=args.timeout,reserve_gib=args.free_space_reserve_gib,cgroup_manager=args.podman_cgroup_manager))
             print(json.dumps(answer,sort_keys=True));return 0
-        except (BuildError,OSError,ValueError,KeyError,subprocess.TimeoutExpired) as exc:
+        except (BuildError,WorkerServiceError,OSError,ValueError,KeyError,subprocess.TimeoutExpired) as exc:
             print('Recovery image unavailable: '+str(exc),file=sys.stderr);return 2
     readonly=((args.command=='recovery-inputs' and args.action in ('replay-check','candidate-spec')) or args.command in ('storage','experiment','build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
                                'target','endpoint','target-service','serve-repository','release-check') or

@@ -64,7 +64,7 @@ def readiness(root):
         reconciliation = 'clear'
         config = configuration(root)
         services = ContainerWorkerServices(engine=config.get('worker_engine', 'podman'),
-            worker_image=config.get('worker_image') or config.get('builder_config_digest'))
+            worker_image=config.get('worker_image') or config.get('builder_config_digest'),cgroup_manager=config.get('worker_cgroup_manager'))
         services.preflight(root, time.time() + 60)
         return {'compute_ready': True, 'worker_reconciliation': 'clear', 'compute_instructions': []}
     except (OSError, ValueError, WorkerServiceError, sqlite3.Error) as exc:

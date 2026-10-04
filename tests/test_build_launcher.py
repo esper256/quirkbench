@@ -12,10 +12,22 @@ from test_container_workers import Engine,IMAGE
 
 class Podman(Engine):
     def __call__(self,argv,timeout):
+        if argv==['podman','--remote=false','info','--format','json']:
+            return json.dumps({'host':{'cgroupManager':'cgroupfs','cgroupVersion':'v2'}})
         assert argv[:3]==['podman','--remote=false','--cgroup-manager=cgroupfs']
         args=argv[3:]
+        if args==['info','--format','json']:
+            return json.dumps({'host':{'cgroupManager':'cgroupfs','cgroupVersion':'v2'}})
         if args[0]=='info' and args[-1]=='{{.Host.Security.Rootless}}':return 'true'
         return super().__call__(['docker',*args],timeout)
+
+
+@pytest.fixture(autouse=True)
+def kernel_fixture(monkeypatch):
+    from quirkbench.resource_budget import Capacity
+    monkeypatch.setattr('quirkbench.resource_budget.capacity',lambda:Capacity(8,16*1024**3))
+    monkeypatch.setattr('quirkbench.container_containment.capture',lambda value,identity,*a,**k:'/libpod-'+identity)
+    monkeypatch.setattr('quirkbench.container_containment.stopped',lambda *a,**k:None)
 
 
 @pytest.mark.parametrize('option',['--detach','--privileged','--cpus=99','--memory=999g','--pid=host','--name=foreign','--replace','--restart=always'])
@@ -33,7 +45,7 @@ def test_ad_hoc_build_retains_output_after_verified_container_stop(tmp_path,monk
     run=json.loads((stage.parent/'run.json').read_bytes());engine=Podman()
     service=DevelopmentServices(c.root,runner=engine)
     def execute(argv,log,**kwargs):
-        assert argv[3:5]==['start','--attach']
+        assert argv[3:5]==['logs','--follow']
         log.write_bytes(b'compiled fixture\n');(stage/'result').write_bytes(b'retained artifact')
         return {'exit_code':0}
     monkeypatch.setattr('quirkbench.recovery_worker.execute_rootfs',execute)
