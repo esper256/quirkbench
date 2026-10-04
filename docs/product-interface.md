@@ -69,10 +69,9 @@ never a checkout-local fallback. Setup creates state; queries never initialize i
 New persistent state and build staging must be outside Git checkouts. Preserve
 explicit `--state` and low-level commands for development and existing data. Do not
 silently migrate or merge an existing `.quirkbench` directory into another identity.
-Terminal exit leaves services running. Setup reports logout behavior and offers
-explicit instructions for optional lingering; it never enables it implicitly. Sleep
-interrupts availability, and reboot restarts reporting/reconciliation with scheduling
-paused. No promise of work executing while powered off. Keep C2 ownership epochs,
+Run the controller in an attended foreground session. Terminal exit ends controller
+availability; daemon packaging is deferred. Sleep interrupts availability, and the
+next explicit start reconciles earlier execution with scheduling paused. No promise of work executing while powered off. Keep C2 ownership epochs,
 worker fencing and bounded cleanup; a second CLI cannot become another scheduler.
 
 Manual `monitor` is a read-only TUI client of existing operation/campaign records,

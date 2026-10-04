@@ -44,7 +44,9 @@
       "tests/test_endpoint_generation.py",
       "tests/test_endpoint_activation.py",
       "tests/test_controller_endpoint.py",
-      "tests/test_controller_tls.py"
+      "tests/test_controller_tls.py",
+      "tests/test_endpoint_migration.py",
+      "tests/test_endpoint_facade.py"
     ]
   },
   "endpoint-retarget": {

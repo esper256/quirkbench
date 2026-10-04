@@ -197,7 +197,7 @@ def parser():
     preferences = commands.add_parser('settings', help='show or configure local retention preferences')
     preferences.add_argument('action', choices=['show','set'])
     preferences.add_argument('key', nargs='?'); preferences.add_argument('value', type=int, nargs='?')
-    commands.add_parser('setup-check', help='inspect user service availability without changing host settings')
+    commands.add_parser('setup-check', help='inspect foreground controller tools without changing host settings')
     install = commands.add_parser('controller-install', help='verify an immutable development archive; optionally activate the idle controller')
     install.add_argument('archive', type=Path, nargs='?')
     install.add_argument('--activate', action='store_true')
@@ -566,9 +566,9 @@ def _main(argv=None):
                 for key,label in [('identity_sha256','Identity SHA256'),('certificate_sha256','Certificate SHA256'),('controller_url','Controller'),('repository_url','Repository'),('switch_sha256','Switch SHA256')]:
                     if answer.get(key) is not None:print(label+': '+answer[key])
                 if args.action=='show':print('Recorded public identity; current reachability remains separate.')
-                elif args.action in ('stage','renew'):print('Identity staged with the existing CA. Apply its exact identity and fingerprint with the controller user service stopped.')
+                elif args.action in ('stage','renew'):print('Identity staged with the existing CA. Apply its exact identity and fingerprint with the foreground controller stopped.')
                 else:print('Configuration restored.' if answer['rolled_back'] else 'Configuration applied.')
-                if args.action!='show':print('Start the existing controller user service when ready, then use recovery endpoint maintenance for each target. Reachability and target migration remain separate.')
+                if args.action!='show':print('Run controller-run when ready, then use recovery endpoint maintenance for each target. Reachability and target migration remain separate.')
             return 0
         except (OSError,ValueError,RuntimeError,sqlite3.Error) as exc:
             code,status=(('UNAVAILABLE',4) if isinstance(exc,SetupUnavailable) else ('CONFLICT',3) if isinstance(exc,Conflict) else ('INVALID_INPUT',2) if isinstance(exc,ContractError) else ('INFRASTRUCTURE',5))

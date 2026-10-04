@@ -172,7 +172,7 @@ def import_builder(root, args, stage, verify, report, deadline, *, execute=None,
     if read_file(image.parent, image.name, limit=256).strip() != args['builder_config_digest'].encode():
         raise ContractError('imported builder image differs from signed config identity')
     helper = Path(__file__).resolve().parent / 'run-bounded-podman.sh'
-    report('builder-preflight', 'Checking the builder base marker in the bounded delegated service.')
+    report('builder-preflight', 'Checking the builder base marker in the bounded container.')
     marker = command(['/usr/bin/bash', str(helper), '--rm', '--pull=never', '--network=none',
                       '--userns=keep-id', '--security-opt=no-new-privileges', args['builder_config_digest'],
                       '/usr/bin/cat', '/etc/quirkbench-base-digest'], 'builder-marker.log', 60)

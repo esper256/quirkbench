@@ -137,3 +137,42 @@ def test_same_boot_legacy_worker_is_not_relabelled_as_a_stopped_container(worker
     with pytest.raises(WorkerServiceError,match='legacy worker'):
         service.stop_and_verify('quirkbench-worker-'+'a'*32+'-1.service',BOOT)
     assert engine.calls==[]
+
+
+def test_clock_rollback_cannot_extend_worker_elapsed_deadline(worker):
+    c,service,_=worker
+    elapsed=[100.0]
+    service.monotonic=lambda:elapsed[0]
+    with c.lifecycle() as owner:
+        claim=launch(c,owner,service)
+        record=service._load(claim['worker_unit'])
+        service.clock=lambda:claim['deadline']-3600
+        elapsed[0]=161.0
+        with pytest.raises(WorkerServiceError,match='expired'):
+            service._current(record)
+        service.stop_and_verify(claim['worker_unit'],BOOT)
+
+
+def test_preparation_hides_configured_secrets_and_authoritative_execution_journal(worker,monkeypatch):
+    from quirkbench.worker_container_plan import plan
+    c,service,_=worker
+    (c.root/'private').mkdir(exist_ok=True)
+    key=c.root/'signing.key';key.write_text('private signing bytes')
+    monkeypatch.setattr('quirkbench.controller_service.configuration',lambda _: {'reserve_gib':0,'key':str(key)})
+    with c.lifecycle() as owner:
+        claim=launch(c,owner,service)
+        record=service._load(claim['worker_unit'])
+        spec=plan(service,record,'prepare')
+        # Resolve the most specific mount visible at each sensitive location.
+        def visible(path):
+            matches=[(source,target,mode) for source,target,mode in spec['mounts']
+                     if path==target or path.is_relative_to(target)]
+            source,target,mode=max(matches,key=lambda item:len(item[1].parts))
+            return source/path.relative_to(target),mode
+        mapped,mode=visible(service._path(record['unit']))
+        assert mapped!=service._path(record['unit']) and mode.startswith('ro')
+        assert '/handshake-prepare/' in str(mapped)
+        masked,mode=visible(key)
+        assert masked.read_bytes()==b'' and mode.startswith('ro')
+        assert any(str(c.root/'private') in option for option in spec['options'])
+        service.stop_and_verify(claim['worker_unit'],BOOT)

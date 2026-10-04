@@ -1,4 +1,4 @@
-"""Fixed candidate package assembly inside the existing delegated job service.
+"""Fixed candidate package assembly inside the bounded job container.
 
 This adapter stages an unpublished sysroot. It has no database, signing, image
 publication, target execution or operator approval authority.

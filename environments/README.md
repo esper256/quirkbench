@@ -140,22 +140,17 @@ headroom can reject a requested job count. This heuristic does not guarantee pea
 linker memory consumption; cgroups enforce the actual bounds. Controller resource
 reserves still apply, and explicit `jobs=1` stays serial. Do not edit a running run's inputs.
 
-The service calls `environments/run-bounded-podman.sh` with the supplied locked
-image, mounts and command arguments. The helper verifies its
-service cgroup and limits (including the controller's half-resource bound),
-enables CPU/memory/task accounting below that unit,
-then starts rootless Podman with a child cgroup under the exact service. Its
-child limits match the service limits so `podman stats` shows a useful memory
-denominator. A missing delegation or limit fails before Podman starts. Keep
-the service's `RuntimeMaxSec` and a unique private stage/log/exit-status record
-for each build; do not reuse a running build's stage or unit. The service
-remains the aggregate limit and shutdown boundary, while `podman stats` reports
-the container payload. This helper is for development/kernel builds; recovery
-rootfs workers still use their separate fixed command and fenced claim.
+The starter creates one foreground rootless Podman container with CPU, memory,
+swap, task and elapsed-time bounds, using the cgroupfs manager. It verifies the
+engine's recorded limits before starting. `podman stats` reports that container's
+resource use. The container is the aggregate limit and shutdown boundary, including
+detached descendants. Each build has a unique stage, log and exit-status record;
+do not reuse a running build's stage or identity. Recovery workers retain their
+separate fixed command and fenced claim.
 
-Keep unique container names and inspect stopped units and container state before
-reusing any staging. A stopped process can leave an exited container record; handle
-its cleanup separately from proving whole-unit termination.
+Interrupted launch acknowledgements retain the recorded creation name and immutable
+container identity for reconciliation. Artifact retention verifies whole-container
+shutdown before removing the stopped container and making work eligible for cleanup.
 
 The builder includes Fedora source-preparation macros and JSON Schema validation.
 Changing its Containerfile requires recapturing the builder identity and package locks;
@@ -170,7 +165,7 @@ stage. It mounts only staged code, the two input files and staged CAS read-only,
 plus a private staged output directory writable. Those private copies may be
 relabelled with Podman's `:Z` bind option; original source and CAS labels are
 untouched. The command uses a local nonroot Podman process with no network,
-host device or broad home mount, private PID/IPC/UTS namespaces and disabled
+host device or broad home mount, private PID/IPC/UTS namespaces and bounded
 Podman cgroups. It has no arbitrary command or extra-flag parameter.
 Its derived image config ID, retained builder archive, catalog and rootfs lock
 must match the current worker operation's immutable input record. The existing
@@ -180,12 +175,14 @@ The planner verifies an OCI archive's sole manifest, expected x86-64/Linux
 config and referenced layer hashes before returning an argv. A rebuilt builder
 needs its own newly retained archive, image ID and operation input record.
 
-The controller user-service adapter now requests `CPUQuota=400%`,
-`MemoryMax=4G`, `MemorySwapMax=0` and `TasksMax=4096` and checks the
-resulting cgroup files before accepting a launch. Rootfs dispatch still needs
-durable logs and input/exit identities, plus proof that launcher, conmon and
-payload stay in that cgroup through fenced termination. The command plan does
-not execute a product operation. Stock v2 recovery uses its retained recipe/lock instead of a candidate catalog.
+The controller container adapter requests at most four CPUs (and half the host's
+reported CPUs), 4 GiB memory, no extra swap and 4096 tasks, then checks the engine's
+recorded bounds before accepting a launch. Every phase has a fixed entry point and
+elapsed deadline; the journal records the engine, immutable container ID and claim.
+The owner verifies whole-container termination and retains bounded logs before
+publishing results or reusing resources. The command plan alone does not execute a
+product operation. Stock v2 recovery uses its retained recipe/lock instead of a
+candidate catalog.
 Admit only complete selected inputs; Distrobox is not a worker prerequisite.
 
 After the initial container and Fedora target rootfs are populated, run
