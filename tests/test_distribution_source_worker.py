@@ -56,7 +56,7 @@ def test_joined_fixed_native_plan_and_private_distribution_import(fixture):
     command = commands[0]
     assert '--network=none' in command and '--pull=never' in command and '--userns=keep-id' in command
     assert '--security-opt=no-new-privileges' in command
-    assert command[-5:] == ['/usr/bin/python3','-m','quirkbench.distribution_source_worker','--stage-dir',str(stage/'distribution')]
+    assert command[-7:] == ['/usr/bin/python3','-m','quirkbench.distribution_source_worker','--stage-dir',str(stage/'distribution'),'--reserve-bytes','0']
     mounts = [command[n+1] for n,value in enumerate(command) if value == '--volume']
     assert len(mounts) == 2 and mounts[0] == f'{stage}/distribution:{stage}/distribution:rw,z'
     assert not any(str(root/'private') in item or str(root/'artifacts') in item or 'controller.sqlite' in item for item in command)
