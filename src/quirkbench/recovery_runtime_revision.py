@@ -8,6 +8,7 @@ import re
 from .build import BuildError, sha256_file
 from .contracts import canonical, sha256
 from .product_contracts import _pairs
+from .target_payload import TARGET_MODULES
 
 
 MAX_MANIFEST_BYTES = 64 * 1024
@@ -58,7 +59,7 @@ def capture_runtime_revision(package_dir: Path, assets_dir: Path) -> dict:
             or not assets_dir.is_dir() or assets_dir.is_symlink()):
         raise BuildError("recovery runtime source directories missing")
     files = []
-    for source in (*package_dir.glob("*.py"), *package_dir.glob("recipes/*.json"),
+    for source in (*(package_dir / (name+".py") for name in TARGET_MODULES), *package_dir.glob("recipes/*.json"),
                    *(assets_dir / name for name in RUNTIME_ASSETS)):
         if source.is_symlink() or not source.is_file():
             raise BuildError("recovery runtime source must be a regular file")

@@ -10,13 +10,13 @@ import subprocess
 import time
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,canonical,digest,identifier,sha256
-from .controller_setup import _managed_path
-from .controller_tls import _read
-from .enrollment import _document,_now
+from .filesystem import _managed_path
+from .filesystem import _read
+from .enrollment_records import _document, _now
 from .enrollment_client import endpoint
-from .enrollment_proof import validate_challenge
+from .enrollment_crypto import validate_challenge
 from .enrollment_target import _storage,_media,_prepare_at,_sign_at,_intent,_saved
-from .maintenance import private_lock
+from .filesystem import private_lock
 from .retarget_local import pending_intent,_location,_capture_source,validate_source,_private_journal
 from .release_http import _remaining
 from .retained_inputs import RetainedInputs
@@ -177,7 +177,7 @@ def _verify_original_ca(pending,original,pem,private_intent,guard,run):
     import ipaddress
     import ssl
     import tempfile
-    from .controller_tls import _openssl
+    from .tls_primitives import _openssl
     from .contracts import ContractError
     from .store import atomic_write
     host,_=endpoint(private_intent['controller_url'])
@@ -207,7 +207,7 @@ def exchange(control,config,request_id,controller_url,approved_certificate_pem,a
     """
     import re
     from .contracts import ContractError
-    from .controller_setup import _durable_directory
+    from .filesystem import _durable_directory
     from .enrollment_activation import _validate_native,_bundle,_retain_bundle
     from .enrollment_client import PinnedEnrollmentClient
     from .enrollment_result import validate_result

@@ -1,6 +1,7 @@
 """Shared resumable controller setup and read-only readiness services."""
 from __future__ import annotations
 
+from .filesystem import _managed_path, _durable_directory
 import os
 import re
 import shutil
@@ -14,8 +15,10 @@ from typing import Callable, Mapping
 
 from .contracts import Conflict, ContractError, canonical, digest, identifier
 from .setup_contracts import MAX_SETUP_BYTES, STEPS, load_progress, validate_intent, validate_progress
-from .state_config import _ancestors, _config_home, configure_state_root, discover_state_root, default_state_root, canonical_user_path
-from .state_reader import StateReader, read_file
+from .filesystem import _ancestors, canonical_user_path
+from .state_config import _config_home, configure_state_root, discover_state_root, default_state_root
+from .state_reader import StateReader
+from .filesystem import read_file
 from .store import atomic_write, sync_directory
 
 
@@ -68,32 +71,8 @@ def inspect_user_manager(*, runner: Callable = _run, uid: int | None = None,
 
 
 
-def _managed_path(path):
-    """Canonical user-owned application directory; no blanket permission policy."""
-    path = Path(path).expanduser().absolute()
-    if any(part.is_symlink() for part in _ancestors(path)):
-        raise ContractError('setup paths cannot contain symlinks')
-    path = canonical_user_path(path)
-    if path == Path('/'):
-        raise ContractError('setup path cannot be filesystem root')
-    if path.exists():
-        info = path.stat()
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
-            raise ContractError('setup directory must be user-owned')
-    from .retained_inputs import observe_directory
-    observe_directory(path)
-    return path
 
 
-def _durable_directory(path):
-    missing = []
-    parent = path
-    while not parent.exists():
-        missing.append(parent)
-        parent = parent.parent
-    for item in reversed(missing):
-        item.mkdir(mode=0o700)
-        sync_directory(item.parent)
 
 
 def _database_present(root):
@@ -331,7 +310,7 @@ def controller_status(root=None, *, config_home=None, filesystem=None,
 
 @contextmanager
 def _state_guard(root, filesystem):
-    from .maintenance import private_lock
+    from .filesystem import private_lock
     from .controller_install import _idle
     with private_lock(root / 'command.lock'):
         if _database_present(root):
@@ -359,7 +338,7 @@ def setup_controller(root=None, *, request_id=None, runtime_root=None, cache_gib
                      reserve_gib=None, host=None, port=None, allow_lan=None, logout_policy=None,
                      config_home=None, filesystem=None, fault_hook=None, **status_adapters):
     """Persist intent before synchronous setup effects and reconcile on every retry."""
-    from .maintenance import private_lock
+    from .filesystem import private_lock
     from .controller_install import configuration, verify_installation
     filesystem = filesystem or SetupFilesystem()
     fault_hook = fault_hook or (lambda _: None)

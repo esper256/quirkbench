@@ -3,11 +3,12 @@
 This authority permits enrollment only. Local one-shot clearance, old spool
 archival, reset invalidation and atomic activation remain separate requirements.
 """
+from .retarget_records import validate_scope, validate_invitation
 import time
 from .binding import system_uuid
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
 from .credential_registry import _document as generation_document
-from .enrollment import _document,validate_code
+from .enrollment_records import _document, validate_code
 from .target_lifecycle import require_reconciled_target
 
 MIGRATION='''
@@ -20,31 +21,8 @@ CREATE TABLE retarget_invitation_scopes(
 '''
 
 
-def validate_scope(value):
-    fields={'schema_version','old_device_id','old_generation','old_generation_sha256','media_instance_id',
-        'old_target_binding','new_target_binding'}
-    if not isinstance(value,dict) or set(value)!=fields or type(value['schema_version']) is not int or value['schema_version']!=1:
-        raise ContractError('invalid exact retarget invitation scope')
-    for key in ('old_device_id','old_generation','media_instance_id'):identifier(value[key])
-    sha256(value['old_generation_sha256'])
-    for key in ('old_target_binding','new_target_binding'):
-        binding=value[key]
-        if not isinstance(binding,dict) or set(binding)!={'schema_version','system_uuid'} or type(binding['schema_version']) is not int or binding['schema_version']!=1:
-            raise ContractError('invalid retarget binding')
-        system_uuid(binding['system_uuid'])
-    if value['old_target_binding']==value['new_target_binding']:raise Conflict('retarget invitation requires a different explicit hardware binding')
-    return value
 
 
-def validate_invitation(value):
-    if (not isinstance(value,dict) or set(value)!={'schema_version','record_type','code','scope','boot_authorized','one_shot_cleared','old_evidence_drained'}
-            or type(value['schema_version']) is not int or value['schema_version']!=1 or value['record_type']!='retarget-invitation'):
-        raise ContractError('invalid retarget invitation')
-    validate_code(value['code']);validate_scope(value['scope'])
-    for key in ('boot_authorized','one_shot_cleared','old_evidence_drained'):
-        if value[key] is not False:raise ContractError('retarget invitation cannot claim local or physical completion')
-    _document(canonical(value))
-    return value
 
 
 def _scope_guard(db,scope, *,completed_generation=None):
@@ -128,10 +106,10 @@ def validate_reply_authority(result,request,authority):
 def create_invitation(controller,target,generation,new_name,new_uuid,request_id, *,ttl_seconds=300,
                       ready=None,tls_inspector=None,clock=time.time,fault_hook=None):
     """Explicit local operator decision, never an agent proposal or automatic revoke."""
-    from .controller_setup import _managed_path
+    from .filesystem import _managed_path
     from .enrollment import _create_code
     from .enrollment_runtime import require_enrollment
-    from .maintenance import private_lock
+    from .filesystem import private_lock
     from .target_setup import resolve_target_identity
     for value in (target,generation,new_name,request_id):identifier(value)
     system_uuid(new_uuid);root=_managed_path(controller.root)
@@ -152,7 +130,8 @@ def create_invitation(controller,target,generation,new_name,new_uuid,request_id,
 
 def issue(root,target,generation,new_name,new_uuid,request_id, **kwargs):
     """Configured existing-state facade; missing setup never initializes a database."""
-    from .controller_setup import _managed_path,_database_present
+    from .filesystem import _managed_path
+    from .controller_setup import _database_present
     from .controller import Controller
     from .setup_contracts import SetupUnavailable
     root=_managed_path(root)

@@ -7,7 +7,8 @@ import tarfile
 from .contracts import Conflict,ContractError,canonical,sha256
 from .source_workspace import validate as validate_workspace,owned_path
 from .source_capture import capture as capture_source,validate_capture,_path
-from .state_reader import StateReader,read_file
+from .state_reader import StateReader
+from .filesystem import read_file
 
 KIND='source_capture'
 STAGE='source_capture'
@@ -27,7 +28,7 @@ def binding(intent):
 
 
 def workspace(root,intent,operation_id):
-    from .enrollment import _document
+    from .enrollment_records import _document
     args=binding(intent);reader=StateReader(root)
     value=validate_workspace(_document(reader.store.get(args['workspace_sha256'])))
     if value['campaign_id']!=intent['campaign_id']:raise Conflict('source operation campaign differs from workspace')
@@ -74,7 +75,7 @@ def _entry(value):
 def verify_tree(store,result, *,expected_paths=None,verify=lambda:None):
     """Independently join bounded manifest identities to serialized source members."""
     from .source_capture import MAX_MANIFEST
-    from .enrollment import _document
+    from .enrollment_records import _document
     manifest_path=store.path(result['manifest_sha256']);archive_path=store.path(result['archive_sha256'])
     if store.verify(result['manifest_sha256'])>MAX_MANIFEST:raise ContractError('source manifest exceeds bounds')
     store.verify(result['archive_sha256'])

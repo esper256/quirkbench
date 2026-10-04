@@ -177,7 +177,8 @@ def enforce_resume(db,campaign):
 
 
 def execute(root,args, *,ready=None):
-    from .state_reader import StateReader,read_file,QUERY_BYTES
+    from .state_reader import StateReader, QUERY_BYTES
+    from .filesystem import read_file
     from .controller import Controller
     from .operations import operation_response
     from .investigation_sources import source_status

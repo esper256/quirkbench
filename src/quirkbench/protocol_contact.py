@@ -3,7 +3,7 @@ import hmac
 
 from .contracts import identifier,digest
 from .credential_registry import _document
-from .enrollment import _now
+from .enrollment_records import _now
 
 MIGRATION='''
 CREATE TABLE protocol_contacts(

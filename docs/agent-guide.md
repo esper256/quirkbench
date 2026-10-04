@@ -211,8 +211,8 @@ physical deadline or grant approval.
 
 Remaining first-usable commands are tracked in [#29](https://github.com/esper256/quirkbench/issues/29).
 [C8](product-interface.md#public-cli-and-sessions) owns their intended contract; installed
-help is the available-command reference. The older `product_cli.py` remains a frozen
-specification fixture.
+help is the available-command reference. CLI contract tests exercise that executable
+parser; there is no separate planning parser.
 
 ## Recovery hardware input
 

@@ -10,16 +10,16 @@ import time
 from .binding import read_system_uuid,verify_binding
 from .boot import clear_once
 from .contracts import Conflict,ContractError,Result,canonical,digest,identifier,sha256
-from .controller_setup import _managed_path,_durable_directory
-from .controller_tls import _read
-from .enrollment import LIMIT,_document
+from .filesystem import _managed_path, _durable_directory
+from .filesystem import _read
+from .enrollment_records import LIMIT, _document
 from .enrollment_target import _storage
-from .maintenance import private_lock
-from .state_reader import read_file
-from .state_config import canonical_user_path
+from .filesystem import private_lock
+from .filesystem import read_file
+from .filesystem import canonical_user_path
 from .store import atomic_write,sync_directory
 from .target import read_sealed_evidence
-from .target_shutdown import validate_intent,validate_preparation
+from .shutdown_records import validate_intent, validate_preparation
 from .product_contracts import _depth,_pairs
 
 UNIT='quirkbench-supervisor.service'
@@ -179,7 +179,7 @@ def retain(control,config,request, *,verify_target,binding_reader=read_system_uu
 
 
 def _service(run, *,self_owned,before_stop=False,cgroup_root=Path('/sys/fs/cgroup')):
-    from .worker_service import verify_empty_cgroup
+    from .process_identity import verify_empty_cgroup
     result=run(['systemctl','show',UNIT,*['--property='+name for name in ('LoadState','ActiveState','MainPID','KillMode','ControlGroup','Job')]],check=False,capture_output=True,text=True,timeout=10)
     if result.returncode or not isinstance(result.stdout,str) or len(result.stdout)>16384:raise Conflict('native supervisor state unavailable')
     fields={}
@@ -207,7 +207,7 @@ def _service(run, *,self_owned,before_stop=False,cgroup_root=Path('/sys/fs/cgrou
 
 
 def _stop(run,cgroup_root):
-    from .worker_service import verify_empty_cgroup
+    from .process_identity import verify_empty_cgroup
     before=_service(run,self_owned=False,before_stop=True,cgroup_root=cgroup_root)
     stopped=run(['systemctl','stop',UNIT],check=False,capture_output=True,timeout=45)
     if stopped.returncode:raise Conflict('could not stop existing target supervisor; shutdown blocked')

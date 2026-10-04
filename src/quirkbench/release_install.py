@@ -8,10 +8,11 @@ import time
 from .contracts import Conflict, ContractError, canonical, digest, identifier
 from .controller_install import install
 from .controller_release import bounded_file, verify_statement
-from .controller_setup import _durable_directory, _managed_path
-from .maintenance import private_lock
+from .filesystem import _durable_directory, _managed_path
+from .filesystem import private_lock
 from .release_trust import load_bundle
-from .state_config import _config_home, canonical_user_path
+from .state_config import _config_home
+from .filesystem import canonical_user_path
 from .store import atomic_write
 
 

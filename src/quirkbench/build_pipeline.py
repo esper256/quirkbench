@@ -385,7 +385,7 @@ class BoundedRunner:
         deadline = time.monotonic() + timeout_s
 
         with log.open("xb") as output:
-            from .retention import launch
+            from .process_ownership import launch
             process = launch(command.argv, workspace=self.workspace, cwd=command.cwd, env=env,
                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                        start_new_session=True)

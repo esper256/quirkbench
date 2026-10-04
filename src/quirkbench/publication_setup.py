@@ -4,18 +4,22 @@ from pathlib import Path
 import subprocess
 
 from .contracts import Conflict,ContractError,canonical,digest,identifier
-from .controller_setup import _managed_path,_durable_directory,_database_present
-from .controller_endpoint import _strict_read
+from .filesystem import _managed_path, _durable_directory
+from .controller_setup import _database_present
+from .filesystem import _strict_read
 from .controller_service import configuration,validate_configuration
-from .enrollment import _document,_snapshot
+from .enrollment_records import _document
+from .enrollment import _snapshot
 from .enrollment_client import endpoint
 from .enrollment_credentials import export_public_key
-from .maintenance import private_lock
+from .filesystem import private_lock
 from .publication_setup_contracts import STEPS,load,validate
 from .setup_contracts import SetupUnavailable
-from .state_reader import StateReader,read_file
+from .state_reader import StateReader
+from .filesystem import read_file
 from .store import atomic_write
-from .controller_tls import FILES as TLS_FILES,load_identity,_read as tls_read
+from .controller_tls import FILES as TLS_FILES, load_identity
+from .filesystem import _read as tls_read
 
 FILES={'source_configuration_sha256':'source.json','destination_configuration_sha256':'destination.json','public_key_sha256':'key.asc'}
 
@@ -177,7 +181,7 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
                 from .job_coordinator import repository_tree
                 repository_tree(repo)
             else:
-                from .maintenance import nested_mounts
+                from .filesystem import nested_mounts
                 # Before native init, an unconfigured continuation must still be
                 # empty and unmounted. Unknown partial contents need operator
                 # reconciliation; init must never follow or overwrite them.

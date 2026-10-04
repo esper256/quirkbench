@@ -7,10 +7,11 @@ import time
 import uuid
 
 from .contracts import ContractError, canonical, digest, identifier
-from .controller import controller_boot_id
-from .state_reader import read_file
+from .process_identity import controller_boot_id
+from .filesystem import read_file
 from .store import atomic_write
-from .worker_service import ContainerWorkerServices, WorkerServiceError, LABEL
+from .worker_service import ContainerWorkerServices, LABEL
+from .process_identity import WorkerServiceError
 
 
 def arguments(values):

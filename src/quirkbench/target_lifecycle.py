@@ -8,7 +8,8 @@ import json
 import time
 
 from .contracts import Conflict, ContractError, canonical, digest, identifier
-from .enrollment import _document, _now, row_code
+from .enrollment_records import _document, _now
+from .enrollment import row_code
 
 MIGRATION = '''
 ALTER TABLE attempts ADD COLUMN credential_generation TEXT REFERENCES credential_generations(generation);
@@ -82,8 +83,9 @@ def revoke_target(root,target,request_id=None, *, generation=None,action='revoke
     capability. The shared command lock preserves restore/maintenance exclusion.
     """
     from .controller import Controller
-    from .controller_setup import _managed_path,_database_present
-    from .maintenance import private_lock
+    from .filesystem import _managed_path
+    from .controller_setup import _database_present
+    from .filesystem import private_lock
     from .setup_contracts import SetupUnavailable
     identifier(target)
     if action not in ('revoke','revoke-code'):raise ContractError('invalid target revocation action')

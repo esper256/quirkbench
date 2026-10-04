@@ -11,8 +11,9 @@ import threading
 from contextlib import contextmanager
 
 from .contracts import Conflict,ContractError
-from .controller import controller_boot_id
-from .state_reader import StateReader,read_file
+from .process_identity import controller_boot_id
+from .state_reader import StateReader
+from .filesystem import read_file
 
 UNIT='quirkbench-controller.service'
 

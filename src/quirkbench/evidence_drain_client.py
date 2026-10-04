@@ -5,7 +5,7 @@ import ssl
 import time
 
 from .contracts import Conflict,ContractError
-from .evidence_drain import validate_grant
+from .evidence_drain_records import validate_grant
 from .transport import MAX_CHUNK,MAX_BODY,TransportError,_strict_json
 from .enrollment_client import endpoint
 from .release_http import _response,_length,_remaining

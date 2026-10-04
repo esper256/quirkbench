@@ -8,11 +8,11 @@ import sys
 
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _managed_path,_durable_directory
-from .controller_tls import _read
-from .enrollment import _document
+from .filesystem import _managed_path, _durable_directory
+from .filesystem import _read
+from .enrollment_records import _document
 from .enrollment_target import _storage
-from .maintenance import private_lock,nested_mounts
+from .filesystem import private_lock, nested_mounts
 from .store import atomic_write,sync_directory
 
 PROFILES=Path('/etc/NetworkManager/system-connections')

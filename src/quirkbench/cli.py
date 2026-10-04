@@ -440,7 +440,7 @@ def _main(argv=None):
     if args.command == 'recovery-inputs' and args.action == 'replay-check':
         from .recovery_replay import check_replay
         from .recovery_acquisition import load_spec, MAX_SPEC
-        from .state_reader import read_file
+        from .filesystem import read_file
         try:
             path = args.spec.expanduser().absolute()
             selected = load_spec(read_file(path.parent.resolve(strict=True), path.name, limit=MAX_SPEC))
@@ -605,8 +605,9 @@ def _main(argv=None):
                 answer=issue(root,args.name,args.generation,args.new_name,args.new_uuid,request_id,
                     ttl_seconds=args.ttl_seconds if args.ttl_seconds is not None else 300)
             elif args.action=='drain-approve':
-                from .evidence_drain import approve,load,validate_plan
-                from .state_reader import read_file
+                from .evidence_drain import approve
+                from .evidence_drain_records import load, validate_plan
+                from .filesystem import read_file
                 if not request_id:raise ContractError('target drain-approve requires an explicit --request-id')
                 path=args.file.expanduser().absolute()
                 plan=validate_plan(load(read_file(path.parent,path.name,limit=65536)))
@@ -897,7 +898,7 @@ def _main(argv=None):
                 if not args.run_id or args.dry_run:
                     raise ValueError('retain-run requires RUN_ID and does not accept --dry-run')
                 from .development_run import retain
-                from .maintenance import private_lock
+                from .filesystem import private_lock
                 with private_lock(root/'coordinator.lock'), private_lock(root/'build.lock'):
                     answer=retain(root,args.run_id,outputs=args.output,abandon=args.abandon)
             else:
@@ -1229,7 +1230,7 @@ def _main(argv=None):
                 if args.action=='acquire-plan':
                     from .retention import managed_path,register
                     from .recovery_acquisition import load_spec,stage_spec,freeze_legacy_spec,MAX_SPEC
-                    from .state_reader import read_file
+                    from .filesystem import read_file
                     spec=load_spec(read_file(args.spec.resolve().parent,args.spec.name,limit=MAX_SPEC)) if args.spec else freeze_legacy_spec()
                     directory=managed_path(controller.root,args.directory.resolve())
                     if directory.exists(): raise ValueError('acquisition requires a fresh inputs directory')
@@ -1237,7 +1238,7 @@ def _main(argv=None):
                     (directory/'rpms').mkdir(mode=0o700)
                     stage_spec(spec,directory)
                     from .store import atomic_write
-                    from .controller import controller_boot_id
+                    from .process_identity import controller_boot_id
                     import os
                     atomic_write(directory/'process-groups.json',canonical({'boot':controller_boot_id(),'pid_namespace':os.readlink('/proc/self/ns/pid'),'groups':[]}))
                     spec_digest=controller.store.put(canonical(spec)).sha256
@@ -1250,7 +1251,7 @@ def _main(argv=None):
                     from .retention import verified_acquisition,work,published
                     verified_acquisition(controller.root,args.directory.resolve())
                     from .recovery_acquisition import load_spec,MAX_SPEC
-                    from .state_reader import read_file
+                    from .filesystem import read_file
                     from .recovery_acquisition import completed_spec
                     spec=completed_spec(controller.root,args.directory.resolve())
                     if args.spec:
@@ -1427,7 +1428,8 @@ def main(argv=None):
     try:
         root=discover_state_root(args.state).expanduser().absolute()
         if not (root/'controller.sqlite').is_file(): return _main(argv)
-        from .maintenance import private_lock,prune
+        from .filesystem import private_lock
+        from .maintenance import prune
         from .contracts import Conflict
         # Abandonment must exclude the acquisition claim-to-launch interval.
         exclusive = args.command == 'maintenance' and args.action in ('abandon','abandon-upload')

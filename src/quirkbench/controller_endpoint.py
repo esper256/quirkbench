@@ -1,4 +1,5 @@
 """Private retained-CA endpoint certificate staging; no service/trust activation."""
+from .filesystem import _strict_read
 from pathlib import Path
 import os
 import subprocess
@@ -6,11 +7,13 @@ import tempfile
 import time
 
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _managed_path,_durable_directory,_database_present
-from .controller_tls import (FILES,_read,_openssl,validate_identity,load_identity,
-    inspect_identity,_lineage,_generate_material,_inspect_material)
-from .enrollment import _document,_now
-from .maintenance import private_lock
+from .filesystem import _managed_path, _durable_directory
+from .controller_setup import _database_present
+from .controller_tls import FILES, validate_identity, load_identity, inspect_identity, _lineage, _generate_material, _inspect_material
+from .tls_primitives import _openssl
+from .filesystem import _read
+from .enrollment_records import _document, _now
+from .filesystem import private_lock
 from .release_http import _remaining
 from .setup_contracts import SetupUnavailable
 from .store import atomic_write
@@ -33,12 +36,6 @@ def validate_intent(value):
     _now(lambda:value['created_at']);return value
 
 
-def _strict_read(directory,name):
-    info=(directory/name).lstat()
-    if info.st_nlink!=1:raise ContractError('endpoint TLS inputs must remain single-link')
-    from .retained_inputs import observe_policy
-    observe_policy(directory/name,single_link=True)
-    return _read(directory,name)
 
 
 def _dates(captured, *,run,temporary_parent):

@@ -12,7 +12,7 @@ import time
 from urllib.parse import urlsplit
 
 from .contracts import Conflict, ContractError, canonical, digest, sha256
-from .enrollment import _now
+from .enrollment_records import _now
 from .transport import TransportError, _strict_json
 from .product_contracts import _depth
 from .http_bounds import BoundedHTTPError

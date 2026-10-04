@@ -12,7 +12,8 @@ from pathlib import Path
 import stat
 
 from .contracts import ContractError, canonical, digest, identifier, sha256
-from .state_reader import QUERY_BYTES, LOG_BYTES, bounded_items, read_file
+from .state_reader import QUERY_BYTES, LOG_BYTES, bounded_items
+from .filesystem import read_file
 
 
 def investigation(reader, name):
@@ -192,7 +193,7 @@ def proposal_schema(reader,name):
 
 @contextmanager
 def object_parent(path):
-    from .state_reader import held_parent
+    from .filesystem import held_parent
     with held_parent(path) as (fd,guard):
         yield fd
         guard()

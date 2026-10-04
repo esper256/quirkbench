@@ -16,7 +16,7 @@ import shutil
 import subprocess
 from urllib.parse import urlsplit
 
-from .build import validate_kernel_config
+from .kernel_policy import validate_kernel_config
 from .contracts import ContractError, canonical, identifier, sha256
 from .deployment import DeploymentManifest, PreparedDeployment
 from .store import atomic_write, StoragePressure, sync_directory
@@ -69,7 +69,7 @@ class CommandRunner:
 
     def __call__(self, argv):
         start = time.monotonic()
-        from .retention import launch
+        from .process_ownership import launch
         try:
             process = launch(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              start_new_session=True)

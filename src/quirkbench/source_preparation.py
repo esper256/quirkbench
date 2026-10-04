@@ -11,7 +11,7 @@ import hashlib
 import stat
 
 from .contracts import Conflict,ContractError,canonical,identifier,sha256
-from .controller_setup import _managed_path
+from .filesystem import _managed_path
 from .source_capture import capture,_git,_directory_owner,validate_capture
 from .source_operation import verify_tree
 

@@ -25,7 +25,7 @@ def metadata_bytes(store,identity,limit=1<<20):
     from .recovery_podman import _metadata_object
     from .store import ArtifactStore
     from .build import BuildError
-    from .state_reader import held_parent
+    from .filesystem import held_parent
     root=store.root if isinstance(store,ArtifactStore) else store.root/'artifacts'
     try:
         with held_parent(root/'objects'/identity) as (_,guard):
@@ -139,7 +139,7 @@ def recipe_scope(reader,proposal):
 
 def availability(reader,refs):
     """Presence/fence only for large source bytes; stopped capture already verified them."""
-    from .state_reader import held_parent
+    from .filesystem import held_parent
     for identity in sorted(refs):
         path=reader.root/'artifacts'/'objects'/identity
         try:
@@ -269,8 +269,9 @@ def usage(reader,name):
 
 def execute(root,args):
     from .controller import Controller
-    from .state_reader import StateReader,read_file
-    from .maintenance import private_lock
+    from .state_reader import StateReader
+    from .filesystem import read_file
+    from .filesystem import private_lock
     from .operations import operation_response
     reader=StateReader(root)
     if args.action=='proposals':return operation_response(data=pending(reader,args.name,after=args.after,limit=args.limit))

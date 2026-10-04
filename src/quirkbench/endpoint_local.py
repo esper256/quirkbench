@@ -7,16 +7,16 @@ import time
 
 from .binding import read_system_uuid,verify_binding,BindingError
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_setup import _managed_path,_durable_directory
-from .controller_endpoint import _strict_read
-from .enrollment import _document
+from .filesystem import _managed_path, _durable_directory
+from .filesystem import _strict_read
+from .enrollment_records import _document
 from .enrollment_activation import _bundle
 from .enrollment_client import endpoint
-from .enrollment_proof import validate_request
+from .enrollment_crypto import validate_request
 from .enrollment_result import validate_result
 from .enrollment_target import _storage,_media
 from .endpoint_generation import read_generation,_active,transition,validate_transition
-from .maintenance import private_lock
+from .filesystem import private_lock
 from .release_http import _remaining
 from .store import atomic_write
 

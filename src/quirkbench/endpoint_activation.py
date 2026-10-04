@@ -9,21 +9,21 @@ import time
 
 from .binding import read_system_uuid,verify_binding
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
-from .controller_endpoint import _strict_read
-from .controller_setup import _managed_path
-from .enrollment import _document
+from .filesystem import _strict_read
+from .filesystem import _managed_path
+from .enrollment_records import _document
 from .enrollment_activation import _bundle
-from .enrollment_proof import validate_request
+from .enrollment_crypto import validate_request
 from .enrollment_result import validate_result
 from .enrollment_target import _media,_intent
 from .endpoint_generation import read_generation,verify_transition,transition,_active
 from .endpoint_local import location
 from .endpoint_preflight import owned,validate_source
 from .endpoint_probe import probe
-from .maintenance import private_lock
+from .filesystem import private_lock
 from .provisioning import _publish_generation
 from .store import atomic_write
-from .state_reader import read_file
+from .filesystem import read_file
 from .retained_inputs import entries
 
 
