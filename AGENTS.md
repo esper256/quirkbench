@@ -60,8 +60,9 @@ this revised contract rather than ask the owner to approve the same decision aga
 
 - Keep existing wire names (`device_id`), CLI options (`--device`, network `--host`)
   and schema meanings. Incompatible changes require versioned readers/migrations.
-- Reuse the controller database, attempt state machine and native systemd user-service
-  ownership of rootless workers. Preserve state and unrelated uncommitted work.
+- Reuse the controller database and attempt state machine. Systemd is optional;
+  preserve worker identity, bounded resources, whole-worker shutdown and restart
+  fencing through the selected supervisor. Preserve state and unrelated uncommitted work.
 - Follow the [storage policy](docs/architecture.md#storage-protection-policy).
   Recovery uses stock Fedora packages, DNF5 installroot, dracut and the existing
   GRUB/GPT assembler; its storage operations are boot-device-only. Candidate kernels

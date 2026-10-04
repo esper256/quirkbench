@@ -12,7 +12,7 @@ from .store import atomic_write
 
 
 def build_stock_image(recipe_digest,store,output,*,runner=None,limits=None,
-                      rootfs_installer=None,image_builder=None):
+                      rootfs_installer=None,image_builder=None,reserve_bytes=20*1024**3):
     from .build_pipeline import BoundedRunner,ResourceLimits
     from .recovery_synthesis import prepare_recovery_image_stage,assemble_recovery_image
     recipe=load_recipe(store.get(recipe_digest))
@@ -26,9 +26,13 @@ def build_stock_image(recipe_digest,store,output,*,runner=None,limits=None,
     stage=output/'image-stage'
     options={} if rootfs_installer is None else {'rootfs_installer':rootfs_installer}
     prepared=prepare_recovery_image_stage(recipe,None,store,stage,output/'recovery.img',
-        runner=ReportingRunner(runner or BoundedRunner(stage),progress),
+        runner=ReportingRunner(runner or BoundedRunner(stage,reserve_bytes=reserve_bytes),progress),
         progress=progress,limits=limits or ResourceLimits(4,4*1024**3,1),**options)
     progress('image-assembly','Assembling the external-media disk image.')
+    if image_builder is None:
+        from functools import partial
+        from .image import create_image
+        image_builder = partial(create_image, reserve_bytes=reserve_bytes)
     assembled=assemble_recovery_image(recipe,None,store,prepared['initramfs'],prepared['image_inputs'],
         image_builder=image_builder)
     # Paths in the worker's namespace are not authority for coordinator reads.

@@ -440,3 +440,54 @@ native shutdown nor watchdog qualification. Before removing media, confirm actua
 physical poweroff locally. Pending uploads can remain durable on the USB and are
 never described as acknowledged. Native acceptance remains the separately authorized
 operator gate [#43](https://github.com/esper256/quirkbench/issues/43).
+
+## Foreground image generation
+
+`recovery-image-build` generates an unsigned stock recovery image without systemd,
+a running controller, target enrollment or signing credentials. It uses the same
+verified RPM inputs, DNF5 installroot, dracut audits and regular-file GRUB/GPT
+assembler as managed image preparation. Docker and local Podman are supported
+container engines; no privileged container or physical device mount is requested.
+Systemd is optional host integration under the revised C2 contract. Remaining
+controller background adapter portability is tracked in #92.
+
+First build the [Fedora tool image](../environments/README.md), inspect its exact
+local configuration ID (`docker image inspect --format '{{.Id}}' IMAGE` or
+`podman image inspect --format '{{.Id}}' IMAGE`), and use that `sha256:...` identity
+for the existing `recovery-inputs lock` and `recipe` commands above. The builder
+must be Linux amd64 with no entrypoint. Keep the selected RPM closure and public
+key; [retained RPM replay](recovery-rpm-replay.md) works when moving repositories
+have dropped exact versions. Locking verifies every RPM against the selected key.
+
+```sh
+quirkbench recovery-image-build --engine docker \
+  --store /SELECTED_STATE/artifacts --recipe ACTUAL_RECIPE_SHA256 \
+  --builder-image sha256:ACTUAL_CONFIG_ID \
+  --output /absolute/new-image-build --memory-gib 4 --timeout 3600
+```
+
+The default CPU cap reserves half the visible CPUs, up to four; `--cpus` selects
+an explicit cap. The builder needs at least 4 GiB and enforces the existing
+half-host CPU/RAM reserve, so smaller hosts should use suitable limits before
+building. `--free-space-reserve-gib` defaults to 2 for foreground builds; dracut
+staging checks that reserve continuously, and assembly additionally requires twice
+the image's size for image/temporary files. This is independent of the controller's
+state-storage reserve. Existing managed build callers retain their existing default.
+The output directory must be new and outside Git. The command copies only the
+recipe's selected inputs, mounts those copies read-only, runs an offline bounded
+container, verifies it has stopped, and exports `recovery.img`, its manifest,
+checksum and unsigned candidate record. The image checksum is checked after export.
+The container's deadline remains active if the terminal disappears. `build.log`
+and `build.json` record diagnostics and the unique container identity. A successful
+build removes its stopped container. Failure retains it for diagnosis, with no
+completed-build claim; use the recorded engine's `cp`/`logs` commands to retrieve
+private staging diagnostics if needed. Explicit cleanup stops/verifies/removes
+only that recorded container and preserves files:
+
+```sh
+quirkbench recovery-image-cleanup /absolute/new-image-build
+```
+
+A generated image is unqualified and untested on hardware. Foreground generation
+neither signs/publishes a release nor authorizes flashing, commissioning or an
+experiment. Existing managed operations and their stored records remain compatible.

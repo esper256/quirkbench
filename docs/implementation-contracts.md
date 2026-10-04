@@ -306,14 +306,24 @@ An operation deadline/failure never releases a physical attempt fence or invents
 its terminal result. Use the existing uncertain-attempt/recovery reconciliation
 rules for a target that may still be executing, and retain late evidence.
 
-The controller user service manager (systemd user services) owns the coordinator
-and rootless container workers, not the initiating
-CLI, terminal, agent turn or a bare `Popen` child. Controller setup must verify
-that management facility before accepting background work. Report whether logout,
-sleep and reboot stop it; never promise power-loss continuity or silently change
-controller power policy, enable lingering, open a firewall or install host packages.
-Bind only the operator-configured LAN interfaces. Missing host prerequisites produce
-exact setup instructions. No additional scheduler/database or polling AI process.
+Systemd is optional integration, never a mandatory host prerequisite. The owner
+explicitly removed the earlier systemd-only requirement in #89. A supported
+supervisor must establish worker identity, bounded resources, complete descendant
+shutdown and restart reconciliation before accepting background work; a PID alone
+is insufficient. Preserve the existing lifecycle lock, epoch/claim fences and
+publication transactions independently of the chosen supervisor. Report whether
+logout, sleep and reboot stop work; never promise power-loss continuity or silently
+change controller power policy, enable lingering, open a firewall or install host
+packages. Bind only operator-configured LAN interfaces. No additional scheduler,
+database or polling AI process is required.
+
+Foreground artifact generation may run independently of controller services and
+state. The recovery builder reuses the fixed stock pipeline in an explicitly pinned
+Podman or Docker container with resource limits, a whole-container deadline, isolated
+staging, read-only input mounts and verified shutdown. It exports unsigned,
+unqualified artifacts only; it has no signing, controller publication, target or
+attempt authority. Interrupted builds retain their container identity and diagnostics
+for explicit cleanup. This does not advertise unsupported background capabilities.
 
 Progress uses existing Activity/Progress semantics. Default queries return at most
 100 events or 64 KiB of summaries; evidence reads use explicit byte ranges and

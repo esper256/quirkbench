@@ -347,8 +347,16 @@ class CommandRunner(Protocol):
 class BoundedRunner:
     """Stream bounded logs; kill a timed-out process group; preserve failure."""
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, *, reserve_bytes=DISK_RESERVE):
+        if type(reserve_bytes) is not int or reserve_bytes < 0:
+            raise BuildError('free-space reserve must be a nonnegative byte count')
         self.workspace = workspace
+        self.reserve_bytes = reserve_bytes
+
+    def check_space(self):
+        free = shutil.disk_usage(self.workspace).free
+        if free < self.reserve_bytes:
+            raise BuildError(f'build free-space reserve reached: free={free}, reserve={self.reserve_bytes} bytes')
 
     def run(self, command: Command, *, phase: str, log: Path,
             timeout_s: int, env: dict[str, str], limits: ResourceLimits,
@@ -371,8 +379,7 @@ class BoundedRunner:
             _validate_command(command)
         if timeout_s < 1 or timeout_s > 24 * 3600:
             raise BuildError("command timeout must be 1..86400 seconds")
-        if shutil.disk_usage(self.workspace).free < DISK_RESERVE:
-            raise BuildError("20 GiB build free-space reserve reached")
+        self.check_space()
         log.parent.mkdir(parents=True, exist_ok=True)
         object_count = byte_count = 0
         truncated = False
@@ -391,8 +398,7 @@ class BoundedRunner:
                 while selector.get_map():
                     if time.monotonic() >= deadline:
                         raise TimeoutError(f"{phase} exceeded {timeout_s}s")
-                    if shutil.disk_usage(self.workspace).free < DISK_RESERVE:
-                        raise BuildError("20 GiB build free-space reserve reached")
+                    self.check_space()
                     for key, _ in selector.select(timeout=1):
                         block = os.read(key.fileobj.fileno(), 65536)
                         if not block:

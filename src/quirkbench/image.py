@@ -389,7 +389,16 @@ def _prepare_data(inputs, directory, config):
     return prepared.deployment_id, prepared.revision, release, health_digest, panic_candidate_id, load_failure_candidate_id
 
 
-def _create_image(inputs: ImageInputs) -> Path:
+def _check_image_space(directory, size_mib, reserve_bytes):
+    if type(reserve_bytes) is not int or reserve_bytes < 0:
+        raise ImageError('free-space reserve must be a nonnegative byte count')
+    required = size_mib*MIB*2 + reserve_bytes
+    free = shutil.disk_usage(directory).free
+    if free < required:
+        raise ImageError(f'image build needs {required} free bytes including reserve={reserve_bytes}; available={free}')
+
+
+def _create_image(inputs: ImageInputs, *, reserve_bytes=20*1024**3) -> Path:
     """Publish image bytes durably, then sidecar checksum and manifest last.
 
     A failed build leaves no published image. An image with missing manifest is
@@ -421,8 +430,7 @@ def _create_image(inputs: ImageInputs) -> Path:
                                     capture_runtime_revision(package, assets))
         except BuildError as exc:
             raise ImageError('staged recovery runtime differs from image builder') from exc
-    if shutil.disk_usage(inputs.output.parent).free < inputs.size_mib*MIB*2+20*1024**3:
-        raise ImageError('image build would breach 20 GiB free-space reserve')
+    _check_image_space(inputs.output.parent, inputs.size_mib, reserve_bytes)
     parts=partition_layout(inputs.size_mib,inputs.root_mib)
     disk_guid=str(uuid.uuid4())
     for part in parts:part['partuuid']=str(uuid.uuid4())
@@ -526,7 +534,7 @@ def _input_identity(inputs):
     return hashlib.sha256(canonical(values)).hexdigest()
 
 
-def _create_image_locked(inputs: ImageInputs, *, lock_timeout_s=60) -> Path:
+def _create_image_locked(inputs: ImageInputs, *, lock_timeout_s=60, reserve_bytes=20*1024**3) -> Path:
     if not inputs.output.is_absolute() or not inputs.output.parent.is_dir():
         raise ImageError('image output requires an existing absolute parent')
     with image_lock(Path(str(inputs.output)+'.lock'), timeout_s=lock_timeout_s):
@@ -541,14 +549,16 @@ def _create_image_locked(inputs: ImageInputs, *, lock_timeout_s=60) -> Path:
             atomic_write(manifest,canonical(record))
             journal.unlink();sync_directory(inputs.output.parent)
             return manifest
-        return _create_image(inputs)
+        return _create_image(inputs, reserve_bytes=reserve_bytes)
 
 
-def create_image(inputs: ImageInputs, *, event=None, lock_timeout_s=60) -> Path:
+def create_image(inputs: ImageInputs, *, event=None, lock_timeout_s=60, reserve_bytes=20*1024**3) -> Path:
+    if type(reserve_bytes) is not int or reserve_bytes < 0:
+        raise ImageError('free-space reserve must be a nonnegative byte count')
     token=_image_event.set(event)
     _emit('image-assembly', status='running')
     try:
-        result=_create_image_locked(inputs,lock_timeout_s=lock_timeout_s)
+        result=_create_image_locked(inputs,lock_timeout_s=lock_timeout_s,reserve_bytes=reserve_bytes)
         _emit('image-assembly', status='complete')
         return result
     except BaseException as exc:
