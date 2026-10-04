@@ -82,7 +82,9 @@ def prepare(root, stage, entry, builder, epoch, workspace_id, verify, report, de
         guard(); atomic_write(source/'manifest.json',canonical({'schema_version':1,'entry':entry,'source_date_epoch':epoch})); guard()
         if stage_only: return {'payload_staged':True}
         package = Path(__file__).resolve().parent
-        argv = ['/usr/bin/bash',str(package/'run-bounded-podman.sh'),'--workload=preparation','--rm','--pull=never','--network=none',
+        from .container_containment import command_directory
+        argv = ['/usr/bin/bash',str(package/'run-bounded-podman.sh'),'--workload=preparation',
+            '--record-dir='+str(command_directory(root,stage)),'--deadline='+str(deadline),'--timeout=7200','--rm','--pull=never','--network=none',
             '--userns=keep-id','--security-opt=no-new-privileges',
             '--volume',f'{source}:{source}:rw,z','--volume',f'{package}:{package}:ro,z',
             '--env',f'PYTHONPATH={package.parent}','--env','PYTHONDONTWRITEBYTECODE=1',builder['builder_config_digest'],

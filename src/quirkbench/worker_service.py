@@ -37,7 +37,7 @@ def _run(argv, timeout=30):
 class ContainerWorkerServices:
     def __init__(self, *, worker_program=None, engine='podman', worker_image=None,
                  runner=_run, boot_id_reader=controller_boot_id, clock=time.time,
-                 development=False, monotonic=time.monotonic, resource_options=None):
+                 development=False, monotonic=time.monotonic, resource_options=None, cgroup_manager=None):
         self.worker_program = worker_program  # compatibility with installed launchers
         self.engine, self.worker_image = engine, worker_image
         self.runner, self.boot_id_reader, self.clock = runner, boot_id_reader, clock
@@ -48,6 +48,8 @@ class ContainerWorkerServices:
         self.cpu_count = None
         self.memory_limit = None
         self._claim_reader = None
+        self.manager_override = cgroup_manager
+        self.cgroup_manager = None
 
     @staticmethod
     def worker_identity(operation, generation):
@@ -55,7 +57,11 @@ class ContainerWorkerServices:
 
     @property
     def backend(self):
-        return ContainerEngine(self.engine, runner=self.runner, error=WorkerServiceError)
+        return ContainerEngine(self.engine, runner=self.runner, error=WorkerServiceError,manager=self.cgroup_manager)
+
+    def recorded_backend(self,record):
+        manager=record.get('cgroup_manager','cgroupfs') if record['engine']=='podman' else None
+        return ContainerEngine(record['engine'],runner=self.runner,error=WorkerServiceError,manager=manager)
 
     def command(self, *args):
         return self.backend.command(*args)
@@ -63,17 +69,17 @@ class ContainerWorkerServices:
     def _invoke(self, *args, timeout=30):
         return self.backend.invoke(*args, timeout=timeout)
 
-    def _engine_identity(self):
+    def _engine_identity(self, backend=None):
         field = '{{.ID}}' if self.engine == 'docker' else '{{.Store.GraphRoot}}'
-        value = self._invoke('info', '--format', field).strip()
+        value = (backend or self.backend).invoke('info', '--format', field).strip()
         if not value or len(value)>4096 or '\n' in value:
             raise WorkerServiceError('local engine identity is unavailable')
         return self.engine+':'+str(os.geteuid())+':'+value
 
-    def _image(self, identity):
+    def _image(self, identity, backend=None):
         if not isinstance(identity,str) or not re.fullmatch('sha256:[0-9a-f]{64}',identity):
             raise WorkerServiceError('configure an exact local --worker-image sha256 ID')
-        result = json.loads(self._invoke('image','inspect',identity))
+        result = json.loads((backend or self.backend).invoke('image','inspect',identity))
         if not isinstance(result,list) or len(result)!=1:
             raise WorkerServiceError('builder image identity is ambiguous')
         item=result[0]
@@ -118,6 +124,7 @@ class ContainerWorkerServices:
         self.root=root
         if os.geteuid()==0:
             raise WorkerServiceError('run controller workers as a regular Linux user')
+        self.cgroup_manager=self.backend.select_manager(self.manager_override)
         if self.engine=='docker':
             endpoint=(os.environ.get('DOCKER_HOST') if not os.environ.get('DOCKER_CONTEXT') else None)
             if not endpoint:
@@ -136,9 +143,11 @@ class ContainerWorkerServices:
         path=self._path(unit)
         from .worker_execution import load
         record=load(read_file(path.parent,path.name,limit=65536),self.root)
-        if (record.get('schema_version') not in (2,3) or record.get('unit')!=unit
+        backend=self.recorded_backend(record)
+        if record['engine']=='podman':backend.select_manager(backend.manager)
+        if (record.get('schema_version') not in (2,3,4) or record.get('unit')!=unit
                 or record.get('engine')!=self.engine
-                or record.get('engine_identity')!=self._engine_identity()):
+                or record.get('engine_identity')!=self._engine_identity(backend)):
             raise WorkerServiceError('worker execution backend differs from its recorded owner')
         return record
 
@@ -170,15 +179,40 @@ class ContainerWorkerServices:
             raise WorkerServiceError('worker claim changed or expired')
 
     def _inspect(self, record, execution):
-        return self.backend.owned(execution['name'], execution['image'], LABEL,
+        return self.recorded_backend(record).owned(execution['name'], execution['image'], LABEL,
                                   record['unit'], execution.get('id'))
 
     def _stop(self, record, execution):
-        return self.backend.stop(execution['name'], execution['image'], LABEL,
-                                 record['unit'], execution.get('id'))
+        backend=self.recorded_backend(record)
+        if record['schema_version']==4:
+            from .container_containment import stop_container
+            return stop_container(backend,execution,LABEL,record['unit'],lambda:self._save(record),gated=True)
+        if record['engine']=='podman' and execution.get('start_requested') and not execution.get('stopped'):
+            # Add stop evidence without changing the meaning of a legacy journal.
+            from .container_containment import capture, container_group, stopped
+            path=self._path(record['unit']).parent/record['unit']/('legacy-cgroup-'+execution['name']+'.json')
+            value=self._inspect(record,execution)
+            try:
+                proof=json.loads(read_file(path.parent,path.name,limit=8192))
+                if set(proof)!={'schema_version','id','cgroup'} or proof['schema_version']!=1 or proof['id']!=value.get('Id',value.get('ID')):
+                    raise WorkerServiceError('legacy container stop evidence differs from its identity')
+                group=container_group(proof['id'],'0::'+proof['cgroup'])
+            except FileNotFoundError:
+                if value['State'].get('Running'):
+                    group=capture(value,value.get('Id',value.get('ID')))
+                    path.parent.mkdir(mode=0o700,exist_ok=True)
+                    atomic_write(path,canonical({'schema_version':1,'id':value.get('Id',value.get('ID')),'cgroup':group}))
+                elif record['claim']['worker_boot_id']==validate_boot_id(self.boot_id_reader()):
+                    raise WorkerServiceError('legacy container cgroup stop identity is unavailable; retain ownership or reconcile after host reboot')
+                else:group=None
+            value=backend.stop(execution['name'],execution['image'],LABEL,record['unit'],execution.get('id'))
+            if group:stopped(group)
+            return value
+        return backend.stop(execution['name'],execution['image'],LABEL,record['unit'],execution.get('id'))
 
     def _start(self, record, phase):
         from .worker_container_plan import plan
+        backend=self.recorded_backend(record)
         self._current(record)
         from .resource_budget import resolve
         workload=('preparation' if record['claim']['kind'] in ('source_prepare','source_capture','builder_prepare','recovery_download')
@@ -188,9 +222,11 @@ class ContainerWorkerServices:
         except BuildError as exc:raise WorkerServiceError(str(exc)) from exc
         self.cpu_count,self.memory_limit=budget.cpus,budget.memory_bytes
         spec=plan(self,record,phase)
-        self._image(spec['image'])
+        self._image(spec['image'],backend)
         execution={'name':'qb-'+uuid.uuid4().hex,'image':spec['image'],'phase':phase,
                    'start_requested':False}
+        if record['schema_version']==4:
+            execution['bounds']={'cpus':budget.cpus,'memory':budget.memory_bytes,'pids':4096}
         record['executions'].append(execution)
         record['phase']=phase
         self._save(record)  # creation name survives even an ambiguous create RPC
@@ -199,7 +235,7 @@ class ContainerWorkerServices:
         command=['create','--name',execution['name'],'--label',LABEL+'='+record['unit'],
                  '--pull=never','--network='+spec.get('network','none'),
                  '--ipc=private','--cgroupns=host',
-                 *self.backend.containment_args(self.cpu_count,self.memory_limit),
+                 *backend.containment_args(self.cpu_count,self.memory_limit),
                  '--user='+spec.get('user',str(os.getuid())+':'+str(os.getgid())),
                  '--env=PYTHONDONTWRITEBYTECODE=1','--env=PYTHONPATH='+spec['pythonpath'],
                  '--env=QUIRKBENCH_BUILDER_CONFIG_DIGEST='+spec['image']]
@@ -211,18 +247,29 @@ class ContainerWorkerServices:
             _canonical(Path(source),directory=Path(source).is_dir())
             command+=['--volume',str(source)+':'+str(target)+':'+mode]
         command += ['--env=QUIRKBENCH_WORKER_RECORD='+str(self._path(record['unit']))]
-        command += [spec['image'],'python3','-m','quirkbench.container_worker',str(remaining),*spec['payload']]
-        identity=self.backend.create(*command[1:])
+        entry=['python3','-m','quirkbench.container_worker']
+        if record['schema_version']==4:
+            command+=['--env=LD_PRELOAD=','--env=LD_LIBRARY_PATH=','--env=LD_AUDIT=']
+            entry=['/usr/bin/python3','-I','-c',
+                   'import sys,runpy;sys.path.insert(0,sys.argv.pop(1));runpy.run_module("quirkbench.container_worker",run_name="__main__")',spec['pythonpath']]
+        command += [spec['image'],*entry,str(remaining),*spec['payload']]
+        identity=backend.create(*command[1:])
         execution['id']=identity;self._save(record)
         value=self._inspect(record,execution)
-        self.backend.validate_limits(value,self.cpu_count,self.memory_limit)
+        backend.validate_limits(value,self.cpu_count,self.memory_limit)
         self._current(record)
         execution['start_requested']=True;self._save(record)
         # Workers observe a separate immutable dispatch copy, never the host's
         # authoritative stop/reconciliation journal. This also keeps privileged
         # rootless composition mounts away from controller execution records.
         atomic_write(self._handshake(record,phase)/(record['unit']+'.json'),canonical(record))
-        self.backend.start(identity)
+        backend.start(identity)
+        if record['schema_version']==4:
+            from .container_containment import capture
+            execution['cgroup']=capture(self._inspect(record,execution),identity,budget.cpus,budget.memory_bytes)
+            self._current(record)
+            execution['payload_released']=True;self._save(record)
+            atomic_write(self._handshake(record,phase)/'release',canonical({'id':identity}))
 
     def launch(self, claim, state_root):
         self.preflight_operation(state_root,claim['deadline'],claim['id'])
@@ -244,6 +291,8 @@ class ContainerWorkerServices:
         if bootstrap:
             record.update(schema_version=3, bootstrap=True,
                           worker_image=intent['arguments']['builder_config_digest'])
+        if self.engine=='podman':
+            record.update(schema_version=4,cgroup_manager=self.cgroup_manager)
         self._save(record)
         try:
             if bootstrap:
@@ -296,7 +345,7 @@ class ContainerWorkerServices:
                 raise WorkerServiceError('retained worker diagnostics changed')
             return
         attempt=log.with_name(log.stem+'-'+uuid.uuid4().hex+'.log')
-        result=self.backend.stream('logs',execution.get('id',execution['name']),attempt,
+        result=self.recorded_backend(record).stream('logs',execution.get('id',execution['name']),attempt,
             deadline=self.clock()+60,max_duration=60)
         if result['exit_code']!=0:
             raise WorkerServiceError('worker log retrieval failed; stopped container and attempt log retained')
@@ -333,7 +382,7 @@ class ContainerWorkerServices:
                 # unavailable manager. Without a start request, an ambiguous
                 # create can leave only an unstarted container. After a proven
                 # stop it also reconciles lost remove acknowledgements.
-                found=self._invoke('ps','--all','--no-trunc','--filter',
+                found=self.recorded_backend(record).invoke('ps','--all','--no-trunc','--filter',
                                    'name=^'+execution['name']+'$','--format','{{.ID}}').strip()
                 if not found:
                     execution['removed']=True;self._save(record)
@@ -341,7 +390,7 @@ class ContainerWorkerServices:
             value=self._stop(record,execution)
             execution['stopped']=True;self._save(record)
             self._capture_log(record,execution)
-            self.backend.remove(value.get('Id',value.get('ID')))
+            self.recorded_backend(record).remove(value.get('Id',value.get('ID')))
             execution['removed']=True;self._save(record)
         record['stopped']=True;self._save(record)
         runtime=self._path(record['unit']).parent/record['unit']

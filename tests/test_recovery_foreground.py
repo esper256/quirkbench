@@ -10,6 +10,12 @@ from quirkbench import recovery_foreground as foreground
 from test_recovery_stock import stock_fixture
 
 
+@pytest.fixture(autouse=True)
+def selected_capacity(monkeypatch):
+    from quirkbench.resource_budget import Capacity
+    monkeypatch.setattr('quirkbench.resource_budget.capacity',lambda:Capacity(foreground.os.cpu_count() or 1,16*1024**3))
+
+
 class Engine:
     def __init__(self, image):
         self.image = image
@@ -43,6 +49,38 @@ class Engine:
         if action == 'rm':
             return self.identity
         raise AssertionError('unexpected engine command '+repr(argv))
+
+
+def test_podman_foreground_gate_and_recorded_manager_cleanup(inputs,monkeypatch):
+    from quirkbench import container_containment
+    from quirkbench.process_identity import WorkerServiceError
+    kwargs,engine=inputs;calls=[];configured=['systemd'];populated=[False]
+    def run(argv,**kw):
+        calls.append(argv);offset=3 if argv[2].startswith('--cgroup-manager=') else 2
+        args=argv[offset:]
+        if args==['info','--format','json']:
+            manager=argv[2].split('=',1)[1] if offset==3 else configured[0]
+            return json.dumps({'host':{'cgroupVersion':'v2','cgroupManager':manager}})
+        if args[0]=='start':engine.running=True;return engine.identity
+        return engine(['docker',*args],**kw)
+    monkeypatch.setattr(container_containment,'capture',lambda value,identity,*a,**k:'/libpod-'+identity)
+    def empty(group):
+        if populated[0]:raise WorkerServiceError('container still contains descendants')
+    monkeypatch.setattr(container_containment,'stopped',empty)
+    kwargs.update(engine='podman',run=run)
+    def interrupted(argv,log,**kw):
+        assert argv[3:5]==['logs','--follow'];log.write_text('interrupted\n');raise KeyboardInterrupt
+    with pytest.raises(KeyboardInterrupt):foreground.build(**kwargs,execute=interrupted)
+    output=kwargs['output'];record=json.loads((output/'build.json').read_bytes())
+    assert record['schema_version']==2 and record['cgroup_manager']=='systemd' and record['payload_released']
+    create=next(argv for argv in calls if 'create' in argv)
+    assert ['/usr/bin/python3','-I','-S','/__quirkbench_entry.py']==create[create.index(kwargs['image'])+1:create.index(kwargs['image'])+5]
+    configured[0]='cgroupfs';calls.clear();populated[0]=True
+    with pytest.raises(WorkerServiceError,match='descendants'):foreground.cleanup(output,run=run)
+    assert not json.loads((output/'build.json').read_bytes())['removed']
+    populated[0]=False
+    assert foreground.cleanup(output,run=run)['removed']
+    assert all(argv[2]=='--cgroup-manager=systemd' for argv in calls)
 
 
 @pytest.fixture

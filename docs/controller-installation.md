@@ -36,12 +36,23 @@ package mechanisms. Check engine capability in the actual execution environment:
 ```sh
 python3 --version
 stat -fc %T /sys/fs/cgroup
-podman --remote=false --cgroup-manager=cgroupfs info
+podman --remote=false info
 # Or, for the Docker-supported paths:
 docker info
 ```
 
 State defaults outside Git checkouts; explicitly selected state may be checkout-local.
+
+Podman uses its configured `systemd` or `cgroupfs` manager. This is independent of
+Quirkbench's foreground lifecycle and does not require a Quirkbench systemd service.
+Use `--podman-cgroup-manager systemd|cgroupfs` (or `worker_cgroup_manager` in the
+controller configuration) only for a deliberate override. The selected manager is
+recorded before creation and replayed for inspection and reconciliation. Missing
+delegation or ineffective CPU, memory, zero-swap or PID limits blocks payload
+execution. Recorded cgroup descendant population must be empty before completion.
+Legacy Podman journals replay `cgroupfs`; an unknown historical cgroup remains
+fenced until stronger stop evidence or host reboot. Native support still requires
+commissioning in the actual environment; software fixtures do not qualify a host.
 Keep installed runtime and signing keys outside source control. Do not
 share a live controller state directory between machines. For a separate controller,
 transfer the development archive through an authenticated channel and install with

@@ -140,7 +140,7 @@ def plan(services, record, phase):
         # capabilities. This supported adapter deliberately requires rootless
         # Podman for composition, independently of the host init system.
         if services.engine!='podman': raise Conflict('composition requires rootless Podman namespace support')
-        if services._invoke('info','--format','{{.Host.Security.Rootless}}').strip()!='true':
+        if services.recorded_backend(record).invoke('info','--format','{{.Host.Security.Rootless}}').strip()!='true':
             raise Conflict('composition requires a rootless Podman engine')
         spec['user']='0'
         spec['options']=['--init','--cap-add=SYS_ADMIN','--cap-add=NET_ADMIN',
@@ -151,7 +151,7 @@ def plan(services, record, phase):
     elif phase in ('recovery','candidate'):
         if services.engine!='podman':
             raise Conflict('managed installroot stages require rootless Podman ownership mapping; use recovery-image-build for Docker artifact generation')
-        if services._invoke('info','--format','{{.Host.Security.Rootless}}').strip()!='true':
+        if services.recorded_backend(record).invoke('info','--format','{{.Host.Security.Rootless}}').strip()!='true':
             raise Conflict('managed installroot stages require a rootless Podman engine')
         spec['user']='0'
         source=stage/'inputs' if phase=='recovery' else stage/'candidate-inputs'
