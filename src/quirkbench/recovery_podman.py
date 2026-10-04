@@ -11,6 +11,8 @@ import re
 import shutil
 import stat
 import hashlib
+import math
+import time
 
 from .baseline_catalog import INPUT_DIGEST_FIELDS, MAX_CATALOG_BYTES, load_catalog
 from .build import BuildError, sha256_file
@@ -25,7 +27,7 @@ from .worker_claim import WorkerClaimError, read_active_worker_claim
 
 IMAGE_ID = re.compile(r'sha256:[0-9a-f]{64}\Z')
 OUTPUT_NAME = re.compile(r'[a-z][a-z0-9-]{0,63}\Z')
-WORKER_UNIT = re.compile(r'quirkbench-worker-[0-9a-f]{32}-[1-9][0-9]*\.service\Z')
+WORKER_UNIT = re.compile(r'(?:quirkbench-worker-[0-9a-f]{32}-[1-9][0-9]*\.service|qb-worker-v2-[0-9a-f]{32}-[1-9][0-9]*)\Z')
 SYSTEM_ROOTS = {Path('/'), Path('/dev'), Path('/proc'), Path('/sys'),
                 Path('/run'), Path('/etc'), Path('/usr'), Path('/boot'),
                 Path('/var'), Path('/mnt'), Path('/media'), Path('/home')}
@@ -259,9 +261,10 @@ def rootfs_command(*, image_id: str, claim: dict, state_root: Path, stage: Path,
                    output_name: str = 'rootfs', cgroup_reader=None) -> tuple[str, ...]:
     """Return a fixed local Podman argv over one prepared, claimed stage.
 
-    The live claim and this process's service cgroup must match before planning
-    container execution. The unit manager applies CPU, memory, swap and task
-    limits, and the controller still fences final publication independently.
+    The live claim and this process's recorded containment must match before
+    planning execution. Podman applies CPU, memory, swap and task limits;
+    the controller still fences final publication independently. This command
+    supports existing internal callers; new jobs use recorded container phases.
     The derived image ID and staged inputs must match the claimed immutable
     operation intent. The returned argv is not reusable execution authorization;
     a dispatcher must verify its claim again immediately before launch.
@@ -333,11 +336,15 @@ def rootfs_command(*, image_id: str, claim: dict, state_root: Path, stage: Path,
     mounts = tuple(arg for host, target, mode in volumes
                    for arg in ('--volume', f'{host}:{target}:{mode}'))
     payload=('python3','-m','quirkbench.recovery_image_worker',arguments['recipe_sha256'],'/workspace/cas','/workspace/output') if 'recipe_sha256' in arguments else ('python3','-m','quirkbench.recovery_rootfs','-' if stock else '/workspace/catalog.json','/workspace/rootfs-lock.json','/workspace/cas',f'/workspace/output/{output_name}')
+    remaining=min(86400,math.ceil(verified.deadline-time.time()))
+    if remaining<=0:raise BuildError('rootfs worker deadline expired')
     return ('env', '-u', 'CONTAINER_HOST', '-u', 'CONTAINER_CONNECTION',
             '-u', 'DOCKER_HOST', '-u', 'CONTAINERS_CONF',
-            'podman', '--remote=false', 'run', '--rm', '--pull=never',
+            'podman', '--remote=false', '--cgroup-manager=cgroupfs', 'run', '--rm', '--pull=never',
             '--network=none', '--pid=private', '--ipc=private', '--uts=private',
-            '--cgroups=disabled', '--user=0',
+            '--cgroups=enabled', '--user=0', '--restart=no', '--timeout='+str(remaining),
+            '--cpus='+str(min(4,max(1,(os.cpu_count() or 1)//2))),
+            '--memory=4294967296','--memory-swap=4294967296','--pids-limit=4096',
             '--security-opt=no-new-privileges',
             '--env=PYTHONPATH=/workspace/code',
             *(("--env=QUIRKBENCH_BUILDER_CONFIG_DIGEST=" + arguments['builder_config_digest'],) if stock else ()),

@@ -43,28 +43,27 @@ source checkout is needed for the controller CLI.
 
 Run bin/quirkbench setup to journal private persistent state and resource choices,
 then bin/quirkbench status to inspect independent readiness. Setup remains partial.
-Use setup --start-service for private TLS/native service setup and, with a signed
+Use setup --configure-controller for local TLS and foreground configuration and, with a signed
 installed release, setup --builder-archive /absolute/builder.tar for durable builder
 preparation. Shipped production publisher trust remains pending.
 The legacy setup-state/setup-check commands remain available.
-For first registry publication, stop the installed service and use publication setup
+For first registry publication, stop the foreground controller and use publication setup
 with an explicit fresh repository alias, HTTPS endpoint and existing operator
-GnuPG home/full signing fingerprint. Then explicitly start the native service
+GnuPG home/full signing fingerprint. Then explicitly run controller-run
 and use target add for an attended invitation. Follow
 lib/quirkbench/guide/controller-installation.md; no handwritten private configuration
 is required for this initial path. Extraction does
 not start a service, change lingering or install any host package.
 
-Run setup-check from the native controller shell to inspect native services.
+Run setup-check in the controller environment to inspect current owner readiness.
 Distrobox is an optional development environment. Build/compose tools belong in
 the isolated builder. State remains at its independently selected path.
 Upgrade with controller-install ARCHIVE --activate after reconciling active work.
-Activation switches CLI, service and worker paths together and verifies readiness.
+Activation switches CLI and worker paths together; start the controller separately.
 Current commands and planned session interfaces are distinguished in
 lib/quirkbench/guide/agent-guide.md; case histories are evidence, not prerequisites.
 
-bin/quirkbench-worker is the fixed rootfs stage executable for configured systemd
-worker services. It accepts only an existing live controller claim; it is not
+Fixed worker entry points are internal to recorded container execution. It accepts only an existing live controller claim; it is not
 a general shell/build launcher. Stage completion is private and does not finish
 an image operation. The configured controller consumes and validates stopped worker output.
 bin/quirkbench-job-worker handles fixed build/compose, builder preparation and
@@ -124,7 +123,7 @@ def build_controller_archive(wheel: Path, output: Path) -> dict:
     if info.get('Name', '').lower() != 'quirkbench' or not re.fullmatch(r'[0-9][A-Za-z0-9.+-]{0,63}', version):
         raise ValueError('invalid Quirkbench wheel metadata')
     required = ('job_worker.py','job_operations.py','job_coordinator.py','job_cache.py',
-                'controller_service.py','run-bounded-podman.sh','quirkbench-controller.service','recovery_worker.py', 'assets/quirkbench-recovery.service', 'schemas/experiment.v1.schema.json',
+                'controller_service.py','run-bounded-podman.sh','recovery_worker.py', 'assets/quirkbench-recovery.service', 'schemas/experiment.v1.schema.json',
                 'examples/experiment.json', 'guide/agent-guide.md',
                 'guide/controller-installation.md', 'guide/recovery-acquisition.md',
                 'guide/build-and-boot.md')

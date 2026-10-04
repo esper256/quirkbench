@@ -29,6 +29,8 @@ class RecoveryImageCoordinator:
             except ValueError: return None
             if 'recipe_sha256' not in arguments: return None
             expired=controller.clock()>=claim['deadline']
+            if not expired and hasattr(self.services, 'advance'):
+                self.services.advance(claim, controller.root)
             if not expired:
                 try:
                     owner.collect_activity(claim)

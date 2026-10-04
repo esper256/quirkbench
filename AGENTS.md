@@ -60,7 +60,7 @@ this revised contract rather than ask the owner to approve the same decision aga
 
 - Keep existing wire names (`device_id`), CLI options (`--device`, network `--host`)
   and schema meanings. Incompatible changes require versioned readers/migrations.
-- Reuse the controller database and attempt state machine. Systemd is optional;
+- Reuse the controller database and attempt state machine. No host systemd is required;
   preserve worker identity, bounded resources, whole-worker shutdown and restart
   fencing through the selected supervisor. Preserve state and unrelated uncommitted work.
 - Follow the [storage policy](docs/architecture.md#storage-protection-policy).
@@ -77,8 +77,7 @@ this revised contract rather than ask the owner to approve the same decision aga
 - New state and build staging belong outside Git checkouts. Use configured home state
   and a manually opened `quirkbench monitor`; never launch popup viewers.
 - Ad hoc kernel builds in rootless Podman use the [bounded starter](environments/README.md#observable-bounded-kernel-builds).
-  Verify plain `podman stats` visibility and launcher/conmon/payload containment under
-  the delegated service before a long compile. Recovery workers have their own contract.
+  Verify plain `podman stats` visibility and whole-container resource bounds and shutdown before a long compile. Recovery workers have their own contract.
 
 ## Validate the change
 

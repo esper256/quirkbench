@@ -274,7 +274,11 @@ class StateReader:
 def development_run(root, run_id, *, logs=False):
     identifier(run_id)
     directory = Path(root) / 'development-runs' / run_id
-    record = json.loads(read_file(Path(root), directory.relative_to(root) / 'run.json', limit=8192))
+    from .source_capture import load_document
+    record = load_document(read_file(Path(root), directory.relative_to(root) / 'run.json', limit=8192),limit=8192)
+    if record.get('schema_version')==2:
+        from .development_run import validate_run
+        validate_run(record)
     if record.get('run_id') != run_id:
         raise ContractError('development run identity mismatch')
     for field in ('log', 'status'):

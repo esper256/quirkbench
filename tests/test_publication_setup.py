@@ -372,11 +372,11 @@ def test_wrong_host_port_or_insecure_url_does_not_publish(installed,url):
     assert configuration(root)==before and not (root/'repositories').exists()
 
 
-def test_active_service_or_foreign_unit_blocks_before_native_repository(installed):
-    root,services,signing,options,calls=installed;services.active=True
-    with pytest.raises(Conflict,match='stop'):setup(installed)
-    services.active=False;services.properties={'KillMode':'process'}
-    with pytest.raises(Conflict,match='effective'):setup(installed)
+def test_active_foreground_owner_blocks_before_native_repository(installed):
+    from quirkbench.maintenance import private_lock
+    root,services,signing,options,calls=installed
+    with private_lock(root/'coordinator.lock'):
+        with pytest.raises(Conflict):setup(installed)
     assert not any(call[0]=='ostree' for call in calls)
 
 
@@ -428,30 +428,6 @@ def test_restored_old_config_after_write_never_acknowledges_success(installed,st
     with pytest.raises(Conflict,match='configuration changed'):setup(installed,fault_hook=change)
     assert (root/'private/controller-service.json').read_bytes()==original
 
-
-def test_final_native_service_callback_cannot_overwrite_unrelated_maintenance(installed):
-    root,services,signing,options,calls=installed;count=0
-    def run(argv,**kwargs):
-        nonlocal count
-        result=services(argv,**kwargs)
-        if '--property=FragmentPath' in argv:
-            count+=1
-            # First discover how many native barriers reach the final key export;
-            # the injected export below marks the exact final callback boundary.
-            if final[0]:
-                config=configuration(root);config['port']=8445
-                (root/'private/controller-service.json').write_bytes(canonical(config))
-        return result
-    native=options['run'];exports=0;final=[False]
-    def key(argv,**kwargs):
-        nonlocal exports
-        result=native(argv,**kwargs)
-        if argv[0]=='gpg' and '--export' in argv:
-            exports+=1
-            if exports==2:final[0]=True
-        return result
-    with pytest.raises(Conflict,match='configuration changed'):setup(installed,runner=run,run=key)
-    assert final[0] and configuration(root)['port']==8445 and 'repository_endpoint' not in configuration(root)
 
 
 def test_final_key_callback_repository_symlink_blocks_publication(installed):

@@ -22,23 +22,25 @@ def validate_switch(value):
     fields={'schema_version','record_type','request_id','source_configuration',
         'destination_configuration','tls_intent_sha256','source_identity_sha256',
         'destination_identity_sha256','approved_certificate_sha256','unit'}
+    if isinstance(value,dict) and value.get('schema_version')==2:fields.remove('unit')
     if (not isinstance(value,dict) or set(value)!=fields or type(value['schema_version']) is not int
-            or value['schema_version']!=1 or value['record_type']!='controller-endpoint-switch'):
+            or value['schema_version'] not in (1,2) or value['record_type']!='controller-endpoint-switch'):
         raise ContractError('invalid controller endpoint switch')
     identifier(value['request_id'])
     for name in ('tls_intent_sha256','source_identity_sha256','destination_identity_sha256','approved_certificate_sha256'):
         sha256(value[name])
     for name in ('source_configuration','destination_configuration'):
         if not isinstance(value[name],dict):raise ContractError('endpoint switch requires exact service configurations')
-    unit=value['unit']
-    if not isinstance(unit,str) or len(unit)>4096 or str(Path(unit))!=unit or not Path(unit).is_absolute() or '..' in Path(unit).parts:
-        raise ContractError('endpoint switch requires a normalized absolute native unit path')
+    if value['schema_version']==1:
+        unit=value['unit']
+        if not isinstance(unit,str) or len(unit)>4096 or str(Path(unit))!=unit or not Path(unit).is_absolute() or '..' in Path(unit).parts:
+            raise ContractError('endpoint switch requires a normalized absolute native unit path')
     if len(canonical(value))>65536:raise ContractError('endpoint switch exceeds byte limit')
     return value
 
 
 def switch_stopped(root, request_id, expected_identity_sha256, approved_certificate_sha256, *,
-                   unit, repository_url=None, run=subprocess.run, runner=subprocess.run,
+                   unit=None, repository_url=None, run=subprocess.run, runner=subprocess.run,
                    fault_hook=None, clock=time.time, monotonic=time.monotonic):
     """Publish only the exact approved staged endpoint while native ownership is stopped.
 
@@ -62,8 +64,7 @@ def rollback_stopped(root, request_id, expected_switch_sha256, *, run=subprocess
 def _switch(root,request_id,expected_identity,approved_pin, *,unit,repository_url,run,runner,
             fault_hook,clock,monotonic,rollback,expected_switch_sha256=None):
     from .controller_install import _idle
-    from .controller_service import configuration, validate_configuration, UNIT
-    from .setup_service import _service_state, _effective_unit
+    from .controller_service import configuration, validate_configuration
     identifier(request_id)
     if not rollback:sha256(expected_identity);sha256(approved_pin)
     root=_managed_path(root)
@@ -103,10 +104,10 @@ def _switch(root,request_id,expected_identity,approved_pin, *,unit,repository_ur
                 if host!=identity['host'] or port==old.get('port',8443):raise ContractError('explicit repository URL must match successor SAN and use a separate port')
                 new['repository_endpoint']={'url':repository_url}
             elif repository_url is not None:raise Conflict('endpoint maintenance cannot introduce repository publication')
-            saved=validate_switch({'schema_version':1,'record_type':'controller-endpoint-switch',
+            saved=validate_switch({'schema_version':2,'record_type':'controller-endpoint-switch',
                 'request_id':request_id,'source_configuration':old,'destination_configuration':new,
                 'tls_intent_sha256':digest(intent_raw),'source_identity_sha256':digest(source_raw),
-                'destination_identity_sha256':digest(identity_raw),'approved_certificate_sha256':approved_pin,'unit':str(unit)})
+                'destination_identity_sha256':digest(identity_raw),'approved_certificate_sha256':approved_pin})
             saved_raw=canonical(saved)
         old,new=saved['source_configuration'],saved['destination_configuration']
         # Recompute every permitted configuration delta rather than trusting a journal.
@@ -128,15 +129,10 @@ def _switch(root,request_id,expected_identity,approved_pin, *,unit,repository_ur
         if rollback:
             if digest(saved_raw)!=expected_switch_sha256:raise Conflict('confirm the exact endpoint switch before rollback')
         elif (saved['destination_identity_sha256']!=expected_identity or saved['approved_certificate_sha256']!=approved_pin
-                or saved['unit']!=str(unit) or (new.get('repository_endpoint',{}).get('url')!=repository_url)):
+                or (saved['schema_version']==1 and unit is not None and saved['unit']!=str(unit)) or (new.get('repository_endpoint',{}).get('url')!=repository_url)):
             raise Conflict('endpoint switch retry requires the original exact operator choices')
         old_raw,new_raw=canonical(old),canonical(new)
         if current_raw not in (old_raw,new_raw):raise Conflict('another configuration superseded this endpoint switch')
-        native_unit=Path(saved['unit'])
-        if native_unit.name!=UNIT or native_unit.resolve()!=native_unit or native_unit.is_symlink():raise ContractError('invalid native controller unit')
-        unit_info=native_unit.stat()
-        if not stat.S_ISREG(unit_info.st_mode) or unit_info.st_uid!=os.geteuid():raise ContractError('native unit ownership changed')
-        unit_raw=read_file(native_unit.parent,native_unit.name,limit=16384)
         journal_required=journal.exists()
         rolled=directory/'rollback-intent.json';receipt=directory/'switch-completion.json'
         retained_rollback=_strict_read(directory,rolled.name) if rolled.exists() or rolled.is_symlink() else None
@@ -148,12 +144,9 @@ def _switch(root,request_id,expected_identity,approved_pin, *,unit,repository_ur
                 if (held.st_dev,held.st_ino)!=(named.st_dev,named.st_ino):raise Conflict('endpoint switch ownership changed')
             if (_strict_read(root/'private','controller-service.json')!=current_raw
                     or _strict_read(previous,'identity.json')!=source_raw or _strict_read(directory,'identity.json')!=identity_raw
-                    or _strict_read(directory,'intent.json')!=intent_raw or native_unit.resolve()!=native_unit
-                    or read_file(native_unit.parent,native_unit.name,limit=16384)!=unit_raw
+                    or _strict_read(directory,'intent.json')!=intent_raw
                     or any(_strict_read(path,name)!=raw for path,files in material.items() for name,raw in files.items())):
                 raise Conflict('endpoint switch inputs changed after validation')
-            info=native_unit.stat()
-            if (info.st_dev,info.st_ino,info.st_uid,info.st_mode)!=(unit_info.st_dev,unit_info.st_ino,unit_info.st_uid,unit_info.st_mode):raise Conflict('native unit identity changed')
             if journal_required:
                 if _strict_read(directory,journal.name)!=saved_raw:raise Conflict('endpoint switch intent changed')
             elif journal.exists() or journal.is_symlink():raise Conflict('endpoint switch intent appeared during validation')
@@ -163,8 +156,8 @@ def _switch(root,request_id,expected_identity,approved_pin, *,unit,repository_ur
                 elif _strict_read(directory,path.name)!=expected:raise Conflict('endpoint maintenance receipt changed')
             _lineage(directory,identity);_remaining(deadline,monotonic)
         def stopped():
-            if _service_state(runner)!='stopped':raise Conflict('stop the existing native controller before endpoint maintenance')
-            _effective_unit(runner,native_unit,Path(old['runtime']).parent.parent,root);exact()
+            # Both command and lifecycle ownership locks remain held.
+            exact()
         exact();stopped()
         rollback_raw=canonical({'schema_version':1,'record_type':'controller-endpoint-rollback','switch_sha256':digest(saved_raw)})
         if rolled.exists() or rolled.is_symlink():

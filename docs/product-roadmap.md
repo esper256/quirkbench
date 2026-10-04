@@ -21,8 +21,8 @@ command exists. Executable CLI/services and retained validation establish availa
 ## Scope and architecture
 
 Reuse the existing controller database, durable operations, attempt state machine,
-content-addressed artifacts, retained OSTree closures and native systemd user-service
-ownership of rootless workers. No second scheduler/database, MCP service, web app
+content-addressed artifacts, retained OSTree closures and foreground controller
+ownership of bounded container workers. No second scheduler/database, MCP service, web app
 or cloud account is required. Cloud development does not imply cloud controller
 execution; see [development setup](testing-policy.md#portable-software-development).
 

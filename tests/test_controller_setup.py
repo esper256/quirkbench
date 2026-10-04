@@ -1,94 +1,40 @@
-"""Read-only systemd user-manager setup evidence with injected responses."""
-from __future__ import annotations
-
+"""Read-only foreground readiness and current container-tool visibility."""
 import json
-import subprocess
-
-from quirkbench import cli, controller_setup
+from quirkbench import cli,controller_setup
 
 
-class FakeRunner:
-    def __init__(self, manager="256\n", linger="no\n", *, fail_manager=False, fail_linger=False):
-        self.manager = manager
-        self.linger = linger
-        self.fail_manager = fail_manager
-        self.fail_linger = fail_linger
-        self.calls = []
-
-    def __call__(self, argv, timeout):
-        self.calls.append((argv, timeout))
-        assert timeout == 5
-        if argv[0] == "systemctl":
-            return subprocess.CompletedProcess(argv, 1 if self.fail_manager else 0, self.manager, "private error")
-        assert argv[0] == "loginctl"
-        return subprocess.CompletedProcess(argv, 1 if self.fail_linger else 0, self.linger, "private error")
+def forbidden(*args,**kwargs):
+    raise AssertionError('setup must not invoke a host service manager')
 
 
-def test_available_manager_reports_optional_lingering_without_mutation():
-    fake = FakeRunner(linger="yes\n")
-    report = controller_setup.inspect_user_manager(runner=fake, uid=1001,
-                                                   which=lambda name: "/usr/bin/" + name,
-                                                   environ={})
-    assert report["user_manager"] == "available"
-    assert report["lingering"] == "enabled"
-    assert report["background_work_ready"] is False
-    assert report["instructions"] == []
-    assert report["builder_tools"] == {"podman": "available", "distrobox": "available"}
-    assert fake.calls == [
-        (["systemctl", "--user", "show", "--property=Version", "--value"], 5),
-        (["loginctl", "show-user", "1001", "--property=Linger", "--value"], 5),
-    ]
+def test_foreground_setup_needs_no_host_manager_or_lingering():
+    report=controller_setup.inspect_user_manager(runner=forbidden,which=lambda name:'/usr/bin/'+name,environ={})
+    assert report['user_manager']=='not_required' and report['lingering']=='not_required'
+    assert not report['background_work_ready']
+    assert 'no automatic restart' in report['logout_behavior']
+    assert any('controller-run' in item for item in report['instructions'])
 
 
-def test_missing_manager_and_disabled_linger_report_actionable_status():
-    fake = FakeRunner(fail_manager=True)
-    report = controller_setup.inspect_user_manager(runner=fake, uid=1001,
-                                                   which=lambda _: None, environ={})
-    assert report["user_manager"] == "unavailable"
-    assert report["lingering"] == "disabled"
-    assert "last session" in report["logout_behavior"]
-    assert any("systemctl --user" in item for item in report["instructions"])
-    assert any("enable-linger" in item for item in report["instructions"])
-    assert report["builder_tools"] == {"podman": "missing", "distrobox": "missing"}
-    assert any("podman" in item and "distrobox" not in item for item in report["instructions"])
-    assert "private error" not in json.dumps(report)
+def test_missing_builder_is_actionable_without_blocking_software_development():
+    report=controller_setup.inspect_user_manager(runner=forbidden,which=lambda _:None,environ={})
+    assert report['builder_tools']['podman']=='missing'
+    assert report['builder_tools']['docker']=='missing'
+    assert any('smoke tests do not require' in item for item in report['instructions'])
 
 
-def test_timeout_and_malformed_output_are_unknown_not_ready():
-    def timeout(argv, seconds):
-        raise subprocess.TimeoutExpired(argv, seconds)
-
-    report = controller_setup.inspect_user_manager(runner=timeout, uid=1001, environ={})
-    assert report["user_manager"] == "unavailable"
-    assert report["lingering"] == "unknown"
-    assert report["background_work_ready"] is False
-    malformed = controller_setup.inspect_user_manager(runner=FakeRunner(manager="x\ny\n", linger="yes\nno\n"),
-                                                       uid=1001, environ={})
-    assert malformed["user_manager"] == "unavailable"
-    assert malformed["lingering"] == "unknown"
+def test_distrobox_reports_current_tool_visibility():
+    report=controller_setup.inspect_user_manager(runner=forbidden,which=lambda _:None,
+        environ={'CONTAINER_ID':'dev','DISTROBOX_ENTER_PATH':'/usr/bin/distrobox-enter'})
+    assert report['process_context']=='distrobox'
+    assert report['builder_tools_scope']=='current_process'
+    assert set(report['builder_tools'].values())=={'not_visible'}
 
 
-def test_distrobox_does_not_confuse_container_visibility_with_host_prerequisites():
-    fake = FakeRunner(fail_linger=True)
-    report = controller_setup.inspect_user_manager(
-        runner=fake, uid=1001, which=lambda _: None,
-        environ={"CONTAINER_ID": "dev", "DISTROBOX_ENTER_PATH": "/usr/bin/distrobox-enter"})
-    assert report["process_context"] == "distrobox"
-    assert report["user_manager_scope"] == "current_process"
-    assert report["builder_tools_scope"] == "current_process"
-    assert report["builder_tools"] == {"podman": "not_visible", "distrobox": "not_visible"}
-    assert report["lingering"] == "unknown"
-    assert all(call[0][0] != "loginctl" for call in fake.calls)
-    assert any("host shell" in item for item in report["instructions"])
-    assert not any("Install the missing" in item for item in report["instructions"])
-
-
-def test_native_setup_does_not_require_optional_distrobox():
-    report = controller_setup.inspect_user_manager(runner=FakeRunner(linger='yes\n'),
-        which=lambda name:'/usr/bin/podman' if name=='podman' else None,environ={})
-    assert report['instructions']==[]
-    assert report['builder_tools']['distrobox']=='missing'
+def test_distrobox_is_optional_and_docker_is_a_supported_engine():
+    report=controller_setup.inspect_user_manager(runner=forbidden,
+        which=lambda name:'/usr/bin/docker' if name=='docker' else None,environ={})
     assert report['optional_tools']==['distrobox']
+    assert not any('Install' in item for item in report['instructions'])
 
 
 def test_cli_setup_check_adds_revision_report_without_initializing_state(monkeypatch, capsys, tmp_path):

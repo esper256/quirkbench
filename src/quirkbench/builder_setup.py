@@ -84,6 +84,9 @@ def prepare(root, runtime, archive, request_id, *, config_home=None, release_ins
 
 
 def reserve_bytes(root):
+    if os.environ.get('QUIRKBENCH_WORKER_RECORD'):
+        from .container_worker import execution_record
+        return execution_record()['reserve_bytes']
     from .controller_service import configuration
     return int(configuration(root).get('reserve_gib', 20) * 1024**3)
 
@@ -138,7 +141,7 @@ def _native(*args):
             '-u', 'DOCKER_HOST', '-u', 'CONTAINERS_CONF', 'podman', '--remote=false', *args]
 
 
-def import_builder(root, args, stage, verify, report, deadline, *, execute=None):
+def import_builder(root, args, stage, verify, report, deadline, *, execute=None, stage_only=False):
     from .recovery_podman import _copy_cas_object, _verify_retained_builder_archive
     from .recovery_worker import execute_rootfs
     execute = execute or execute_rootfs
@@ -152,6 +155,9 @@ def import_builder(root, args, stage, verify, report, deadline, *, execute=None)
     from .recovery_builder_archive import inspect_builder_archive
     with archive.open('rb') as stream:
         inspect_builder_archive(stream, args['builder_config_digest'], require_no_entrypoint=True)
+    if stage_only:
+        verify()
+        return {'payload_staged':True}
     report('builder-import', 'Importing exact retained OCI bytes into rootless Podman.')
     def command(argv, name, budget):
         verify()

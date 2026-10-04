@@ -28,7 +28,7 @@ FILES = ('recovery.img', 'recovery.img.json', 'recovery.img.sha256', 'image-resu
 
 def _engine(name):
     if name == 'podman':
-        return ['podman', '--remote=false']
+        return ['podman', '--remote=false', '--cgroup-manager=cgroupfs']
     if name == 'docker':
         return ['docker']
     raise BuildError('select docker or podman')

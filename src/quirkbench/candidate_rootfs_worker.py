@@ -60,7 +60,7 @@ def validate_result(output,value,result):
     return rootfs
 
 
-def prepare(root,stage,value,builder,verify,report,deadline, *,execute=None):
+def prepare(root,stage,value,builder,verify,report,deadline, *,execute=None,stage_only=False):
     from .recovery_podman import _verify_retained_builder_archive,_copy_cas_object
     from .recovery_rootfs import CASReader,MAX_CLOSURE_BYTES
     from .recovery_worker import execute_rootfs
@@ -106,6 +106,9 @@ def prepare(root,stage,value,builder,verify,report,deadline, *,execute=None):
                 guard();remaining -= _copy_cas_object(root/'artifacts',identity,cas/'objects'/identity,remaining,space_check=space)
             baseline_inputs.resolve(CASReader(cas),value,verify=guard)
             atomic_write(record,frozen_value);record_identity=_staged_identity(record);guard()
+            if stage_only:
+                guard()
+                return {'payload_staged':True}
             package = Path(__file__).resolve().parent
             # Container UID 0 maps to the rootless controller user. No host privilege
             # or device is passed; installroot writes are confined to private output.

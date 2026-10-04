@@ -12,7 +12,9 @@
       "tests/test_source_*",
       "tests/test_worker*",
       "tests/test_job_*",
-      "tests/test_builder_setup.py"
+      "tests/test_builder_setup.py",
+      "src/quirkbench/container_worker.py",
+      "tests/test_container_workers.py"
     ],
     "tests": [
       "tests/test_distribution_source.py",
@@ -21,7 +23,9 @@
       "tests/test_source_operation.py",
       "tests/test_source_prepare_operation.py",
       "tests/test_worker_claim.py",
-      "tests/test_worker.py"
+      "tests/test_worker.py",
+      "tests/test_container_workers.py",
+      "tests/test_worker_service.py"
     ]
   },
   "endpoint-control": {
@@ -179,7 +183,10 @@
       "src/quirkbench/target_shutdown.py",
       "tests/test_shutdown.py",
       "examples/shutdown.json",
-      "src/quirkbench/controller_install.py"
+      "src/quirkbench/controller_install.py",
+      "src/quirkbench/development_container.py",
+      "src/quirkbench/development_run.py",
+      "tests/test_build_launcher.py"
     ],
     "tests": [
       "tests/test_build_storage.py",
@@ -212,7 +219,8 @@
       "tests/test_enrollment_target.py",
       "tests/test_enrollment_maintenance.py",
       "tests/test_recipe_registry.py",
-      "tests/test_manual_provisioning.py"
+      "tests/test_manual_provisioning.py",
+      "tests/test_build_launcher.py"
     ]
   },
   "release-preparation": {

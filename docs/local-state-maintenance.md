@@ -51,7 +51,7 @@ pin notes or cleanup. Eligibility remains unknown until an explicit maintenance
 dry run evaluates it. See [backup coverage and paused restore](backup-and-restore.md).
 Pin before retirement; pinning cannot restore deleted bytes. Abandonment excludes
 publishers, requires recorded shutdown proof and begins the failed-stage grace.
-Ad hoc systemd development runs instead use the existing `retain-run --abandon`
+Ad hoc foreground development runs instead use the existing `retain-run --abandon`
 interface. Neither command authorizes a physical attempt.
 
 | Setting | Default | Purpose |

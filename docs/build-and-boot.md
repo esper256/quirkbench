@@ -29,7 +29,7 @@ Controller storage is separate: initially budget roughly 200 GiB for sources, bu
 
 ### CLI entry points
 
-Submit from the controller's normal terminal after the [manual user-service setup](controller-installation.md#durable-build-and-composition-service).
+Submit from the controller's normal terminal after the [manual user-service setup](controller-installation.md#foreground-build-and-composition-controller).
 The pinned builder image must already exist locally. Inputs use the existing
 BuildInputs/ComposeInputs manifests and absolute declared paths; expensive capture
 and hash checks happen in the first worker stage. Persistent state and private

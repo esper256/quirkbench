@@ -1,235 +1,348 @@
-"""Bounded systemd user-unit adapter for fenced controller workers.
+"""Container-backed workers owned by the foreground controller.
 
-The installed recovery_worker executable is available; production coordinator
-integration and actual rootless containment evidence remain P2b/P2d work.
-This adapter never selects a command from operation arguments.
+The historical module/error names are retained for callers. No host service
+manager participates in admission, execution or shutdown.
 """
 from __future__ import annotations
 
+import json
+import math
 import os
 from pathlib import Path
 import re
-import subprocess
+import sqlite3
 import time
+import uuid
 
-from .contracts import ContractError, identifier
+from .contracts import canonical, Conflict, digest
 from .controller import controller_boot_id, validate_boot_id
+from .state_reader import read_file, StateReader
+from .store import atomic_write
+from .build import BuildError
 
-UNIT = re.compile(r'quirkbench-worker-[0-9a-f]{32}-[1-9][0-9]*\.service\Z')
-SHOW_PROPERTIES = ('LoadState', 'ActiveState', 'Job', 'ControlGroup', 'KillMode',
-                   'Restart', 'RemainAfterExit', 'MainPID')
+UNIT = re.compile(r'qb-worker-v2-[0-9a-f]{32}-[1-9][0-9]*\Z')
+LEGACY_UNIT = re.compile(r'quirkbench-worker-[0-9a-f]{32}-[1-9][0-9]*\.service\Z')
+LABEL = 'org.quirkbench.worker-v2'
 
 
 class WorkerServiceError(RuntimeError):
-    """A manager response does not establish safe worker ownership or shutdown."""
-
     def __init__(self, message, *, possibly_started=False):
         super().__init__(message)
         self.possibly_started = possibly_started
 
 
-def _run(argv, timeout):
-    return subprocess.run(argv, capture_output=True, text=True, check=False, timeout=timeout)
+def _run(argv, timeout=30):
+    from .recovery_foreground import _run as bounded
+    return bounded(argv, timeout=timeout)
 
 
-class SystemdUserWorkerServices:
-    def __init__(self, *, worker_program=None, runner=_run, boot_id_reader=controller_boot_id,
-                 cgroup_root=Path('/sys/fs/cgroup'), clock=time.time, development=False):
-        self.worker_program = Path(worker_program) if worker_program is not None else None
-        self.runner = runner
-        self.boot_id_reader = boot_id_reader
-        self.cgroup_root = Path(cgroup_root)
-        self.clock = clock
-        self.development = development
-        self.cpu_percent = min(400,max(1,(os.cpu_count() or 1)//2)*100)
-        memory_total=int(next(line.split()[1] for line in Path("/proc/meminfo").read_text().splitlines() if line.startswith("MemTotal:")))*1024
-        self.memory_limit=min(8*1024**3,memory_total//2) if development else 4*1024**3
+class ContainerWorkerServices:
+    def __init__(self, *, worker_program=None, engine='podman', worker_image=None,
+                 runner=_run, boot_id_reader=controller_boot_id, clock=time.time,
+                 development=False, monotonic=time.monotonic):
+        self.worker_program = worker_program  # compatibility with installed launchers
+        self.engine, self.worker_image = engine, worker_image
+        self.runner, self.boot_id_reader, self.clock = runner, boot_id_reader, clock
+        self.monotonic=monotonic
+        self.root = None
+        self.cpu_count = min(4, max(1, (os.cpu_count() or 1)//2))
+        self.memory_limit = 4*1024**3
+        self._claim_reader = None
 
     @staticmethod
-    def _unit(unit):
-        if not isinstance(unit, str) or not UNIT.fullmatch(unit):
-            raise WorkerServiceError('invalid worker unit identity')
-        return unit
+    def worker_identity(operation, generation):
+        return f'qb-worker-v2-{operation}-{generation}'
 
-    def _invoke(self, argv, timeout):
+    def command(self, *args):
+        # Rootless Podman uses the kernel cgroup filesystem directly; its default
+        # manager must not silently reintroduce a host systemd dependency.
+        if self.engine == 'podman':
+            return ['podman', '--remote=false', '--cgroup-manager=cgroupfs', *args]
+        if self.engine == 'docker':
+            return ['docker', *args]
+        raise WorkerServiceError('select a local docker or podman engine')
+
+    def _invoke(self, *args, timeout=30):
         try:
-            result = self.runner(argv, timeout)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise WorkerServiceError('user service manager response is uncertain') from exc
-        if result.returncode != 0:
-            raise WorkerServiceError('user service manager command failed')
-        if not isinstance(result.stdout, str) or len(result.stdout) > 8192:
-            raise WorkerServiceError('user service manager response is invalid')
-        return result.stdout
+            result = self.runner(self.command(*args), timeout=timeout)
+            if not isinstance(result, str) or len(result) > 1024**2:
+                raise ValueError('engine response exceeds its budget')
+            return result
+        except (OSError, ValueError, BuildError) as exc:
+            raise WorkerServiceError('container engine command failed: '+str(exc)[:1024]) from exc
 
-    def _show(self, unit):
-        argv = ['systemctl', '--user', '--no-pager', *(f'--property={name}' for name in SHOW_PROPERTIES),
-                'show', self._unit(unit)]
-        raw = self._invoke(argv, 15)
-        result = {}
-        for line in raw.splitlines():
-            name, separator, value = line.partition('=')
-            if not separator or name not in SHOW_PROPERTIES or name in result:
-                raise WorkerServiceError('user unit properties are invalid')
-            result[name] = value
-        if set(result) != set(SHOW_PROPERTIES):
-            raise WorkerServiceError('user unit properties are incomplete')
-        return result
+    def _engine_identity(self):
+        field = '{{.ID}}' if self.engine == 'docker' else '{{.Store.GraphRoot}}'
+        value = self._invoke('info', '--format', field).strip()
+        if not value or len(value)>4096 or '\n' in value:
+            raise WorkerServiceError('local engine identity is unavailable')
+        return self.engine+':'+str(os.geteuid())+':'+value
 
-    @staticmethod
-    def _managed(value):
-        if (value['LoadState'] != 'loaded' or value['KillMode'] != 'control-group'
-                or value['Restart'] != 'no' or value['RemainAfterExit'] != 'yes'):
-            raise WorkerServiceError('worker unit identity or stop policy is unverified')
-
-    def finished(self, unit, boot_id):
-        """A read-only readiness hint; adoption still requires whole-unit stop proof."""
-        if validate_boot_id(boot_id)!=validate_boot_id(self.boot_id_reader()):
-            raise WorkerServiceError('controller boot changed; worker requires reconciliation')
-        value=self._show(unit)
-        self._managed(value)
-        return value['Job'] in ('','0') and value['MainPID']=='0' and value['ActiveState'] in {'active','inactive','failed'}
+    def _image(self, identity):
+        if not isinstance(identity,str) or not re.fullmatch('sha256:[0-9a-f]{64}',identity):
+            raise WorkerServiceError('configure an exact local --worker-image sha256 ID')
+        result = json.loads(self._invoke('image','inspect',identity))
+        if not isinstance(result,list) or len(result)!=1:
+            raise WorkerServiceError('builder image identity is ambiguous')
+        item=result[0]
+        if (item.get('Id',item.get('ID','')).removeprefix('sha256:')!=identity[7:]
+                or item.get('Os',item.get('OS'))!='linux'
+                or item.get('Config',{}).get('Entrypoint') not in (None,[])):
+            raise WorkerServiceError('local worker image differs or overrides the fixed entry point')
+        return item
 
     def preflight(self, state_root, deadline):
-        """Reject definite setup failures before the database reserves a unit."""
-        if self.development and self.memory_limit<4*1024**3:
-            raise WorkerServiceError('controller capacity below the 4 GiB builder minimum')
-        if self.worker_program is None:
-            raise WorkerServiceError('installed worker launcher is not configured')
-        program = self.worker_program
-        if (not program.is_absolute() or program.is_symlink() or not program.is_file()
-                or program.resolve() != program or not os.access(program, os.X_OK)):
-            raise WorkerServiceError('installed worker launcher is unavailable')
-        root = Path(state_root)
-        if not root.is_absolute() or root.is_symlink() or root.resolve() != root:
-            raise WorkerServiceError('controller state root is not canonical')
-        try:
-            validate_boot_id(self.boot_id_reader())
-        except ContractError as exc:
-            raise WorkerServiceError('controller boot identity unavailable') from exc
-        if not isinstance(deadline, (int, float)) or isinstance(deadline, bool):
-            raise WorkerServiceError('worker deadline is invalid')
-        remaining = deadline - self.clock()
-        if not 0 < remaining <= 86400:
-            raise WorkerServiceError('worker deadline is invalid')
-        return remaining
+        root=Path(state_root)
+        if not root.is_absolute() or root.resolve()!=root or root.is_symlink():
+            raise WorkerServiceError('worker state root must be canonical')
+        from .recovery_podman import _canonical
+        _canonical(root,directory=True)
+        if type(deadline) not in (int,float) or not 0<deadline-self.clock()<=86400:
+            raise WorkerServiceError('worker deadline must be bounded and in the future')
+        self.root=root
+        if os.geteuid()==0:
+            raise WorkerServiceError('run controller workers as a regular Linux user')
+        if self.engine=='docker':
+            endpoint=(os.environ.get('DOCKER_HOST') if not os.environ.get('DOCKER_CONTEXT') else None)
+            if not endpoint:
+                endpoint=self._invoke('context','inspect','--format','{{.Endpoints.docker.Host}}').strip()
+            if not endpoint.startswith('unix:///'):
+                raise WorkerServiceError('controller workers require a local Docker Unix socket and shared filesystem')
+        self._engine_identity()
+        self._image(self.worker_image)
+        return deadline-self.clock()
+
+    def _path(self, unit):
+        if self.root is None or not isinstance(unit,str) or not UNIT.fullmatch(unit):
+            raise WorkerServiceError('unknown container worker identity; legacy workers require reconciliation')
+        return self.root/'worker-executions'/ (unit+'.json')
+
+    def _load(self, unit):
+        path=self._path(unit)
+        from .worker_execution import load
+        record=load(read_file(path.parent,path.name,limit=65536),self.root)
+        if (record.get('schema_version')!=2 or record.get('unit')!=unit
+                or record.get('engine')!=self.engine
+                or record.get('engine_identity')!=self._engine_identity()):
+            raise WorkerServiceError('worker execution backend differs from its recorded owner')
+        return record
+
+    def _save(self, record):
+        from .worker_execution import validate
+        validate(record,self.root)
+        path=self._path(record['unit'])
+        if path.parent.is_symlink() or path.parent.resolve()!=path.parent:
+            raise WorkerServiceError('worker execution journal is linked')
+        path.parent.mkdir(mode=0o700,exist_ok=True)
+        atomic_write(path,canonical(record))
+
+    def _handshake(self,record,phase):
+        from .worker_execution import PHASES
+        if phase not in PHASES[1:]:raise WorkerServiceError('unknown fixed worker phase')
+        path=self._path(record['unit']).parent/record['unit']/('handshake-'+phase)
+        if path.resolve()!=path:raise WorkerServiceError('worker handshake path is linked')
+        path.mkdir(mode=0o700,exist_ok=True)
+        return path
+
+    def _current(self, record):
+        with StateReader(self.root).connection() as db:
+            epoch=db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
+            row=db.execute('SELECT * FROM operations WHERE id=?',(record['claim']['id'],)).fetchone()
+        fields=('worker_epoch','worker_generation','worker_unit','worker_boot_id','stage','stage_dir','input_digest','deadline')
+        if (row is None or row['state']!='RUNNING' or epoch!=record['claim']['worker_epoch']
+                or any(row[k]!=record['claim'][k] for k in fields)
+                or self.clock()>=row['deadline'] or self.monotonic()>=record['monotonic_deadline']):
+            raise WorkerServiceError('worker claim changed or expired')
+
+    def _inspect(self, record, execution):
+        identity=execution.get('id',execution['name'])
+        raw=json.loads(self._invoke('inspect',identity))
+        if not isinstance(raw,list) or len(raw)!=1:
+            raise WorkerServiceError('worker container identity is ambiguous')
+        value=raw[0]; actual=value.get('Id',value.get('ID',''))
+        if (not re.fullmatch('[0-9a-f]{64}',actual)
+                or (execution.get('id') and actual!=execution['id'])
+                or value.get('Config',{}).get('Labels',{}).get(LABEL)!=record['unit']
+                or value.get('Image','').removeprefix('sha256:')!=execution['image'][7:]):
+            raise WorkerServiceError('container differs from immutable worker identity')
+        return value
+
+    def _stop(self, record, execution):
+        value=self._inspect(record,execution)
+        if value.get('State',{}).get('Running'):
+            self._invoke('stop','--time','10',value.get('Id',value.get('ID')),timeout=30)
+            value=self._inspect(record,execution)
+        if (value.get('State',{}).get('Running') is not False or value['State'].get('Pid')!=0
+                or value['State'].get('Restarting') is True
+                or value.get('HostConfig',{}).get('RestartPolicy',{}).get('Name') not in ('no','')):
+            raise WorkerServiceError('whole worker container shutdown is unverified')
+        return value
+
+    def _start(self, record, phase):
+        from .worker_container_plan import plan
+        self._current(record)
+        spec=plan(self,record,phase)
+        self._image(spec['image'])
+        execution={'name':'qb-'+uuid.uuid4().hex,'image':spec['image'],'phase':phase,
+                   'start_requested':False}
+        record['executions'].append(execution)
+        record['phase']=phase
+        self._save(record)  # creation name survives even an ambiguous create RPC
+        remaining=max(1,math.ceil(min(record['claim']['deadline']-self.clock(),
+                                      record['monotonic_deadline']-self.monotonic())))
+        command=['create','--name',execution['name'],'--label',LABEL+'='+record['unit'],
+                 '--pull=never','--restart=no','--network='+spec.get('network','none'),
+                 '--ipc=private','--cgroupns=host',
+                 '--cpus='+str(self.cpu_count),'--memory='+str(self.memory_limit),
+                 '--memory-swap='+str(self.memory_limit),'--pids-limit=4096',
+                 '--security-opt=no-new-privileges','--user='+spec.get('user',str(os.getuid())+':'+str(os.getgid())),
+                 '--env=PYTHONDONTWRITEBYTECODE=1','--env=PYTHONPATH='+spec['pythonpath'],
+                 '--env=QUIRKBENCH_BUILDER_CONFIG_DIGEST='+spec['image']]
+        command+=['--log-driver='+('json-file' if self.engine=='docker' else 'k8s-file'),
+                  '--log-opt=max-size=8m']
+        if self.engine=='podman' and spec.get('user')!='0': command+=['--userns=keep-id']
+        if self.engine=='podman': command+=['--pid=private']
+        command+=spec.get('options',[])
+        for source,target,mode in spec['mounts']:
+            from .recovery_podman import _canonical
+            _canonical(Path(source),directory=Path(source).is_dir())
+            command+=['--volume',str(source)+':'+str(target)+':'+mode]
+        command += ['--env=QUIRKBENCH_WORKER_RECORD='+str(self._path(record['unit']))]
+        command += [spec['image'],'python3','-m','quirkbench.container_worker',str(remaining),*spec['payload']]
+        identity=self._invoke(*command).strip()
+        if not re.fullmatch('[0-9a-f]{64}',identity):
+            raise WorkerServiceError('invalid created container identity')
+        execution['id']=identity;self._save(record)
+        value=self._inspect(record,execution)
+        limits=value.get('HostConfig',{})
+        cpu=(limits.get('NanoCpus',0)/10**9 or
+             limits.get('CpuQuota',0)/max(1,limits.get('CpuPeriod',0)))
+        if (limits.get('Memory')!=self.memory_limit or limits.get('MemorySwap')!=self.memory_limit
+                or cpu!=self.cpu_count
+                or limits.get('PidsLimit')!=4096
+                or limits.get('PidMode') not in ('','private')
+                or limits.get('RestartPolicy',{}).get('Name') not in ('no','')
+                or limits.get('Privileged') is not False):
+            raise WorkerServiceError('worker containment settings differ from requested bounds')
+        self._current(record)
+        execution['start_requested']=True;self._save(record)
+        # Workers observe a separate immutable dispatch copy, never the host's
+        # authoritative stop/reconciliation journal. This also keeps privileged
+        # rootless composition mounts away from controller execution records.
+        atomic_write(self._handshake(record,phase)/(record['unit']+'.json'),canonical(record))
+        self._invoke('start',identity)
 
     def launch(self, claim, state_root):
-        """Submit only the configured installed launcher as a transient user unit.
+        self.preflight(state_root,claim['deadline'])
+        unit=claim['worker_unit']; path=self._path(unit)
+        if unit!=self.worker_identity(claim['id'],claim['worker_generation']) or path.exists():
+            raise WorkerServiceError('worker execution identity is already used')
+        from .controller_service import configuration
+        config=configuration(self.root)
+        from .worker_container_plan import intent_document, capture_runtime, private_inputs
+        from .worker_execution import CLAIM_FIELDS
+        intent=intent_document(self.root,claim)
+        record={'schema_version':2,'unit':unit,'engine':self.engine,
+                'engine_identity':self._engine_identity(),'claim':{k:claim[k] for k in CLAIM_FIELDS},
+                'worker_image':self.worker_image,'reserve_bytes':int(config.get('reserve_gib',20)*1024**3),
+                'monotonic_deadline':self.monotonic()+min(86400,claim['deadline']-self.clock()),
+                'payload_args':{k:v for k,v in intent['arguments'].items() if k=='recipe_sha256'},
+                'executions':[],'phase':'reserved','complete':False}
+        self._save(record)
+        try:
+            # Keep WAL/shm present while preparation uses a read-only bind.
+            # SQLite otherwise removes them at the last close and a subsequent
+            # read-only process cannot recreate its shared-memory index.
+            self._claim_reader=sqlite3.connect((self.root/'controller.sqlite').as_uri()+'?mode=rw',uri=True)
+            self._claim_reader.execute('PRAGMA query_only=ON')
+            self._claim_reader.execute('SELECT epoch FROM controller_lifecycle').fetchall()
+            if claim['kind'] in ('build','compose'):
+                cache=self.root/'intermediate-cache'
+                if cache.resolve()!=cache or cache.is_symlink():
+                    raise WorkerServiceError('worker cache path is linked')
+                cache.mkdir(mode=0o700,exist_ok=True)
+            runtime=path.parent/unit
+            runtime.mkdir(mode=0o700)
+            capture_runtime(runtime/'code',excluded=private_inputs(self.root))
+            self._start(record,'prepare')
+        except BaseException as exc:
+            raise WorkerServiceError(str(exc),possibly_started=True) from exc
 
-        A timeout or failed show remains an ambiguous launch. The caller retains
-        the persisted unit and must reconcile it before resource reuse.
-        """
-        if not isinstance(claim, dict) or claim.get('state') != 'RUNNING':
-            raise WorkerServiceError('running claim required')
-        remaining = self.preflight(state_root, claim.get('deadline'))
-        program = self.worker_program
-        try:
-            operation = identifier(claim.get('id'))
-        except ContractError as exc:
-            raise WorkerServiceError('invalid worker operation identity') from exc
-        generation = claim.get('worker_generation')
-        epoch = claim.get('worker_epoch')
-        if type(generation) is not int or generation < 1 or type(epoch) is not int or epoch < 1:
-            raise WorkerServiceError('invalid worker claim fence')
-        unit = self._unit(claim.get('worker_unit'))
-        if unit != f'quirkbench-worker-{operation}-{generation}.service':
-            raise WorkerServiceError('worker unit differs from claim')
-        root = Path(state_root)
-        raw_stage = claim.get('stage_dir')
-        if not isinstance(raw_stage, str):
-            raise WorkerServiceError('worker stage is unavailable')
-        stage = Path(raw_stage)
-        if (not root.is_absolute() or root.is_symlink() or root.resolve() != root
-                or not stage.is_absolute() or stage.is_symlink() or not stage.is_dir()
-                or stage.resolve() != stage or stage.parent != root / 'workers' / operation):
-            raise WorkerServiceError('worker stage is not the private claimed directory')
-        try:
-            recorded_boot = validate_boot_id(claim.get('worker_boot_id'))
-            current_boot = validate_boot_id(self.boot_id_reader())
-        except ContractError as exc:
-            raise WorkerServiceError('controller boot identity unavailable') from exc
-        if recorded_boot != current_boot:
-            raise WorkerServiceError('controller boot changed before worker launch')
-        runtime_seconds = int(remaining) + 1
-        if claim.get('kind') == 'recovery_download' and claim.get('stage') == 'recovery_download':
-            runtime_seconds = min(runtime_seconds, 3600)
-        argv = ['systemd-run', '--user', '--no-ask-password', '--no-block',
-                '--remain-after-exit', '--expand-environment=no', f'--unit={unit}',
-                '--property=KillMode=control-group', '--property=Restart=no',
-                f'--property=CPUQuota={self.cpu_percent if self.development else 400}%', f'--property=MemoryMax={self.memory_limit}',
-                '--property=MemorySwapMax=0', '--property=TasksMax=4096',
-                '--property=TimeoutStopSec=30s', f'--property=RuntimeMaxSec={runtime_seconds}s',
-                f'--working-directory={stage}', '--', str(program),
-                '--state', str(root), '--operation', operation, '--worker-epoch', str(epoch),
-                '--worker-generation', str(generation), '--stage-dir', str(stage)]
-        if self.development:
-            argv[argv.index('--') : argv.index('--')] = ['--property=Delegate=cpu memory pids','--property=DelegateSubgroup=runtime']
-        try:
-            self._invoke(argv, 20)
-            observed = self._show(unit)
-            self._managed(observed)
-            if observed['ActiveState'] not in ('active', 'activating'):
-                raise WorkerServiceError('worker launch did not reach an active unit')
-            self._bounded_cgroup(observed['ControlGroup'])
-        except WorkerServiceError as exc:
-            raise WorkerServiceError(str(exc), possibly_started=True) from exc
+    def advance(self, claim, root):
+        self.root=Path(root)
+        record=self._load(claim['worker_unit'])
+        if record['complete']: return
+        self._current(record)
+        execution=record['executions'][-1]
+        value=self._inspect(record,execution)
+        if value.get('State',{}).get('Running'): return
+        value=self._stop(record,execution)
+        self._capture_log(record,execution)
+        from .worker_container_plan import completed
+        following=completed(self,record,value['State'].get('ExitCode'))
+        if following:
+            self._start(record,following)
+        else:
+            record['complete']=True
+            self._save(record)
 
-    def _bounded_cgroup(self, group):
-        if (not group or not group.startswith('/') or '//' in group
-                or any(part in ('.', '..') for part in group.split('/'))):
-            raise WorkerServiceError('worker cgroup path is invalid')
-        root = self.cgroup_root
-        if root.is_symlink() or not root.is_dir() or not (root / 'cgroup.controllers').is_file():
-            raise WorkerServiceError('cgroup v2 hierarchy is unavailable')
-        path = root / group.lstrip('/')
-        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
-            raise WorkerServiceError('worker cgroup path escapes hierarchy')
-        try:
-            quota, period = (path / 'cpu.max').read_text().strip().split()
-            cpu_ok = (quota != 'max' and 0 < int(quota) <= 4 * int(period)
-                      and int(period) > 0)
-            memory = (path / 'memory.max').read_text().strip()
-            swap = (path / 'memory.swap.max').read_text().strip()
-            tasks = (path / 'pids.max').read_text().strip()
-            bounded = (cpu_ok and memory != 'max' and 0 < int(memory) <= self.memory_limit
-                       and swap == '0' and tasks != 'max' and 0 < int(tasks) <= 4096)
-        except (OSError, ValueError) as exc:
-            raise WorkerServiceError('worker cgroup resource limits are unreadable') from exc
-        if not bounded:
-            raise WorkerServiceError('worker cgroup resource limits are not enforced')
+    def _capture_log(self, record, execution):
+        from .recovery_worker import execute_rootfs
+        log=Path(record['claim']['stage_dir'])/'diagnostics'/(execution['phase']+'.log')
+        if log.parent.resolve()!=log.parent:
+            raise WorkerServiceError('worker diagnostics path is linked')
+        log.parent.mkdir(mode=0o700,exist_ok=True)
+        if execution.get('log_sha256'):
+            if digest(read_file(log.parent,log.name,limit=8*1024**2))!=execution['log_sha256']:
+                raise WorkerServiceError('retained worker diagnostics changed')
+            return
+        attempt=log.with_name(log.stem+'-'+uuid.uuid4().hex+'.log')
+        result=execute_rootfs(self.command('logs',execution.get('id',execution['name'])),attempt,
+            verify=lambda:None,deadline=self.clock()+60,max_duration=60)
+        if result['exit_code']!=0:
+            raise WorkerServiceError('worker log retrieval failed; stopped container and attempt log retained')
+        value=digest(read_file(attempt.parent,attempt.name,limit=8*1024**2))
+        os.replace(attempt,log)
+        execution['log_sha256']=value;self._save(record)
 
-    def _empty_cgroup(self, group):
-        return verify_empty_cgroup(self.cgroup_root,group)
+    def finished(self, unit, boot_id):
+        if validate_boot_id(boot_id)!=validate_boot_id(self.boot_id_reader()):
+            raise WorkerServiceError('worker boot changed; reconcile before consuming output')
+        record=self._load(unit)
+        return record['complete']
 
     def stop_and_verify(self, unit, recorded_boot_id):
-        """Return proof only after user-manager stop and empty descendant cgroup."""
-        self._unit(unit)
-        try:
-            recorded = validate_boot_id(recorded_boot_id)
-            current = validate_boot_id(self.boot_id_reader())
-        except ContractError as exc:
-            raise WorkerServiceError('controller boot identity unavailable') from exc
-        if recorded != current:
-            return 'previous_boot'
-        before = self._show(unit)
-        self._managed(before)
-        self._invoke(['systemctl', '--user', '--no-ask-password', 'stop', unit], 45)
-        after = self._show(unit)
-        # A successful explicit stop can immediately collect a transient unit.
-        # Its identity and stop policy were checked before stopping; a missing
-        # unit before stop is still ambiguous and fails above.
-        if after['LoadState'] == 'loaded':
-            self._managed(after)
-        elif after['LoadState'] != 'not-found':
-            raise WorkerServiceError('worker unit state after stop is unverified')
-        if (after['ActiveState'] not in ('inactive', 'failed') or after['Job'] not in ('', '0')
-                or after['MainPID'] != '0'):
-            raise WorkerServiceError('worker stop has not completed')
-        self._empty_cgroup(before['ControlGroup'])
-        self._empty_cgroup(after['ControlGroup'])
-        if validate_boot_id(self.boot_id_reader()) != recorded:
-            return 'previous_boot'
+        recorded=validate_boot_id(recorded_boot_id)
+        if LEGACY_UNIT.fullmatch(unit or ''):
+            if recorded!=validate_boot_id(self.boot_id_reader()): return 'previous_boot'
+            raise WorkerServiceError('legacy worker must be stopped using its original installation, or reconciled after host reboot; no container stop proof exists')
+        record=self._load(unit)
+        for execution in record['executions']:
+            if execution.get('removed'): continue
+            if not execution.get('start_requested',True) or execution.get('stopped'):
+                # A successful engine listing distinguishes absence from an
+                # unavailable manager. Without a start request, an ambiguous
+                # create can leave only an unstarted container. After a proven
+                # stop it also reconciles lost remove acknowledgements.
+                found=self._invoke('ps','--all','--no-trunc','--filter',
+                                   'name=^'+execution['name']+'$','--format','{{.ID}}').strip()
+                if not found:
+                    execution['removed']=True;self._save(record)
+                    continue
+            value=self._stop(record,execution)
+            execution['stopped']=True;self._save(record)
+            self._capture_log(record,execution)
+            self._invoke('rm',value.get('Id',value.get('ID')))
+            execution['removed']=True;self._save(record)
+        record['stopped']=True;self._save(record)
+        runtime=self._path(record['unit']).parent/record['unit']
+        if runtime.exists():
+            if runtime.resolve()!=runtime or runtime.is_symlink():
+                raise WorkerServiceError('stopped worker runtime path is linked')
+            import shutil
+            shutil.rmtree(runtime)
+        if self._claim_reader is not None:
+            self._claim_reader.close();self._claim_reader=None
         return 'stopped'
 
 def verify_empty_cgroup(root, group):

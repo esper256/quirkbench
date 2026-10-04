@@ -54,14 +54,14 @@ def execute(root,action, *,request_id=None,host=None,source_sha256=None,identity
     raise ContractError('choose show, stage, renew, apply or rollback')
 
 
-def wizard(root, *,unit,input_stream=None,output_stream=None,run=None,runner=None):
+def wizard(root, *,unit=None,input_stream=None,output_stream=None,run=None,runner=None):
     """Attended address/SAN maintenance; the existing native unit stays stopped."""
     import sys
     from .enrollment_console import _answer
     from .contracts import ContractError,sha256
     source=input_stream or sys.stdin;output=output_stream or sys.stdout
     original=show(root)
-    print('Finish or reconcile active work, then stop the existing controller user service before staging.',file=output)
+    print('Finish or reconcile active work, then stop the foreground controller before staging.',file=output)
     print('Current controller: '+original['controller_url'],file=output)
     print('Current identity SHA-256: '+original['identity_sha256'],file=output)
     request_id=_answer(source,output,'Endpoint request ID (reuse after interruption; empty cancels): ',128)
@@ -80,7 +80,7 @@ def wizard(root, *,unit,input_stream=None,output_stream=None,run=None,runner=Non
         selected=show(root,request_id)
         if selected['identity_sha256']!=retained['destination_identity_sha256'] or selected['certificate_sha256']!=retained['approved_certificate_sha256']:
             raise Conflict('retained switch differs from staged identity')
-        if str(unit)!=retained['unit']:raise Conflict('resume with the exact original native unit')
+        if retained['schema_version']==1 and unit is not None and str(unit)!=retained['unit']:raise Conflict('resume with the exact original native unit')
         staged=selected
         print('Resuming the retained switch from identity SHA-256: '+retained['source_identity_sha256'],file=output)
         selected['repository_url']=retained['destination_configuration'].get('repository_endpoint',{}).get('url')
@@ -113,6 +113,6 @@ def wizard(root, *,unit,input_stream=None,output_stream=None,run=None,runner=Non
     if runner is not None:adapters['runner']=runner
     result=execute(root,'apply',request_id=request_id,identity_sha256=selected['identity_sha256'],fingerprint=approved,
         unit=unit,repository_url=repository_url,**adapters)
-    print('Controller configuration applied. Start its existing user service, then apply this address and fingerprint on each target.',file=output)
+    print('Controller configuration applied. Run quirkbench controller-run, then apply this address and fingerprint on each target.',file=output)
     print('Targets keep their evidence and credentials. Reachability and boot approval remain separate.',file=output,flush=True)
     return result

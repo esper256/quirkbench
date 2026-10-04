@@ -55,10 +55,9 @@ using existing operator signing trust and preserves an exact private, versioned 
 continuation. It never creates keys, starts services or rotates existing publication.
 An exact completed replay is a historical acknowledgment, separate from current
 enrollment availability and target/boot authority. See the
-[installed sequence](controller-installation.md#initial-native-user-service-setup).
+[installed sequence](controller-installation.md#initial-controller-setup).
 
-The controller's systemd user service manager owns the coordinator and rootless
-container workers. Distrobox is an optional development/agent environment; its disposable
+The foreground controller owns the coordinator and bounded container workers. Distrobox is an optional development/agent environment; its disposable
 filesystem is not the authority for persistence. Stable private configuration,
 credentials, database, source workspaces and retained artifacts live outside it.
 Do not reuse the prototype builder's temporary home for agent authentication.
@@ -124,7 +123,7 @@ M1a implements additive `setup`/`status` syntax in the executable parser; the ea
 product CLI v1 fixture stays unchanged. `setup --json` requires `--request-id`;
 human setup generates and prints one and reuses the existing intent on retry.
 Optional `--runtime`, `--cache-gib`, `--reserve-gib`, `--host`, `--port`, `--allow-lan`
-and `--logout-policy session|existing_linger` choices are normalized before publication.
+and `--logout-policy session` choices are normalized before publication.
 Omitted retry choices retain the recorded values. The single initial setup journal
 refuses a different request or changed intent; later maintenance uses its own APIs.
 `status [--json]` does not initialize/migrate state or acquire execution ownership.

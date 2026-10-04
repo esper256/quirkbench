@@ -91,12 +91,18 @@ def read_active_worker_claim(state_root, operation_id, epoch, generation, stage_
     if (db_path.is_symlink() or not db_path.is_file() or db_path.resolve() != db_path
             or db_path.stat().st_uid != os.geteuid()):
         raise WorkerClaimError('controller database is unavailable')
-    unit = f'quirkbench-worker-{operation_id}-{generation}.service'
+    record_path = os.environ.get('QUIRKBENCH_WORKER_RECORD')
+    unit = (f'qb-worker-v2-{operation_id}-{generation}' if record_path else
+            f'quirkbench-worker-{operation_id}-{generation}.service')
     try:
         boot = validate_boot_id(boot_id_reader())
     except (OSError, ValueError) as exc:
         raise WorkerClaimError('controller boot identity is unavailable') from exc
-    _own_cgroup(unit, cgroup_reader)
+    if record_path:
+        from .container_worker import verify_execution
+        verify_execution(root, unit, record_path, cgroup_reader)
+    else:
+        _own_cgroup(unit, cgroup_reader)
     uri = f'file:{quote(str(db_path), safe="/")}?mode=ro'
     try:
         with closing(sqlite3.connect(uri, uri=True, timeout=5)) as db:

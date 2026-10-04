@@ -21,13 +21,13 @@ def make_archive(directory):
     """Build the small software archive at an explicitly supplied destination."""
     wheel=directory/'input.whl'
     names=('cli.py','job_worker.py','job_operations.py','job_coordinator.py','job_cache.py',
-           'controller_service.py','run-bounded-podman.sh','quirkbench-controller.service',
+           'controller_service.py','run-bounded-podman.sh',
            'recovery_worker.py','assets/quirkbench-recovery.service',
             'schemas/experiment.v1.schema.json','examples/experiment.json','guide/agent-guide.md',
             'guide/controller-installation.md','guide/recovery-acquisition.md','guide/build-and-boot.md')
     with zipfile.ZipFile(wheel,'w') as out:
         for name in names:
-            raw=(Path(__file__).resolve().parents[1]/'src/quirkbench/quirkbench-controller.service').read_bytes() if name=='quirkbench-controller.service' else b'fixture'
+            raw=b'fixture'
             out.writestr('quirkbench/'+name,raw)
         out.writestr('quirkbench-0.1.0.dist-info/METADATA','Name: quirkbench\nVersion: 0.1.0\n')
     output=directory/'arbitrary-name.tar.gz'
@@ -148,7 +148,8 @@ def test_activation_aligns_all_paths_and_preserves_private_settings(tmp_path,arc
     record,root,c,conf,binary,old=configured(tmp_path,archive)
     services=Services(root,record)
     answer=activate(record,root,config_home=conf,bin_home=binary,runner=services,ready=ready)
-    assert answer['activated'] and answer['background_work_ready']
+    assert answer['activated'] and not answer['background_work_ready']
+    assert answer['controller_start_required'] and services.calls==[]
     config=json.loads((root/'private/controller-service.json').read_bytes())
     runtime=Path(record['runtime_root'])
     for key in ('runtime','job_worker','recovery_worker'):assert Path(config[key]).parent==runtime/'bin'
@@ -212,27 +213,23 @@ def test_busy_activation_refuses_before_stopping(tmp_path,archive):
     assert json.loads((root/'private/controller-service.json').read_bytes())==old
 
 
-def test_work_arriving_during_stop_prevents_path_switch(tmp_path,archive):
+def test_work_arriving_before_activation_lock_prevents_path_switch(tmp_path,archive):
     record,root,c,conf,binary,old=configured(tmp_path,archive)
-    services=Services(root,record,inject=lambda:queue_operation(c))
+    services=Services(root,record)
+    def arrival(step):
+        if step=='intent_recorded':queue_operation(c)
     with pytest.raises(Conflict,match='outstanding'):
-        activate(record,root,config_home=conf,bin_home=binary,runner=services,ready=ready)
+        activate(record,root,config_home=conf,bin_home=binary,runner=services,ready=ready,fault_hook=arrival)
     assert json.loads((root/'private/controller-service.json').read_bytes())==old
 
 
-def test_readiness_failure_rolls_back_verified_old_installation(tmp_path,archive,monkeypatch):
+def test_failed_publication_restores_old_configuration_and_launcher(tmp_path,archive):
     record,root,c,conf,binary,old=configured(tmp_path,archive)
-    old_unit=(conf/'systemd/user/quirkbench-controller.service').read_bytes()
-    def fail_new(_):
-        config=json.loads((root/'private/controller-service.json').read_bytes())
-        if config['runtime']!=old['runtime']:raise Conflict('new runtime unavailable')
-        return ready(root)
-    import quirkbench.controller_install as installer
-    monkeypatch.setattr(installer,'_wait_ready',lambda root,check:check(root))
-    with pytest.raises(Conflict,match='unavailable'):
-        activate(record,root,config_home=conf,bin_home=binary,runner=Services(root,record),ready=fail_new)
+    def fail(step):
+        if step=='configuration_published':raise Conflict('publication interrupted')
+    with pytest.raises(Conflict,match='publication interrupted'):
+        activate(record,root,config_home=conf,bin_home=binary,fault_hook=fail)
     assert json.loads((root/'private/controller-service.json').read_bytes())==old
-    assert (conf/'systemd/user/quirkbench-controller.service').read_bytes()==old_unit
     assert (binary/'quirkbench').resolve()==Path(old['runtime']).with_name('quirkbench')
     assert json.loads((conf/'quirkbench/last-activation.json').read_bytes())['phase']=='ROLLED_BACK'
 
@@ -241,7 +238,7 @@ def test_interrupted_activation_requires_explicit_rollback(tmp_path,archive):
     record,root,c,conf,binary,old=configured(tmp_path,archive)
     def crash(_):raise KeyboardInterrupt()
     with pytest.raises(KeyboardInterrupt):
-        activate(record,root,config_home=conf,bin_home=binary,runner=Services(root,record),ready=crash)
+        activate(record,root,config_home=conf,bin_home=binary,runner=Services(root,record),fault_hook=crash)
     assert (conf/'quirkbench/installation-activation.json').exists()
     with pytest.raises(Conflict,match='unfinished'):
         activate(record,root,config_home=conf,bin_home=binary,runner=Services(root,record),ready=ready)
@@ -249,22 +246,13 @@ def test_interrupted_activation_requires_explicit_rollback(tmp_path,archive):
     assert json.loads((root/'private/controller-service.json').read_bytes())==old
 
 
-def test_first_activation_failure_without_launcher_directory_restores_service(tmp_path,archive,monkeypatch):
+def test_failed_initial_activation_preserves_absent_launcher_directory(tmp_path,archive):
     record,root,c,conf,binary,old=configured(tmp_path,archive)
     (binary/'quirkbench').unlink();binary.rmdir()
-    services=Services(root,record)
-    import quirkbench.controller_install as installer
-    original=installer._stopped
-    calls=0
-    def fail_once(runner):
-        nonlocal calls
-        calls+=1
-        if calls==1:raise Conflict('shutdown check unavailable')
-        return original(runner)
-    monkeypatch.setattr(installer,'_stopped',fail_once)
-    with pytest.raises(Conflict,match='shutdown check'):
-        activate(record,root,config_home=conf,bin_home=binary,runner=services,ready=ready)
-    assert ['start','quirkbench-controller.service'] in services.calls
+    def fail(step):
+        if step=='configuration_published':raise Conflict('publication failed')
+    with pytest.raises(Conflict,match='publication failed'):
+        activate(record,root,config_home=conf,bin_home=binary,fault_hook=fail)
     assert not binary.exists()
     assert json.loads((root/'private/controller-service.json').read_bytes())==old
 
@@ -291,7 +279,7 @@ def test_rollback_refuses_new_work_after_interruption_before_stopping(tmp_path,a
     record,root,c,conf,binary,old=configured(tmp_path,archive)
     def crash(_):raise KeyboardInterrupt()
     with pytest.raises(KeyboardInterrupt):
-        activate(record,root,config_home=conf,bin_home=binary,runner=Services(root,record),ready=crash)
+        activate(record,root,config_home=conf,bin_home=binary,runner=Services(root,record),fault_hook=crash)
     queue_operation(c)
     services=Services(root,record)
     with pytest.raises(Conflict,match='outstanding'):

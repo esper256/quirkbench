@@ -6,8 +6,9 @@ from .contracts import ContractError, canonical, digest, identifier, sha256
 from .product_contracts import _depth, _pairs
 from .setup_contracts import validate_intent as validate_initial
 
-STEPS = ('tls_ready', 'configuration_published', 'unit_published', 'launcher_published',
+LEGACY_STEPS = ('tls_ready', 'configuration_published', 'unit_published', 'launcher_published',
          'unit_enabled', 'service_started', 'service_ready')
+STEPS = ('tls_ready', 'configuration_published', 'launcher_published')
 LIMIT = 16384
 
 
@@ -29,12 +30,13 @@ def validate_intent(value):
 def validate_progress(value):
     fields = {'schema_version','record_type','request_id','request_digest','intent','completed_steps','tls_identity_sha256'}
     if (not isinstance(value, dict) or set(value) != fields or type(value['schema_version']) is not int
-            or value['schema_version'] != 1 or value['record_type'] != 'controller-service-setup'):
+            or value['schema_version'] not in (1,2) or value['record_type'] != 'controller-service-setup'):
         raise ContractError('invalid service setup progress')
     identifier(value['request_id']); validate_intent(value['intent'])
     if value['request_digest'] != digest(canonical({'kind':'controller_service_setup','arguments':value['intent']})):
         raise ContractError('service setup request digest differs')
-    if value['completed_steps'] not in [list(STEPS[:n]) for n in range(len(STEPS)+1)]:
+    steps=LEGACY_STEPS if value['schema_version']==1 else STEPS
+    if value['completed_steps'] not in [list(steps[:n]) for n in range(len(steps)+1)]:
         raise ContractError('invalid service setup completed steps')
     if value['completed_steps']:
         sha256(value['tls_identity_sha256'])

@@ -116,9 +116,9 @@ def input_record(root,intent):
     return value,{key:args[key] for key in BUILDER_FIELDS}
 
 
-def run(root,intent,stage,verify,report,deadline):
+def run(root,intent,stage,verify,report,deadline,*,stage_only=False):
     value,builder=input_record(root,intent)
-    return candidate_rootfs_worker.prepare(root,stage,value,builder,verify,report,deadline)
+    return candidate_rootfs_worker.prepare(root,stage,value,builder,verify,report,deadline,stage_only=stage_only)
 
 
 @contextmanager

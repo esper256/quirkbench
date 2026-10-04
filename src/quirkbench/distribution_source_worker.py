@@ -48,7 +48,7 @@ def inner(stage, *,runner=None,limits=None):
     return result
 
 
-def prepare(root, stage, entry, builder, epoch, workspace_id, verify, report, deadline, *,execute=None):
+def prepare(root, stage, entry, builder, epoch, workspace_id, verify, report, deadline, *,execute=None,stage_only=False):
     """Caller invokes this only from its active existing job-worker branch."""
     from .recovery_podman import _verify_retained_builder_archive, _copy_cas_object
     from .recovery_worker import execute_rootfs
@@ -80,6 +80,7 @@ def prepare(root, stage, entry, builder, epoch, workspace_id, verify, report, de
         def space(count): guard(); store.check_space(count); guard()
         _copy_cas_object(root/'artifacts',entry['kernel_srpm_sha256'],source/'input.src.rpm',8*1024**3,space_check=space)
         guard(); atomic_write(source/'manifest.json',canonical({'schema_version':1,'entry':entry,'source_date_epoch':epoch})); guard()
+        if stage_only: return {'payload_staged':True}
         package = Path(__file__).resolve().parent
         argv = ['/usr/bin/bash',str(package/'run-bounded-podman.sh'),'--rm','--pull=never','--network=none',
             '--userns=keep-id','--security-opt=no-new-privileges',

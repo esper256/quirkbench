@@ -204,14 +204,16 @@ def test_bulk_cas_copy_allows_empty_configuration_object(tmp_path):
 def test_exact_local_rootless_command(tmp_path):
     with claimed_prepared(tmp_path) as (root, stage, claim):
         argv = command(root, stage, claim)
-    assert argv[:13] == ('env', '-u', 'CONTAINER_HOST', '-u', 'CONTAINER_CONNECTION',
+    assert argv[:14] == ('env', '-u', 'CONTAINER_HOST', '-u', 'CONTAINER_CONNECTION',
                          '-u', 'DOCKER_HOST', '-u', 'CONTAINERS_CONF', 'podman',
-                         '--remote=false', 'run', '--rm')
+                         '--remote=false', '--cgroup-manager=cgroupfs', 'run', '--rm')
     assert {'--pull=never', '--network=none', '--pid=private', '--ipc=private',
-            '--uts=private', '--cgroups=disabled', '--user=0',
+            '--uts=private', '--cgroups=enabled', '--user=0', '--memory=4294967296', '--memory-swap=4294967296',
             '--security-opt=no-new-privileges'} <= set(argv)
     assert '--privileged' not in argv and not any(arg.startswith('--device') for arg in argv)
-    assert not any('label=disable' in arg or arg.startswith('--cpus=') for arg in argv)
+    assert not any('label=disable' in arg for arg in argv)
+    assert any(arg.startswith('--cpus=') for arg in argv)
+    assert any(arg.startswith('--timeout=') for arg in argv)
     assert sum(arg == '--volume' for arg in argv) == 5
     assert str(stage / 'inputs/code') + ':/workspace/code:ro,Z' in argv
     assert str(stage / 'inputs/cas') + ':/workspace/cas:ro,Z' in argv

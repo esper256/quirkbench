@@ -319,6 +319,18 @@ class ResourceLimits:
         estimate or a per-process RLIMIT alone does not cap all compiler jobs.
         """
         try:
+            if root == Path('/sys/fs/cgroup'):
+                # A worker may use the host cgroup namespace to verify its
+                # immutable container identity. Read its own enforced limits,
+                # rather than the hierarchy root's unrelated host limits.
+                groups=[line[3:] for line in Path('/proc/self/cgroup').read_text().splitlines()
+                        if line.startswith('0::')]
+                if len(groups)!=1 or not groups[0].startswith('/') or '..' in Path(groups[0]).parts:
+                    raise ValueError('current cgroup is unavailable')
+                current=root/groups[0].lstrip('/')
+                if current.resolve()!=current:
+                    raise ValueError('current cgroup path is linked')
+                root=current
             mem_total = next(int(line.split()[1]) * 1024 for line in Path("/proc/meminfo").read_text().splitlines()
                              if line.startswith("MemTotal:"))
             memory = int((root / "memory.max").read_text().strip())

@@ -91,14 +91,7 @@ def test_existing_owner_blocks_switch_before_durable_intent(prepared,lock):
     assert not Path(prepared[1]['directory'],'switch-intent.json').exists()
 
 
-@pytest.mark.parametrize('mode',['active','overrides'])
-def test_native_service_state_and_effective_unit_are_required_before_switch(prepared,mode):
-    manager=prepared[3];setattr(manager,mode,True)
-    with pytest.raises(Conflict):activate(prepared)
-    assert not Path(prepared[1]['directory'],'switch-intent.json').exists()
-
-
-@pytest.mark.parametrize('change',['config','source-key','destination-key','unit','unit-inode','command-inode','intent','completion'])
+@pytest.mark.parametrize('change',['config','source-key','destination-key','command-inode','intent','completion'])
 def test_native_callback_mutations_fail_before_configuration_publication(prepared,change):
     (root,source,native),answer,unit,manager=prepared;directory=Path(answer['directory']);before=configuration(root);done=[False]
     def changed(argv,**kw):
@@ -107,8 +100,6 @@ def test_native_callback_mutations_fail_before_configuration_publication(prepare
             if change=='config':atomic_write(root/'private/controller-service.json',canonical(before|{'port':9443}))
             elif change=='source-key':atomic_write(Path(source['directory'])/'ca.key',b'changed')
             elif change=='destination-key':atomic_write(directory/'controller.key',b'changed')
-            elif change=='unit':unit.write_text('changed')
-            elif change=='unit-inode':unit.rename(unit.with_suffix('.old'));unit.write_text('[Service]\nKillMode=control-group\n')
             elif change=='command-inode':(root/'command.lock').rename(root/'lost.lock');atomic_write(root/'command.lock',b'')
             elif change=='intent':atomic_write(directory/'switch-intent.json',b'{}')
             else:atomic_write(directory/'switch-completion.json',b'{}')
@@ -175,7 +166,7 @@ def test_switch_publication_deadline_and_expiry_are_checked_after_native_work(pr
 
 
 @pytest.mark.parametrize('phase',['endpoint_switch_intent','endpoint_configuration_switched','endpoint_switch_completed'])
-@pytest.mark.parametrize('change',['active','overrides','expiry'])
+@pytest.mark.parametrize('change',['coordinator.lock','command.lock','expiry'])
 def test_durable_switch_boundary_rechecks_native_owner_and_expiry(prepared,phase,change):
     from cryptography import x509
     now=[int(__import__('time').time())]
@@ -183,31 +174,36 @@ def test_durable_switch_boundary_rechecks_native_owner_and_expiry(prepared,phase
     def altered(actual):
         if actual==phase:
             if change=='expiry':now[0]=expiry
-            else:setattr(prepared[3],change,True)
+            else:
+                path=prepared[0][0]/change;path.rename(path.with_suffix('.old'));atomic_write(path,b'')
     with pytest.raises(Conflict):activate(prepared,fault_hook=altered,clock=lambda:now[0])
     if phase=='endpoint_switch_intent':assert configuration(prepared[0][0])['host']=='127.0.0.1'
 
 
 @pytest.mark.parametrize('phase',['endpoint_rollback_intent','endpoint_configuration_restored','endpoint_switch_completed'])
-def test_durable_rollback_boundary_rechecks_native_unit_before_receipt(prepared,phase):
+def test_durable_rollback_boundary_rechecks_lifecycle_lock_before_receipt(prepared,phase):
     result=activate(prepared)
     def altered(actual):
-        if actual==phase:prepared[3].overrides=True
+        if actual==phase:
+            path=prepared[0][0]/'coordinator.lock';path.rename(path.with_suffix('.old'));atomic_write(path,b'')
     with pytest.raises(Conflict):restore(prepared,result,fault_hook=altered)
 
 
-def test_oversized_native_unit_is_refused_before_switch_intent(prepared):
+def test_historical_unit_file_is_not_a_foreground_prerequisite(prepared):
     prepared[2].write_bytes(b'x'*16385)
-    with pytest.raises(ContractError,match='budget'):activate(prepared)
-    assert not Path(prepared[1]['directory'],'switch-intent.json').exists()
+    assert activate(prepared)['configured']
+    assert prepared[3].calls==[]
 
 
 def test_staged_switch_reader_and_schema_are_strict(prepared):
     from jsonschema import Draft202012Validator
     activate(prepared);repo=Path(__file__).resolve().parents[1]
     value=json.loads(Path(prepared[1]['directory'],'switch-intent.json').read_bytes())
-    schema=json.loads((repo/'schemas/controller-endpoint-switch.v1.schema.json').read_bytes())
+    schema=json.loads((repo/'schemas/controller-endpoint-switch.v2.schema.json').read_bytes())
     validator=Draft202012Validator(schema);validator.validate(value)
-    validator.validate(json.loads((repo/'examples/controller-endpoint-switch.json').read_bytes()))
+    legacy=json.loads((repo/'examples/controller-endpoint-switch.json').read_bytes())
+    old_schema=json.loads((repo/'schemas/controller-endpoint-switch.v1.schema.json').read_bytes())
+    Draft202012Validator(old_schema).validate(legacy)
+    assert switch.validate_switch(legacy)==legacy
     assert switch.validate_switch(value)==value
     with pytest.raises(ContractError):switch.validate_switch(value|{'unexpected':True})
