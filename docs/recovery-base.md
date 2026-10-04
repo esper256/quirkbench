@@ -236,3 +236,32 @@ resume machinery have been retired. Select a new v2 recipe and fresh workspace;
 an old recipe is never silently converted or given new hashes. Historical v1
 recipe/release readers remain available for evidence inspection. Candidate and
 experiment kernel compilation, including Fedora SRPM preparation, is unchanged.
+
+## Reviewed vendor inventories
+
+New recovery input retention binds a version 1 vendor inventory through a version 2
+storage profile. The rootfs lock and recipe remain version 2; their existing storage
+profile hash now also binds the inventory. Version 1 storage profiles retain their
+original reader and boot-policy behavior. Their historical Fedora44 fallback is
+pinned to the original inventory digest; editing that data cannot silently change
+legacy acceptance. Use an explicitly selected new inventory for changed packages.
+
+`profiles/vendor-fedora44.v1.json` contains the previously reviewed Fedora 44
+package pins, systemd generator hashes and vendor enablement maps. These are image
+input data, not application policy. The selected signed RPM closure must contain
+those exact package names, NEVRAs and hashes. Additional packages (such as the
+pairing profile's OpenSSL executable) remain subject to the final installed unit
+and generator audits. The inventory cannot change the application's storage guard,
+required generator masks or recovery service policy.
+
+For a changed Fedora package selection, review a new inventory JSON alongside the
+package pins and boot behavior. Pass it explicitly with
+`quirkbench recovery-inputs lock --vendor-inventory /path/to/reviewed.json` and the
+other lock arguments. The schema is `recovery-vendor-inventory.v1.schema.json`.
+Do not generate approval by copying whatever an unreviewed rootfs happens to
+contain. Generator changes require reviewing their effects on internal-device
+probing; new enabled behavior must satisfy the same boot/storage contract.
+
+The build stages the selected inventory and verifies its hash and Fedora release.
+Installation and the final factory-root audit reject changed generators or unknown
+enablement. No inventory update establishes native boot or hardware qualification.

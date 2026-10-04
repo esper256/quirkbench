@@ -55,6 +55,8 @@ def run_recovery_runtime_stage(recipe: dict, catalog: dict, store, stage: Path,
     package_output = rootfs / "usr/lib/quirkbench/quirkbench"
     if package_output.exists() or package_output.is_symlink():
         raise BuildError("recovery runtime stage must be new")
+    from .recovery_vendor import stage_inventory
+    stage_inventory(rootfs,checked['profile'],store)
     sanitize_recovery_etc_enablement(rootfs)
     _check_recovery_unit_links(rootfs)
     units_dir = rootfs / "etc/systemd/system"

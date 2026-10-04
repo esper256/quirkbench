@@ -57,7 +57,12 @@ def retained(tmp_path,monkeypatch,*,bad_signature=False):
         return ''
     return retain_packages(directory,key,store,tmp_path/'diagnostics',
                            builder_image_digest=lock['builder_image_digest'],fingerprint='A'*40,
-                           query=query,signature_runner=signature)
+                           query=query,signature_runner=signature,
+                           vendor_inventory={"schema_version":1,"inventory_id":"synthetic-vendor",
+                               "fedora_release":"44","architecture":"x86_64",
+                               "required_packages":[{"name":name,"nevra":name+"-0:"+lock["kernel_release"],
+                                   "sha256":digest(name.encode())} for name in sorted(names)],
+                               "enabled_links":{},"generators":{},"etc_links":{}})
 
 
 def test_retained_lock_only_published_after_signature_validation(tmp_path,monkeypatch):

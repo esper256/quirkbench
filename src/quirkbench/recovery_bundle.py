@@ -61,6 +61,8 @@ def _closure(recipe_sha,spec_sha,store):
         raise BuildError('recipe packages differ from acquisition specification')
     objects={recipe_sha,spec_sha}
     for record in (recipe,lock):objects.update(v for k,v in record.items() if k.endswith('_sha256'))
+    if checked['profile']['schema_version']==2:
+        objects.add(checked['profile']['vendor_inventory_sha256'])
     objects.update(p['sha256'] for p in packages)
     objects.update(p['sha256'] for p in checked['runtime_revision']['files'])
     return recipe,checked,objects
@@ -90,7 +92,7 @@ def _publish(root,store,recipe_sha,spec_sha):
 
 
 def prepare(*,packages,public_key,spec,output,builder_image,epoch,reserve_bytes=2*1024**3,
-            layout=None,query=None,signature_runner=None):
+            layout=None,query=None,signature_runner=None,vendor_inventory=None):
     """Verify retained RPMs, make the existing lock/recipe, then commit one bundle."""
     from .recovery_acquisition import load_spec
     from .state_reader import read_file
@@ -104,6 +106,9 @@ def prepare(*,packages,public_key,spec,output,builder_image,epoch,reserve_bytes=
     root=_new_output(output);store=ArtifactStore(root,reserve_bytes=reserve_bytes)
     options={}
     if query is not None:options['query']=query
+    if vendor_inventory is not None:
+        from .recovery_vendor import read_inventory
+        options['vendor_inventory']=read_inventory(user_build_path(vendor_inventory))
     lock=retain_packages(packages,public_key,store,root/'signature-diagnostics',
                          builder_image_digest=builder_image,spec=spec,signature_runner=signature_runner,**options)
     recipe=generate_recipe(digest(canonical(lock)),store,recipe_id=None,builder_image_digest=builder_image,

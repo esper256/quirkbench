@@ -306,6 +306,7 @@ def parser():
     lock = recovery_actions.add_parser('lock', help='verify and retain downloaded binary RPM closure')
     lock.add_argument('directory',type=Path); lock.add_argument('--public-key',type=Path,required=True)
     lock.add_argument('--spec',type=Path,help='same immutable specification used for acquisition; otherwise retains legacy selection')
+    lock.add_argument('--vendor-inventory',type=Path,help='reviewed vendor inventory JSON for the exact RPM selection')
     lock.add_argument('--builder-image-digest',required=True); lock.add_argument('--diagnostics',type=Path,required=True)
     recipe = recovery_actions.add_parser('recipe', help='generate default stock RecoveryRecipe v2')
     recipe.add_argument('--lock',required=True); recipe.add_argument('--builder-image-digest',required=True)
@@ -1284,9 +1285,12 @@ def _main(argv=None):
                                    'Recovery private RPM database key import' if '--import' in argv else
                                    'Recovery RPM signature verification')
                             return checked(argv,timeout_s,phase)
+                        from .recovery_vendor import read_inventory
                         lock=retain_packages(args.directory.resolve(),args.public_key.resolve(),controller.store,
                             args.diagnostics.resolve()/'diagnostics',builder_image_digest=args.builder_image_digest,
-                            query=query,signature_runner=verify,spec=spec)
+                            query=query,signature_runner=verify,spec=spec,
+                            vendor_inventory=(read_inventory(args.vendor_inventory)
+                                              if args.vendor_inventory else None))
                         published(controller.root,diagnostic_owner,[digest(canonical(lock))],disposable_work=True)
                     from .retention import register,release_acquisition,release_group
                     value=controller.store.put(canonical(lock)).sha256

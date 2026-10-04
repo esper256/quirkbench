@@ -12,6 +12,7 @@ def add_parser(commands):
     plan.add_argument('--spec',type=Path,required=True);plan.add_argument('--output',type=Path,required=True)
     prepare=actions.add_parser('prepare',help='verify downloaded signed RPMs and retain a complete bundle')
     for name in ('packages','public-key','spec','output'):prepare.add_argument('--'+name,type=Path,required=True)
+    prepare.add_argument('--vendor-inventory',type=Path,help='reviewed inventory JSON for this exact signed RPM selection')
     prepare.add_argument('--builder-image',required=True);prepare.add_argument('--epoch',type=int,required=True)
     prepare.add_argument('--free-space-reserve-gib',type=int,default=2)
     verify=actions.add_parser('verify',help='verify all inputs and RPM signatures; optionally check the local builder')
@@ -39,7 +40,7 @@ def run(args):
         if args.action=='plan':result=service.plan(args.spec,args.output)
         elif args.action=='prepare':
             result=service.prepare(packages=args.packages,public_key=args.public_key,spec=args.spec,output=args.output,
-                builder_image=args.builder_image,epoch=args.epoch,reserve_bytes=reserve*1024**3)
+                builder_image=args.builder_image,epoch=args.epoch,reserve_bytes=reserve*1024**3,vendor_inventory=args.vendor_inventory)
         elif args.action=='verify':result=service.verify(args.bundle,expected=args.manifest_sha256,engine=args.engine)
         elif args.action in ('export','import'):
             result=service.transfer(args.bundle,args.output,expected=args.manifest_sha256,reserve_bytes=reserve*1024**3)
