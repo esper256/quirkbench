@@ -1029,11 +1029,9 @@ class BuildPipeline:
                  controller=None, campaign_id: str | None = None,
                  incremental_cache: BuildStageCache | None = None,
                  resume_reconciled: bool = False):
-        _safe_build_path(workspace)
-        _safe_build_path(controller_state)
-        from .state_config import outside_checkout
-        outside_checkout(workspace)
-        outside_checkout(controller_state)
+        from .build import user_build_path
+        workspace = user_build_path(workspace)
+        controller_state = user_build_path(controller_state)
         self.workspace = workspace
         self.controller_state = controller_state
         self.repository = repository

@@ -11,7 +11,7 @@ from .controller_release import bounded_file, verify_statement
 from .controller_setup import _durable_directory, _managed_path
 from .maintenance import private_lock
 from .release_trust import load_bundle
-from .state_config import _config_home, outside_checkout
+from .state_config import _config_home, canonical_user_path
 from .store import atomic_write
 
 
@@ -32,7 +32,7 @@ def acquire_install(version, request_id, *, trust_bundle=None, cache_home=None, 
     identifier(request_id)
     trust = load_bundle(trust_bundle)
     bundle = trust['bundle']
-    destination = outside_checkout(Path(data_home or os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share').expanduser().resolve())
+    destination = canonical_user_path(Path(data_home or os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share').expanduser().resolve())
     base = _managed_path(Path(cache_home or os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') /
                          'quirkbench/releases')
     _durable_directory(base)

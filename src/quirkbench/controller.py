@@ -566,8 +566,8 @@ class _LifecycleOwner:
 class Controller(OperatorApprovals):
     def __init__(self, root, clock=time.time, reserve_bytes=20 * 1024**3, deployment_repository=None,
                  boot_id_reader=controller_boot_id):
-        from .state_config import outside_checkout
-        self.root = outside_checkout(Path(root))
+        from .state_config import canonical_user_path
+        self.root = canonical_user_path(Path(root))
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.clock = clock
         self.boot_id_reader = boot_id_reader

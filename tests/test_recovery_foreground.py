@@ -114,14 +114,21 @@ def test_cleanup_refuses_changed_container_identity(inputs):
     assert all(call[1]=='inspect' for call in engine.calls[before:])
 
 
-def test_output_in_checkout_rejected_before_any_container(inputs):
+def test_checkout_output_and_ancestor_alias_retain_failed_build_without_touching_source(inputs):
     kwargs, engine = inputs
-    (kwargs['output'].parent/'.git').mkdir()
-    (kwargs['output'].parent/'.git/HEAD').write_text('ref: refs/heads/main\n')
-    with pytest.raises(ValueError, match='outside a Git'):
-        foreground.build(**kwargs)
-    assert not kwargs['output'].exists()
-    assert all(call[1]=='inspect' for call in engine.calls)
+    parent=kwargs['output'].parent
+    (parent/'.git').mkdir();(parent/'.git/HEAD').write_text('ref: refs/heads/main\n')
+    (parent/'source.c').write_text('source stays intact')
+    alias=parent/'alias';alias.symlink_to(parent,target_is_directory=True)
+    kwargs['output']=alias/kwargs['output'].name
+    with pytest.raises(BuildError,match='image build failed'):
+        foreground.build(**kwargs,execute=lambda *a,**k:{'exit_code':1})
+    output=parent/kwargs['output'].name
+    assert json.loads((output/'build.json').read_bytes())['stopped']
+    foreground.cleanup(output,run=engine)
+    assert (parent/'source.c').read_text()=='source stays intact'
+    assert (parent/'.git/HEAD').read_text()=='ref: refs/heads/main\n'
+    assert output.is_dir()  # Cleanup removes its container, never the user directory.
 
 
 def test_cli_needs_no_controller_selection(monkeypatch, tmp_path, capsys):

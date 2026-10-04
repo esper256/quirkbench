@@ -26,7 +26,7 @@ from .contracts import Conflict, ContractError, canonical
 from .controller_archive import MAX_PACKAGE_BYTES
 from .controller_service import configuration, require_ready
 from .product_contracts import _pairs
-from .state_config import outside_checkout
+from .state_config import canonical_user_path
 from .state_reader import StateReader, read_file
 from .store import atomic_write, sync_directory
 
@@ -39,14 +39,13 @@ def _json(raw):
 
 def _home(explicit, env, suffix):
     path = Path(explicit or os.environ.get(env) or Path.home() / suffix).expanduser().resolve()
-    return outside_checkout(path)
+    return canonical_user_path(path)
 
 
 def _managed(path):
     path = Path(path)
     if any(p.is_symlink() for p in (path, *path.parents)):
         raise ContractError('managed installation paths cannot contain symlinks')
-    outside_checkout(path)
     return path
 
 
@@ -276,11 +275,11 @@ def _link(path, target):
 
 def activate(record, root, *, config_home=None, bin_home=None,
              runner=subprocess.run, ready=require_ready, fault_hook=lambda _:None):
-    root = outside_checkout(Path(root))
+    root = canonical_user_path(Path(root))
     runtime = Path(record['runtime_root'])
     verify_installation(runtime)
     config = _home(config_home,'XDG_CONFIG_HOME','.config')
-    launchers = _managed(outside_checkout(Path(bin_home or Path.home()/'.local/bin').resolve()))
+    launchers = _managed(canonical_user_path(Path(bin_home or Path.home()/'.local/bin').resolve()))
     directory = _managed(config/'quirkbench')
     directory.mkdir(parents=True,exist_ok=True,mode=0o700)
     journal = directory/'installation-activation.json'

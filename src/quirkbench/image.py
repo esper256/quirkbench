@@ -64,10 +64,11 @@ class ImageInputs:
             path=Path(str(self.output)+suffix)
             if path.exists() or path.is_symlink():
                 raise ImageError(f'refusing to overwrite output: {path}')
-        protected=('/dev','/proc','/sys','/run','/boot','/etc','/usr','/media','/mnt')
-        parent=self.output.parent.resolve()
-        if any(parent==Path(p) or Path(p) in parent.parents for p in protected):
-            raise ImageError('output cannot be a controller system/device path')
+        from .build import _safe_build_path, BuildError
+        try:
+            _safe_build_path(self.output)
+        except BuildError as exc:
+            raise ImageError('output cannot be a controller system/device path') from exc
         for source in (self.recovery_kernel,self.recovery_initramfs,self.recovery_config):
             if source is None or not source.is_absolute() or source.is_symlink() or not source.is_file():
                 raise ImageError(f'missing absolute regular input: {source}')
@@ -566,3 +567,35 @@ def create_image(inputs: ImageInputs, *, event=None, lock_timeout_s=60, reserve_
         raise
     finally:
         _image_event.reset(token)
+
+
+def export_image(source: Path, output: Path) -> Path:
+    """Copy three completed artifacts to a user destination without overwrites.
+
+    Build staging remains managed separately. A failed export may leave completed
+    files for inspection; it never deletes user files or treats the parent as staging.
+    """
+    from .state_reader import held_parent
+    with held_parent(output) as (parent_fd, guard):
+        for suffix in ('', '.sha256', '.json'):
+            destination = Path(str(output) + suffix)
+            if destination.exists() or destination.is_symlink():
+                raise ImageError('image export destination already exists')
+        for suffix in ('', '.sha256', '.json'):
+            guard()
+            temporary = '.quirkbench-image-' + uuid.uuid4().hex
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                         0o600, dir_fd=parent_fd)
+            try:
+                with os.fdopen(fd, 'wb') as stream, Path(str(source) + suffix).open('rb') as source_stream:
+                    shutil.copyfileobj(source_stream, stream)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                guard()
+                os.link(temporary, output.name + suffix, src_dir_fd=parent_fd,
+                        dst_dir_fd=parent_fd, follow_symlinks=False)
+                os.fsync(parent_fd)
+                guard()
+            finally:
+                os.unlink(temporary, dir_fd=parent_fd)
+    return Path(str(output) + '.json')
