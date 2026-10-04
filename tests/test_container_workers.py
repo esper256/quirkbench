@@ -48,6 +48,8 @@ class Engine:
 
 @pytest.fixture
 def worker(tmp_path,monkeypatch):
+    from quirkbench.resource_budget import Capacity, GIB
+    monkeypatch.setattr('quirkbench.resource_budget.capacity', lambda: Capacity(8, 16*GIB))
     c=Controller(tmp_path/'state',reserve_bytes=0,boot_id_reader=lambda:BOOT)
     engine=Engine()
     service=ContainerWorkerServices(engine='docker',worker_image=IMAGE,runner=engine,boot_id_reader=lambda:BOOT)
