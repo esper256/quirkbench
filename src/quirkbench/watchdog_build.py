@@ -15,4 +15,3 @@ def validate_watchdog_kernel(path: str | Path, *, driver: str, lockup_detection:
     missing = sorted(key for key in required if values.get(key) != "y")
     if missing:
         raise BuildError("watchdog qualification kernel requires built-in: " + ", ".join(missing))
-

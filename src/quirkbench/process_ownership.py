@@ -50,4 +50,3 @@ def launch(*args,workspace=None,**kwargs):
             process.wait(timeout=10)
             raise
     return process
-

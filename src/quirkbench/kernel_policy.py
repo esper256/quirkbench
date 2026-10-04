@@ -79,5 +79,3 @@ def validate_kernel_config(path: Path) -> None:
         detail = ", ".join(f"{key}: expected {want}, got {got}"
                            for key, (want, got) in sorted(mismatch.items()))
         raise BuildError(f"protected kernel config mismatch: {detail}")
-
-

@@ -64,6 +64,8 @@ def test_isolated_payload_imports_and_target_entrypoint_help(tmp_path):
              '[importlib.import_module("quirkbench."+n) for n in '+repr(TARGET_MODULES)+']; '
              'assert not any("quirkbench."+n in sys.modules for n in '
              '["controller","cli","build","target_install","worker_service","state_reader"])')
+    invitation=json.loads((ROOT/'examples/retarget-invitation.json').read_bytes())
+    program+='; from quirkbench.retarget_records import validate_invitation; validate_invitation('+repr(invitation)+')'
     result=subprocess.run([sys.executable,'-I','-S','-B','-c',program],capture_output=True,text=True,timeout=10)
     assert result.returncode==0,result.stderr
     for module in ('boot','runtime','library_maintenance'):

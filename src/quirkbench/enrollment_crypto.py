@@ -86,4 +86,3 @@ def verify_signature(public_key, message, signature, *, run=subprocess.run, temp
                       '-rawin','-in',str(stage/'message'),'-sigfile',str(stage/'signature')],run=run)
         except ContractError as exc:
             raise ContractError('invalid enrollment key proof') from exc
-

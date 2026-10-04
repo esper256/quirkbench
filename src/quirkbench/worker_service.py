@@ -346,4 +346,3 @@ class ContainerWorkerServices:
         if self._claim_reader is not None:
             self._claim_reader.close();self._claim_reader=None
         return 'stopped'
-

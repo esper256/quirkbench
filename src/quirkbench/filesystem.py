@@ -190,4 +190,3 @@ def private_lock(path, *, shared=False):
         yield fd
     finally:
         os.close(fd)
-

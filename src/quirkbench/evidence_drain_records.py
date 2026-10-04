@@ -96,4 +96,3 @@ def read_credential(path, *, stores=()):
     value=load(_secret_read(directory,path.name,limit=MAX_BYTES,stores=(*managed,*stores)))
     if not isinstance(value,dict) or not isinstance(value.get('intent'),dict):raise ContractError('private drain intent is missing')
     return _private_credential(value,value['intent'])
-

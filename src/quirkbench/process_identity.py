@@ -63,4 +63,3 @@ def verify_empty_cgroup(root, group):
     values = [parts[1] for parts in lines if len(parts) == 2 and parts[0] == 'populated']
     if values != ['0']:
         raise WorkerServiceError('worker cgroup may still contain descendants')
-

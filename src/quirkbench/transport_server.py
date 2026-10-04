@@ -377,5 +377,3 @@ def make_server(
         def server_close(self):
             self.accepted.close();super().server_close()
     return Server()
-
-

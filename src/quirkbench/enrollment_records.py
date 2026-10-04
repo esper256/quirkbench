@@ -60,4 +60,3 @@ def _document(raw):
     if raw != canonical(value):
         raise ContractError('enrollment private record must be canonical')
     return value
-

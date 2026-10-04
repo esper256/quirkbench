@@ -45,4 +45,3 @@ def validate_preparation(value):
             or value['pending_upload_records']==0 and value['pending_upload_bytes']!=0):
         raise ContractError('shutdown evidence inventory exceeds local bounds')
     return value
-

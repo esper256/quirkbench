@@ -286,5 +286,3 @@ class ReadOnlyStore:
             if actual!=value or (before.st_size,before.st_mtime_ns,before.st_ctime_ns)!=(after.st_size,after.st_mtime_ns,after.st_ctime_ns):
                 raise ContractError('stored artifact failed verification')
             return before.st_size
-
-

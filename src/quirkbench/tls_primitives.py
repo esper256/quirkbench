@@ -35,4 +35,3 @@ def _dates(raw):
         return tuple(int(parsedate_to_datetime(line.split('=',1)[1]).timestamp()) for line in lines)
     except (ValueError,TypeError,UnicodeError,OverflowError) as exc:
         raise ContractError('invalid native listener certificate validity') from exc
-

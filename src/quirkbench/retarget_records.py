@@ -11,7 +11,7 @@ from .contracts import Conflict, ContractError, canonical, digest, identifier, s
 from .product_contracts import _depth, _pairs
 from .store import atomic_write
 from .binding import system_uuid
-from .enrollment_records import validate_code
+from .enrollment_records import validate_code, _document
 
 
 def validate_scope(value):
@@ -40,4 +40,3 @@ def validate_invitation(value):
         if value[key] is not False:raise ContractError('retarget invitation cannot claim local or physical completion')
     _document(canonical(value))
     return value
-

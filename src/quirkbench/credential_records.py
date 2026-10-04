@@ -28,4 +28,3 @@ def validate_generation(value):
     if type(value['expires_at']) is not int or not 1 <= value['expires_at'] <= 4102444800:
         raise ContractError('invalid credential expiry')
     return value
-
