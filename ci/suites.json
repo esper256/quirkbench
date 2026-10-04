@@ -245,6 +245,9 @@
       "src/quirkbench/recovery_foreground.py",
       "tests/test_recovery_foreground.py",
       "tests/test_recovery_space.py",
+      "src/quirkbench/recovery_bundle*",
+      "tests/test_recovery_bundle.py",
+      "schemas/recovery-input-bundle.v1.schema.json",
       "src/quirkbench/target_install.py",
       "src/quirkbench/target_payload.py",
       "src/quirkbench/recovery_runtime_revision.py",
@@ -263,6 +266,7 @@
       "tests/test_stock_recovery_flow.py",
       "tests/test_recovery_foreground.py",
       "tests/test_recovery_space.py",
+      "tests/test_recovery_bundle.py",
       "tests/test_recovery_runtime_revision.py"
     ]
   }

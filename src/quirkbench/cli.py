@@ -289,6 +289,8 @@ def parser():
     respond = session_actions.add_parser('respond', help='durably answer a human request')
     respond.add_argument('session_id'); respond.add_argument('--request', required=True)
     respond.add_argument('--file', type=Path, required=True); respond.add_argument('--request-id', required=True)
+    from .recovery_bundle_cli import add_parser as recovery_bundle_parser
+    recovery_bundle_parser(commands)
     recovery = commands.add_parser('recovery-inputs', help='exact stock package acquisition plan and v2 retained inputs')
     recovery_actions = recovery.add_subparsers(dest='action', required=True)
     replay = recovery_actions.add_parser('replay-check', help='report missing or changed exact RPM inputs in a retained repository; read-only')
@@ -1403,6 +1405,9 @@ def _main(argv=None):
 def main(argv=None):
     """A publication barrier, not a scheduler; read-only commands do no housekeeping."""
     args=parser().parse_args(argv)
+    if args.command=='recovery-bundle':
+        from .recovery_bundle_cli import run
+        return run(args)
     if args.command in ('recovery-image-build','recovery-image-cleanup'):
         from .recovery_foreground import build,cleanup
         from .build import BuildError
