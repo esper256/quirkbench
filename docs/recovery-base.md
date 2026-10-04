@@ -226,3 +226,13 @@ storage/firmware. Kernel and watchdog qualification remain separate.
 Follow the [testing policy](testing-policy.md): focused fixtures during implementation;
 expensive boot/composition/endurance gates only on an explicitly requested final major
 release. This contract does not qualify any image bytes.
+
+
+## Recipe execution compatibility
+
+Recovery image generation executes only stock Fedora schema-v2 recipes. The old
+custom-kernel recovery compiler, its introspection-based cache and interrupted-v1
+resume machinery have been retired. Select a new v2 recipe and fresh workspace;
+an old recipe is never silently converted or given new hashes. Historical v1
+recipe/release readers remain available for evidence inspection. Candidate and
+experiment kernel compilation, including Fedora SRPM preparation, is unchanged.
