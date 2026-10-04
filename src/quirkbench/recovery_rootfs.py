@@ -211,7 +211,9 @@ def inspect_local_rpm_closure(entry: dict, directory: Path, *, runner=_run) -> t
 def verify_stock_rpm_signatures(lock, store, package_paths, stage, runner=_run):
     """Verify all RPMs against only the explicitly pinned key in a private RPM DB."""
     key = stage / 'rpm-signing-key.asc'
-    key.write_bytes(store.path(lock['rpm_key_sha256']).read_bytes())
+    from .state_reader import read_file
+    source=store.path(lock['rpm_key_sha256'])
+    key.write_bytes(read_file(source.parent,source.name,limit=1024**2))
     if sha256_file(key) != lock['rpm_key_sha256']:
         raise BuildError('RPM signing key changed during staging')
     home = stage / 'gpg-home'
