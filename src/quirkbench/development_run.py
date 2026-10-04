@@ -10,7 +10,7 @@ import time
 
 from .contracts import ContractError, canonical, identifier, digest, sha256
 from .controller import controller_boot_id
-from .state_config import discover_state_root, outside_checkout
+from .state_config import discover_state_root, canonical_user_path
 from .state_reader import development_run,read_file
 from .store import ArtifactStore, atomic_write
 from .development_container import DevelopmentServices
@@ -40,10 +40,10 @@ def prepare(unit, stage, log, status, arguments=()):
     DevelopmentServices._unit(unit)
     run_id = unit.removesuffix('.service')
     identifier(run_id)
-    root = outside_checkout(discover_state_root())
+    root = canonical_user_path(discover_state_root())
     if not (root / 'controller.sqlite').is_file():
         raise ContractError('run quirkbench setup-state before starting a build')
-    stage = outside_checkout(stage)
+    stage = canonical_user_path(stage)
     if stage != root / 'development-runs' / run_id / 'work':
         raise ContractError(f'build stage must be {root}/development-runs/{run_id}/work')
     directory = stage.parent
@@ -65,7 +65,7 @@ def prepare(unit, stage, log, status, arguments=()):
 
 def retain(root, run_id, *, outputs=(), abandon=False):
     """Explicitly preserve ad hoc outputs before making their work disposable."""
-    root = outside_checkout(root)
+    root = canonical_user_path(root)
     record = development_run(root, run_id)
     expected=(run_id+'.service' if record.get('schema_version')==1 else 'qb-development-v2-'+run_id)
     if record['unit'] != expected:

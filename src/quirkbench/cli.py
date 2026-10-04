@@ -319,7 +319,7 @@ def parser():
     foreground.add_argument('--recipe',required=True)
     foreground.add_argument('--builder-image',required=True,help='exact local sha256 image configuration ID from the verified recipe')
     foreground.add_argument('--engine',choices=('podman','docker'),default='podman')
-    foreground.add_argument('--output',type=Path,required=True,help='new output directory outside Git')
+    foreground.add_argument('--output',type=Path,required=True,help='new output directory (checkout-local paths are allowed)')
     foreground.add_argument('--cpus',type=int,help='default: up to four CPUs, reserving half the visible host CPUs')
     foreground.add_argument('--memory-gib',type=int,default=4)
     foreground.add_argument('--timeout',type=int,default=3600,help='whole-container deadline in seconds')
@@ -1067,23 +1067,17 @@ def _main(argv=None):
         args.state = discover_state_root(args.state)
         read_only = args.command in ('watch', 'target-inventory') or (args.command == 'campaign' and args.action == 'status')
         if not read_only and args.command not in ('doctor','target','endpoint','target-service','serve-repository'):
-            from .state_config import outside_checkout
-            outside_checkout(args.state)
             if not explicit_state and not args.state.exists():
                 raise ValueError('run quirkbench setup-state before creating controller work')
         if read_only and not (args.state / 'controller.sqlite').is_file():
             raise ValueError('controller state unavailable; run quirkbench setup-state first')
-        if args.command in ('build', 'compose', 'image'):
-            from .state_config import outside_checkout
+        if args.command in ('build', 'compose'):
             from .retention import managed_path
             if args.command in ('build', 'compose'):
                 import uuid
                 args.workspace=args.workspace or args.state/'workspaces'/(args.command+'-'+uuid.uuid4().hex)
                 managed_path(args.state,args.workspace)
                 if args.command=='compose': managed_path(args.state,args.publish_repo)
-            else:
-                raw_image = json.loads(args.manifest.read_bytes())
-                managed_path(args.state,Path(raw_image['output']).parent)
         if args.reserve_gib < 0:
             raise ValueError('reserve must be nonnegative')
         repository_paths = {}
@@ -1116,18 +1110,26 @@ def _main(argv=None):
             from .simulation import demo
             answer = demo(args.state)
         elif args.command == 'image':
-            from .image import ImageInputs, create_image
+            from .image import ImageInputs, create_image, export_image
             raw=json.loads(args.manifest.read_bytes())
             if not isinstance(raw,dict) or set(raw)-set(ImageInputs.__dataclass_fields__):raise ValueError('invalid image input fields')
             fields={key:Path(value) if key not in ('size_mib','root_mib','smoke','experiment_mib','library_mib','log_budget_mib') and value is not None else value for key,value in raw.items()}
             from .retention import work,published
-            image_dir=Path(raw['output']).parent
+            from .build import user_build_path
+            import uuid
+            output=user_build_path(Path(raw['output']))
+            if not output.parent.is_dir():raise ValueError('image output parent must exist')
+            for suffix in ('', '.json', '.sha256'):
+                destination=Path(str(output)+suffix)
+                if destination.exists() or destination.is_symlink():raise ValueError('image output and sidecars must be new')
+            image_dir=args.state/'workspaces'/('image-'+uuid.uuid4().hex)
+            fields['output']=image_dir/output.name
             with work(args.state,'recovery',image_dir) as run_owner:
                 result=create_image(ImageInputs(**fields))
                 controller=Controller(args.state.resolve(),**controller_options)
                 values=[controller.store.put_file(p).sha256 for p in image_dir.iterdir() if p.is_file() and p.name!='process-groups.json']
                 published(controller.root,run_owner,values)
-                answer={'manifest':str(result)}
+                answer={'manifest':str(export_image(fields['output'],output))}
         elif args.command == 'qualify-image':
             from .qemu import QemuInputs, qualify_boot_cycle
             controller=Controller(args.state.resolve(),**controller_options)

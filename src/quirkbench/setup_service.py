@@ -17,7 +17,7 @@ from .controller_tls import create_identity, inspect_identity
 from .maintenance import private_lock
 from .setup_contracts import STEPS as INITIAL_STEPS, SetupUnavailable
 from .setup_service_contracts import LIMIT, STEPS, load_progress, validate_progress
-from .state_config import _config_home, outside_checkout, discover_state_root
+from .state_config import _config_home, discover_state_root
 from .state_reader import read_file
 from .store import atomic_write
 
@@ -53,7 +53,6 @@ def _public_directory(path):
     path = Path(path).expanduser().absolute()
     if any(part.is_symlink() for part in (path, *path.parents)):
         raise ContractError('service publication paths cannot contain links')
-    outside_checkout(path)
     if path.exists():
         info = path.stat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():

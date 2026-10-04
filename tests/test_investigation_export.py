@@ -72,7 +72,9 @@ def manifest(path):
 
 def test_report_only_inconclusive_atomic_public_output_excludes_private_control(lab,tmp_path):
     c,_=lab;identity=populate(c,attempts=2)
-    output=tmp_path/'public.tar'
+    checkout=tmp_path/'checkout';checkout.mkdir();(checkout/'.git').mkdir()
+    alias=tmp_path/'alias';alias.symlink_to(checkout,target_is_directory=True)
+    output=alias/'public.tar'
     receipt=export.export(c.root,'investigation',output)
     value,names=manifest(output)
     assert receipt['conclusion']=='inconclusive' and not receipt['source_reconstructed']

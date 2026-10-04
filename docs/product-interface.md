@@ -66,7 +66,9 @@ Setup persists the chosen state root under the user's controller configuration.
 Commands resolve that identity independently of the current directory. Unconfigured
 resolution uses `$XDG_STATE_HOME/quirkbench` (default `~/.local/state/quirkbench`),
 never a checkout-local fallback. Setup creates state; queries never initialize it.
-New persistent state and build staging must be outside Git checkouts. Preserve
+Default persistent state lives outside Git checkouts. Explicit user-selected state,
+build and output directories may be checkout-local; resolve ordinary ancestor aliases
+at admission. Only recorded managed staging is automatically disposable. Preserve
 explicit `--state` and low-level commands for development and existing data. Do not
 silently migrate or merge an existing `.quirkbench` directory into another identity.
 Run the controller in an attended foreground session. Terminal exit ends controller

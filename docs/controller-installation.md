@@ -41,7 +41,8 @@ podman --remote=false --cgroup-manager=cgroupfs info
 docker info
 ```
 
-State, installed runtime and signing keys belong outside Git checkouts. Do not
+State defaults outside Git checkouts; explicitly selected state may be checkout-local.
+Keep installed runtime and signing keys outside source control. Do not
 share a live controller state directory between machines. For a separate controller,
 transfer the development archive through an authenticated channel and install with
 that machine's Python; do not copy a development virtualenv.

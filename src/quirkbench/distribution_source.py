@@ -17,7 +17,6 @@ from .contracts import Conflict, ContractError, canonical, identifier, sha256
 from .source_capture import _directory_owner, _git, _identity, _observe, _path, _parent, _staged_identity, MAX_FILES
 from .source_preparation import prepare
 from .controller_setup import _managed_path
-from .state_config import outside_checkout
 
 
 def snapshot(root, verify, *, git=False):
@@ -305,7 +304,7 @@ def import_prepared(entry, prepared, source_stage, stage, store, workspace_id, *
     for path in (source_stage, stage):
         if not path.is_absolute() or path.resolve() != path:
             raise ContractError('canonical private distribution staging required')
-        outside_checkout(path); _managed_path(path)
+        _managed_path(path)
     if source_stage == stage or source_stage.is_relative_to(stage) or stage.is_relative_to(source_stage):
         raise ContractError('distribution import and source stages must be separate')
     expected = {'schema_version','kernel_srpm_sha256','kernel_source_nevra','spec_sha256','source','source_tree_sha256','source_date_epoch'}

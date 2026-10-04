@@ -20,7 +20,6 @@ import tarfile
 from .agent import SENSITIVE
 from .contracts import Conflict,ContractError,canonical,sha256
 from .controller_setup import _managed_path
-from .state_config import outside_checkout
 
 MAX_FILES=250000
 MAX_LIST=32*1024**2
@@ -265,7 +264,7 @@ def capture(repository,base_oid,allowed_untracked,stage,store, *,writer_quiesced
     stage=Path(stage)
     if not stage.is_absolute() or stage.resolve()!=stage or stage.is_symlink() or '..' in stage.parts:raise ContractError('source staging must be canonical')
     stage=_managed_path(stage)
-    outside_checkout(stage);stage.mkdir(mode=0o700,parents=True,exist_ok=True)
+    stage.mkdir(mode=0o700,parents=True,exist_ok=True)
     if stage==root or stage.is_relative_to(root) or root.is_relative_to(stage):raise ContractError('source capture staging must be separate from source')
     fault=fault_hook or (lambda _:None)
     root_fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)

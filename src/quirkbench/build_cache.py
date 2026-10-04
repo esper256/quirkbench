@@ -109,11 +109,11 @@ class BuildStageCache:
     """One latest complete snapshot per stage and reviewed recipe lineage."""
 
     def __init__(self, root: Path):
-        from .state_config import outside_checkout
+        from .state_config import canonical_user_path
         self.root = Path(root)
-        if self.root.exists() and (self.root.is_symlink() or self.root.resolve() != self.root):
+        if self.root.is_symlink():
             raise BuildError("build cache root cannot be linked")
-        self.root=outside_checkout(self.root)
+        self.root=canonical_user_path(self.root)
         self.root.mkdir(parents=True, mode=0o700, exist_ok=True)
         _directory(self.root)
         if self.root.stat().st_uid != os.getuid():
@@ -319,12 +319,15 @@ class BuildStageCache:
             _sync_directory(slot)
             for old in slot.iterdir():
                 if old.name not in {key, ".lock"} and old.is_dir() and not old.is_symlink() and HASH.fullmatch(old.name):
-                    shutil.rmtree(old)
+                    if self.completed_entry(old):
+                        from .maintenance import remove_tree
+                        remove_tree(old, self.root)
             _sync_directory(slot)
             return key
         finally:
             if pending.exists():
-                shutil.rmtree(pending)
+                from .maintenance import remove_tree
+                remove_tree(pending, self.root)
 
     def _verify_entry(self, entry: Path, stage: str, key: str, identity: dict,
                       trees: dict[str, Path]) -> None:
@@ -342,6 +345,15 @@ class BuildStageCache:
             if _tree_digest(Path(trees[name])) != record["trees"][name]:
                 raise BuildError("same build cache identity produced different bytes")
 
+    def completed_entry(self, entry: Path) -> bool:
+        """A directory name alone never grants cache retirement authority."""
+        try:
+            record = self._restore(entry, entry.parent.name, {})
+            return (record['key'] == entry.name
+                    and {p.name for p in entry.iterdir()} == {'manifest.json', *record['trees']})
+        except (BuildError, OSError, ValueError, TypeError):
+            return False
+
     def list(self) -> list[dict]:
         result = []
         for lineage in sorted(self.root.iterdir()):
@@ -351,7 +363,7 @@ class BuildStageCache:
                 if not stage.is_dir() or stage.is_symlink() or not NAME.fullmatch(stage.name):
                     continue
                 for entry in sorted(stage.iterdir()):
-                    if entry.is_dir() and not entry.is_symlink() and HASH.fullmatch(entry.name):
+                    if entry.is_dir() and not entry.is_symlink() and HASH.fullmatch(entry.name) and self.completed_entry(entry):
                         result.append({"lineage": lineage.name, "stage": stage.name,
                                        "cache_id": entry.name})
         return result
@@ -369,5 +381,8 @@ class BuildStageCache:
             entry = self._slot(item["lineage"], item["stage"]) / cache_id
             if not entry.is_dir() or entry.is_symlink():
                 raise BuildError("build cache entry changed before prune")
-            shutil.rmtree(entry)
+            if not self.completed_entry(entry):
+                raise BuildError("build cache entry has no matching completion record")
+            from .maintenance import remove_tree
+            remove_tree(entry, self.root)
         return True
