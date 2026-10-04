@@ -44,8 +44,9 @@ def run(args):
         elif args.action in ('export','import'):
             result=service.transfer(args.bundle,args.output,expected=args.manifest_sha256,reserve_bytes=reserve*1024**3)
         else:
+            overrides={name:getattr(args,name) for name in ('cpus','memory_gib') if getattr(args,name) is not None}
             result=service.build(args.bundle,args.output,expected=args.manifest_sha256,engine=args.engine,
-                cpus=args.cpus,memory_gib=args.memory_gib,timeout=args.timeout,reserve_gib=reserve)
+                timeout=args.timeout,reserve_gib=reserve,**overrides)
         print(json.dumps(result,sort_keys=True))
         return 0 if result.get('ready',True) else 2
     except (BuildError,OSError,ValueError,KeyError,StoragePressure,subprocess.SubprocessError) as exc:

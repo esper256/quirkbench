@@ -116,3 +116,41 @@ def test_bundle_schema_and_rejected_link_leave_destination_untouched(prepared,tm
     retained.write_bytes(path.read_bytes());path.unlink();path.symlink_to(retained)
     with pytest.raises(BuildError,match='missing object'):bundle.transfer(root,tmp_path/'refused')
     assert not (tmp_path/'refused').exists() and retained.is_file()
+
+
+def test_cli_defaults_reach_real_foreground_admission(prepared,tmp_path,monkeypatch):
+    from quirkbench.cli import main
+    from quirkbench import recovery_foreground
+    from test_recovery_foreground import Engine
+    root,_=prepared;manifest=bundle.load((root/'manifest.json').read_bytes())
+    monkeypatch.setattr(bundle,'verify',lambda *a,**k:{'ready':True,'recipe_sha256':manifest['recipe_sha256'],
+        'builder_image_digest':manifest['builder_image_digest']})
+    original=recovery_foreground.build;engine=Engine(manifest['builder_image_digest'])
+    def admission(**kwargs):
+        return original(**kwargs,run=engine,execute=lambda *a,**k:(_ for _ in ()).throw(KeyboardInterrupt()))
+    monkeypatch.setattr(recovery_foreground,'build',admission)
+    with pytest.raises(KeyboardInterrupt):
+        main(['recovery-bundle','build',str(root),'--engine','docker','--output',str(tmp_path/'image')])
+    create=next(c for c in engine.calls if c[1]=='create')
+    assert '--memory='+str(4*1024**3) in create
+    assert json.loads((tmp_path/'image/build.json').read_bytes())['stopped']
+
+
+def test_imported_oversized_public_key_is_bounded_before_native_verification(prepared,tmp_path):
+    from quirkbench.store import ArtifactStore
+    from quirkbench.contracts import ContractError
+    root,_=prepared;store=ArtifactStore(root,reserve_bytes=0)
+    manifest=bundle.load((root/'manifest.json').read_bytes())
+    recipe=json.loads(store.get(manifest['recipe_sha256']))
+    lock=json.loads(store.get(recipe['rootfs_lock_sha256']))
+    lock['rpm_key_sha256']=store.put(b'x'*(1024**2+1)).sha256
+    recipe['rootfs_lock_sha256']=store.put(canonical(lock)).sha256
+    new_recipe=store.put(canonical(recipe)).sha256
+    # Construct a hash-consistent imported snapshot; do not use trusted prepare.
+    _,_,objects=bundle._closure(new_recipe,manifest['acquisition_spec_sha256'],store)
+    manifest['recipe_sha256']=new_recipe
+    manifest['objects']=[{'sha256':h,'size_bytes':store.path(h).stat().st_size} for h in sorted(objects)]
+    (root/'manifest.json').write_bytes(canonical(manifest))
+    imported=tmp_path/'imported';bundle.transfer(root,imported,expected=digest(canonical(manifest)),reserve_bytes=0)
+    with pytest.raises(ContractError,match='read budget'):
+        bundle.verify(imported,signature_runner=lambda *a:pytest.fail('oversized key must not reach native tools'))
