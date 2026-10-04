@@ -14,7 +14,7 @@ def parser() -> argparse.ArgumentParser:
     root.add_argument("--state", type=Path, help="explicit legacy or selected controller state root")
     commands = root.add_subparsers(dest="command", required=True)
 
-    commands.add_parser("setup", help="configure the controller and persistent user services")
+    commands.add_parser("setup", help="configure the foreground controller")
     commands.add_parser("pair", help="create a short-lived target enrollment code")
     commands.add_parser("targets", help="show separate target recovery, enrollment and experiment readiness facts")
     target = commands.add_parser("target", help="target administration")

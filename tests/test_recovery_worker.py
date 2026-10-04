@@ -48,7 +48,7 @@ def run(controller, claim, executor):
 
 def complete(argv, log, *, verify, deadline):
     verify()
-    assert '--network=none' in argv and '--cgroups=disabled' in argv
+    assert '--network=none' in argv and '--cgroups=enabled' in argv and '--memory=4294967296' in argv
     assert argv[-1] == '/workspace/output/rootfs'
     stage = log.parent.parent
     record = stage / 'output/rootfs/usr/lib/quirkbench/recovery-rootfs-lock.json'

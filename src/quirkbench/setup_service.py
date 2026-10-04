@@ -1,8 +1,4 @@
-"""Bounded initial installation of the existing controller user service.
-
-One synchronous setup continuation, not a scheduler. Existing differing service
-configuration/units/launchers are never replaced; upgrades retain guarded activation.
-"""
+"""Resumable TLS/configuration setup for an explicitly run foreground controller."""
 from __future__ import annotations
 
 import os
@@ -10,10 +6,11 @@ from pathlib import Path
 import re
 import stat
 import subprocess
+from contextlib import nullcontext
 
 from .contracts import Conflict, ContractError, canonical, digest
-from .controller_install import _idle, _link, _systemctl, _wait_ready, verify_installation
-from .controller_service import UNIT, require_ready
+from .controller_install import _idle, _link, verify_installation
+from .controller_service import require_ready
 from .controller_setup import (_durable_directory, _manifest_digest, _managed_path,
                                _database_present, SetupFilesystem, setup_progress as initial_progress)
 from .controller_tls import create_identity, inspect_identity
@@ -35,19 +32,6 @@ def service_progress(*, config_home=None):
     if path.is_symlink() or path.stat().st_uid != os.geteuid():
         raise ContractError('service setup journal must be owned and unlinked')
     return load_progress(read_file(path.parent, path.name, limit=LIMIT))
-
-
-def _render(runtime, root):
-    # Preserve compatibility with the existing guarded activation's literal paths.
-    # systemd specifiers, whitespace and control characters cannot enter ExecStart.
-    if any(not re.fullmatch(r'/[A-Za-z0-9/._-]+', str(path)) for path in (runtime, root)):
-        raise ContractError('service paths require plain absolute path components for the supported unit template')
-    raw = read_file(runtime, 'lib/quirkbench/quirkbench-controller.service', limit=16384)
-    expected = b'ExecStart=/ABSOLUTE/INSTALL/bin/quirkbench-controller-service --state /ABSOLUTE/STATE/quirkbench'
-    if raw.count(expected) != 1 or b'\nKillMode=control-group\n' not in raw:
-        raise ContractError('installed controller unit template differs from the supported contract')
-    return raw.replace(expected, ('ExecStart=' + str(runtime / 'bin/quirkbench-controller-service') +
-                                 ' --state ' + str(root)).encode())
 
 
 def _same_file(path, raw):
@@ -77,52 +61,6 @@ def _public_directory(path):
     return path
 
 
-def _service_state(run):
-    try:
-        result = run(['systemctl','--user','show',UNIT,'--property=ActiveState','--property=MainPID'],
-                     capture_output=True,text=True,check=False,timeout=5,stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise SetupUnavailable('systemd user manager unavailable; retry from a native controller login session') from exc
-    if result.returncode or not isinstance(result.stdout, str) or len(result.stdout) > 16384:
-        raise SetupUnavailable('systemd user manager could not inspect the controller unit')
-    try: fields = dict(line.split('=',1) for line in result.stdout.splitlines())
-    except ValueError as exc: raise Conflict('invalid controller service state') from exc
-    if fields.get('ActiveState') == 'active' and re.fullmatch(r'[1-9][0-9]*', fields.get('MainPID','')):
-        return 'active'
-    if fields.get('ActiveState') in ('inactive','failed') and fields.get('MainPID') == '0':
-        return 'stopped'
-    raise Conflict('controller service state requires manual reconciliation')
-
-
-def _effective_unit(run, unit, runtime, root):
-    properties = ('LoadState', 'FragmentPath', 'DropInPaths', 'ExecStart', 'ExecStartPre',
-                  'ExecStartPost', 'ExecCondition', 'KillMode')
-    try:
-        answer = run(['systemctl', '--user', 'show', UNIT, *('--property=' + p for p in properties)],
-                     capture_output=True,text=True,check=False,timeout=5,stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise SetupUnavailable('effective controller unit inspection unavailable') from exc
-    if answer.returncode or not isinstance(answer.stdout, str) or len(answer.stdout) > 16384:
-        raise Conflict('effective controller unit inspection unavailable')
-    try: fields = dict(line.split('=',1) for line in answer.stdout.splitlines())
-    except ValueError as exc: raise Conflict('invalid effective controller unit properties') from exc
-    start = fields.get('ExecStart', '')
-    executable = str(runtime / 'bin/quirkbench-controller-service')
-    command = executable + ' --state ' + str(root)
-    prefix = '{ path=' + executable + ' ; argv[]=' + command + ' ; ignore_errors=no ;'
-    if (set(fields) != set(properties) or fields['LoadState'] != 'loaded'
-            or fields['FragmentPath'] != str(unit) or fields['DropInPaths'] != ''
-            or fields['KillMode'] != 'control-group' or any(fields[p] for p in ('ExecStartPre','ExecStartPost','ExecCondition'))
-            or not start.startswith(prefix) or start.count('{ path=') != 1 or start.count('argv[]=') != 1):
-        raise Conflict('effective controller unit differs, is masked or has overrides; reconcile it before setup')
-
-
-def _action(runner, *args):
-    try: return _systemctl(runner, *args)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise SetupUnavailable('user service action unavailable; retry the recorded setup request') from exc
-
-
 def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, tls_run=subprocess.run,
                     ready=require_ready, fault_hook=None):
     initial = initial_progress(config_home=config_home)
@@ -143,10 +81,6 @@ def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, t
     home = _config_home(config_home)
     launchers = _public_directory(bin_home or Path.home() / '.local/bin')
     journal = _journal(home); _durable_directory(journal.parent)
-    unit = home / 'systemd/user' / UNIT
-    if any(part.is_symlink() for part in (unit, *unit.parents)):
-        raise ContractError('initial service unit cannot contain filesystem links')
-    unit_raw = _render(runtime, root)
     intent = {'initial_intent': choice, 'setup_request_digest': initial['request_digest'],
               'config_home': str(home), 'bin_home': str(launchers)}
     fault_hook = fault_hook or (lambda _: None)
@@ -156,7 +90,7 @@ def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, t
             if progress['intent'] != intent or progress['request_id'] != initial['request_id']:
                 raise Conflict('service setup already has another intent/request')
         else:
-            progress = validate_progress({'schema_version':1,'record_type':'controller-service-setup',
+            progress = validate_progress({'schema_version':2,'record_type':'controller-service-setup',
                 'request_id':initial['request_id'],
                 'request_digest':digest(canonical({'kind':'controller_service_setup','arguments':intent})),
                 'intent':intent,'completed_steps':[],'tls_identity_sha256':None})
@@ -167,12 +101,16 @@ def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, t
                 progress['completed_steps'].append(step)
                 validate_progress(progress); atomic_write(journal, canonical(progress))
             fault_hook(step)
-        live = _service_state(runner)
-        # Already-running managed setup can only observe its immutable publication.
-        # No source/config changes while the service owns coordinator.lock.
-        publishing = live != 'active'
-        if not publishing and not set(STEPS[:5]) <= set(progress['completed_steps']):
-            raise Conflict('unverified active controller owner blocks initial service setup')
+        if progress['schema_version']==1:
+            # Preserve the historical unit/start facts; do not reinterpret them
+            # as foreground readiness. Re-verify publications under the owner lock.
+            with private_lock(root/'coordinator.lock'):
+                _idle(root)
+                legacy=journal.with_name('setup-service.v1.json')
+                if not _same_file(legacy,canonical(progress)):atomic_write(legacy,canonical(progress))
+                progress={**progress,'schema_version':2,'completed_steps':[],'tls_identity_sha256':None}
+                validate_progress(progress);atomic_write(journal,canonical(progress))
+        publishing=progress['completed_steps']!=list(STEPS)
         def published_inputs():
             tls = (create_identity(root, choice['host'], initial['request_id'], run=tls_run) if publishing else
                    inspect_identity(root / 'private/controller-tls' / ('setup-' + digest(initial['request_id'].encode())[:32]),
@@ -186,8 +124,7 @@ def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, t
                 'host':choice['host'],'port':choice['port'],'allow_lan':choice['allow_lan'],
                 'reserve_gib':choice['reserve_gib']}
             configuration = root / 'private/controller-service.json'
-            for step, path, raw in [('configuration_published', configuration, canonical(config)),
-                                    ('unit_published', unit, unit_raw)]:
+            for step, path, raw in [('configuration_published', configuration, canonical(config))]:
                 exists = _same_file(path, raw)
                 if not exists:
                     if not publishing or step in progress['completed_steps']:
@@ -210,21 +147,12 @@ def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, t
                 atomic_write(selection, canonical(record))
             completed('launcher_published')
             return tls
-        if publishing:
-            with private_lock(root / 'coordinator.lock'):
-                _idle(root); tls = published_inputs()
-            _action(runner, 'daemon-reload')
-            _effective_unit(runner, unit, runtime, root)
-            _action(runner, 'enable', UNIT); completed('unit_enabled')
-            _action(runner, 'start', UNIT); completed('service_started')
-        else:
-            tls = published_inputs()
-            _effective_unit(runner, unit, runtime, root)
-        status = _wait_ready(root, ready)
-        if not status.get('background_work_ready'): raise Conflict('controller service readiness is unavailable')
-        if 'unit_enabled' not in progress['completed_steps']:
-            raise Conflict('service startup publication requires reconciliation')
-        # A verified live owner reconciles start ACK loss without restarting it.
-        completed('service_started')
-        completed('service_ready')
-    return {'service_progress':progress,'certificate_sha256':tls['certificate_sha256'], **status}
+        with private_lock(root/'coordinator.lock') if publishing else nullcontext():
+            if publishing:_idle(root)
+            tls=published_inputs()
+        try:status=ready(root)
+        except (OSError,ValueError):status={'background_work_ready':False,'service_installation':'configured'}
+    import shlex
+    command=shlex.join([str(runtime/'bin/quirkbench'),'--state',str(root),'controller-run'])
+    return {'service_progress':progress,'certificate_sha256':tls['certificate_sha256'],
+            **status,'next_command':command,'controller_start_required':not status.get('background_work_ready',False)}

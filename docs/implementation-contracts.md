@@ -306,8 +306,9 @@ An operation deadline/failure never releases a physical attempt fence or invents
 its terminal result. Use the existing uncertain-attempt/recovery reconciliation
 rules for a target that may still be executing, and retain late evidence.
 
-Systemd is optional integration, never a mandatory host prerequisite. The owner
-explicitly removed the earlier systemd-only requirement in #89. A supported
+The controller runs in the foreground and has no host service-manager integration.
+Daemon packaging is deferred. Target/recovery/experiment systemd remains unchanged.
+The owner removed the earlier systemd-only controller requirement in #89/#92. A supported
 supervisor must establish worker identity, bounded resources, complete descendant
 shutdown and restart reconciliation before accepting background work; a PID alone
 is insufficient. Preserve the existing lifecycle lock, epoch/claim fences and
@@ -380,7 +381,7 @@ the current owner validates stopped output, signs composition and publishes shar
 repository/result references. Repository pins precede the short fenced reference
 transaction. Explicit resume is a durable request reconciled by that owner with a
 fresh generation. See [build and boot](build-and-boot.md)
-and [manual installation](controller-installation.md#durable-build-and-composition-service).
+and [manual installation](controller-installation.md#foreground-build-and-composition-controller).
 
 Failed disposable staging defaults to seven days. Optional cache admission/eviction
 uses the configurable 50 GiB default, budget lock and nonblocking lineage locks;

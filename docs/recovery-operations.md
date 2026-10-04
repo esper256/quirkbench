@@ -177,8 +177,8 @@ behavior, not real boot compatibility or internal-storage preservation.
 Stock rootfs intent v2 binds the builder archive/config and rootfs lock, with
 no candidate catalog. A complete image operation additionally binds its v2 recipe;
 its dracut/runtime/unit references are retained transitively in the same CAS tables. The existing single lifecycle owner dispatches the fixed
-bounded systemd/Podman worker. Logs and stage completion stay private. The current
-owner stops/verifies the complete service, rechecks installed lock/package closure,
+bounded container worker. Logs and stage completion stay private. The current
+owner stops/verifies the complete worker container, rechecks installed lock/package closure,
 stock modules and tree identity, then transactionally publishes an audit with the
 exact claim/deadline and live owner fence. Native coordinator RPM inspection is an
 explicit prerequisite, with confined database paths, bounded output and elapsed
@@ -225,7 +225,7 @@ not stop the service. An interrupted worker requires the existing explicit owner
 reconciliation/resume contract; do not edit epochs or reuse its partial stage.
 
 The optional executor only advances admitted full recovery-image operations. It uses
-the existing lifecycle owner and user services while HTTPS stays responsive; it does
+the existing foreground lifecycle owner and bounded containers while HTTPS stays responsive; it does
 not schedule agent decisions or cancel rootfs-only work. Restart leaves interrupted
 operations for explicit reconciliation/resume, rather than automatically rebuilding.
 Use `operation status/watch/events/output` for durable executive progress and the

@@ -24,7 +24,7 @@ import zlib
 
 from .contracts import Conflict, ContractError, canonical
 from .controller_archive import MAX_PACKAGE_BYTES
-from .controller_service import UNIT, configuration, require_ready
+from .controller_service import configuration, require_ready
 from .product_contracts import _pairs
 from .state_config import outside_checkout
 from .state_reader import StateReader, read_file
@@ -139,7 +139,7 @@ def _archive_payload(archive, *,expected_archive_sha256=None,expected_version=No
             or set(manifest['files']) != set(files) - {'controller-manifest.json'}):
         raise ContractError('unsupported development controller manifest')
     required = {'bin/quirkbench','bin/quirkbench-controller-service','bin/quirkbench-job-worker',
-                'bin/quirkbench-worker','lib/quirkbench/quirkbench-controller.service'}
+                'bin/quirkbench-worker'}
     if not required <= files.keys():
         raise ContractError('archive lacks fixed runtime/service launchers')
     if expected_version is not None and manifest['version'] != expected_version:
@@ -266,20 +266,6 @@ def _idle(root):
     if busy: raise Conflict('outstanding work requires completion/pause and reconciliation before activation')
 
 
-def _systemctl(runner, *args):
-    result = runner(['systemctl','--user',*args], capture_output=True,text=True,check=False,timeout=20)
-    if result.returncode:
-        raise Conflict('user service action failed: ' + ' '.join(args))
-    return result.stdout
-
-
-def _stopped(runner):
-    raw = _systemctl(runner,'show',UNIT,'--property=ActiveState','--property=MainPID')
-    fields = dict(line.split('=',1) for line in raw.splitlines())
-    if fields.get('ActiveState') not in ('inactive','failed') or fields.get('MainPID') != '0':
-        raise Conflict('controller unit shutdown is unverified')
-
-
 def _link(path, target):
     temporary = path.with_name('.'+path.name+'.install-link')
     temporary.unlink(missing_ok=True)
@@ -288,17 +274,8 @@ def _link(path, target):
     sync_directory(path.parent)
 
 
-def _wait_ready(root, ready):
-    deadline = time.monotonic()+12
-    while True:
-        try: return ready(root)
-        except (OSError,ValueError):
-            if time.monotonic() >= deadline: raise
-            time.sleep(0.25)
-
-
 def activate(record, root, *, config_home=None, bin_home=None,
-             runner=subprocess.run, ready=require_ready):
+             runner=subprocess.run, ready=require_ready, fault_hook=lambda _:None):
     root = outside_checkout(Path(root))
     runtime = Path(record['runtime_root'])
     verify_installation(runtime)
@@ -307,7 +284,6 @@ def activate(record, root, *, config_home=None, bin_home=None,
     directory = _managed(config/'quirkbench')
     directory.mkdir(parents=True,exist_ok=True,mode=0o700)
     journal = directory/'installation-activation.json'
-    unit = _managed(config/'systemd/user'/UNIT)
     link = launchers/'quirkbench'
     selection = directory/'installation.json'
     with _lock(directory/'.installation.lock'), _lock(root/'command.lock'):
@@ -316,21 +292,14 @@ def activate(record, root, *, config_home=None, bin_home=None,
         _idle(root)
         # Refuse to overwrite a user-written executable or a different unit contract.
         if link.exists() and not link.is_symlink(): raise Conflict('launcher is not an installation symlink')
-        old_unit = unit.read_bytes()
-        text = old_unit.decode()
-        matches = re.findall(r'^ExecStart=(.*)$',text,re.M)
-        expected = old_config['runtime']+' --state '+str(root)
-        if matches != [expected] or not re.search(r'^KillMode=control-group$',text,re.M):
-            raise Conflict('unit differs from supported fixed controller service template')
-        saved = {'schema_version':1,'state_root':str(root),'unit':str(unit),'launcher':str(link),
-                 'old_unit':old_unit.decode(),'old_config':old_config,
+        saved = {'schema_version':2,'state_root':str(root),'launcher':str(link),
+                 'old_config':old_config,
                  'old_link':os.readlink(link) if link.is_symlink() else None,
                  'old_selection':selection.read_text() if selection.exists() else None,
                  'new_record':record,'phase':'PREPARED'}
         atomic_write(journal,canonical(saved))
         try:
-            _systemctl(runner,'stop',UNIT)
-            _stopped(runner)
+            fault_hook('intent_recorded')
             with _lock(root/'coordinator.lock'):
                 # No startup, epoch advance or work-state mutation by the installer.
                 _idle(root)
@@ -339,15 +308,13 @@ def activate(record, root, *, config_home=None, bin_home=None,
                                          ('job_worker','quirkbench-job-worker'),('recovery_worker','quirkbench-worker')):
                     if name == 'recovery_worker' and name not in old_config: continue
                     new_config[name] = str(runtime/'bin'/executable)
-                new_unit = text.replace('ExecStart='+expected,'ExecStart='+new_config['runtime']+' --state '+str(root)).encode()
                 atomic_write(root/'private/controller-service.json',canonical(new_config))
-                atomic_write(unit,new_unit)
+                fault_hook('configuration_published')
                 launchers.mkdir(parents=True,exist_ok=True,mode=0o700)
                 _link(link,runtime/'bin/quirkbench')
                 atomic_write(selection,canonical(record))
-            _systemctl(runner,'daemon-reload')
-            _systemctl(runner,'start',UNIT)
-            status = _wait_ready(root,ready)
+                fault_hook('selection_published')
+            status = {'background_work_ready':False,'controller_start_required':True,'next_command':'quirkbench controller-run'}
             saved['phase']='VERIFIED';atomic_write(journal,canonical(saved))
             atomic_write(directory/'last-activation.json',canonical(saved))
             journal.unlink();sync_directory(directory)
@@ -355,21 +322,22 @@ def activate(record, root, *, config_home=None, bin_home=None,
         except Exception:
             if journal.exists():
                 _rollback(journal,root,runner,ready)
-            else:
-                _systemctl(runner,'start',UNIT)
             raise
 
 
 def _rollback(journal,root,runner,ready):
     saved = _json(read_file(journal.parent,journal.name,limit=65536))
-    _managed(Path(saved['unit']));_managed(Path(saved['launcher']).parent)
+    if saved.get('schema_version') not in (1,2):raise ContractError('unsupported activation journal')
+    _managed(Path(saved['launcher']).parent)
     if saved['state_root'] != str(root): raise Conflict('rollback belongs to another controller state')
     _idle(root)
-    _systemctl(runner,'stop',UNIT);_stopped(runner)
     with _lock(root/'coordinator.lock'):
         _idle(root)
         atomic_write(root/'private/controller-service.json',canonical(saved['old_config']))
-        atomic_write(Path(saved['unit']),saved['old_unit'].encode())
+        if saved['schema_version']==1:
+            # Restore historical bytes for rollback compatibility, never start a daemon.
+            unit=_managed(Path(saved['unit']))
+            atomic_write(unit,saved['old_unit'].encode())
         link = Path(saved['launcher'])
         if saved['old_link'] is None:
             link.unlink(missing_ok=True)
@@ -378,8 +346,7 @@ def _rollback(journal,root,runner,ready):
         selection = journal.parent/'installation.json'
         if saved['old_selection'] is None: selection.unlink(missing_ok=True)
         else: atomic_write(selection,saved['old_selection'].encode())
-    _systemctl(runner,'daemon-reload');_systemctl(runner,'start',UNIT)
-    status = _wait_ready(root,ready)
+    status = {'background_work_ready':False,'controller_start_required':True,'next_command':'quirkbench controller-run'}
     saved['phase']='ROLLED_BACK';atomic_write(journal.parent/'last-activation.json',canonical(saved))
     journal.unlink();sync_directory(journal.parent)
     return {**status,'rolled_back':True}

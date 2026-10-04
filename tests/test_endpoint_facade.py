@@ -66,7 +66,7 @@ def test_controller_address_wizard_confirms_source_and_successor_before_same_sto
     text='\n'.join(['endpoint-1','change','127.0.0.2',source['identity_sha256'],staged['certificate_sha256'],''])
     output=StringIO();answer=facade.wizard(root,unit=unit,input_stream=StringIO(text),output_stream=output,run=native,runner=manager)
     assert answer['configured'] and not answer['service_started'] and not answer['targets_migrated']
-    assert 'Start its existing user service' in output.getvalue() and 'full fingerprint' in output.getvalue()
+    assert 'Run quirkbench controller-run' in output.getvalue() and 'full fingerprint' in output.getvalue()
 
 
 def test_wizard_can_leave_exact_generated_identity_staged_for_later_review(prepared):

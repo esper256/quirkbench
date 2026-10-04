@@ -55,10 +55,9 @@ using existing operator signing trust and preserves an exact private, versioned 
 continuation. It never creates keys, starts services or rotates existing publication.
 An exact completed replay is a historical acknowledgment, separate from current
 enrollment availability and target/boot authority. See the
-[installed sequence](controller-installation.md#initial-native-user-service-setup).
+[installed sequence](controller-installation.md#initial-controller-setup).
 
-The controller's systemd user service manager owns the coordinator and rootless
-container workers. Distrobox is an optional development/agent environment; its disposable
+The foreground controller owns the coordinator and bounded container workers. Distrobox is an optional development/agent environment; its disposable
 filesystem is not the authority for persistence. Stable private configuration,
 credentials, database, source workspaces and retained artifacts live outside it.
 Do not reuse the prototype builder's temporary home for agent authentication.
@@ -70,10 +69,9 @@ never a checkout-local fallback. Setup creates state; queries never initialize i
 New persistent state and build staging must be outside Git checkouts. Preserve
 explicit `--state` and low-level commands for development and existing data. Do not
 silently migrate or merge an existing `.quirkbench` directory into another identity.
-Terminal exit leaves services running. Setup reports logout behavior and offers
-explicit instructions for optional lingering; it never enables it implicitly. Sleep
-interrupts availability, and reboot restarts reporting/reconciliation with scheduling
-paused. No promise of work executing while powered off. Keep C2 ownership epochs,
+Run the controller in an attended foreground session. Terminal exit ends controller
+availability; daemon packaging is deferred. Sleep interrupts availability, and the
+next explicit start reconciles earlier execution with scheduling paused. No promise of work executing while powered off. Keep C2 ownership epochs,
 worker fencing and bounded cleanup; a second CLI cannot become another scheduler.
 
 Manual `monitor` is a read-only TUI client of existing operation/campaign records,
@@ -124,7 +122,7 @@ M1a implements additive `setup`/`status` syntax in the executable parser; the ea
 product CLI v1 fixture stays unchanged. `setup --json` requires `--request-id`;
 human setup generates and prints one and reuses the existing intent on retry.
 Optional `--runtime`, `--cache-gib`, `--reserve-gib`, `--host`, `--port`, `--allow-lan`
-and `--logout-policy session|existing_linger` choices are normalized before publication.
+and `--logout-policy session` choices are normalized before publication.
 Omitted retry choices retain the recorded values. The single initial setup journal
 refuses a different request or changed intent; later maintenance uses its own APIs.
 `status [--json]` does not initialize/migrate state or acquire execution ownership.

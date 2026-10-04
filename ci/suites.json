@@ -12,7 +12,9 @@
       "tests/test_source_*",
       "tests/test_worker*",
       "tests/test_job_*",
-      "tests/test_builder_setup.py"
+      "tests/test_builder_setup.py",
+      "src/quirkbench/container_worker.py",
+      "tests/test_container_workers.py"
     ],
     "tests": [
       "tests/test_distribution_source.py",
@@ -21,7 +23,9 @@
       "tests/test_source_operation.py",
       "tests/test_source_prepare_operation.py",
       "tests/test_worker_claim.py",
-      "tests/test_worker.py"
+      "tests/test_worker.py",
+      "tests/test_container_workers.py",
+      "tests/test_worker_service.py"
     ]
   },
   "endpoint-control": {
@@ -40,7 +44,9 @@
       "tests/test_endpoint_generation.py",
       "tests/test_endpoint_activation.py",
       "tests/test_controller_endpoint.py",
-      "tests/test_controller_tls.py"
+      "tests/test_controller_tls.py",
+      "tests/test_endpoint_migration.py",
+      "tests/test_endpoint_facade.py"
     ]
   },
   "endpoint-retarget": {
@@ -161,6 +167,8 @@
       "src/quirkbench/recovery_storage.py",
       "tests/test_recovery_inventory.py",
       "src/quirkbench/controller_setup.py",
+      "src/quirkbench/foreground_owner.py",
+      "tests/test_foreground_owner.py",
       "src/quirkbench/backup_*",
       "src/quirkbench/storage_view.py",
       "tests/test_backup_*",
@@ -177,7 +185,10 @@
       "src/quirkbench/target_shutdown.py",
       "tests/test_shutdown.py",
       "examples/shutdown.json",
-      "src/quirkbench/controller_install.py"
+      "src/quirkbench/controller_install.py",
+      "src/quirkbench/development_container.py",
+      "src/quirkbench/development_run.py",
+      "tests/test_build_launcher.py"
     ],
     "tests": [
       "tests/test_build_storage.py",
@@ -193,6 +204,7 @@
       "tests/test_backup_coverage.py",
       "tests/test_storage_view.py",
       "tests/test_controller.py",
+      "tests/test_foreground_owner.py",
       "tests/test_publication_setup_contracts.py",
       "tests/test_publication_setup.py",
       "tests/test_setup_service.py",
@@ -209,7 +221,8 @@
       "tests/test_enrollment_target.py",
       "tests/test_enrollment_maintenance.py",
       "tests/test_recipe_registry.py",
-      "tests/test_manual_provisioning.py"
+      "tests/test_manual_provisioning.py",
+      "tests/test_build_launcher.py"
     ]
   },
   "release-preparation": {

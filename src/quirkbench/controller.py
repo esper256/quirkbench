@@ -175,7 +175,7 @@ class _LifecycleOwner:
             with self.controller.transaction() as db:
                 db.execute('UPDATE housekeeping_requests SET serviced=MAX(serviced,?) WHERE id=1',(row['requested'],))
 
-    def claim(self, operation_id, *, stage, deadline):
+    def claim(self, operation_id, *, stage, deadline, worker_identity=None):
         """Reserve one allowlisted preparation/build stage for a service worker."""
         if self.closed or self.controller._lifecycle_owner is not self:
             raise Conflict('controller lifecycle ownership ended')
@@ -215,7 +215,8 @@ class _LifecycleOwner:
                 from .credential_registry import require_execution_credentials
                 require_execution_credentials(db,row['device'],controller.clock())
             generation = row['worker_generation'] + 1
-            unit = f'quirkbench-worker-{operation_id}-{generation}.service'
+            unit = (worker_identity(operation_id, generation) if worker_identity else
+                    f'quirkbench-worker-{operation_id}-{generation}.service')
             boot_id = validate_boot_id(controller.boot_id_reader())
             workers = controller.root / 'workers'
             workers.mkdir(mode=0o700, exist_ok=True)
@@ -297,7 +298,8 @@ class _LifecycleOwner:
         """Claim before requesting a service; ambiguous launch retains its unit."""
         from .worker_service import WorkerServiceError
         services.preflight(self.controller.root, deadline)
-        claimed = self.claim(operation_id, stage=stage, deadline=deadline)
+        claimed = self.claim(operation_id, stage=stage, deadline=deadline,
+                             worker_identity=getattr(services,'worker_identity',None))
         try:
             services.launch(claimed, self.controller.root)
         except BaseException as exc:
@@ -514,10 +516,22 @@ class _LifecycleOwner:
         return {'operation':published,'image_sha256':refs[1],
                 'qualification_status':signed['candidate']['qualification_status']}
 
-    def reconcile_units(self, services):
-        """Clear ownership only after a full service/cgroup stop is established."""
+    def interrupt_and_reconcile(self, services):
+        """Fence active work, then stop containers before releasing ownership."""
         if self.closed or self.controller._lifecycle_owner is not self:
             raise Conflict('controller lifecycle ownership ended')
+        with self.controller.transaction() as db:
+            current=db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
+            if current!=self.epoch:
+                raise Conflict('controller lifecycle epoch changed')
+            self.controller._startup_db(db)
+        return self.reconcile_units(services)
+
+    def reconcile_units(self, services):
+        """Clear ownership only after whole-worker shutdown is established."""
+        if self.closed or self.controller._lifecycle_owner is not self:
+            raise Conflict('controller lifecycle ownership ended')
+        if hasattr(services, 'root'): services.root = self.controller.root
         with self.controller.transaction() as db:
             current = db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
             if current != self.epoch:
@@ -680,8 +694,8 @@ class Controller(OperatorApprovals):
     def lifecycle(self):
         """Hold the controller owner lock and fence old publications for its lifetime.
 
-        This is only the ownership boundary. P2b service dispatch and cgroup
-        termination must be added before claims can run product operations.
+        Dispatch and shutdown use the selected bounded worker backend. Callers
+        stop their workers before leaving this ownership context.
         """
         if self._lifecycle_owner is not None:
             raise Conflict('controller lifecycle already owned by this process')

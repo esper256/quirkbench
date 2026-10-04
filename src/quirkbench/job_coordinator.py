@@ -52,6 +52,8 @@ class JobCoordinator:
             claim=active[0]
             if claim['kind'] not in ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare','candidate_prepare') or claim['state']!='RUNNING': return None
             expired=c.clock()>=claim['deadline']
+            if not expired and hasattr(self.services, 'advance'):
+                self.services.advance(claim, c.root)
             if not expired:
                 owner.collect_activity(claim)
                 if not self.services.finished(claim['worker_unit'],claim['worker_boot_id']): return None

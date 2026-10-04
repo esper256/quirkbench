@@ -1,12 +1,11 @@
 # Fedora build environment
 
-Systemd is optional host integration. Foreground recovery image generation uses
+Controller execution requires no systemd integration. Foreground recovery image generation uses
 Podman or Docker without a running controller; see
 [foreground image generation](../docs/recovery-operations.md#foreground-image-generation).
-The current durable controller adapter uses systemd user services and rootless
-Podman; alternate background supervision is tracked separately. Distrobox is an
+The foreground controller owns bounded container workers. Distrobox is an
 optional development shell. `build` and `compose` submit durable jobs through
-[controller service setup](../docs/controller-installation.md#durable-build-and-composition-service)
+[controller service setup](../docs/controller-installation.md#foreground-build-and-composition-controller)
 and return operation IDs; `--wait` reads their results. No image build is required
 for ordinary software edits. Recovery uses stock packages; kernel compile guidance
 below applies to experimental kernels and explicitly requested custom builds.
@@ -54,37 +53,23 @@ one build at a time.
 
 ### Observable bounded kernel builds
 
-For ad hoc kernel builds launched as rootless Podman containers, use
-`start-bounded-podman-build.sh` instead of invoking `systemd-run` and
-`podman run` separately. It starts a **new** systemd user service with cgroup v2,
-`Delegate=cpu memory pids`, `DelegateSubgroup=runtime`,
-`KillMode=control-group`, and the usual CPU, memory, zero-swap and task caps.
-`DelegateSubgroup` requires systemd 254 or newer. For example, the service
-properties for a controller with at least 8 CPUs and 16 GiB of reported
-`MemTotal` are (smaller controllers get at most half their online CPU and
-reported memory):
+For ad hoc kernel builds, `start-bounded-podman-build.sh` runs one recorded
+rootless Podman container in the foreground. The engine enforces at most four CPUs,
+at most half the reported host CPU/RAM, at most 8 GiB RAM, zero additional swap,
+4,096 processes, and a 24-hour timeout. At least 4 GiB within that memory budget is
+required for a build. It uses cgroupfs directly and requires no user service manager.
 
-```text
-Delegate=cpu memory pids
-DelegateSubgroup=runtime
-KillMode=control-group
-CPUQuota=400%
-MemoryMax=8589934592
-MemorySwapMax=0
-TasksMax=4096
-```
-
-Choose a fresh user-owned stage, a unique unit/container name and an exact locked
-image. Pass the existing restricted build arguments to the launcher. For example:
+Use a fresh run identity, canonical owned stage and exact locked image:
 
 ```sh
 environments/start-bounded-podman-build.sh \
-  quirkbench-build-NEW_RUN_ID.service "$STAGE" build.log build.exit.status \
-  --rm --pull=never --network=none --pid=private --ipc=private --uts=private \
-  --user=0 --security-opt=no-new-privileges \
-  --name quirkbench-kernel-build-NEW_RUN_ID \
-  --volume "$STAGE:/work:Z" "$IMAGE_ID" python3 /work/kernel.py
+  quirkbench-build-NEW_RUN_ID "$STAGE" build.log build.exit.status \
+  --pull=never --network=none --userns=keep-id \
+  --volume "$STAGE:$STAGE:Z" "$IMAGE_ID" python3 "$STAGE/kernel.py"
 ```
+
+The historical `.service` suffix is accepted as an input spelling, but creates no
+service. Container naming and resource/lifetime options belong to the launcher.
 
 First run `quirkbench setup-state`. Choose `RUN_ID=quirkbench-build-NEW_RUN_ID`
 and set `STAGE` to the canonical selected state's
@@ -92,9 +77,9 @@ and set `STAGE` to the canonical selected state's
 directory with usable owner permissions; no exact mode is required. `IMAGE_ID`
 remains the exact pinned local builder image.
 Every run needs a fresh identity; the starter rejects staging in a Git checkout.
-Logs, service/boot identity and eventual exit status live beside `work`, so they
+Logs, container/boot identity and eventual exit status live beside `work`, so they
 can survive disposal of bulky work. The launcher prints the monitor command and
-returns after dispatch. Launch acceptance is not completion.
+stays attached until completion. Use another terminal for the monitor.
 
 ```sh
 quirkbench monitor --run "$RUN_ID"
@@ -102,12 +87,12 @@ quirkbench monitor --run "$RUN_ID" --once
 ```
 
 The monitor runs in your existing terminal. No Konsole, desktop environment,
-watching agent or popup window is required. Closing it leaves the bounded service
-running. Existing cgroup, CPU, memory and task restrictions remain mandatory;
+watching agent or popup window is required. Closing the monitor leaves the bounded container
+running; Ctrl-C in the launcher terminal stops it. Existing cgroup, CPU, memory and task restrictions remain mandatory;
 do not use detached/restarting/replacement containers or override the bounds.
 The starter records `queued`, then `running`, then a numeric exit status. An
-interrupted recorder can leave a nonterminal status; inspect the recorded service
-and reconcile it rather than treating silence as completion.
+interrupted recorder can leave a nonterminal status; inspect the recorded container
+and verify it stopped before retaining interrupted work rather than treating silence as completion.
 
 Ad hoc commands do not declare which outputs are important. Before disposing of a
 successful run's work, explicitly retain each required artifact relative to `work`:
@@ -118,7 +103,7 @@ quirkbench maintenance prune --dry-run
 quirkbench maintenance prune
 ```
 
-`retain-run` refuses a live service, verifies whole-unit shutdown and retains the
+`retain-run` refuses a live container, verifies whole-container shutdown and retains the
 selected files in CAS. Choose the complete artifact set for the actual build,
 including matching modules, configuration, provenance and symbols; the example is
 not a complete kernel release bundle. Failed/interrupted work requires explicit
@@ -155,22 +140,17 @@ headroom can reject a requested job count. This heuristic does not guarantee pea
 linker memory consumption; cgroups enforce the actual bounds. Controller resource
 reserves still apply, and explicit `jobs=1` stays serial. Do not edit a running run's inputs.
 
-The service calls `environments/run-bounded-podman.sh` with the supplied locked
-image, mounts and command arguments. The helper verifies its
-service cgroup and limits (including the controller's half-resource bound),
-enables CPU/memory/task accounting below that unit,
-then starts rootless Podman with a child cgroup under the exact service. Its
-child limits match the service limits so `podman stats` shows a useful memory
-denominator. A missing delegation or limit fails before Podman starts. Keep
-the service's `RuntimeMaxSec` and a unique private stage/log/exit-status record
-for each build; do not reuse a running build's stage or unit. The service
-remains the aggregate limit and shutdown boundary, while `podman stats` reports
-the container payload. This helper is for development/kernel builds; recovery
-rootfs workers still use their separate fixed command and fenced claim.
+The starter creates one foreground rootless Podman container with CPU, memory,
+swap, task and elapsed-time bounds, using the cgroupfs manager. It verifies the
+engine's recorded limits before starting. `podman stats` reports that container's
+resource use. The container is the aggregate limit and shutdown boundary, including
+detached descendants. Each build has a unique stage, log and exit-status record;
+do not reuse a running build's stage or identity. Recovery workers retain their
+separate fixed command and fenced claim.
 
-Keep unique container names and inspect stopped units and container state before
-reusing any staging. A stopped process can leave an exited container record; handle
-its cleanup separately from proving whole-unit termination.
+Interrupted launch acknowledgements retain the recorded creation name and immutable
+container identity for reconciliation. Artifact retention verifies whole-container
+shutdown before removing the stopped container and making work eligible for cleanup.
 
 The builder includes Fedora source-preparation macros and JSON Schema validation.
 Changing its Containerfile requires recapturing the builder identity and package locks;
@@ -185,7 +165,7 @@ stage. It mounts only staged code, the two input files and staged CAS read-only,
 plus a private staged output directory writable. Those private copies may be
 relabelled with Podman's `:Z` bind option; original source and CAS labels are
 untouched. The command uses a local nonroot Podman process with no network,
-host device or broad home mount, private PID/IPC/UTS namespaces and disabled
+host device or broad home mount, private PID/IPC/UTS namespaces and bounded
 Podman cgroups. It has no arbitrary command or extra-flag parameter.
 Its derived image config ID, retained builder archive, catalog and rootfs lock
 must match the current worker operation's immutable input record. The existing
@@ -195,12 +175,15 @@ The planner verifies an OCI archive's sole manifest, expected x86-64/Linux
 config and referenced layer hashes before returning an argv. A rebuilt builder
 needs its own newly retained archive, image ID and operation input record.
 
-The controller user-service adapter now requests `CPUQuota=400%`,
-`MemoryMax=4G`, `MemorySwapMax=0` and `TasksMax=4096` and checks the
-resulting cgroup files before accepting a launch. Rootfs dispatch still needs
-durable logs and input/exit identities, plus proof that launcher, conmon and
-payload stay in that cgroup through fenced termination. The command plan does
-not execute a product operation. Stock v2 recovery uses its retained recipe/lock instead of a candidate catalog.
+The controller container adapter requests at most four CPUs (and half the host's
+reported CPUs), 4 GiB memory for recovery (managed development jobs use up to
+8 GiB within half the host's memory), no extra swap and 4096 tasks, then checks the engine's
+recorded bounds before accepting a launch. Every phase has a fixed entry point and
+elapsed deadline; the journal records the engine, immutable container ID and claim.
+The owner verifies whole-container termination and retains bounded logs before
+publishing results or reusing resources. The command plan alone does not execute a
+product operation. Stock v2 recovery uses its retained recipe/lock instead of a
+candidate catalog.
 Admit only complete selected inputs; Distrobox is not a worker prerequisite.
 
 After the initial container and Fedora target rootfs are populated, run
@@ -285,7 +268,7 @@ and [treefile reference](https://coreos.github.io/rpm-ostree/treefile/).
 ### Nested composition sandbox
 
 Use a dedicated **rootless Podman** container for rpm-ostree composition, alongside
-the native controller user service. An optional development shell has no worker
+the foreground controller. An optional development shell has no worker
 ownership role. Run the composition process as container
 UID 0 with the default rootless UID mapping: UID 0 maps to the unprivileged controller
 user, and subordinate UIDs remain mapped. Do not use keep-id for this composition
@@ -364,8 +347,8 @@ evidence before the cache becomes disposable.
 
 ## Service ownership
 
-Controller systemd user services own durable rootless workers; see
-[installation](../docs/controller-installation.md#durable-build-and-composition-service).
+The foreground controller owns durable container workers; see
+[installation](../docs/controller-installation.md#foreground-build-and-composition-controller).
 The optional assemble development environment has no execution ownership role.
 Its temporary home is not a place for persistent state, signing keys or agent
-credentials. The guided installer/setup wizard remains planned in M1.
+credentials. Controller setup publishes configuration without installing a daemon.

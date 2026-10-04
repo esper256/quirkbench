@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_type",
+    "request_id",
+    "request_digest",
+    "intent",
+    "completed_steps",
+    "tls_identity_sha256"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 2
+    },
+    "record_type": {
+      "const": "controller-service-setup"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "request_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "initial_intent",
+        "setup_request_digest",
+        "config_home",
+        "bin_home"
+      ],
+      "properties": {
+        "initial_intent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state_root",
+            "runtime_root",
+            "cache_gib",
+            "reserve_gib",
+            "host",
+            "port",
+            "allow_lan",
+            "logout_policy",
+            "runtime_archive_sha256",
+            "runtime_manifest_sha256"
+          ],
+          "properties": {
+            "state_root": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 4096,
+              "pattern": "^/(?!$)(?!.*(?:/\\.\\.?(/|$)|//))[^\\x00]*[^/]$"
+            },
+            "runtime_root": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 4096,
+                  "pattern": "^/(?!$)(?!.*(?:/\\.\\.?(/|$)|//))[^\\x00]*[^/]$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "cache_gib": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1048576
+            },
+            "reserve_gib": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1048576
+            },
+            "host": {
+              "type": "string",
+              "maxLength": 45,
+              "anyOf": [
+                {
+                  "format": "ipv4"
+                },
+                {
+                  "format": "ipv6"
+                }
+              ]
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "allow_lan": {
+              "type": "boolean"
+            },
+            "logout_policy": {
+              "enum": [
+                "session",
+                "existing_linger"
+              ]
+            },
+            "runtime_archive_sha256": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              ]
+            },
+            "runtime_manifest_sha256": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              ]
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "runtime_root": {
+                    "type": "null"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "runtime_archive_sha256": {
+                    "type": "null"
+                  },
+                  "runtime_manifest_sha256": {
+                    "type": "null"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "runtime_archive_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "runtime_manifest_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "allow_lan": {
+                    "const": false
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "host": {
+                    "anyOf": [
+                      {
+                        "pattern": "^127\\."
+                      },
+                      {
+                        "const": "::1"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "setup_request_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "config_home": {
+          "type": "string",
+          "maxLength": 4096,
+          "pattern": "^/"
+        },
+        "bin_home": {
+          "type": "string",
+          "maxLength": 4096,
+          "pattern": "^/"
+        }
+      }
+    },
+    "completed_steps": {
+      "enum": [
+        [],
+        [
+          "tls_ready"
+        ],
+        [
+          "tls_ready",
+          "configuration_published"
+        ],
+        [
+          "tls_ready",
+          "configuration_published",
+          "launcher_published"
+        ]
+      ]
+    },
+    "tls_identity_sha256": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

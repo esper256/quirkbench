@@ -49,8 +49,8 @@ class Services:
             output=''.join(k+'='+v+'\n' for k,v in fields.items())
         return subprocess.CompletedProcess(argv,0,output,'')
     def ready(self, root):
-        assert self.active
         configuration(root)
+        self.active=True  # injected foreground owner observation, not a service-manager start
         # Simulated live lifecycle owner; readiness checks are independently covered.
         return {'background_work_ready':True,'service_installation':'verified'}
 
@@ -72,27 +72,29 @@ def test_versioned_service_progress_schema_matches_strict_reader():
         with pytest.raises(ContractError): load_progress(canonical({**value,**patch}))
 
 
-def test_zero_target_native_publication_and_active_replay(tmp_path, initialized):
+def test_zero_target_foreground_publication_and_read_only_active_replay(tmp_path, initialized):
     services=Services();result=start(tmp_path,services)
+    assert result['service_progress']['schema_version']==2
     assert result['service_progress']['completed_steps']==list(STEPS)
     cfg=configuration(tmp_path/'state')
-    assert cfg['credential_registry'] and 'tokens_file' not in cfg
-    assert cfg['reserve_gib']==0
-    assert Path(cfg['runtime']).parent==initialized/'bin'
+    assert cfg['credential_registry'] and 'tokens_file' not in cfg and cfg['reserve_gib']==0
     assert (tmp_path/'bin/quirkbench').resolve()==initialized/'bin/quirkbench'
-    unit=tmp_path/'config/systemd/user'/UNIT
-    assert ('ExecStart='+str(initialized/'bin/quirkbench-controller-service')+' --state '+str(tmp_path/'state')) in unit.read_text()
-    assert ['enable',UNIT] in services.calls
+    assert not (tmp_path/'config/systemd').exists()
+    assert services.calls==[]
     with StateReader(tmp_path/'state').connection() as db:
         assert db.execute('SELECT epoch FROM controller_lifecycle').fetchone()[0]==0
-        for table in ('devices','campaigns','attempts','credential_generations'):
-            assert db.execute('SELECT count(*) FROM '+table).fetchone()[0]==0
-    before=len(services.calls)
+        assert db.execute('SELECT count(*) FROM devices').fetchone()[0]==0
     with private_lock(tmp_path/'state/coordinator.lock'):
         replay=start(tmp_path,services)
-        initial=setup_controller(tmp_path/'state',request_id='initial',config_home=tmp_path/'config',**observations())
-    assert replay==result and not initial['readiness']['setup_complete']
-    assert all(call[0]=='show' for call in services.calls[before:])
+    assert replay==result and services.calls==[]
+
+
+def test_configuration_does_not_claim_a_controller_was_started(tmp_path,initialized):
+    def unavailable(_):raise Conflict('no running owner')
+    result=install_service(config_home=tmp_path/'config',bin_home=tmp_path/'bin',
+        tls_run=TLSCommands(),runner=lambda *a,**kw:pytest.fail('unexpected host service action'),ready=unavailable)
+    assert not result['background_work_ready'] and result['controller_start_required']
+    assert result['next_command'].endswith('controller-run')
 
 
 @pytest.mark.parametrize('step',['intent_recorded',*STEPS])
@@ -108,21 +110,10 @@ def test_each_service_ack_boundary_replays_same_private_identity(tmp_path,initia
     assert all(p.read_bytes()==raw for p,raw in keys.items())
 
 
-def test_start_ack_loss_observes_live_owner_without_restarting(tmp_path,initialized):
-    services=Services();services.start_loss=True
-    with pytest.raises(KeyboardInterrupt): start(tmp_path,services)
-    assert services.active
-    with private_lock(tmp_path/'state/coordinator.lock'): result=start(tmp_path,services)
-    assert result['service_progress']['completed_steps']==list(STEPS)
-    assert services.calls.count(['start',UNIT])==1
-
-
-@pytest.mark.parametrize('change',['unit','launcher','configuration','owner'])
+@pytest.mark.parametrize('change',['launcher','configuration','owner'])
 def test_foreign_inputs_and_owner_are_preserved(tmp_path,initialized,change):
     services=Services()
-    if change=='unit':
-        path=tmp_path/'config/systemd/user'/UNIT;path.parent.mkdir(parents=True);path.write_bytes(b'foreign unit')
-    elif change=='launcher':
+    if change=='launcher':
         path=tmp_path/'bin/quirkbench';path.parent.mkdir();path.write_bytes(b'foreign launcher')
     elif change=='configuration':
         path=tmp_path/'state/private/controller-service.json';path.parent.mkdir(exist_ok=True);path.write_bytes(b'foreign config')
@@ -134,27 +125,6 @@ def test_foreign_inputs_and_owner_are_preserved(tmp_path,initialized,change):
     before=path.read_bytes()
     with pytest.raises((Conflict, ContractError)): start(tmp_path,services)
     assert path.read_bytes()==before and not services.active
-
-
-def test_failed_native_start_can_retry_without_regenerating_trust(tmp_path, initialized):
-    services=Services();services.fail='start'
-    with pytest.raises(Conflict): start(tmp_path,services)
-    progress=service_progress(config_home=tmp_path/'config')
-    assert progress['completed_steps'][-1]=='unit_enabled'
-    keys={p:p.read_bytes() for p in (tmp_path/'state/private/controller-tls').rglob('*.key')}
-    services.fail=None
-    result=start(tmp_path,services)
-    assert result['background_work_ready'] and all(p.read_bytes()==raw for p,raw in keys.items())
-
-
-@pytest.mark.parametrize('patch',[{'FragmentPath':'/foreign/unit'}, {'DropInPaths':'/foreign/override.conf'},
-    {'LoadState':'masked'},{'ExecStart':'{ path=/foreign ; argv[]=/foreign ; ignore_errors=no ; }'},
-    {'ExecStartPre':'foreign pre-execution'}, {'KillMode':'process'}])
-def test_effective_foreign_unit_never_enabled_or_started(tmp_path,initialized,patch):
-    services=Services();services.properties=patch
-    with pytest.raises(Conflict,match='effective controller unit differs'): start(tmp_path,services)
-    assert not any(call[0] in ('start','enable') for call in services.calls)
-    assert not services.active
 
 
 def test_changed_state_selection_cannot_start_old_journal_state(tmp_path,initialized):

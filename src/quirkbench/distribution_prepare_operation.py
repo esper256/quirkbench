@@ -143,7 +143,7 @@ def pending(root,operation_id,value):
     return selection(root,operation_id,approved),approved,result
 
 
-def run(value,intent,stage,verify,report, *,state_root,operation_id):
+def run(value,intent,stage,verify,report, *,state_root,operation_id,stage_only=False):
     from .source_prepare_operation import input_record
     from .source_preparation import prepare
     from .distribution_source_worker import prepare as distribution_worker
@@ -164,7 +164,7 @@ def run(value,intent,stage,verify,report, *,state_root,operation_id):
     with reader.connection() as db:
         row = db.execute('SELECT deadline FROM operations WHERE id=?',(operation_id,)).fetchone()
     builder = {key:value[key] for key in ('builder_image_digest','builder_config_digest','builder_archive_sha256')}
-    return distribution_worker(state_root,stage,baseline(store,value),builder,value['source_date_epoch'],value['workspace_id'],guard,report,row['deadline'])
+    return distribution_worker(state_root,stage,baseline(store,value),builder,value['source_date_epoch'],value['workspace_id'],guard,report,row['deadline'],stage_only=stage_only)
 
 
 def exact_base(source,base,observed,verify):

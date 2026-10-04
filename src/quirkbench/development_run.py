@@ -1,4 +1,4 @@
-"""Recorded development builds; systemd remains their sole execution owner."""
+"""Recorded foreground development builds and explicit artifact retention."""
 from __future__ import annotations
 
 import argparse
@@ -8,20 +8,32 @@ import re
 import sqlite3
 import time
 
-from .contracts import ContractError, canonical, identifier, digest
+from .contracts import ContractError, canonical, identifier, digest, sha256
 from .controller import controller_boot_id
 from .state_config import discover_state_root, outside_checkout
 from .state_reader import development_run,read_file
 from .store import ArtifactStore, atomic_write
-from .worker_service import SystemdUserWorkerServices
+from .development_container import DevelopmentServices
 
 
-class DevelopmentServices(SystemdUserWorkerServices):
-    @staticmethod
-    def _unit(unit):
-        if not isinstance(unit,str) or not re.fullmatch(r'quirkbench-build-[a-z0-9-]+\.service',unit):
-            raise ContractError('invalid development build service')
-        return unit
+def validate_run(record):
+    fields={'schema_version','run_id','unit','boot_id','started','log','status','work','command_sha256'}
+    if (not isinstance(record,dict) or set(record)!=fields or type(record['schema_version']) is not int
+            or record['schema_version']!=2):raise ContractError('invalid foreground development run')
+    run_id=record['run_id'];identifier(run_id)
+    if not re.fullmatch(r'quirkbench-build-[a-z0-9-]+',run_id):raise ContractError('invalid development run name')
+    if record['unit']!='qb-development-v2-'+run_id or record['work']!='work':
+        raise ContractError('development run identity differs')
+    from .controller import validate_boot_id
+    import math
+    validate_boot_id(record['boot_id']);sha256(record['command_sha256'])
+    if type(record['started']) not in (int,float) or not math.isfinite(record['started']):
+        raise ContractError('invalid development start time')
+    for name in ('log','status'):
+        if not isinstance(record[name],str) or not re.fullmatch(r'[a-z][a-z0-9.-]+',record[name]):
+            raise ContractError('invalid development diagnostic filename')
+    if len(canonical(record))>8192:raise ContractError('development run exceeds read budget')
+    return record
 
 
 def prepare(unit, stage, log, status, arguments=()):
@@ -42,9 +54,9 @@ def prepare(unit, stage, log, status, arguments=()):
     for name in (log, status):
         if not re.fullmatch(r'[a-z][a-z0-9.-]+', name) or (directory / name).exists():
             raise ContractError('development log/status must be new plain filenames')
-    atomic_write(directory / 'run.json', canonical({'schema_version': 1, 'run_id': run_id,
-        'unit': unit, 'boot_id': controller_boot_id(), 'started': time.time(),
-        'log': log, 'status': status, 'work': 'work','command_sha256':digest(canonical(list(arguments)))}))
+    atomic_write(directory / 'run.json', canonical(validate_run({'schema_version': 2, 'run_id': run_id,
+        'unit': 'qb-development-v2-'+run_id, 'boot_id': controller_boot_id(), 'started': time.time(),
+        'log': log, 'status': status, 'work': 'work','command_sha256':digest(canonical(list(arguments)))})))
     atomic_write(directory/'command.json',canonical({'podman_arguments':list(arguments)}))
     atomic_write(directory / status, b'queued\n')
     return {'run_id': run_id, 'state_root': str(root), 'log': str(directory / log),
@@ -55,10 +67,18 @@ def retain(root, run_id, *, outputs=(), abandon=False):
     """Explicitly preserve ad hoc outputs before making their work disposable."""
     root = outside_checkout(root)
     record = development_run(root, run_id)
-    if record['unit'] != run_id + '.service':
+    expected=(run_id+'.service' if record.get('schema_version')==1 else 'qb-development-v2-'+run_id)
+    if record['unit'] != expected:
         raise ContractError('development service differs from run identity')
+    services = DevelopmentServices(root)
     if record['exit_status'] is None:
-        raise ContractError('development build has no terminal exit record')
+        if not abandon or not services.finished(record['unit'],record['boot_id']):
+            raise ContractError('development build has no terminal exit record; stop its container before abandoning interrupted work')
+        proof=services.stop_and_verify(record['unit'],record['boot_id'])
+        run=Path(root)/'development-runs'/run_id
+        atomic_write(run/'stopped.json',canonical({'unit':record['unit'],'boot_id':record['boot_id'],'proof':proof,'at':time.time()}))
+        atomic_write(run/record['status'],b'130\n')
+        record=development_run(root,run_id)
     if record['state'] != 'SUCCEEDED' and not abandon:
         raise ContractError('failed/interrupted work requires explicit --abandon')
     if record['state'] == 'SUCCEEDED' and (not outputs or abandon):
@@ -74,7 +94,6 @@ def retain(root, run_id, *, outputs=(), abandon=False):
                 or path.resolve()!=path or not path.is_file()):
             raise ContractError('output must be a regular file inside the recorded work directory')
         paths[str(relative)]=path
-    services = DevelopmentServices()
     try:
         stop=json.loads(read_file(root,run.relative_to(root)/'stopped.json',limit=4096))
     except FileNotFoundError:
@@ -108,6 +127,7 @@ def retain(root, run_id, *, outputs=(), abandon=False):
     register(root,'development',(*refs.values(),manifest.sha256),owner=run_id,
              state='SUCCEEDED' if record['state']=='SUCCEEDED' else 'FAILED',stop_proof=stop)
     atomic_write(run / 'published.json', canonical({**publication,'manifest_sha256':manifest.sha256}))
+    if record.get('schema_version')==2:services.remove_stopped(record['unit'])
     return {'run_id': run_id, 'retained_outputs': refs, 'abandoned': abandon}
 
 
@@ -118,8 +138,17 @@ def main():
     parser.add_argument('arguments',nargs=argparse.REMAINDER)
     args = parser.parse_args()
     arguments=args.arguments[1:] if args.arguments[:1]==['--'] else args.arguments
-    print(json.dumps(prepare(args.unit,args.stage,args.log,args.status,arguments),sort_keys=True))
+    answer=prepare(args.unit,args.stage,args.log,args.status,arguments)
+    print(json.dumps(answer,sort_keys=True),flush=True)
+    directory=Path(answer['state_root'])/'development-runs'/answer['run_id']
+    run=json.loads(read_file(directory,'run.json',limit=8192))
+    import signal
+    previous=signal.getsignal(signal.SIGTERM)
+    def terminate(*_):raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM,terminate)
+    try:return DevelopmentServices(answer['state_root']).run(run,arguments)
+    finally:signal.signal(signal.SIGTERM,previous)
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

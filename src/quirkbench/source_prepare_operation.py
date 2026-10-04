@@ -149,13 +149,13 @@ def selection(root,operation_id,value):
     return record,path
 
 
-def run(intent,stage,verify,report, *,state_root,operation_id):
+def run(intent,stage,verify,report, *,state_root,operation_id,stage_only=False):
     from .store import ArtifactStore
     from .builder_setup import reserve_bytes
     value=input_record(state_root,intent,operation_id)
     if value['schema_version']==2:
         from .distribution_prepare_operation import run as distribution_run
-        return distribution_run(value,intent,stage,verify,report,state_root=state_root,operation_id=operation_id)
+        return distribution_run(value,intent,stage,verify,report,state_root=state_root,operation_id=operation_id,stage_only=stage_only)
     pending=selection(state_root,operation_id,value)
     if pending:_,path=pending
     else:

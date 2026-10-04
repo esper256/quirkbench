@@ -22,9 +22,9 @@ class CommandParser(argparse.ArgumentParser):
             if getattr(value,option) is not None:setattr(value,positional,getattr(value,option))
         if value.command=='endpoint':
             requirements={'show':(), 'stage':('request_id','host','source_sha256'), 'renew':('request_id','host','source_sha256'),
-                'apply':('request_id','identity_sha256','fingerprint','unit'), 'rollback':('request_id','switch_sha256'), 'wizard':('unit',)}
+                'apply':('request_id','identity_sha256','fingerprint'), 'rollback':('request_id','switch_sha256'), 'wizard':()}
             allowed=set(requirements[value.action])|({'request_id','public_certificate'} if value.action=='show' else
-                {'repository_url'} if value.action=='apply' else set())
+                {'repository_url','unit'} if value.action=='apply' else {'unit'} if value.action=='wizard' else set())
             for name in ('request_id','host','source_sha256','identity_sha256','fingerprint','repository_url','unit','switch_sha256','public_certificate'):
                 if name not in allowed and getattr(value,name):self.error('--'+name.replace('_','-')+' is incompatible with endpoint '+value.action)
             if any(getattr(value,name) is None for name in requirements[value.action]):self.error('endpoint '+value.action+' requires '+', '.join('--'+name.replace('_','-') for name in requirements[value.action]))
@@ -165,7 +165,7 @@ def parser():
     endpoint.add_argument('--identity-sha256',help='exact staged successor identity SHA256')
     endpoint.add_argument('--fingerprint',help='explicit full staged controller certificate SHA256')
     endpoint.add_argument('--repository-url',help='explicit successor repository service HTTPS URL')
-    endpoint.add_argument('--unit',type=Path,help='existing native controller user-unit file, verified before apply')
+    endpoint.add_argument('--unit',type=Path,help=argparse.SUPPRESS)
     endpoint.add_argument('--switch-sha256',help='exact retained switch SHA256 for rollback')
     endpoint.add_argument('--public-certificate',action='store_true',help='show only the selected public PEM certificate')
     endpoint.add_argument('--json',action='store_true')
@@ -177,7 +177,7 @@ def parser():
     publication.add_argument('--signing-home',required=True,type=Path,help='existing private operator-provisioned GnuPG home; no keys are created')
     publication.add_argument('--fingerprint',required=True,help='full uppercase fingerprint of the explicit composition signing key')
     publication.add_argument('--request-id',required=True,help='retain this identity and exact choices for retry')
-    publication.add_argument('--unit',type=Path,help='existing native controller user unit; defaults to the configured home')
+    publication.add_argument('--unit',type=Path,help=argparse.SUPPRESS)
     publication.add_argument('--json',action='store_true')
     setup = commands.add_parser('setup', help='resume initial controller setup and optional native service startup')
     setup.add_argument('--request-id', help='durable retry identity; required with --json')
@@ -187,8 +187,8 @@ def parser():
     setup.add_argument('--host', help='record the literal controller bind IP')
     setup.add_argument('--port', type=int)
     setup.add_argument('--allow-lan', action='store_true', default=None)
-    setup.add_argument('--logout-policy', choices=['session', 'existing_linger'])
-    setup.add_argument('--start-service', action='store_true', help='create private local TLS and enable/start the existing controller user unit')
+    setup.add_argument('--logout-policy', choices=['session'], help='foreground session lifetime; daemon packaging is separate')
+    setup.add_argument('--configure-controller', '--start-service', dest='start_service', action='store_true', help='publish local TLS, controller configuration and launcher; run controller-run separately')
     setup.add_argument('--builder-archive', type=Path, help='admit signed OCI capture/import to the existing worker')
     setup.add_argument('--builder-request-id', help='builder retry identity; defaults to the setup request ID plus -builder')
     setup.add_argument('--json', action='store_true')
@@ -197,7 +197,7 @@ def parser():
     preferences = commands.add_parser('settings', help='show or configure local retention preferences')
     preferences.add_argument('action', choices=['show','set'])
     preferences.add_argument('key', nargs='?'); preferences.add_argument('value', type=int, nargs='?')
-    commands.add_parser('setup-check', help='inspect user service availability without changing host settings')
+    commands.add_parser('setup-check', help='inspect foreground controller tools without changing host settings')
     install = commands.add_parser('controller-install', help='verify an immutable development archive; optionally activate the idle controller')
     install.add_argument('archive', type=Path, nargs='?')
     install.add_argument('--activate', action='store_true')
@@ -375,6 +375,11 @@ def parser():
     compose = commands.add_parser('compose',help='compose and sign a complete experimental Fedora OSTree revision'); compose.add_argument('manifest',type=Path); compose.add_argument('--workspace',type=Path); compose.add_argument('--publish-repo',type=Path,required=True); compose.add_argument('--campaign')
     repo = commands.add_parser('serve-repository',help='serve read-only OSTree content with mutual TLS'); repo.add_argument('--host',default='127.0.0.1',help='controller repository service bind address'); repo.add_argument('--port',type=int,default=8444); repo.add_argument('--allow-lan',action='store_true'); repo.add_argument('--cert',required=True); repo.add_argument('--key',required=True); repo.add_argument('--client-ca',required=True)
     repo.add_argument('--credential-registry', action='store_true', help='require live registered leaf certificate in addition to mutual TLS')
+    foreground = commands.add_parser('controller-run',help='run the configured controller in the foreground; no host service manager')
+    foreground.add_argument('--engine',choices=['podman','docker'],default=None)
+    foreground.add_argument('--worker-image',help='exact local worker image configuration ID (sha256:...)')
+    serve.add_argument('--worker-engine',choices=['podman','docker'],default='podman')
+    serve.add_argument('--worker-image',help='exact local worker image configuration ID (sha256:...)')
     serve.add_argument('--job-worker',type=Path,help='installed fixed build/compose worker')
     serve.add_argument('--service-runtime',type=Path,help=argparse.SUPPRESS)
     for command in (build,compose,candidate):
@@ -394,6 +399,12 @@ def parser():
 
 def _main(argv=None):
     args = parser().parse_args(argv)
+    if args.command=='controller-run':
+        from .controller_service import main as run_controller
+        options=['--state',str(discover_state_root(args.state))]
+        if args.engine: options+=['--engine',args.engine]
+        if args.worker_image: options+=['--worker-image',args.worker_image]
+        return run_controller(options)
     if args.command=='publication':
         from .publication_setup import configure
         from .setup_contracts import SetupUnavailable
@@ -555,9 +566,9 @@ def _main(argv=None):
                 for key,label in [('identity_sha256','Identity SHA256'),('certificate_sha256','Certificate SHA256'),('controller_url','Controller'),('repository_url','Repository'),('switch_sha256','Switch SHA256')]:
                     if answer.get(key) is not None:print(label+': '+answer[key])
                 if args.action=='show':print('Recorded public identity; current reachability remains separate.')
-                elif args.action in ('stage','renew'):print('Identity staged with the existing CA. Apply its exact identity and fingerprint with the controller user service stopped.')
+                elif args.action in ('stage','renew'):print('Identity staged with the existing CA. Apply its exact identity and fingerprint with the foreground controller stopped.')
                 else:print('Configuration restored.' if answer['rolled_back'] else 'Configuration applied.')
-                if args.action!='show':print('Start the existing controller user service when ready, then use recovery endpoint maintenance for each target. Reachability and target migration remain separate.')
+                if args.action!='show':print('Run controller-run when ready, then use recovery endpoint maintenance for each target. Reachability and target migration remain separate.')
             return 0
         except (OSError,ValueError,RuntimeError,sqlite3.Error) as exc:
             code,status=(('UNAVAILABLE',4) if isinstance(exc,SetupUnavailable) else ('CONFLICT',3) if isinstance(exc,Conflict) else ('INVALID_INPUT',2) if isinstance(exc,ContractError) else ('INFRASTRUCTURE',5))
@@ -1315,18 +1326,20 @@ def _main(argv=None):
                     if args.recovery_worker is not None:
                         if any(value is None for value in (args.recovery_signing_home,args.recovery_public_key,args.recovery_fingerprint)):
                             raise ValueError('recovery coordinator requires explicit signing trust and worker configuration')
-                        from .worker_service import SystemdUserWorkerServices
+                        from .worker_service import ContainerWorkerServices
                         from .recovery_coordinator import RecoveryImageCoordinator
-                        services=SystemdUserWorkerServices(worker_program=args.recovery_worker.resolve())
+                        services=ContainerWorkerServices(worker_program=args.recovery_worker.resolve(),engine=args.worker_engine,worker_image=args.worker_image)
                         owner.reconcile_units(services)
+                        services.preflight(controller.root,controller.clock()+60)
                         coordinator=RecoveryImageCoordinator(owner,services,signing_home=args.recovery_signing_home,
                             trusted_public_key=args.recovery_public_key,fingerprint=args.recovery_fingerprint)
                     jobs=None
                     if args.job_worker is not None:
-                        from .worker_service import SystemdUserWorkerServices
+                        from .worker_service import ContainerWorkerServices
                         from .job_coordinator import JobCoordinator
-                        services=SystemdUserWorkerServices(worker_program=args.job_worker.resolve(),development=True)
+                        services=ContainerWorkerServices(worker_program=args.job_worker.resolve(),development=True,engine=args.worker_engine,worker_image=args.worker_image)
                         owner.reconcile_units(services)
+                        services.preflight(controller.root,controller.clock()+60)
                         jobs=JobCoordinator(owner,services)
                     from .enrollment_runtime import publication_runtime
                     with publication_runtime(controller,registry=registry,service_runtime=args.service_runtime,
@@ -1357,6 +1370,8 @@ def _main(argv=None):
                                     server.shutdown(); thread.join(5)
                         finally:
                             server.server_close()
+                            if coordinator is not None: owner.interrupt_and_reconcile(coordinator.services)
+                            if jobs is not None: owner.interrupt_and_reconcile(jobs.services)
                 answer = {'stopped': True}
             else:
                 raise ValueError('unknown command')

@@ -29,7 +29,7 @@ Controller storage is separate: initially budget roughly 200 GiB for sources, bu
 
 ### CLI entry points
 
-Submit from the controller's normal terminal after the [manual user-service setup](controller-installation.md#durable-build-and-composition-service).
+Submit from the controller's normal terminal after the [foreground controller setup](controller-installation.md#foreground-build-and-composition-controller).
 The pinned builder image must already exist locally. Inputs use the existing
 BuildInputs/ComposeInputs manifests and absolute declared paths; expensive capture
 and hash checks happen in the first worker stage. Persistent state and private
@@ -65,7 +65,7 @@ Software support does not establish real service containment or boot qualificati
 ### Durable candidate sysroot preparation
 
 `candidate-rootfs` prepares a retained package sysroot through the same operation
-service and delegated worker. Supply a strict
+controller and bounded container worker. Supply a strict
 [candidate-rootfs-input v1](../examples/candidate-rootfs-input.json) whose baseline,
 RPM snapshot, locks, recipes and packages are already retained in the controller
 artifact store. Missing pinned bytes are a blocker, not permission to download or

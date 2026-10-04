@@ -6,7 +6,7 @@ import subprocess
 from .contracts import Conflict,ContractError,canonical,digest,identifier
 from .controller_setup import _managed_path,_durable_directory,_database_present
 from .controller_endpoint import _strict_read
-from .controller_service import configuration,validate_configuration,UNIT
+from .controller_service import configuration,validate_configuration
 from .enrollment import _document,_snapshot
 from .enrollment_client import endpoint
 from .enrollment_credentials import export_public_key
@@ -75,25 +75,21 @@ def response(saved):
         'repository_alias':intent['repository_alias'],'signing_fingerprint':intent['signing_fingerprint'],
         'public_key_sha256':intent['public_key_sha256'],'controller_certificate_sha256':intent['controller_certificate_sha256'],
         'enrollment_available':False,'service_start_required':True,'boot_authorized':False,
-        'next_command':'systemctl --user start '+UNIT}
+        'next_command':'quirkbench controller-run'}
 
 
 def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,runner=subprocess.run,
               run=subprocess.run,tls_inspector=None,fault_hook=None):
     """Configure only a stopped, idle initial service; no keys, start or target grant."""
     from .controller_install import _idle
-    from .setup_service import _service_state,_effective_unit
-    from .state_config import _config_home
     identifier(request_id);identifier(alias)
     root=_managed_path(root);signing_home=_managed_path(signing_home)
     if not signing_home.is_dir():raise SetupUnavailable('provision an existing private composition signing home first')
     if not _database_present(root):raise SetupUnavailable('complete initial controller setup first')
-    unit=Path(unit or _config_home()/('systemd/user/'+UNIT))
-    if str(unit)!=str(unit.absolute()) or unit.resolve()!=unit:raise ContractError('native controller unit must be canonical')
     fault=fault_hook or (lambda _:None)
     directory=root/'private/publication-setup'
     choices={'repository_alias':alias,'repository_url':url,'signing_home':str(signing_home),
-        'signing_fingerprint':fingerprint,'unit':str(unit)}
+        'signing_fingerprint':fingerprint}
     previous=history(root)
     if previous:
         saved,captured,old,new=previous
@@ -142,8 +138,6 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
                 raise Conflict('original controller TLS changed during publication setup')
         def guard(expected=None):
             pure_fence(expected)
-            if _service_state(runner)!='stopped':raise Conflict('stop the existing controller user service before publication setup')
-            _effective_unit(runner,unit,runtime,root)
             pure_fence(expected)
         guard()
         snapshot=_snapshot(root,tls_inspector=tls_inspector);guard()
@@ -154,9 +148,9 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
             repo=root/'repositories'/alias
             if repo.exists() or repo.is_symlink():raise Conflict('initial publication repository already exists; select a fresh explicit alias')
             intent={'state_root':str(root),'repository_alias':alias,'repository_url':url,'signing_home':str(signing_home),
-                'signing_fingerprint':fingerprint,'unit':str(unit),**{key:digest(raw) for key,raw in captured.items()},
+                'signing_fingerprint':fingerprint,**{key:digest(raw) for key,raw in captured.items()},
                 'controller_tls_identity_sha256':digest(tls_material['identity.json']),'controller_certificate_sha256':snapshot['certificate_sha256']}
-            saved=validate({'schema_version':1,'record_type':'publication-setup','request_id':request_id,
+            saved=validate({'schema_version':2,'record_type':'publication-setup','request_id':request_id,
                 'request_digest':digest(canonical({'kind':'publication-setup','arguments':intent})),'intent':intent,'completed_steps':[],
                 'repository_configuration_sha256':None})
             _durable_directory(_managed_path(directory))

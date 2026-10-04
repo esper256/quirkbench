@@ -29,9 +29,9 @@ temporary root because GnuPG agent sockets have a pathname limit. They use only
 disposable test keys and stop their own agent before removing the home.
 
 This development environment is separate from the machine running the controller.
-The currently supported durable controller uses native systemd user services,
-with rootless Podman for build workers. A Linux VM with those capabilities is a
-possible deployment route; a container without a user manager is development-only.
+The controller runs in the foreground with bounded container workers. A host service
+manager is not required. Actual engine/cgroup capabilities determine which native
+workloads are available; software tests need no running controller.
 Missing runtime capabilities do not prevent software development and must not be
 reported as ready. See [controller installation](controller-installation.md).
 
@@ -165,8 +165,7 @@ make test-full                              # explicit milestone, all software t
 
 The smoke list lives in `SMOKE_TESTS` in the root Makefile. It reuses existing
 contract/schema, artifact publication/upload, state-path, controller lifecycle
-and setup tests, plus a simulated CLI demo and independent monitor. Setup uses
-injected service responses, not a live systemd manager. Explicit file/node paths
+and setup tests, plus a simulated CLI demo and independent monitor. Setup checks foreground ownership and publishes configuration without starting a daemon. Explicit file/node paths
 avoid importing every integration module as `pytest -m smoke` would. All smoke
 cases remain part of the full suite. No tests or assertions are removed or skipped
 by this split. Smoke checks basic functionality; they do not replace regressions

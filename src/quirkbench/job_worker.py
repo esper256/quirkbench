@@ -133,7 +133,7 @@ def restore(kind,raw,prepared,root,stage):
     return result
 
 
-def run_worker(root,operation,epoch,generation,stage):
+def run_worker(root,operation,epoch,generation,stage,*,prepare_only=False):
     root,stage=Path(root),Path(stage)
     from .state_reader import StateReader
     row=StateReader(root).operation_status(operation)['data']
@@ -154,14 +154,17 @@ def run_worker(root,operation,epoch,generation,stage):
     atomic_write(stage/'binding.json',canonical({'input_digest':claim.input_digest}))
     record={'schema_version':1,'operation_id':operation,'worker_epoch':epoch,'worker_generation':generation,
             'input_digest':claim.input_digest,'stage':claim.stage,'state':'FAILED'}
+    payload_pending=False
     try:
         from .recovery_podman import _verify_retained_builder_archive
         if claim.kind=='candidate_prepare':
             from .candidate_rootfs_operation import run
-            result=run(root,intent,stage,verify,report,claim.deadline)
+            result=run(root,intent,stage,verify,report,claim.deadline,stage_only=prepare_only)
+            payload_pending=prepare_only
         elif claim.kind=='source_prepare':
             from .source_prepare_operation import run
-            result=run(intent,stage,verify,report,state_root=root,operation_id=operation)
+            result=run(intent,stage,verify,report,state_root=root,operation_id=operation,stage_only=prepare_only)
+            payload_pending=prepare_only and result.get('payload_staged') is True
         elif claim.kind=='source_capture':
             from .source_operation import capture as capture_source
             result=capture_source(intent,stage,verify,report,state_root=root,operation_id=operation)
@@ -178,7 +181,8 @@ def run_worker(root,operation,epoch,generation,stage):
                 prepared=document(root,'artifacts/objects/'+row['prepared_digest'])
                 if canonical(prepared)!=canonical({'schema_version':1,'archive_sha256':args['builder_archive_sha256']}):
                     raise ValueError('retained builder preparation differs')
-                result=import_builder(root,args,stage,verify,report,claim.deadline)
+                result=import_builder(root,args,stage,verify,report,claim.deadline,stage_only=prepare_only)
+                payload_pending=prepare_only
         elif claim.stage=='job_inputs':
             _verify_retained_builder_archive(root,args['builder_archive_sha256'],args['builder_config_digest'])
             raw=args.get('manifest')
@@ -207,31 +211,35 @@ def run_worker(root,operation,epoch,generation,stage):
             _private_directory(cache)
             from .retention_settings import settings
             atomic_write(stage/'cache-policy.json',canonical({'cache_gib':settings(root)['cache_gib']}))
-            argv=['/usr/bin/bash',str(helper),'--rm','--pull=never','--network=none' if claim.kind=='build' or args.get('schema_version')==3 else '--network=slirp4netns',
-                  '--userns=keep-id','--security-opt=no-new-privileges',
-                  '--volume',f'{stage}:{stage}:rw,z','--volume',f'{package}:{package}:ro,z',
-                  '--volume',f'{cache}:{cache}:ro,z','--env',f'PYTHONPATH={package.parent}',
-                  '--env','PYTHONDONTWRITEBYTECODE=1',args['builder_config_digest'],
-                  '/usr/bin/python3','-m','quirkbench.job_worker','--inner',claim.kind,'--stage-dir',str(stage),'--cache',str(cache)]
-            from .package_resources import target_assets_dir
-            assets=target_assets_dir().resolve()
-            if not assets.is_relative_to(package):
-                argv[argv.index('--env'):argv.index('--env')]=['--volume',f'{assets}:{assets}:ro,z']
-            from .recovery_worker import execute_rootfs
-            report('compilation' if claim.kind=='build' else 'composition','Running the pinned builder in the delegated service.')
-            summary=execute_rootfs(argv,diagnostics/'worker.log',verify=verify,deadline=claim.deadline,max_duration=86400)
-            if summary['exit_code']!=0: raise ValueError('builder failed; inspect worker.log')
-            result=document(stage,'output/outputs.json')
+            if prepare_only:
+                payload_pending=True
+                result={}
+            else:
+                argv=['/usr/bin/bash',str(helper),'--rm','--pull=never','--network=none' if claim.kind=='build' or args.get('schema_version')==3 else '--network=slirp4netns',
+                      '--userns=keep-id','--security-opt=no-new-privileges',
+                      '--volume',f'{stage}:{stage}:rw,z','--volume',f'{package}:{package}:ro,z',
+                      '--volume',f'{cache}:{cache}:ro,z','--env',f'PYTHONPATH={package.parent}',
+                      '--env','PYTHONDONTWRITEBYTECODE=1',args['builder_config_digest'],
+                      '/usr/bin/python3','-m','quirkbench.job_worker','--inner',claim.kind,'--stage-dir',str(stage),'--cache',str(cache)]
+                from .package_resources import target_assets_dir
+                assets=target_assets_dir().resolve()
+                if not assets.is_relative_to(package):
+                    argv[argv.index('--env'):argv.index('--env')]=['--volume',f'{assets}:{assets}:ro,z']
+                from .recovery_worker import execute_rootfs
+                report('compilation' if claim.kind=='build' else 'composition','Running the pinned builder in a bounded container.')
+                summary=execute_rootfs(argv,diagnostics/'worker.log',verify=verify,deadline=claim.deadline,max_duration=86400)
+                if summary['exit_code']!=0: raise ValueError('builder failed; inspect worker.log')
+                result=document(stage,'output/outputs.json')
         verify()
         if lost: raise lost[0]
-        record.update(state='COMPLETE',result=result)
+        record.update(state='PAYLOAD_STAGED' if payload_pending else 'COMPLETE',result=result)
     except Exception as exc:
         record['error']=str(exc)[:512]
         report(claim.stage,'Worker failed: '+str(exc)[:400],state='FAILED')
     finally:
         stop.set(); thread.join(3)
         atomic_write(diagnostics/'stage-result.json',canonical(record))
-    return 0 if record['state']=='COMPLETE' else 1
+    return 0 if record['state'] in ('COMPLETE','PAYLOAD_STAGED') else 1
 
 
 def inner(kind,stage,cache):

@@ -1,49 +1,68 @@
-"""Headless launcher wiring with fake admission and service commands; no builds."""
-import os
+"""Foreground development builds preserve bounds, stop evidence and selected output."""
+import json
 from pathlib import Path
-import subprocess
-
 import pytest
 
+from quirkbench.contracts import ContractError
+from quirkbench.controller import Controller
+from quirkbench.development_container import DevelopmentServices, arguments
+from quirkbench import development_run
+from test_container_workers import Engine,IMAGE
 
-ROOT = Path(__file__).resolve().parents[1]
+
+class Podman(Engine):
+    def __call__(self,argv,timeout):
+        assert argv[:3]==['podman','--remote=false','--cgroup-manager=cgroupfs']
+        args=argv[3:]
+        if args[0]=='info' and args[-1]=='{{.Host.Security.Rootless}}':return 'true'
+        return super().__call__(['docker',*args],timeout)
 
 
-@pytest.mark.parametrize('total_gib,memory_gib', [(32, 8), (8, 4)])
-@pytest.mark.parametrize('admitted', [True, False])
-def test_headless_launcher_requires_admission_and_contains_worker(tmp_path, total_gib, memory_gib, admitted):
-    stage = tmp_path / 'stage'; stage.mkdir(); stage.chmod(0o755)
-    binary = tmp_path / 'bin'; binary.mkdir()
-    captured = tmp_path / 'worker-argv'
-    admission = tmp_path / 'admission-argv'
-    scripts = {
-        'systemd-run': '#!/bin/bash\nprintf "%s\\n" "$@" > "$SERVICE_ARGV"\n',
-        'python3': '#!/bin/bash\nprintf "%s\\n" "$@" > "$ADMISSION_ARGV"\nexit ' + ('0' if admitted else '2') + '\n',
-        'getconf': '#!/bin/bash\nprintf "16\\n"\n',
-        'awk': f'#!/bin/bash\nprintf "{total_gib * 1024**2}\\n"\n',
-    }
-    for name, source in scripts.items():
-        path = binary / name; path.write_text(source); path.chmod(0o755)
-    env = {**os.environ, 'PATH': f'{binary}:/usr/bin:/bin', 'DISPLAY': '', 'WAYLAND_DISPLAY': '',
-           'SERVICE_ARGV': str(captured), 'ADMISSION_ARGV': str(admission)}
-    env.pop('CONTAINER_ID', None); env.pop('DISTROBOX_ENTER_PATH', None)
-    result = subprocess.run(['bash', str(ROOT / 'environments/start-bounded-podman-build.sh'),
-                             'quirkbench-build-test.service', str(stage), 'build.log', 'build.exit.status',
-                             '--rm', 'unused-image'], capture_output=True, text=True, env=env, timeout=10)
-    if os.geteuid() == 0:
-        assert result.returncode == 125 and 'rootless user required' in result.stderr
-        assert not captured.exists() and not admission.exists()
-        return
-    assert admission.read_text().splitlines()[:2] == ['-m', 'quirkbench.development_run']
-    if not admitted:
-        assert result.returncode != 0 and not captured.exists()
-        return
-    assert result.returncode == 0, result.stderr
-    argv = captured.read_text().splitlines()
-    assert '--user' in argv and '--no-block' in argv
-    assert '--property=Delegate=cpu memory pids' in argv
-    assert f'--property=MemoryMax={memory_gib * 1024**3}' in argv
-    assert '--property=CPUQuota=400%' in argv
-    assert '--property=MemorySwapMax=0' in argv
-    assert '--property=KillMode=control-group' in argv
-    assert str(ROOT / 'environments/record-bounded-podman-build.sh') in argv
+@pytest.mark.parametrize('option',['--detach','--privileged','--cpus=99','--memory=999g','--pid=host','--name=foreign','--replace','--restart=always'])
+def test_build_arguments_cannot_override_execution_ownership_or_limits(option):
+    with pytest.raises(ContractError):arguments([option,IMAGE,'true'])
+
+
+def test_ad_hoc_build_retains_output_after_verified_container_stop(tmp_path,monkeypatch):
+    c=Controller(tmp_path/'state',reserve_bytes=0)
+    monkeypatch.setattr(development_run,'discover_state_root',lambda:c.root)
+    monkeypatch.setattr(development_run,'ArtifactStore',lambda _:c.store)
+    run_id='quirkbench-build-test';stage=c.root/'development-runs'/run_id/'work';stage.mkdir(parents=True)
+    values=['--rm','--network=none',IMAGE,'true']
+    development_run.prepare(run_id,stage,'build.log','build.status',values)
+    run=json.loads((stage.parent/'run.json').read_bytes());engine=Podman()
+    service=DevelopmentServices(c.root,runner=engine)
+    def execute(argv,log,**kwargs):
+        assert argv[3:5]==['start','--attach']
+        log.write_bytes(b'compiled fixture\n');(stage/'result').write_bytes(b'retained artifact')
+        return {'exit_code':0}
+    monkeypatch.setattr('quirkbench.recovery_worker.execute_rootfs',execute)
+    assert service.run(run,values)==0
+    assert (stage.parent/'build.status').read_text()=='0\n'
+    assert json.loads((stage.parent/'stopped.json').read_bytes())['proof']=='stopped'
+    monkeypatch.setattr(development_run,'DevelopmentServices',lambda _:service)
+    saved=development_run.retain(c.root,run_id,outputs=['result'])
+    assert c.store.get(saved['retained_outputs']['result'])==b'retained artifact'
+    assert not engine.containers
+    assert (stage.parent/'build.log').read_bytes()==b'compiled fixture\n'
+
+
+def test_interrupted_attachment_stops_container_and_retains_diagnostics(tmp_path,monkeypatch):
+    c=Controller(tmp_path/'state',reserve_bytes=0)
+    monkeypatch.setattr(development_run,'discover_state_root',lambda:c.root)
+    monkeypatch.setattr(development_run,'ArtifactStore',lambda _:c.store)
+    run_id='quirkbench-build-interrupted';stage=c.root/'development-runs'/run_id/'work';stage.mkdir(parents=True)
+    values=[IMAGE,'true'];development_run.prepare(run_id,stage,'build.log','build.status',values)
+    run=json.loads((stage.parent/'run.json').read_bytes());engine=Podman();service=DevelopmentServices(c.root,runner=engine)
+    def interrupted(argv,log,**kwargs):
+        log.write_bytes(b'partial diagnostic\n')
+        engine.containers['2'*64]['State'].update(Running=True,Pid=123)
+        raise KeyboardInterrupt
+    monkeypatch.setattr('quirkbench.recovery_worker.execute_rootfs',interrupted)
+    with pytest.raises(KeyboardInterrupt):service.run(run,values)
+    assert all(not item['State']['Running'] for item in engine.containers.values())
+    assert (stage.parent/'build.status').read_text()=='130\n'
+    assert (stage.parent/'build.log').read_bytes()==b'partial diagnostic\n'
+    monkeypatch.setattr(development_run,'DevelopmentServices',lambda _:service)
+    assert development_run.retain(c.root,run_id,abandon=True)['abandoned']
+    assert not engine.containers

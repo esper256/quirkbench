@@ -197,7 +197,7 @@ A durable `BOOT_PENDING` handoff precedes one-shot arming. Candidate adoption ve
 ## Product orchestration boundary
 
 The [product interface contract](product-interface.md) specifies planned services and
-UX over these existing primitives. Controller systemd user services own rootless
+UX over these existing primitives. The foreground controller owns bounded container
 workers; sessions reference campaigns. Deliver external-agent proposals first, then a
 managed decision queue over the same source-capture and dispatch API. Proposal receipt
 is distinct from immutable-source readiness. Recipe extensions and human observations
