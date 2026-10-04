@@ -500,3 +500,7 @@ cleanup stops only its recorded container. The low-level `image` command assembl
 in managed staging and exports the image plus `.sha256` and `.json` sidecars without
 overwriting files. Its selected output parent must already exist. An interrupted
 export may leave completed files for inspection; select a new destination to retry.
+
+For the controller-free prepare/verify/build workflow and portable input snapshots,
+see [recovery input bundles](recovery-input-bundles.md). Existing low-level commands
+remain available for diagnosis.
