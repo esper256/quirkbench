@@ -23,7 +23,10 @@ an actionable failure; install those prerequisites through your package manager.
 An existing incompatible or incomplete environment is preserved: choose a new
 `--venv` destination and remove the old one yourself when no longer needed.
 
-The nonsecret `<venv>/bootstrap-report.json` records the source, interpreter/build,
+Each attempt retains capped phase logs, exit statuses and a report in a new
+evidence directory; its path is printed even on failure. With `--report`, that
+directory is created beside the report so CI uploads failed setup evidence too.
+The latest successful nonsecret `<venv>/bootstrap-report.json` records the source, interpreter/build,
 dependency versions, native-tool availability and elapsed time. Download caching is
 keyed by interpreter/platform, project metadata and constraints; virtualenvs are
 never moved between interpreters. Use `--cache-dir /writable/cache` on restricted

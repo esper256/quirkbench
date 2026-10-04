@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import shlex
+import selectors
+import signal
 import shutil
 import subprocess
 import sys
@@ -50,7 +52,7 @@ def compatible(selected,installed,venv):
         and installed['prefix']!=installed['base_prefix'])
 
 
-def environment(python,venv,selected):
+def environment(python,venv,selected,*,evidence=None):
     """Never clear an existing destination, including incompatible/incomplete virtualenvs."""
     if venv.exists():
         cfg=venv/'pyvenv.cfg';binary=venv/'bin/python'
@@ -61,10 +63,13 @@ def environment(python,venv,selected):
         if not compatible(selected,identity(binary),venv):
             raise SetupError('Virtualenv belongs to a different interpreter/build; preserve it and choose a new --venv path')
         return binary,False
-    result=subprocess.run([str(python),'-m','venv',str(venv)],capture_output=True,text=True,timeout=60)
-    if result.returncode:
+    evidence=evidence or Path(tempfile.mkdtemp(prefix='quirkbench-bootstrap-venv-'))
+    log=evidence/'venv.log'
+    try:run([python,'-m','venv',venv],log,timeout=60)
+    except SetupError as exc:
         raise SetupError('Cannot create virtualenv. Install your distro venv/ensurepip support '
-            '(Debian/Ubuntu: python3-venv; Fedora: python3-pip), then choose a new --venv path. '+(result.stdout+result.stderr)[-2000:])
+            '(Debian/Ubuntu: python3-venv; Fedora: python3-pip), then choose a new --venv path. '
+            +'diagnostic='+str(log)+'; '+log.read_text(errors='replace')[-2000:]) from exc
     return venv/'bin/python',True
 
 
@@ -80,18 +85,47 @@ def dependency_key(selected):
 
 
 def run(argv,log,*,timeout=300,env=None):
-    started=time.monotonic()
-    with log.open('wb') as stream:
-        try:result=subprocess.run([str(a) for a in argv],cwd=ROOT,stdout=stream,stderr=subprocess.STDOUT,timeout=timeout,env=env)
-        except subprocess.TimeoutExpired as exc:
-            log.with_suffix(log.suffix+'.exit').write_text('124\n')
-            raise SetupError('Setup phase timed out; diagnostic='+str(log)) from exc
-    log.with_suffix(log.suffix+'.exit').write_text(str(result.returncode if result.returncode>=0 else 128-result.returncode)+'\n')
-    if result.returncode:raise SetupError('Command failed ('+str(result.returncode)+'); diagnostic='+str(log))
+    # Preserve each phase, including a failed reuse check followed by installation.
+    original=log;index=1
+    while log.exists():
+        index+=1;log=original.with_name(original.stem+'-'+str(index)+original.suffix)
+    started=time.monotonic();deadline=started+timeout;tail=bytearray();total=0
+    process=subprocess.Popen([str(a) for a in argv],cwd=ROOT,stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,env=env,start_new_session=True)
+    selector=selectors.DefaultSelector();selector.register(process.stdout,selectors.EVENT_READ)
+    timed_out=False;status=125
+    def stop():
+        try:os.killpg(process.pid,signal.SIGTERM)
+        except ProcessLookupError:return
+        # Give ordinary subprocesses a brief orderly termination opportunity.
+        try:process.wait(timeout=.2)
+        except subprocess.TimeoutExpired:pass
+        try:os.killpg(process.pid,signal.SIGKILL)
+        except ProcessLookupError:pass
+    try:
+        while selector.get_map():
+            if time.monotonic()>=deadline:
+                timed_out=True;stop();break
+            for entry,_ in selector.select(min(.1,max(0,deadline-time.monotonic()))):
+                chunk=os.read(entry.fd,65536)
+                if not chunk:selector.unregister(entry.fd);continue
+                total+=len(chunk);tail.extend(chunk)
+                if len(tail)>1024**2:del tail[:len(tail)-1024**2]
+        if timed_out:status=124
+        else:status=process.wait(timeout=max(.01,deadline-time.monotonic()))
+    except subprocess.TimeoutExpired:
+        timed_out=True;stop();status=124
+    finally:
+        if status or process.poll() is None:stop()
+        process.wait(timeout=2);selector.close();process.stdout.close()
+        log.write_bytes((('[truncated '+str(total-len(tail))+' bytes; retained final 1 MiB]\n').encode() if total>len(tail) else b'')+tail)
+        log.with_suffix(log.suffix+'.exit').write_text(str(status if status>=0 else 128-status)+'\n')
+    if timed_out:raise SetupError('Setup phase timed out; diagnostic='+str(log))
+    if status:raise SetupError('Command failed ('+str(status)+'); diagnostic='+str(log))
     return round(time.monotonic()-started,3)
 
 
-def dependencies(python,venv,key,cache):
+def dependencies(python,venv,key,cache,evidence):
     receipt=venv/'bootstrap-report.json'
     if receipt.is_file():
         try:
@@ -101,13 +135,13 @@ def dependencies(python,venv,key,cache):
             if (editable.get('url')==ROOT.as_uri() and editable.get('dir_info',{}).get('editable') is True
                 and previous.get('dependency_key')==key and previous.get('checkout')==str(ROOT)
                 and all(actual.get(k)==v for k,v in constraint_versions().items())):
-                run([python,'-m','pip','check'],venv/'bootstrap-pip-check.log',timeout=30)
+                run([python,'-m','pip','check'],evidence/'pip-check.log',timeout=30)
                 return True
         except (ValueError,SetupError,subprocess.SubprocessError):pass
     common=[python,'-m','pip','install','--cache-dir',cache,'--constraint',CONSTRAINTS]
-    run([*common,'setuptools','wheel'],venv/'bootstrap-build-tools.log')
-    run([*common,'--no-build-isolation','--editable',str(ROOT)+'[test]'],venv/'bootstrap-dependencies.log')
-    run([python,'-m','pip','check'],venv/'bootstrap-pip-check.log',timeout=30)
+    run([*common,'setuptools','wheel'],evidence/'build-tools.log')
+    run([*common,'--no-build-isolation','--editable',str(ROOT)+'[test]'],evidence/'dependencies.log')
+    run([python,'-m','pip','check'],evidence/'pip-check.log',timeout=30)
     return False
 
 
@@ -145,39 +179,40 @@ def main(argv=None):
     parser.add_argument('--skip-smoke',action='store_true',help='CI only: the selected existing software suite runs separately')
     parser.add_argument('--check-archive',action='store_true',help='build an unsigned controller archive in temporary storage')
     parser.add_argument('--diagnose-runtime',action='store_true',help='run the opt-in bounded stdlib/pytest crash diagnostic once')
-    args=parser.parse_args(argv);started=time.monotonic()
+    args=parser.parse_args(argv);started=time.monotonic();report={"schema_version":1,"status":"failed"};evidence=None;venv=None
     try:
+        evidence=Path(tempfile.mkdtemp(prefix='quirkbench-bootstrap-',dir=args.report.parent if args.report else None))
+        report['evidence_directory']=str(evidence)
         native=tools();python=interpreter(args.python);selected=identity(python)
-        venv=args.venv.expanduser().resolve();python,created=environment(python,venv,selected)
+        venv=args.venv.expanduser().resolve();python,created=environment(python,venv,selected,evidence=evidence)
         key=dependency_key(selected);cache=args.cache_dir.expanduser().resolve()/key;cache.mkdir(parents=True,exist_ok=True)
-        reused=dependencies(python,venv,key,cache)
-        report={'schema_version':1,'checkout':str(ROOT),'source_sha':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
+        reused=dependencies(python,venv,key,cache,evidence)
+        report.update({'schema_version':1,'checkout':str(ROOT),'source_sha':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
             'source_dirty':bool(subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True)),
             'interpreter':selected,'dependency_key':key,'venv_created':created,'dependencies_reused':reused,'tools':native,
             'packages':json.loads(subprocess.check_output([str(python),'-I','-c',PACKAGES],text=True,timeout=10)),
-            'smoke':'not_run','archive':'not_requested','diagnostic':'not_requested'}
+            'smoke':'not_run','archive':'not_requested','diagnostic':'not_requested'})
         if args.diagnose_runtime:
             with tempfile.TemporaryDirectory(prefix='quirkbench-runtime-diagnostic-') as tmp:
                 # Retain the actual diagnostic logs beyond the temporary test file.
                 try:diagnose(python,Path(tmp)/'probe')
                 except SetupError as exc:
-                    raise SetupError('Runtime diagnostic failed; retained logs='+str(venv/'bootstrap-stdlib.log')+' and '+str(venv/'bootstrap-pytest.log')) from exc
+                    raise SetupError('Runtime diagnostic failed; retained logs='+str(evidence/'stdlib.log')+' and '+str(evidence/'pytest.log')) from exc
                 finally:
                     for path in (Path(tmp)/'probe').glob('*.log*'):
-                        shutil.copyfile(path,venv/('bootstrap-'+path.name))
+                        shutil.copyfile(path,evidence/path.name)
             report['diagnostic']='passed'
         if args.check_archive:
             with tempfile.TemporaryDirectory(prefix='quirkbench-dev-package-') as tmp:
                 archive=Path(tmp)/'controller.tar'
-                run([python,ROOT/'environments/build-controller-archive.py','--output',archive],venv/'bootstrap-archive.log',timeout=90)
+                run([python,ROOT/'environments/build-controller-archive.py','--output',archive],evidence/'archive.log',timeout=90)
                 if not archive.is_file():raise SetupError('Archive helper did not emit an archive')
             report['archive']='passed'
         if not args.skip_smoke:
-            report['smoke_seconds']=run(['make','smoke','PYTHON='+str(python)],venv/'bootstrap-smoke.log',timeout=120)
+            report['smoke_seconds']=run(['make','smoke','PYTHON='+str(python)],evidence/'smoke.log',timeout=120)
             report['smoke']='passed'
-        report['elapsed_seconds']=round(time.monotonic()-started,3)
+        report['status']='ready';report['elapsed_seconds']=round(time.monotonic()-started,3)
         raw=json.dumps(report,sort_keys=True,indent=2)+'\n';(venv/'bootstrap-report.json').write_text(raw)
-        if args.report:args.report.write_text(raw)
         print(('Development dependencies ready; smoke not run' if args.skip_smoke else 'Development setup and smoke passed')+'; report='+str(venv/'bootstrap-report.json'))
         for name in ('openssl','gpg'):
             if not native[name]['available']:print('Optional '+name+' unavailable; its native regression coverage is not verified')
@@ -185,7 +220,14 @@ def main(argv=None):
         print('Archive: make controller-archive PYTHON='+shlex.quote(str(python))+' OUTPUT=/path/to/new-controller.tar')
         return 0
     except (SetupError,OSError,ValueError,subprocess.SubprocessError) as exc:
+        report['error']=str(exc)
         print('Development setup failed: '+str(exc),file=sys.stderr);return 2
+    finally:
+        report['elapsed_seconds']=round(time.monotonic()-started,3)
+        raw=json.dumps(report,sort_keys=True,indent=2)+'\n'
+        if evidence:(evidence/'report.json').write_text(raw)
+        if args.report and args.report.parent.is_dir():args.report.write_text(raw)
+        if evidence:print('Setup evidence: '+str(evidence))
 
 
 if __name__=='__main__':raise SystemExit(main())
