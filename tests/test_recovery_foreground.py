@@ -204,3 +204,12 @@ def test_exported_artifacts_match_selected_inputs(tmp_path, monkeypatch, change)
             foreground.build(**kwargs)
         assert not json.loads((output/'build.json').read_bytes())['complete']
         assert not any(call[1]=='rm' for call in engine.calls)
+
+
+def test_default_cpu_cap_works_on_small_linux_hosts(inputs, monkeypatch):
+    kwargs, engine = inputs
+    monkeypatch.setattr(foreground.os, 'cpu_count', lambda: 2)
+    with pytest.raises(KeyboardInterrupt):
+        foreground.build(**kwargs, execute=lambda *a,**k: (_ for _ in ()).throw(KeyboardInterrupt()))
+    create = next(call for call in engine.calls if call[1]=='create')
+    assert '--cpus=1' in create

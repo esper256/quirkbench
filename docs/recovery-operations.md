@@ -463,10 +463,13 @@ have dropped exact versions. Locking verifies every RPM against the selected key
 quirkbench recovery-image-build --engine docker \
   --store /SELECTED_STATE/artifacts --recipe ACTUAL_RECIPE_SHA256 \
   --builder-image sha256:ACTUAL_CONFIG_ID \
-  --output /absolute/new-image-build --cpus 4 --memory-gib 4 --timeout 3600
+  --output /absolute/new-image-build --memory-gib 4 --timeout 3600
 ```
 
-The output directory must be new and outside Git. The command copies only the
+The default CPU cap reserves half the visible CPUs, up to four; `--cpus` selects
+an explicit cap. The builder needs at least 4 GiB and enforces the existing
+half-host CPU/RAM reserve, so smaller hosts should use suitable limits before
+building. The output directory must be new and outside Git. The command copies only the
 recipe's selected inputs, mounts those copies read-only, runs an offline bounded
 container, verifies it has stopped, and exports `recovery.img`, its manifest,
 checksum and unsigned candidate record. The image checksum is checked after export.

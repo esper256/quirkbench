@@ -99,9 +99,11 @@ def cleanup(output, *, run=_run):
     return {'removed': True, 'output': str(output), 'image_ready': record.get('complete', False)}
 
 
-def build(*, cas_root, recipe_sha256, image, output, engine='podman', cpus=4,
+def build(*, cas_root, recipe_sha256, image, output, engine='podman', cpus=None,
           memory_gib=4, timeout=3600, run=_run, execute=None):
     sha256(recipe_sha256)
+    if cpus is None:
+        cpus = min(4, max(1, (os.cpu_count() or 1)//2))
     if (not re.fullmatch('sha256:[0-9a-f]{64}', image)
             or type(cpus) is not int or not 1 <= cpus <= 128
             or type(memory_gib) is not int or not 4 <= memory_gib <= 1024

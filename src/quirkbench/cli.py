@@ -320,7 +320,7 @@ def parser():
     foreground.add_argument('--builder-image',required=True,help='exact local sha256 image configuration ID from the verified recipe')
     foreground.add_argument('--engine',choices=('podman','docker'),default='podman')
     foreground.add_argument('--output',type=Path,required=True,help='new output directory outside Git')
-    foreground.add_argument('--cpus',type=int,default=4)
+    foreground.add_argument('--cpus',type=int,help='default: up to four CPUs, reserving half the visible host CPUs')
     foreground.add_argument('--memory-gib',type=int,default=4)
     foreground.add_argument('--timeout',type=int,default=3600,help='whole-container deadline in seconds')
     cleanup=commands.add_parser('recovery-image-cleanup',help='stop and remove only the container recorded by a foreground image build; preserve files')
