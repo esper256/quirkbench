@@ -307,7 +307,8 @@ exact candidate modules, selected recipes/units and generated runtime settings.
 Controller-only modules and unused recovery assets do not change that payload
 identity. Composer and installation-policy source hashes are recorded separately;
 the final composed tree is audited before signing or publication. Older retained
-build identities remain opaque and keep their original meaning. Software fixtures
+build identities remain opaque and keep their original meaning; unsigned staged
+legacy output must be resubmitted to obtain the current publication checks. Software fixtures
 verify these checks; native composition and boot acceptance remain separate.
 
 Foreground owner presence refreshes independently of validation, signing and housekeeping.

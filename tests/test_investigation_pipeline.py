@@ -520,3 +520,26 @@ def test_joined_storage_pressure_has_c2_blocked_response(joined,bounded_build,mo
     answer=json.loads(capsys.readouterr().out)
     assert result==4 and answer['error']=={'code':'BLOCKED','message':'free-space reserve reached','retryable':True}
     assert answer['operation_id'] is None
+
+
+@pytest.mark.parametrize('version',[None,1])
+def test_owner_rejects_worker_selected_legacy_payload_validation(joined,bounded_compose,monkeypatch,version):
+    from quirkbench.compose import ComposeInputs
+    from quirkbench.contracts import canonical
+    c,entry,builder,snapshot,source,candidate,config=joined
+    def downgrade(claim,coordinator):
+        if claim['stage']!='os_compose':return
+        stage=Path(claim['stage_dir']);path=stage/'diagnostics/stage-result.json'
+        record=json.loads(path.read_bytes());provenance=record['result']['deployment']['provenance']
+        if version is None:provenance.pop('composition_identity_version')
+        else:provenance['composition_identity_version']=version
+        raw=json.loads((stage/'worker-manifest.json').read_bytes())
+        provenance['build_identity']=ComposeInputs.from_mapping(raw).identity(version=1)
+        path.write_bytes(canonical(record))
+    with c.lifecycle() as owner:
+        build=pipeline.submit(c,'investigation','build','downgrade-build',source=source,candidate=candidate,ready=lambda _:None)
+        complete_job(c,owner,monkeypatch)
+        pipeline.submit(c,'investigation','compose','downgrade-compose',build=build['operation_id'],repository='lab',ready=lambda _:None)
+        result=complete_job(c,owner,monkeypatch,kind='compose',after_worker=downgrade,allow_failure=True)
+        assert result['state']=='FAILED'
+    assert not any('gpg-sign' in argv for _,argv in bounded_compose)

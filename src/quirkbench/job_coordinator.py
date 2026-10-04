@@ -236,12 +236,14 @@ class JobCoordinator:
             raise ValueError('composition manifest differs from bound inputs')
         from .compose import ComposeInputs, composition_policy, composition_provenance, final_candidate_payload
         inputs=ComposeInputs.from_mapping(raw)
-        version=manifest.provenance.get('composition_identity_version',1)
+        version=manifest.provenance.get('composition_identity_version')
+        if type(version) is not int or version!=2:
+            raise ValueError('staged composition requires version 2 payload provenance; resubmit legacy output')
         from .candidate_payload import capture, audit
         payload=capture();policy=composition_policy()
         if manifest.provenance.get('build_identity')!=inputs.identity(payload=payload,policy=policy,version=version) or manifest.provenance.get('composer_base_image_digest')!=args['builder_image_digest']:
             raise ValueError('composition provenance differs from complete pinned identity')
-        if version==2 and any(manifest.provenance.get(key)!=value for key,value in composition_provenance(payload,policy).items()):
+        if any(manifest.provenance.get(key)!=value for key,value in composition_provenance(payload,policy).items()):
             raise ValueError('candidate payload or composition policy provenance differs')
         values={role:self.staged(claim,entry['path'],sha256(entry['sha256'])) for role,entry in data['evidence'].items()}
         evidence=c._deployment_evidence(manifest)
@@ -269,8 +271,7 @@ class JobCoordinator:
         if observed!=manifest.revision: raise ValueError('composed revision unavailable')
         checkout=stage/'validation-tree'
         run(['ostree',f'--repo={repo}','checkout','--user-mode','--force-copy',manifest.revision,str(checkout)])
-        if version==2:
-            audit(checkout,final_candidate_payload(inputs,manifest.provenance['build_identity'],payload))
+        audit(checkout,final_candidate_payload(inputs,manifest.provenance['build_identity'],payload))
         from .build import sha256_file,validate_kernel_config
         module_dir=checkout/'usr/lib/modules'/raw['kernel_release']
         for role,name in (('kernel','vmlinuz'),('config','config'),('initramfs','initramfs.img')):
@@ -290,14 +291,6 @@ class JobCoordinator:
                 if not peer.is_symlink() or path.readlink()!=peer.readlink(): raise ValueError('composed module link differs')
             elif peer.is_symlink() or peer.resolve()!=peer or sha256_file(path)!=sha256_file(peer):
                 raise ValueError('composed module content differs')
-        if version==1:
-            from .target_install import install_candidate_runtime
-            expected_runtime=stage/'validation-runtime';expected_runtime.mkdir(mode=0o700);install_candidate_runtime(expected_runtime)
-            for path in (expected_runtime/'usr/lib/quirkbench').rglob('*'):
-                if path.is_file() and not path.is_symlink():
-                    peer=checkout/path.relative_to(expected_runtime)
-                    if peer.resolve()!=peer or not peer.is_file() or sha256_file(path)!=sha256_file(peer):
-                        raise ValueError('composed candidate runtime differs')
         if args.get('schema_version')==3:
             from .investigation_pipeline import verify_composed
             verify_composed(self,claim,args,manifest,values,checkout)

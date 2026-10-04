@@ -58,7 +58,7 @@ def test_installation_matches_manifest_exactly_and_retains_empty_directories(tmp
     candidate_payload.audit(root,payload)
     actual={p.relative_to(root).as_posix() for p in root.rglob('*')}
     assert actual==set(payload.files)|set(payload.links)|set(payload.directories)
-    spec=compose.rpm_spec('candidate','1',root)
+    spec=compose.rpm_spec('candidate','1',root,directories=payload.directories)
     assert '%dir /usr/etc/NetworkManager/system-connections' in spec
     assert '%dir /usr/etc/quirkbench' in spec
 

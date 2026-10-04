@@ -252,10 +252,10 @@ def extract_payload(archive: Path, destination: Path, *, userspace: bool, reserv
                 raise BuildError("special and hardlinked payload files forbidden")
 
 
-def rpm_spec(name: str, version: str, payload: Path, *, kernel_release: str | None = None) -> str:
+def rpm_spec(name: str, version: str, payload: Path, *, kernel_release: str | None = None, directories=()) -> str:
     files = []
     for path in sorted(payload.rglob("*")):
-        if path.is_dir() and not path.is_symlink():
+        if path.is_dir() and not path.is_symlink() and path.relative_to(payload).as_posix() in directories:
             relative = path.relative_to(payload).as_posix()
             if any(character in relative for character in ('%', '\n', '"', '\\', ' ')):
                 raise BuildError("RPM payload filename has unsupported syntax")
@@ -512,7 +512,8 @@ class FedoraComposer:
                                                    "protection_profile": inputs.protection_profile}) + b"\n")
                     marker.chmod(0o644)
                 spec = top / "SPECS/experiment.spec"
-                spec.write_text(rpm_spec(name, version, payload, kernel_release=inputs.kernel_release if is_kernel else None))
+                spec.write_text(rpm_spec(name, version, payload, kernel_release=inputs.kernel_release if is_kernel else None,
+                                         directories=() if is_kernel else runtime_payload.directories))
                 run(["rpmbuild", "-bb", "--define", f"_topdir {top}", str(spec)], f"package-{name}")
                 for rpm in (top / "RPMS").rglob("*.rpm"):
                     shutil.copyfile(rpm, packages / rpm.name)
