@@ -1,131 +1,116 @@
-import os
+"""User-selected build destinations do not require a special mount layout."""
 from pathlib import Path
-import stat
-from stat_fixtures import stat_with
-
 import pytest
-
-from quirkbench import build, maintenance
-from quirkbench.build import BuildError, _safe_build_path
+from quirkbench.build import BuildError, _safe_build_path, user_build_path
 
 
-@pytest.fixture(autouse=True)
-def fixture_infrastructure(tmp_path, monkeypatch):
-    # The fake /var/tmp and volume roots live under pytest's real temp parent.
-    # Model their infrastructure as root-owned, independently of the host's
-    # sandbox uid mapping; the dedicated namespace-owner test overrides this.
-    original = Path.lstat
-    def infrastructure(path, *args, **kwargs):
-        info = original(path, *args, **kwargs)
-        if path in tmp_path.parents:
-            return stat_with(info, st_uid=0)
-        return info
-    monkeypatch.setattr(Path, 'lstat', infrastructure)
+@pytest.mark.parametrize('location',['checkout/build','volume/project','scratch/new/output'])
+def test_explicit_user_build_path_preserves_existing_files_and_permissions(tmp_path,location):
+    (tmp_path/'.git').mkdir();(tmp_path/'.git/HEAD').write_text('ref: refs/heads/main\n')
+    parent=tmp_path/location;parent.mkdir(parents=True,mode=0o775)
+    unrelated=parent/'important';unrelated.write_text('keep')
+    assert user_build_path(parent/'new-build')==parent/'new-build'
+    assert unrelated.read_text()=='keep'
+    assert not (parent/'new-build').exists()
 
 
-@pytest.fixture(params=['var/tmp', 'mnt/volume', 'media/volume'])
-def storage(tmp_path, monkeypatch, request):
-    # Map host storage locations into an ordinary fixture; no mount or root needed.
-    location = tmp_path / request.param
-    location.mkdir(parents=True)
-    root = location if request.param == 'var/tmp' else location.parent
-    monkeypatch.setattr(build, '_BUILD_STORAGE_ROOTS', (root,))
-    monkeypatch.setattr(maintenance, 'nested_mounts', lambda root: [str(location)])
-    private = location / 'quirkbench'; private.mkdir(mode=0o700)
-    return root, location, private
+def test_ancestor_alias_is_resolved_before_work_starts(tmp_path):
+    real=tmp_path/'volume';real.mkdir()
+    alias=tmp_path/'storage';alias.symlink_to(real,target_is_directory=True)
+    assert user_build_path(alias/'build')==real/'build'
+    # The retained destination does not follow a subsequent alias replacement.
+    selected=user_build_path(alias/'build')
+    alias.unlink();alias.symlink_to('/etc',target_is_directory=True)
+    assert selected==real/'build'
+    with pytest.raises(BuildError):user_build_path(alias/'build')
 
 
-def test_private_scratch_or_volume_subdirectory_is_admitted(storage):
-    root, volume, private = storage
-    _safe_build_path(private / 'build/new-output')
-    assert not (private / 'build').exists()
+def test_leaf_alias_cannot_select_an_existing_output(tmp_path):
+    real=tmp_path/'real';real.mkdir()
+    alias=tmp_path/'output';alias.symlink_to(real,target_is_directory=True)
+    with pytest.raises(BuildError):user_build_path(alias)
 
 
-def test_existing_owned_anchor_is_required(storage):
-    root, volume, private = storage
-    with pytest.raises(BuildError, match='user-owned subdirectory'):
-        _safe_build_path(volume / 'not-created/staging')
-    private.chmod(0o775)
-    _safe_build_path(private / 'staging')
-    assert stat.S_IMODE(private.stat().st_mode) == 0o775
+@pytest.mark.parametrize('path',['/mnt/volume/project/build','/media/user/disk/build','/var/tmp/build','/srv/build/project'])
+def test_admission_does_not_require_a_distribution_specific_mount_or_owner(path):
+    _safe_build_path(Path(path))
 
 
-
-@pytest.mark.parametrize('kind', ['symlink', 'file', 'foreign-owner', 'nested-mount'])
-def test_unsafe_storage_descendants_are_rejected(storage, tmp_path, monkeypatch, kind):
-    root, volume, private = storage
-    child = private / 'child'
-    if kind == 'symlink': child.symlink_to(tmp_path)
-    elif kind == 'file': child.write_text('not a directory')
-    else: child.mkdir()
-    if kind == 'nested-mount':
-        # Includes same-device bind mounts; stat()/ismount() cannot establish this.
-        monkeypatch.setattr(maintenance, 'nested_mounts', lambda root: [str(volume), str(child)])
-    if kind == 'foreign-owner':
-        original = Path.lstat
-        def foreign(path, *args, **kwargs):
-            info = original(path, *args, **kwargs)
-            if path == child: return stat_with(info, st_uid=os.geteuid() + 1)
-            return info
-        monkeypatch.setattr(Path, 'lstat', foreign)
-    with pytest.raises(BuildError): _safe_build_path(child / 'staging')
+@pytest.mark.parametrize('path',['/','/var','/mnt','/media','/var/lib/quirkbench',
+    '/dev/shm/quirkbench','/proc/build','/sys/build','/run/build','/etc/build',
+    '/usr/build','/boot/build','/lib/build','/mnt/../etc/build'])
+def test_system_destinations_are_rejected(path):
+    with pytest.raises(BuildError):_safe_build_path(Path(path))
 
 
-def test_mount_root_cannot_be_used_as_private_anchor(storage, monkeypatch):
-    root, volume, private = storage
-    monkeypatch.setattr(maintenance, 'nested_mounts', lambda root: [str(volume), str(private)])
-    with pytest.raises(BuildError): _safe_build_path(private / 'new-build')
+def test_external_output_admission_does_not_grant_managed_cleanup(tmp_path):
+    from quirkbench.retention import managed_path
+    from quirkbench.contracts import ContractError
+    root=tmp_path/'state';root.mkdir()
+    output=user_build_path(tmp_path/'checkout/build')
+    with pytest.raises(ContractError,match='beneath'):
+        managed_path(root,output)
 
 
-def test_unknown_mounts_fail_closed(storage, monkeypatch):
-    def unavailable(root): raise PermissionError('mount inventory unavailable')
-    monkeypatch.setattr(maintenance, 'nested_mounts', unavailable)
-    with pytest.raises(BuildError, match='cannot inspect'): _safe_build_path(storage[2] / 'staging')
+def test_image_export_never_overwrites_or_disposes_user_content(tmp_path):
+    from quirkbench.image import export_image, ImageError
+    source=tmp_path/'stage/image.raw';source.parent.mkdir()
+    output=tmp_path/'checkout/build/image.raw';output.parent.mkdir(parents=True)
+    keep=output.parent/'source.c';keep.write_text('keep')
+    for suffix in ('', '.json', '.sha256'):
+        Path(str(source)+suffix).write_text('artifact'+suffix)
+    assert export_image(source,output)==Path(str(output)+'.json')
+    assert output.read_text()=='artifact'
+    with pytest.raises(ImageError,match='already exists'):export_image(source,output)
+    assert keep.read_text()=='keep'
 
 
-def test_storage_changed_to_link_before_resolution_is_rejected(storage, monkeypatch):
-    root, volume, private = storage
-    original = build._private_build_storage
-    def changed(path, root):
-        original(path, root)
-        private.rename(volume / 'original')
-        private.symlink_to('/etc')
-    monkeypatch.setattr(build, '_private_build_storage', changed)
-    with pytest.raises(BuildError, match='changed or contains a symlink'):
-        _safe_build_path(private / 'staging')
+def test_kernel_build_resolves_selected_ancestor_alias_once(tmp_path):
+    from quirkbench.build import KernelBuild
+    real=tmp_path/'real';real.mkdir()
+    alias=tmp_path/'alias';alias.symlink_to(real,target_is_directory=True)
+    build=KernelBuild(*(alias/name for name in ('source','objects','sysroot','output')))
+    alias.unlink()
+    assert build.source==real/'source' and build.output_dir==real/'output'
 
 
-def test_unmapped_root_owner_does_not_authorize_arbitrary_volume_owners(tmp_path, monkeypatch):
-    root = tmp_path / 'mnt'; root.mkdir()
-    volume = root / 'volume'; volume.mkdir()
-    private = volume / 'private'; private.mkdir(mode=0o700)
-    monkeypatch.setattr(build, '_BUILD_STORAGE_ROOTS', (root,))
-    monkeypatch.setattr(maintenance, 'nested_mounts', lambda root: [str(volume)])
-    original_stat, original_lstat = Path.stat, Path.lstat
-    overflow = 65534 if os.geteuid() != 65534 else 65533
-    def root_owner(path, *args, **kwargs):
-        info = original_stat(path, *args, **kwargs)
-        if path == Path('/'):
-            # Path.lstat may delegate to Path.stat(follow_symlinks=False);
-            # preserve the entire native result, changing only ownership.
-            return stat_with(info, st_uid=overflow)
-        return info
-    monkeypatch.setattr(Path, 'stat', root_owner)
-    def mapped(path, *args, **kwargs):
-        info = original_lstat(path, *args, **kwargs)
-        if path == root or path in root.parents or path == volume:
-            return stat_with(info, st_uid=overflow)
-        return info
-    monkeypatch.setattr(Path, 'lstat', mapped)
-    with pytest.raises(BuildError, match='owned directory'): _safe_build_path(private / 'stage')
-    # A user-owned volume under the same mapped infrastructure is admissible.
-    monkeypatch.setattr(Path, 'lstat', lambda path, *a, **kw:
-        original_lstat(path, *a, **kw) if path == volume else mapped(path, *a, **kw))
-    _safe_build_path(private / 'stage')
+def test_image_cli_stages_separately_from_explicit_checkout_output(tmp_path, monkeypatch, capsys):
+    import json
+    from quirkbench.cli import main
+    from quirkbench.controller import Controller
+    checkout=tmp_path/'checkout';checkout.mkdir();(checkout/'.git').mkdir()
+    state=checkout/'state';Controller(state,reserve_bytes=0)
+    output=checkout/'image.raw'
+    manifest=tmp_path/'inputs.json'
+    manifest.write_text(json.dumps(dict(output=str(output),recovery_kernel='/unused/kernel',
+        recovery_initramfs='/unused/initrd',rootfs_dir='/unused/root')))
+    stages=[]
+    def create(inputs):
+        stages.append(inputs.output.parent)
+        for suffix in ('', '.json', '.sha256'):
+            Path(str(inputs.output)+suffix).write_text('artifact'+suffix)
+        return Path(str(inputs.output)+'.json')
+    monkeypatch.setattr('quirkbench.image.create_image',create)
+    assert main(['--state',str(state),'--reserve-gib','0','image',str(manifest)])==0
+    assert output.read_text()=='artifact'
+    assert stages[0].is_relative_to(state/'workspaces')
+    assert 'image.raw.json' in capsys.readouterr().out
 
 
-@pytest.mark.parametrize('path', ['/var/tmp', '/mnt', '/media', '/var/lib/quirkbench',
-    '/dev/shm/quirkbench', '/proc/build', '/sys/build', '/run/build', '/etc/build',
-    '/usr/build', '/boot/build', '/lib/build', '/mnt/../etc/build'])
-def test_system_paths_and_storage_roots_stay_forbidden(path):
-    with pytest.raises(BuildError): _safe_build_path(Path(path))
+def test_image_export_parent_swap_cannot_redirect_publication(tmp_path, monkeypatch):
+    import os
+    from quirkbench.image import export_image
+    from quirkbench.contracts import ContractError
+    source=tmp_path/'stage/image.raw';source.parent.mkdir()
+    output=tmp_path/'destination/image.raw';output.parent.mkdir()
+    moved=tmp_path/'original-destination'
+    for suffix in ('', '.sha256', '.json'):Path(str(source)+suffix).write_text('artifact')
+    link=os.link
+    def swap(*args, **kwargs):
+        output.parent.rename(moved);output.parent.mkdir()
+        return link(*args, **kwargs)
+    monkeypatch.setattr(os,'link',swap)
+    with pytest.raises(ContractError,match='ancestor changed'):export_image(source,output)
+    assert list(output.parent.iterdir())==[]
+    assert (moved/'image.raw').read_text()=='artifact'
+    assert list(moved.iterdir())==[moved/'image.raw']

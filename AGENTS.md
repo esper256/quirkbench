@@ -74,7 +74,8 @@ this revised contract rather than ask the owner to approve the same decision aga
   ownership, durable execution, shutdown or watchdog authorization boundaries.
 - Keep readiness, source capture, worker draining, recovery arrival, evidence durability,
   safe shutdown and unattended eligibility separate. Do not infer them from one status.
-- New state and build staging belong outside Git checkouts. Use configured home state
+- Default state lives outside Git checkouts; explicit user-selected state/build/output
+  directories may be checkout-local. Admission never grants recursive cleanup authority. Use configured state
   and a manually opened `quirkbench monitor`; never launch popup viewers.
 - Ad hoc kernel builds in rootless Podman use the [bounded starter](environments/README.md#observable-bounded-kernel-builds).
   Verify plain `podman stats` visibility and whole-container resource bounds and shutdown before a long compile. Recovery workers have their own contract.

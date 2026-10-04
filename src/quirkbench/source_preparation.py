@@ -14,7 +14,6 @@ from .contracts import Conflict,ContractError,canonical,identifier,sha256
 from .controller_setup import _managed_path
 from .source_capture import capture,_git,_directory_owner,validate_capture
 from .source_operation import verify_tree
-from .state_config import outside_checkout
 
 
 @contextmanager
@@ -85,7 +84,7 @@ def prepare(repository,base_oid,allowed_untracked,stage,store,workspace_id, *,wr
     """
     identifier(workspace_id);stage=Path(stage);root=Path(repository)
     if not stage.is_absolute() or stage.resolve()!=stage or stage.is_symlink():raise ContractError('canonical private preparation stage required')
-    outside_checkout(stage);stage=_managed_path(stage);stage.mkdir(mode=0o700,parents=True,exist_ok=True)
+    stage=_managed_path(stage);stage.mkdir(mode=0o700,parents=True,exist_ok=True)
     with _directory_owner(stage) as initial_stage_guard,_source_owner(root) as initial_source_guard:
         def initial_guard():
             verify();initial_stage_guard();initial_source_guard()

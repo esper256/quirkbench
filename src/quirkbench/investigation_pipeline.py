@@ -467,11 +467,10 @@ def verify_composed(coordinator,claim,args,manifest,values,checkout):
 
 def execute(root,args, *,ready=None):
     from .state_reader import StateReader
-    from .state_config import outside_checkout
     from .maintenance import private_lock
     from .controller import Controller
     from .investigations import record
-    root=Path(root).expanduser().absolute();outside_checkout(root)
+    root=Path(root).expanduser().absolute()
     reader=StateReader(root)
     with reader.connection() as db:inv=record(reader,args.name,db)
     if inv is None:raise ContractError('unknown investigation')

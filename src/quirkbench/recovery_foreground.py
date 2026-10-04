@@ -14,7 +14,7 @@ import subprocess
 import sys
 import uuid
 
-from .build import BuildError, _safe_build_path, sha256_file
+from .build import BuildError, user_build_path, sha256_file
 from .contracts import canonical, digest, sha256
 from .recovery_podman import stage_rootfs_inputs
 from .recovery_rootfs import CASReader
@@ -84,7 +84,7 @@ def _stopped(engine, record, run=_run):
 
 
 def cleanup(output, *, run=_run):
-    output = Path(output).expanduser().absolute()
+    output = user_build_path(output)
     from .state_reader import read_file
     record = json.loads(read_file(output, 'build.json', limit=65536))
     if (record.get('schema_version') != 1 or not re.fullmatch('qb-image-[0-9a-f]{32}', record.get('name', ''))
@@ -124,12 +124,9 @@ def build(*, cas_root, recipe_sha256, image, output, engine='podman', cpus=None,
     if recipe['schema_version'] != 2 or recipe['builder_image_digest'] != image:
         raise BuildError('stock recipe differs from selected builder')
     checked = preflight_recipe(recipe, store)
-    output = Path(output).expanduser().absolute()
-    _safe_build_path(output)
+    output = user_build_path(output)
     if output.resolve() != output or not output.parent.is_dir() or output.exists() or output.is_symlink():
-        raise BuildError('output must be a new canonical directory outside Git')
-    from .state_config import outside_checkout
-    outside_checkout(output)
+        raise BuildError('output must be a new directory with an existing parent')
     output.mkdir(mode=0o700)
     stage = output/'staging'
     stage.mkdir(mode=0o700)

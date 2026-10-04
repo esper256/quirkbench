@@ -110,3 +110,32 @@ def test_cli_lists_and_prunes_only_intermediate_cache(tmp_path, capsys):
     assert main(["--state", str(state), "build-cache", "prune", key]) == 0
     assert "Pruned" in capsys.readouterr().out
     assert cache.list() == []
+
+
+@pytest.mark.parametrize('operation', ['publish', 'prune', 'budget'])
+def test_unrecognized_sha_named_directory_is_never_disposable(tmp_path, operation):
+    from quirkbench.maintenance import enforce_cache_limit
+    cache = BuildStageCache(tmp_path / 'checkout/build-cache')
+    unknown = cache.root / 'recipe-a/kernel' / ('a' * 64)
+    unknown.mkdir(parents=True)
+    (unknown / 'valuable').write_text('not a cache entry')
+    if operation == 'publish':
+        cache.publish('recipe-a', 'kernel', {'source': 'new'},
+                      {'tree': _tree(tmp_path / 'source', b'new')}, {})
+    elif operation == 'prune':
+        assert not cache.prune(unknown.name)
+    else:
+        assert not enforce_cache_limit(cache.root, limit=0)['room']
+    assert (unknown / 'valuable').read_text() == 'not a cache entry'
+
+
+def test_cache_retirement_refuses_nested_mount(tmp_path, monkeypatch):
+    from quirkbench.contracts import ContractError
+    cache = BuildStageCache(tmp_path / 'cache')
+    key = cache.publish('recipe-a', 'kernel', {},
+                        {'tree': _tree(tmp_path / 'source', b'x')}, {})
+    entry = cache.root / 'recipe-a/kernel' / key
+    monkeypatch.setattr('quirkbench.maintenance.nested_mounts', lambda path: [str(entry/'tree')])
+    with pytest.raises(ContractError, match='mount boundary'):
+        cache.prune(key)
+    assert (entry / 'tree/object.o').read_bytes() == b'x'

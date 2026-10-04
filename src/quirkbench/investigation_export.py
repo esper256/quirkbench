@@ -192,13 +192,13 @@ def _capture(reader,db,name,selected):
 def export(root,name,output,*,capture_id=None,author=None,plan=None,timeout_s=300,fault=None):
     """One bounded snapshot and atomic new tar file, never a private-state backup."""
     from .maintenance import private_lock
-    from .state_config import outside_checkout
+    from .state_config import canonical_user_path
     root=Path(root).expanduser().absolute();output=Path(output).expanduser().absolute()
     identifier(name)
     if type(timeout_s) is not int or not 1<=timeout_s<=600:raise ContractError('export timeout must be 1..600 seconds')
     if author is not None:author_identity(author)
-    outside_checkout(output.parent)
-    if output.parent.resolve()!=output.parent or not output.parent.is_dir() or output.exists() or output.is_symlink():raise Conflict('export requires a new file under an existing canonical directory outside Git')
+    output=canonical_user_path(output.parent)/output.name
+    if output.parent.resolve()!=output.parent or not output.parent.is_dir() or output.exists() or output.is_symlink():raise Conflict('export requires a new file under an existing directory')
     if output.is_relative_to(root):raise ContractError('public export must be outside controller private state')
     deadline=time.monotonic()+timeout_s;copied=0;work=0
     reserve=reserve_bytes(root)

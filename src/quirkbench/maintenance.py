@@ -109,7 +109,8 @@ def enforce_cache_limit(root, *, incoming=0, protected_lineage=None, dry_run=Fal
                                        dry_run=dry_run,limit=limit,budget_held=True)
     used = tree_bytes(root)
     candidates = []
-    from .build_cache import HASH, NAME
+    from .build_cache import HASH, NAME, BuildStageCache
+    cache = BuildStageCache(root)
     for lineage in root.iterdir():
         if lineage.is_symlink() or not lineage.is_dir() or not NAME.fullmatch(lineage.name):
             continue
@@ -130,6 +131,8 @@ def enforce_cache_limit(root, *, incoming=0, protected_lineage=None, dry_run=Fal
             continue
         try:
             with private_lock(lineage / '.lock'):
+                if not cache.completed_entry(entry):
+                    continue
                 disposable(entry, root)
                 size = tree_bytes(entry)
                 if not dry_run:

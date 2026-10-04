@@ -35,57 +35,20 @@ def _ancestors(path):
     return _lexical_ancestors(raw)
 
 
-@lru_cache(maxsize=512)
-def _lexical_git_markers(raw):
-    return tuple(parent/'.git' for parent in _lexical_ancestors(raw))
+def canonical_user_path(path: Path) -> Path:
+    """Resolve an explicitly selected path without imposing checkout policy.
 
-
-def _git_markers(path):
-    raw=str(path)
-    if len(raw)>4096 or raw.count('/')>32:
-        return tuple(parent/'.git' for parent in (path,*path.parents))
-    return _lexical_git_markers(raw)
-
-
-def outside_checkout(path: Path) -> Path:
-    """New persistent work must never depend on a checkout's ignore rules."""
-    path = Path(path).expanduser().resolve()
-    for marker in _git_markers(path):
-        try:
-            before = marker.lstat()
-        except (FileNotFoundError, NotADirectoryError):
-            continue
-        except OSError as exc:
-            raise StateConfigurationError('cannot inspect Git checkout metadata') from exc
-        # Some sandboxes reserve empty .git directories outside the checkout.
-        # Only a proven-empty ordinary directory is harmless. Files (including
-        # worktree gitfiles), links, partial repositories and unreadable markers
-        # remain blocked, without invoking Git or trusting repository config.
-        empty = False
-        if stat.S_ISDIR(before.st_mode):
-            try:
-                fd = os.open(marker, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-                try:
-                    with os.scandir(fd) as entries:
-                        empty = next(entries, None) is None
-                    opened, after = os.fstat(fd), marker.lstat()
-                    signature = lambda info: (info.st_dev, info.st_ino, info.st_mode,
-                                              info.st_mtime_ns, info.st_ctime_ns)
-                    empty = empty and signature(before) == signature(opened) == signature(after)
-                finally:
-                    os.close(fd)
-            except OSError as exc:
-                raise StateConfigurationError('cannot inspect Git checkout metadata') from exc
-        if not empty:
-            raise StateConfigurationError('persistent state/build staging must be outside a Git checkout')
-    return path
+    This grants no mutation or cleanup authority. Each owner still validates its
+    managed records, publication destinations and disposable staging separately.
+    """
+    return Path(path).expanduser().resolve()
 
 
 def default_state_root(state_home: Path | None = None) -> Path:
     home = Path(state_home or os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state')
     if not home.is_absolute():
         raise StateConfigurationError('controller state home must be absolute')
-    return outside_checkout(home / 'quirkbench')
+    return canonical_user_path(home / 'quirkbench')
 
 
 def _config_home(config_home: Path | None) -> Path:
@@ -143,7 +106,7 @@ def discover_state_root(explicit: Path | None = None, *, config_home: Path | Non
 def configure_state_root(explicit: Path | None = None, *, config_home: Path | None = None,
                          state_home: Path | None = None, cwd: Path | None = None) -> dict:
     """Select one controller root; leave service installation for P2d."""
-    config = outside_checkout(_config_home(config_home))
+    config = canonical_user_path(_config_home(config_home))
     directory = config / "quirkbench"
     if config.is_symlink() or directory.is_symlink():
         raise StateConfigurationError("controller config directory cannot be a symlink")
@@ -171,7 +134,7 @@ def configure_state_root(explicit: Path | None = None, *, config_home: Path | No
                     requested = (cwd or Path.cwd()) / requested
             if requested.is_symlink():
                 raise StateConfigurationError("controller state root cannot be a symlink")
-            root = outside_checkout(requested)
+            root = canonical_user_path(requested)
             if root == Path("/"):
                 raise StateConfigurationError("controller state root cannot be filesystem root")
             if current is not None and current != root:
@@ -181,7 +144,6 @@ def configure_state_root(explicit: Path | None = None, *, config_home: Path | No
             if root.exists() and current is None and explicit is None and any(root.iterdir()):
                 raise StateConfigurationError("existing default state root requires explicit --state selection")
             root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        outside_checkout(root)
         info = root.stat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
             raise StateConfigurationError("controller state root must be owned by this user")

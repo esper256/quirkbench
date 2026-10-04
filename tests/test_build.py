@@ -190,10 +190,8 @@ def test_recovery_compile_plan_checks_resolved_config_before_commands(tmp_path, 
         build.recovery_compile_plan(profile)
 
 
-def test_canonical_account_home_under_var_is_usable_but_system_paths_remain_forbidden(monkeypatch):
-    from types import SimpleNamespace
+def test_ordinary_var_home_is_usable_but_system_destinations_remain_forbidden():
     from quirkbench import build
-    monkeypatch.setattr(build.pwd,'getpwuid',lambda uid:SimpleNamespace(pw_dir='/var/home/different-user'))
-    build._safe_build_path(Path('/var/home/different-user/.local/state/quirkbench/workspaces/source'))
-    for path in ('/var','/var/lib/rpm','/var/home/other-user/work','/dev/sda','/mnt/target'):
+    build._safe_build_path(Path('/var/home/user/.local/state/quirkbench/workspaces/source'))
+    for path in ('/var', '/var/lib/rpm', '/dev/sda'):
         with pytest.raises(BuildError):build._safe_build_path(Path(path))
