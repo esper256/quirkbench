@@ -168,8 +168,11 @@ def download(root,owner):
                 path=generation/'download-failure.log'
                 atomic_write(path,raw)
                 return str(path)
-            output=CommandRunner(lambda phase,message:print(message.replace('OSTree command','Recovery package download'),flush=True),
-                lambda:None,timeout_s=7200,diagnostic=diagnostic)(list(acquisition_command(directory,spec=spec)))
+            output=CommandRunner(lambda phase,message:print(message,flush=True),
+                lambda:None,timeout_s=7200,diagnostic=diagnostic,
+                operation='Recovery package download',phase='recovery-acquisition',
+                failure_guidance='acquisition incomplete; inspect the log, required tools and selected repository inputs before retrying')(
+                    list(acquisition_command(directory,spec=spec)))
             atomic_write(generation/'download.log',output.encode())
             proof=stop_proof(generation)
             proof['download_complete']=True
@@ -183,8 +186,19 @@ def download(root,owner):
     return {'directory':str(directory),'retention_owner':owner}
 
 
-if __name__=='__main__':
+def main(argv=None):
     parser=argparse.ArgumentParser()
     parser.add_argument('--state',type=Path,required=True); parser.add_argument('--owner',required=True)
-    args=parser.parse_args()
-    print(json.dumps(download(args.state,args.owner),sort_keys=True))
+    args=parser.parse_args(argv)
+    try:
+        result=download(args.state,args.owner)
+    except (BuildError,OSError,ValueError) as exc:
+        import sys
+        print('Recovery acquisition failed: '+str(exc),file=sys.stderr)
+        return 2
+    print(json.dumps(result,sort_keys=True))
+    return 0
+
+
+if __name__=='__main__':
+    raise SystemExit(main())

@@ -41,6 +41,14 @@ quirkbench recovery-inputs lock /SELECTED_STATE/inputs/GENERATION/rpms \
 optional `--spec` must match it. It does not trust a newly edited local candidate
 file. Failed acquisition or signatures preserve diagnostics without usable inputs.
 
+Native command failures identify the acquisition or verification phase, exit status
+or deadline, and the absolute retained diagnostic path. Acquisition uses
+`download-failure.log` in its generation; locking uses `package-verification.log`
+in the selected diagnostics directory. Inspect that log for repository/tool errors,
+correct the cause, and retry with a fresh generation. Private command output stays
+in the log rather than being copied into ordinary status messages. A successful
+download still requires independent signature verification before a usable lock.
+
 For compatibility, `acquire-plan` without `--spec` selects the named historical
 Fedora candidate and freezes the observed Fedora/updates repository bytes into the
 same bound v1 specification before producing a command. It reports
