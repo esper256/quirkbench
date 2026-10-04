@@ -144,3 +144,63 @@ def test_engine_runner_reports_stderr_and_failure():
     import sys
     with pytest.raises(BuildError, match='selected image unavailable'):
         foreground._run([sys.executable, '-c', 'import sys; print("selected image unavailable",file=sys.stderr);sys.exit(3)'])
+
+
+@pytest.mark.parametrize('change', ['none', 'profile', 'manifest', 'recipe'])
+def test_exported_artifacts_match_selected_inputs(tmp_path, monkeypatch, change):
+    """Sparse synthetic image exercises real checksum/export checks, without a build."""
+    from test_stock_recovery_flow import assembled_stock
+    from quirkbench.recovery_stock_release import create_candidate
+    from quirkbench.contracts import digest
+    import os
+    _, recipe, store, record, image_inputs, manifest = assembled_stock(tmp_path/'source', monkeypatch)
+    candidate = create_candidate(recipe, store, record, image_inputs)
+    from quirkbench.store import ArtifactStore
+    writer = ArtifactStore(store.objects.parent, reserve_bytes=0)
+    recipe_sha = writer.put(canonical(recipe)).sha256
+    payload = image_inputs.output
+    with payload.open('r+b') as stream:
+        stream.truncate(candidate['image_size_bytes'])
+    checksum = foreground.sha256_file(payload)
+    candidate['image_sha256'] = checksum
+    manifest['image_sha256'] = checksum
+    if change == 'profile':
+        candidate['profile_digest'] = manifest['recovery_profile_digest'] = 'f'*64
+    if change == 'recipe':
+        candidate['recipe_digest'] = 'f'*64
+    candidate['image_manifest_sha256'] = digest(canonical(manifest))
+    if change == 'manifest':
+        manifest['boot_policy'] = 'corrupted after completion'
+    result = {'recipe_sha256': recipe_sha, 'signed': False, 'candidate': candidate}
+    engine = Engine(recipe['builder_image_digest'])
+    engine.exit = 0
+    def run(argv, **options):
+        if argv[1] != 'cp':
+            return engine(argv, **options)
+        engine.calls.append(argv)
+        target = Path(argv[-1])
+        if target.name == 'recovery.img':
+            os.link(payload, target)  # Preserve sparseness; no privileged build adapter.
+        elif target.name == 'recovery.img.json':
+            target.write_bytes(canonical(manifest))
+        elif target.name == 'recovery.img.sha256':
+            target.write_text(checksum+'  recovery.img\n')
+        else:
+            target.write_bytes(canonical(result))
+        return ''
+    def execute(*args, **options):
+        engine.running = False
+        return {'exit_code': 0}
+    output = tmp_path/'output'
+    kwargs = dict(cas_root=store.objects.parent, recipe_sha256=recipe_sha,
+                  image=recipe['builder_image_digest'], output=output,
+                  engine='docker', run=run, execute=execute)
+    if change == 'none':
+        answer = foreground.build(**kwargs)
+        assert answer['sha256'] == checksum and not answer['signed'] and not answer['boot_tested']
+        assert json.loads((output/'build.json').read_bytes())['removed']
+    else:
+        with pytest.raises((BuildError, ValueError), match='provenance|manifest'):
+            foreground.build(**kwargs)
+        assert not json.loads((output/'build.json').read_bytes())['complete']
+        assert not any(call[1]=='rm' for call in engine.calls)

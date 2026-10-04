@@ -177,14 +177,16 @@ def build(*, cas_root, recipe_sha256, image, output, engine='podman', cpus=4,
         expected.update({key: value for key, value in checked['rootfs_lock'].items()
                          if key in candidate and key != 'schema_version'})
         expected['recipe_digest'] = recipe_sha256
+        expected['profile_digest'] = recipe['storage_policy_sha256']
         manifest_raw = read_file(output, 'recovery.img.json', limit=1024**2)
         from .recovery_distribution import _validate_factory_manifest
         _validate_factory_manifest(json.loads(manifest_raw), candidate)
-        checksum = sha256_file(output/'recovery.img')
         if (result.get('recipe_sha256') != recipe_sha256 or result.get('signed') is not False
                 or any(candidate.get(key) != value for key, value in expected.items())
-                or candidate['image_manifest_sha256'] != digest(manifest_raw)
-                or candidate['image_sha256'] != checksum
+                or candidate['image_manifest_sha256'] != digest(manifest_raw)):
+            raise BuildError('exported provenance differs from the selected image inputs')
+        checksum = sha256_file(output/'recovery.img')
+        if (candidate['image_sha256'] != checksum
                 or candidate['image_size_bytes'] != (output/'recovery.img').stat().st_size
                 or read_file(output, 'recovery.img.sha256', limit=256).decode() != checksum+'  recovery.img\n'):
             raise BuildError('exported artifacts differ from the completed image')
