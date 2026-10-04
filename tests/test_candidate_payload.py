@@ -113,3 +113,21 @@ def test_final_tree_or_changed_policy_cannot_be_signed(tmp_path,monkeypatch,muta
         compose.FedoraComposer(tmp_path/'workspace',tmp_path/'published').compose(value)
     assert 'sign-revision' not in [phase for phase,_ in calls]
     assert not (tmp_path/'published').exists()
+
+
+def test_legacy_identity_algorithm_is_explicit_and_version_is_strict(tmp_path):
+    import hashlib
+    from quirkbench.contracts import canonical
+    from quirkbench.package_resources import target_assets_dir
+    value=inputs(tmp_path)
+    expected={'artifacts':value.artifact_sha256,'kernel_release':value.kernel_release,
+              'fedora_release':value.fedora_release,'fedora_repo_sha256':value.fedora_repo_sha256,
+              'source_date_epoch':value.source_date_epoch,'composer_sha256':compose.sha256_file(Path(compose.__file__)),
+              'protection_profile':value.protection_profile,'replacement_rpm_sha256':[],
+              'build_evidence_sha256':value.evidence_sha256,
+              'runtime_assets_sha256':{p.name:compose.sha256_file(p) for p in sorted(target_assets_dir().iterdir()) if p.is_file()},
+              'candidate_runtime_sha256':{p.name:compose.sha256_file(p) for p in sorted(Path(compose.__file__).parent.glob('*.py'))}}
+    assert value.identity(version=1)==hashlib.sha256(canonical(expected)).hexdigest()
+    assert value.identity()!=value.identity(version=1)
+    for version in (True,0,3,'2'):
+        with pytest.raises(compose.BuildError):value.identity(version=version)

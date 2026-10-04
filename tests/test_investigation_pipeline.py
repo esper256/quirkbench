@@ -128,7 +128,9 @@ def configure_build(monkeypatch):
         assert '--network=none' in argv
         kw['verify']()
         stage=Path(argv[argv.index('--stage-dir')+1]);kind=argv[argv.index('--inner')+1]
-        result=job_worker.inner(kind,stage,Path(argv[argv.index('--cache')+1]))
+        # The joined controller fixture explicitly configures a zero reserve.
+        # Match container_worker, which forwards its retained execution reserve.
+        result=job_worker.inner(kind,stage,Path(argv[argv.index('--cache')+1]),reserve_bytes=0)
         kw['verify']();return {'exit_code':result}
     monkeypatch.setattr(recovery_worker,'execute_rootfs',execute)
     return runner
@@ -401,6 +403,32 @@ def test_owner_rejects_forged_dependency_evidence_before_signing(joined,bounded_
         complete_job(c,owner,monkeypatch)
         pipeline.submit(c,'investigation','compose','forged-compose',build=build['operation_id'],repository='lab',ready=lambda _:None)
         result=complete_job(c,owner,monkeypatch,kind='compose',after_worker=forge,allow_failure=True)
+        assert result['state']=='FAILED'
+        with c.transaction() as db:assert not db.execute('SELECT 1 FROM deployment_refs WHERE owner=?',(result['id'],)).fetchone()
+    assert not any('gpg-sign' in argv for _,argv in bounded_compose)
+
+
+@pytest.mark.parametrize('mutation',['unit','extra-module','link','marker'])
+def test_owner_rejects_candidate_payload_mutation_before_signing(joined,bounded_compose,monkeypatch,mutation):
+    import subprocess
+    c,entry,builder,snapshot,source,candidate,config=joined
+    native=subprocess.run
+    def mutate(argv,**kwargs):
+        result=native(argv,**kwargs)
+        if argv[0]=='ostree' and 'checkout' in argv:
+            root=Path(argv[-1])
+            if mutation=='unit':(root/'usr/etc/systemd/system/quirkbench-candidate.service').write_bytes(b'changed unit')
+            elif mutation=='extra-module':(root/'usr/lib/quirkbench/quirkbench/extra.py').write_bytes(b'extra')
+            elif mutation=='marker':(root/'usr/lib/quirkbench/deployment-build.json').write_bytes(b'changed marker')
+            else:
+                path=root/'usr/etc/resolv.conf';path.unlink();path.symlink_to('/run/other')
+        return result
+    monkeypatch.setattr(subprocess,'run',mutate)
+    with c.lifecycle() as owner:
+        build=pipeline.submit(c,'investigation','build','payload-build',source=source,candidate=candidate,ready=lambda _:None)
+        complete_job(c,owner,monkeypatch)
+        pipeline.submit(c,'investigation','compose','payload-compose',build=build['operation_id'],repository='lab',ready=lambda _:None)
+        result=complete_job(c,owner,monkeypatch,kind='compose',allow_failure=True)
         assert result['state']=='FAILED'
         with c.transaction() as db:assert not db.execute('SELECT 1 FROM deployment_refs WHERE owner=?',(result['id'],)).fetchone()
     assert not any('gpg-sign' in argv for _,argv in bounded_compose)
