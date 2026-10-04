@@ -90,11 +90,15 @@
       "ci/*",
       ".github/*",
       "Makefile",
-      "tests/test_ci_*"
+      "tests/test_ci_*",
+      "environments/bootstrap.py",
+      "development/constraints.txt",
+      "tests/test_development_bootstrap.py"
     ],
     "tests": [
       "tests/test_ci_tools.py",
-      "tests/test_ci_diagnostics.py"
+      "tests/test_ci_diagnostics.py",
+      "tests/test_development_bootstrap.py"
     ]
   },
   "investigation-product": {

@@ -100,3 +100,10 @@ print-smoke-tests:
 
 test-suite:
 	$(PYTHON) -m ci.run run --suite "$(SUITE)" --output "$(EVIDENCE)"
+
+# Repository-owned development setup; no full suite, controller or target startup.
+BOOTSTRAP_PYTHON ?= python3
+VENV ?= .venv
+.PHONY: bootstrap
+bootstrap:
+	$(BOOTSTRAP_PYTHON) environments/bootstrap.py --python "$(BOOTSTRAP_PYTHON)" --venv "$(VENV)" $(BOOTSTRAP_ARGS)
