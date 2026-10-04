@@ -18,6 +18,26 @@ podman build --pull=never --build-arg="FEDORA_RELEASE=$FEDORA_RELEASE" \
   -f environments/Containerfile -t localhost/quirkbench-build:local environments
 ```
 
+If HTTPS package access uses an organization or proxy CA, supply a PEM CA bundle
+with the standard build secret option:
+
+```sh
+podman build --pull=never --secret=id=ca_bundle,src=/absolute/ca-bundle.pem \
+  --build-arg="FEDORA_RELEASE=$FEDORA_RELEASE" \
+  --build-arg="BASE_IMAGE=$BASE_IMAGE" \
+  -f environments/Containerfile -t localhost/quirkbench-build:local environments
+```
+
+The bundle should include the public roots needed by the selected Fedora mirrors
+and any required organization CA. DNF uses it only during package installation;
+the secret is not stored in an image layer. TLS and RPM signature verification
+remain enabled. Without the secret, DNF uses Fedora's default trust. Docker with
+BuildKit accepts the same `--secret` option when preparing this builder image
+(omit Podman's `--pull=never`). Registry pulls use the container engine's own trust
+configuration, so configure that separately if pulling the base fails. Building
+the tool image does not change the supported systemd/rootless-Podman ownership of
+controller workloads.
+
 This locally built image is a builder candidate until its installed package and
 toolchain locks are captured and reviewed. `assemble.ini` describes a rootless
 Distrobox development profile with a private home and 4 CPU / 4 GiB cgroup caps.
