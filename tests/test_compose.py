@@ -116,6 +116,11 @@ def fake_runner(monkeypatch, calls, *, fail_phase=None):
             return "alsa-lib-0:1.2.13-99.fc43.x86_64"
         if phase == "resolve-revision":
             return "a" * 64 + "\n"
+        if phase == "checkout-candidate-runtime":
+            import shutil
+            target=Path(argv[-1]); target.mkdir()
+            for name in ('kernel-quirkbench', 'quirkbench-experiment-userspace'):
+                shutil.copytree(cwd/name/'SOURCES/payload',target,symlinks=True,dirs_exist_ok=True)
         if phase == "init-published-repo":
             repo = Path(argv[1].split("=", 1)[1])
             repo.mkdir()

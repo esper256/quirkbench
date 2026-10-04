@@ -408,6 +408,32 @@ def test_owner_rejects_forged_dependency_evidence_before_signing(joined,bounded_
     assert not any('gpg-sign' in argv for _,argv in bounded_compose)
 
 
+@pytest.mark.parametrize('mutation',['unit','extra-module','link','marker'])
+def test_owner_rejects_candidate_payload_mutation_before_signing(joined,bounded_compose,monkeypatch,mutation):
+    import subprocess
+    c,entry,builder,snapshot,source,candidate,config=joined
+    native=subprocess.run
+    def mutate(argv,**kwargs):
+        result=native(argv,**kwargs)
+        if argv[0]=='ostree' and 'checkout' in argv:
+            root=Path(argv[-1])
+            if mutation=='unit':(root/'usr/etc/systemd/system/quirkbench-candidate.service').write_bytes(b'changed unit')
+            elif mutation=='extra-module':(root/'usr/lib/quirkbench/quirkbench/extra.py').write_bytes(b'extra')
+            elif mutation=='marker':(root/'usr/lib/quirkbench/deployment-build.json').write_bytes(b'changed marker')
+            else:
+                path=root/'usr/etc/resolv.conf';path.unlink();path.symlink_to('/run/other')
+        return result
+    monkeypatch.setattr(subprocess,'run',mutate)
+    with c.lifecycle() as owner:
+        build=pipeline.submit(c,'investigation','build','payload-build',source=source,candidate=candidate,ready=lambda _:None)
+        complete_job(c,owner,monkeypatch)
+        pipeline.submit(c,'investigation','compose','payload-compose',build=build['operation_id'],repository='lab',ready=lambda _:None)
+        result=complete_job(c,owner,monkeypatch,kind='compose',allow_failure=True)
+        assert result['state']=='FAILED'
+        with c.transaction() as db:assert not db.execute('SELECT 1 FROM deployment_refs WHERE owner=?',(result['id'],)).fetchone()
+    assert not any('gpg-sign' in argv for _,argv in bounded_compose)
+
+
 def test_restart_is_paused_and_interrupted_build_requires_explicit_resume(joined,bounded_build,monkeypatch):
     from quirkbench.job_coordinator import JobCoordinator
     from quirkbench.job_operations import resume
@@ -494,3 +520,26 @@ def test_joined_storage_pressure_has_c2_blocked_response(joined,bounded_build,mo
     answer=json.loads(capsys.readouterr().out)
     assert result==4 and answer['error']=={'code':'BLOCKED','message':'free-space reserve reached','retryable':True}
     assert answer['operation_id'] is None
+
+
+@pytest.mark.parametrize('version',[None,1])
+def test_owner_rejects_worker_selected_legacy_payload_validation(joined,bounded_compose,monkeypatch,version):
+    from quirkbench.compose import ComposeInputs
+    from quirkbench.contracts import canonical
+    c,entry,builder,snapshot,source,candidate,config=joined
+    def downgrade(claim,coordinator):
+        if claim['stage']!='os_compose':return
+        stage=Path(claim['stage_dir']);path=stage/'diagnostics/stage-result.json'
+        record=json.loads(path.read_bytes());provenance=record['result']['deployment']['provenance']
+        if version is None:provenance.pop('composition_identity_version')
+        else:provenance['composition_identity_version']=version
+        raw=json.loads((stage/'worker-manifest.json').read_bytes())
+        provenance['build_identity']=ComposeInputs.from_mapping(raw).identity(version=1)
+        path.write_bytes(canonical(record))
+    with c.lifecycle() as owner:
+        build=pipeline.submit(c,'investigation','build','downgrade-build',source=source,candidate=candidate,ready=lambda _:None)
+        complete_job(c,owner,monkeypatch)
+        pipeline.submit(c,'investigation','compose','downgrade-compose',build=build['operation_id'],repository='lab',ready=lambda _:None)
+        result=complete_job(c,owner,monkeypatch,kind='compose',after_worker=downgrade,allow_failure=True)
+        assert result['state']=='FAILED'
+    assert not any('gpg-sign' in argv for _,argv in bounded_compose)
