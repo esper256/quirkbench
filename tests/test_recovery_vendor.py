@@ -122,3 +122,16 @@ def test_legacy_inventory_rejects_changed_data_without_explicit_profile(tmp_path
         patch.setattr(vendor,'bundled_inventory',lambda release:selected)
         with pytest.raises(BuildError,match='historical'):importlib.reload(legacy)
     importlib.reload(legacy)
+
+
+def test_container_input_copy_retains_locked_vendor_object(tmp_path):
+    from quirkbench.recovery_podman import stage_rootfs_inputs
+    from quirkbench.recovery_rootfs import CASReader
+    recipe,lock,_,store,inventory,profile=selected(tmp_path)
+    recipe_sha=store.put(canonical(recipe)).sha256
+    stage=tmp_path/'container-stage';stage.mkdir()
+    stage_rootfs_inputs(catalog_sha256=None,lock_sha256=recipe['rootfs_lock_sha256'],
+        cas_root=store.root,stage=stage,recipe_sha256=recipe_sha)
+    copied=CASReader(stage/'inputs/cas')
+    assert copied.get(profile['vendor_inventory_sha256'])==canonical(inventory)
+    assert preflight_recipe(recipe,copied)['profile']==profile

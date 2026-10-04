@@ -242,7 +242,9 @@ experiment kernel compilation, including Fedora SRPM preparation, is unchanged.
 New recovery input retention binds a version 1 vendor inventory through a version 2
 storage profile. The rootfs lock and recipe remain version 2; their existing storage
 profile hash now also binds the inventory. Version 1 storage profiles retain their
-original reader and boot-policy behavior.
+original reader and boot-policy behavior. Their historical Fedora44 fallback is
+pinned to the original inventory digest; editing that data cannot silently change
+legacy acceptance. Use an explicitly selected new inventory for changed packages.
 
 `profiles/vendor-fedora44.v1.json` contains the previously reviewed Fedora 44
 package pins, systemd generator hashes and vendor enablement maps. These are image
