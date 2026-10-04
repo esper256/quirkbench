@@ -337,7 +337,7 @@ def test_interrupted_unconfigured_namespace_blocks_before_native_init(installed,
     if entry=='symlink':(repo/'objects').symlink_to(root/'private',target_is_directory=True)
     elif entry=='file':(repo/'foreign').write_bytes(b'preserve')
     elif entry=='fifo':os.mkfifo(repo/'pipe')
-    else:monkeypatch.setattr('quirkbench.maintenance.nested_mounts',lambda path:True)
+    else:monkeypatch.setattr('quirkbench.filesystem.nested_mounts',lambda path:True)
     with pytest.raises(Conflict,match='not empty or is mounted'):setup(installed)
     assert not any(call[0]=='ostree' for call in installed[4])
     assert not (repo/'config').exists() and 'repository_endpoint' not in configuration(root)
