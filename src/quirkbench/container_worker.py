@@ -80,7 +80,7 @@ def main(argv=None):
     if phase=='prepare': return prepare(root,stage,record)
     if phase=='distribution':
         from .distribution_source_worker import inner
-        inner(stage/'distribution')
+        inner(stage/'distribution',reserve=record['reserve_bytes'])
         return 0
     if phase=='distribution-import':
         from .worker_claim import read_active_worker_claim
@@ -104,7 +104,7 @@ def main(argv=None):
         return 0
     if phase in ('build','compose'):
         from .job_worker import inner
-        return inner(phase,stage,root/'intermediate-cache')
+        return inner(phase,stage,root/'intermediate-cache',reserve_bytes=record['reserve_bytes'])
     if phase=='candidate':
         from .candidate_rootfs_worker import inner
         inner(stage/'candidate-inputs/cas',stage/'candidate-inputs/input.json',stage/'candidate-output')

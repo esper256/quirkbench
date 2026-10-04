@@ -10,6 +10,7 @@ from __future__ import annotations
 from .platform_adapters import X86_UEFI_USB
 
 import ast
+from functools import partial
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import fcntl
@@ -96,7 +97,7 @@ def _tree_hash(root: Path, *, excluded_paths: frozenset[str] = frozenset(EXCLUDE
     return digest.hexdigest()
 
 
-def _sync_incremental_source(source: Path, destination: Path) -> None:
+def _sync_incremental_source(source: Path, destination: Path, *, reserve_bytes=None) -> None:
     """Update only changed source files at Kbuild's stable absolute path."""
     if (not source.is_dir() or source.is_symlink()
             or not destination.is_dir() or destination.is_symlink()):
@@ -136,7 +137,7 @@ def _sync_incremental_source(source: Path, destination: Path) -> None:
                     shutil.rmtree(target)
                 else:
                     target.unlink()
-            _copy_file(str(original), str(target))
+            _copy_file(str(original), str(target),reserve_bytes=reserve_bytes)
         else:
             raise BuildError("incremental source contains a special file")
     if _tree_hash(source, excluded_paths=frozenset()) != _tree_hash(destination, excluded_paths=frozenset()):
@@ -307,41 +308,32 @@ class ResourceLimits:
     jobs: int
 
     @classmethod
-    def from_cgroup(cls, root: Path = Path("/sys/fs/cgroup")) -> "ResourceLimits":
-        """Require kernel-enforced CPU and memory cgroup limits at half the controller resources.
+    def from_cgroup(cls, root: Path = Path("/sys/fs/cgroup"), *, workload="kernel") -> "ResourceLimits":
+        """Require kernel-enforced CPU and memory bounds for the selected workload.
 
         The build container must be launched with Podman --cpus and --memory. A soft
         estimate or a per-process RLIMIT alone does not cap all compiler jobs.
         """
+        hierarchy_root=root
         try:
             if root == Path('/sys/fs/cgroup'):
-                # A worker may use the host cgroup namespace to verify its
-                # immutable container identity. Read its own enforced limits,
-                # rather than the hierarchy root's unrelated host limits.
-                groups=[line[3:] for line in Path('/proc/self/cgroup').read_text().splitlines()
-                        if line.startswith('0::')]
-                if len(groups)!=1 or not groups[0].startswith('/') or '..' in Path(groups[0]).parts:
-                    raise ValueError('current cgroup is unavailable')
-                current=root/groups[0].lstrip('/')
-                if current.resolve()!=current:
-                    raise ValueError('current cgroup path is linked')
-                root=current
-            mem_total = next(int(line.split()[1]) * 1024 for line in Path("/proc/meminfo").read_text().splitlines()
-                             if line.startswith("MemTotal:"))
+                from .resource_budget import cgroup_directory
+                root=cgroup_directory(root)
             memory = int((root / "memory.max").read_text().strip())
             quota, period = (root / "cpu.max").read_text().split()
             cpu_quota, cpu_period = int(quota), int(period)
         except (OSError, ValueError, StopIteration) as exc:
             raise BuildError("enforced cgroup CPU and memory limits required") from exc
-        controller_cpus = os.cpu_count() or 0
         if cpu_quota < 1 or cpu_period < 1:
             raise BuildError("positive enforced cgroup CPU limits required")
-        if controller_cpus < 1 or memory > mem_total // 2 or cpu_quota > max(1, controller_cpus // 2) * cpu_period:
-            raise BuildError("container cgroup exceeds half of controller CPU or RAM")
-        if memory < 4 * GIB:
-            raise BuildError("container memory limit below 4 GiB; defer build")
-        cpus = max(1, cpu_quota // cpu_period)
-        jobs = build_module.kernel_job_budget(cpus, memory)
+        from .resource_budget import MINIMUM, capacity
+        effective=capacity(cgroup_root=hierarchy_root,current=root)
+        memory=min(memory,effective.memory_bytes)
+        if workload not in MINIMUM or memory < MINIMUM[workload]:
+            raise BuildError('enforced memory below selected workload minimum')
+        cpus = min(effective.cpus,max(1, cpu_quota // cpu_period))
+        if cpus<1:raise BuildError("at least one effective CPU is required")
+        jobs = min(cpus,128) if workload=='preparation' else build_module.kernel_job_budget(cpus,memory)
         return cls(cpus, memory, jobs)
 
 
@@ -502,8 +494,8 @@ def run_recovery_source_stage(*, srpm: Path, entry: dict, stage: Path,
     _safe_build_path(stage)
     if not stage.is_dir() or stage.is_symlink():
         raise BuildError("recovery source staging directory missing")
-    if type(limits.jobs) is not int or limits.jobs < 1 or type(limits.memory_bytes) is not int or limits.memory_bytes < 4 * GIB:
-        raise BuildError("bounded recovery source limits required")
+    if type(limits.jobs) is not int or limits.jobs < 1 or type(limits.memory_bytes) is not int or limits.memory_bytes < GIB:
+        raise BuildError("bounded source preparation requires at least 1 GiB")
     if isinstance(runner, BoundedRunner) and runner.workspace != stage:
         raise BuildError("bounded runner workspace must match recovery source stage")
     _file_identity(srpm, entry["kernel_srpm_sha256"])
@@ -735,7 +727,9 @@ def _validate_userspace_command(command: Command, workspace: Path) -> None:
         raise BuildError("userspace DESTDIR must remain under build workspace")
 
 
-def _tar_directory(directory: Path, output: Path, epoch: int) -> None:
+def _tar_directory(directory: Path, output: Path, epoch: int, *, reserve_bytes=None) -> None:
+    from .resource_budget import disk_reserve
+    reserve_bytes=disk_reserve(reserve_bytes,DISK_RESERVE)
     with tarfile.open(output, "w:xz", format=tarfile.PAX_FORMAT) as handle:
         for path in sorted(directory.rglob("*")):
             if path.is_symlink():
@@ -751,8 +745,8 @@ def _tar_directory(directory: Path, output: Path, epoch: int) -> None:
             info.uname = info.gname = ""
             info.mtime = epoch
             if path.is_file() and not path.is_symlink():
-                if shutil.disk_usage(output.parent).free - path.stat().st_size < DISK_RESERVE:
-                    raise BuildError("20 GiB reserve reached while packaging build artifact")
+                if shutil.disk_usage(output.parent).free - path.stat().st_size < reserve_bytes:
+                    raise BuildError("configured reserve reached while packaging build artifact")
                 with path.open("rb") as source:
                     handle.addfile(info, source)
             else:
@@ -787,14 +781,16 @@ class BuildPipeline:
                  activity: Callable[[str, str], None] | None = None,
                  controller=None, campaign_id: str | None = None,
                  incremental_cache: BuildStageCache | None = None,
-                 resume_reconciled: bool = False):
+                 resume_reconciled: bool = False, reserve_bytes=None):
         from .build import user_build_path
         workspace = user_build_path(workspace)
         controller_state = user_build_path(controller_state)
         self.workspace = workspace
         self.controller_state = controller_state
         self.repository = repository
-        self.runner = runner or BoundedRunner(workspace)
+        from .resource_budget import disk_reserve
+        self.reserve_bytes=disk_reserve(reserve_bytes,DISK_RESERVE)
+        self.runner = runner or BoundedRunner(workspace,reserve_bytes=self.reserve_bytes)
         self.activity = activity or (lambda phase, message: None)
         self.controller = controller
         self.campaign_id = campaign_id
@@ -942,8 +938,8 @@ class BuildPipeline:
                 return self._publish_cached(final, key)
             self._verify_environment(inputs)
             limits = ResourceLimits.from_cgroup()
-            if shutil.disk_usage(self.workspace).free < DISK_RESERVE:
-                raise BuildError("20 GiB build free-space reserve reached")
+            if shutil.disk_usage(self.workspace).free < self.reserve_bytes:
+                raise BuildError("configured build free-space reserve reached")
             stage = Path(tempfile.mkdtemp(prefix=".pending-", dir=cache))
             try:
                 if self.incremental_cache is None:
@@ -972,8 +968,8 @@ class BuildPipeline:
                      limits: ResourceLimits, key: str,
                      identity: dict[str, str | int]) -> dict[str, Path]:
         self._report("extract", "verifying and extracting pinned sources")
-        extracted_source = _extract_archive(inputs.kernel_source_tar, stage / "kernel-source")
-        userspace = _extract_archive(inputs.userspace_source_tar, stage / "userspace-source")
+        extracted_source = _extract_archive(inputs.kernel_source_tar, stage / "kernel-source",reserve_bytes=self.reserve_bytes)
+        userspace = _extract_archive(inputs.userspace_source_tar, stage / "userspace-source",reserve_bytes=self.reserve_bytes)
         object_dir, output_dir = stage / "kernel-obj", stage / "artifacts"
         source = extracted_source
         restored_objects = False
@@ -1064,7 +1060,7 @@ class BuildPipeline:
                     for name in structural)
                 if same_structure:
                     if restored["identity"]["source"] != inputs.kernel_source_sha256:
-                        _sync_incremental_source(extracted_source, work / "source")
+                        _sync_incremental_source(extracted_source, work / "source",reserve_bytes=self.reserve_bytes)
                     restored_objects = True
                     self._report("kernel-cache", "verified Kbuild objects restored")
                 else:
@@ -1075,7 +1071,7 @@ class BuildPipeline:
                 compatible = False
             if not compatible and not resumed_objects:
                 shutil.copytree(extracted_source, work / "source", symlinks=True,
-                                copy_function=_copy_file)
+                                copy_function=partial(_copy_file,reserve_bytes=self.reserve_bytes))
                 (work / "objects").mkdir()
                 self._report("kernel-cache", "fresh Kbuild object tree required")
             source, object_dir = work / "source", work / "objects"
@@ -1093,8 +1089,8 @@ class BuildPipeline:
             return {name for name in names if f"{relative}/{name}" in EXCLUDED_CREDENTIAL_FILES}
 
         def copy_checked(source_file: str, destination_file: str) -> str:
-            if shutil.disk_usage(stage).free - Path(source_file).stat().st_size < DISK_RESERVE:
-                raise BuildError("20 GiB reserve reached while copying target sysroot")
+            if shutil.disk_usage(stage).free - Path(source_file).stat().st_size < self.reserve_bytes:
+                raise BuildError("configured reserve reached while copying target sysroot")
             return shutil.copy2(source_file, destination_file)
 
         shutil.copytree(inputs.target_sysroot, sysroot, symlinks=True,
@@ -1161,15 +1157,15 @@ class BuildPipeline:
         user_common = ("make", "-C", str(userspace), f"DESTDIR={userspace_dest}", "PREFIX=/usr")
         self._run(Command((*user_common, "all"), userspace), stage, "compile-userspace", inputs, limits, 3600)
         self._run(Command((*user_common, "install"), userspace), stage, "install-userspace", inputs, limits, 1800)
-        _tar_directory(module_tree, output_dir / "modules.tar.xz", inputs.source_date_epoch)
-        _tar_directory(userspace_dest, output_dir / "userspace.tar.xz", inputs.source_date_epoch)
+        _tar_directory(module_tree, output_dir / "modules.tar.xz", inputs.source_date_epoch,reserve_bytes=self.reserve_bytes)
+        _tar_directory(userspace_dest, output_dir / "userspace.tar.xz", inputs.source_date_epoch,reserve_bytes=self.reserve_bytes)
         if work is not None:
             if (sha256_file(inputs.kernel_source_tar) != inputs.kernel_source_sha256
                     or _tree_hash(source, excluded_paths=frozenset())
                     != _tree_hash(extracted_source, excluded_paths=frozenset())):
                 raise BuildError("incremental experiment source changed")
             shutil.copytree(object_dir, stage / "kernel-obj", symlinks=True,
-                            copy_function=_copy_file)
+                            copy_function=partial(_copy_file,reserve_bytes=self.reserve_bytes))
             snapshot_build = KernelBuild(source, stage / "kernel-obj", sysroot,
                                          output_dir, jobs=limits.jobs)
             kernel_artifacts = snapshot_build.artifacts(release)

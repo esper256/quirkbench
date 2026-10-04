@@ -139,47 +139,15 @@ def kernel_job_budget(cpus: int, memory_bytes: int) -> int:
 
 
 def recommended_jobs() -> int:
-    """Reserve controller resources without halving an enforced worker cap again."""
-    cpus = os.cpu_count()
-    if not cpus:
-        raise BuildError("CPU count unavailable; set jobs explicitly")
-    memory_available = None
-    memory_total = None
+    """Use the selected budget without reserving a constrained worker twice."""
+    from .resource_budget import resolve
+    from .build_pipeline import ResourceLimits
     try:
-        for line in Path("/proc/meminfo").read_text().splitlines():
-            if line.startswith("MemAvailable:"):
-                memory_available = int(line.split()[1]) * 1024
-            elif line.startswith("MemTotal:"):
-                memory_total = int(line.split()[1]) * 1024
-    except (OSError, ValueError):
-        pass
-    gib = 1024 ** 3
-    if memory_available is None:
-        raise BuildError("available memory unknown; set jobs explicitly after checking resources")
-    budget = min(memory_available // 2, memory_available - 2 * gib)
-    cpu_budget = max(1, cpus // 2)
-    cgroup_limit = Path("/sys/fs/cgroup/memory.max")
-    try:
-        limit = cgroup_limit.read_text().strip()
-        if limit != "max":
-            # memory.current includes reusable Kbuild page cache. Use the fixed
-            # worker capacity for job planning, not transient cache occupancy.
-            capacity = int(limit)
-            if memory_total is not None and 0 < capacity <= memory_total // 2:
-                # This cap already reserves half the controller. Keep another
-                # 2 GiB of currently available memory for desktop use.
-                budget = min(capacity, memory_available - 2 * gib)
-            else:
-                budget = min(budget, capacity)
-    except (OSError, ValueError):
-        pass
-    try:
-        quota, period = Path("/sys/fs/cgroup/cpu.max").read_text().split()
-        if quota != "max":
-            cpu_budget = min(cpu_budget, max(1, int(quota) // int(period)))
-    except (OSError, ValueError, ZeroDivisionError):
-        pass
-    return kernel_job_budget(cpu_budget, budget)
+        return ResourceLimits.from_cgroup().jobs
+    except BuildError as exc:
+        if 'enforced cgroup CPU and memory limits required' not in str(exc):raise
+    budget=resolve('kernel')
+    return kernel_job_budget(budget.cpus,budget.memory_bytes)
 
 
 @contextmanager
@@ -349,10 +317,12 @@ def _validate_command(command: Command) -> bool:
 
 
 def run_commands(commands: Iterable[Command], *, config_to_validate: Path | None = None,
-                 timeout_s: int = 8 * 3600) -> None:
+                 timeout_s: int = 8 * 3600, reserve_bytes: int = 20 * 1024**3) -> None:
     """Execute only exact target recipe forms in the dedicated container."""
     if timeout_s < 1 or timeout_s > 24 * 3600:
         raise BuildError("command timeout must be 1..86400 seconds")
+    if type(reserve_bytes) is not int or reserve_bytes < 0:
+        raise BuildError("free-space reserve must be a nonnegative byte count")
     _require_container()
     planned = tuple(commands)
     validations = [_validate_command(command) for command in planned]
@@ -362,8 +332,8 @@ def run_commands(commands: Iterable[Command], *, config_to_validate: Path | None
     if config_to_validate is not None:
         validate_kernel_config(config_to_validate)
     for command in planned:
-        if shutil.disk_usage(command.cwd).free < 20 * 1024**3:
-            raise BuildError('20 GiB build free-space reserve reached')
+        if shutil.disk_usage(command.cwd).free < reserve_bytes:
+            raise BuildError(f'build free-space reserve reached: reserve={reserve_bytes} bytes')
         subprocess.run(command.argv, cwd=command.cwd, check=True, timeout=timeout_s)
 
 

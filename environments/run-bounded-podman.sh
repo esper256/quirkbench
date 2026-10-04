@@ -10,6 +10,8 @@ fail() {
 
 (( EUID != 0 )) || fail 'rootless user required'
 (( $# > 0 )) || fail 'Podman run arguments required'
+workload=kernel
+if [[ $1 == --workload=* ]]; then workload=${1#--workload=}; shift; fi
 payload=false
 expect_value=false
 for argument in "$@"; do
@@ -30,15 +32,11 @@ for argument in "$@"; do
   esac
 done
 $payload && ! $expect_value || fail 'immutable image ID and complete options required'
-controller_cpus=$(getconf _NPROCESSORS_ONLN) || fail 'controller CPU count unavailable'
-controller_memory_kib=$(awk '$1 == "MemTotal:" { print $2; exit }' /proc/meminfo)
-[[ $controller_cpus =~ ^[0-9]+$ && $controller_memory_kib =~ ^[0-9]+$ ]] || fail 'controller resources unavailable'
-cpus=$((controller_cpus / 2))
-(( cpus >= 1 )) || cpus=1
-(( cpus <= 4 )) || cpus=4
-memory=$((controller_memory_kib * 1024 / 2))
-(( memory <= 8589934592 )) || memory=8589934592
-(( memory >= 4294967296 )) || fail 'less than 4 GiB available within the half-host memory budget'
+script_parent=$(cd -- "$(dirname -- "$0")/.." && pwd)
+module_path=$script_parent
+[[ ! -d $script_parent/src/quirkbench ]] || module_path=$script_parent/src
+budget=$(PYTHONPATH="$module_path${PYTHONPATH:+:$PYTHONPATH}" "${PYTHON:-python3}" -B -m quirkbench.resource_budget "$workload") || fail 'resource budget unavailable'
+read -r cpus memory <<< "$budget"
 exec podman --remote=false --cgroup-manager=cgroupfs run \
   --cgroups=enabled --pid=private --restart=no --timeout=86400 \
   --cpus="$cpus" --memory="$memory" --memory-swap="$memory" --pids-limit=4096 \

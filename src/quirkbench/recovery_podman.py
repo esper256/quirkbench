@@ -336,6 +336,8 @@ def rootfs_command(*, image_id: str, claim: dict, state_root: Path, stage: Path,
     mounts = tuple(arg for host, target, mode in volumes
                    for arg in ('--volume', f'{host}:{target}:{mode}'))
     payload=('python3','-m','quirkbench.recovery_image_worker',arguments['recipe_sha256'],'/workspace/cas','/workspace/output') if 'recipe_sha256' in arguments else ('python3','-m','quirkbench.recovery_rootfs','-' if stock else '/workspace/catalog.json','/workspace/rootfs-lock.json','/workspace/cas',f'/workspace/output/{output_name}')
+    from .resource_budget import resolve
+    budget=resolve('recovery')
     remaining=min(86400,math.ceil(verified.deadline-time.time()))
     if remaining<=0:raise BuildError('rootfs worker deadline expired')
     return ('env', '-u', 'CONTAINER_HOST', '-u', 'CONTAINER_CONNECTION',
@@ -343,8 +345,8 @@ def rootfs_command(*, image_id: str, claim: dict, state_root: Path, stage: Path,
             'podman', '--remote=false', '--cgroup-manager=cgroupfs', 'run', '--rm', '--pull=never',
             '--network=none', '--pid=private', '--ipc=private', '--uts=private',
             '--cgroups=enabled', '--user=0', '--restart=no', '--timeout='+str(remaining),
-            '--cpus='+str(min(4,max(1,(os.cpu_count() or 1)//2))),
-            '--memory=4294967296','--memory-swap=4294967296','--pids-limit=4096',
+            '--cpus='+str(budget.cpus),
+            '--memory='+str(budget.memory_bytes),'--memory-swap='+str(budget.memory_bytes),'--pids-limit=4096',
             '--security-opt=no-new-privileges',
             '--env=PYTHONPATH=/workspace/code',
             *(("--env=QUIRKBENCH_BUILDER_CONFIG_DIGEST=" + arguments['builder_config_digest'],) if stock else ()),

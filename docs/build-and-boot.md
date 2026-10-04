@@ -19,13 +19,16 @@ Use the versioned Fedora container environment, immutable base-image identity an
 
 Build kernels and modules in dedicated output trees. Stage userspace using `DESTDIR` and modules using `INSTALL_MOD_PATH`, preserve matching debug symbols and source archives in the controller artifact store, and package the experimental components as RPMs for composition. The composer produces one revision containing matching kernel, modules, initramfs, userspace and default configuration. Do not apply package overrides on the target. Capture exact source, configuration, package and toolchain identities in the deployment provenance.
 
-Default to one build at a time, no more than half the controller CPUs and RAM, and a 20 GiB free-space reserve. Report compiler output activity, measured object/byte counters where available and bounded phase deadlines. Cache reuse is an optimization; checkpoints and source identities remain recoverable without caches.
+Default to one build at a time and conservative interactive resource budgets.
+[Workload profiles and explicit overrides](../environments/README.md#resource-overrides)
+use effective capacity and avoid reserving desktop resources twice. Managed builds
+default to a configurable 20 GiB free-space reserve. Report compiler output activity, measured object/byte counters where available and bounded phase deadlines. Cache reuse is an optimization; checkpoints and source identities remain recoverable without caches.
 
 ### Capacity planning
 
 Use an existing suitable external USB SSD where possible. Default allocations are 2 GiB recovery, 32 GiB experiments and 32 GiB library, plus EFI/state. Evidence receives the remaining capacity and must fit the configured log budget plus twice target RAM, with at least 20% capacity headroom. A 250/256 GB SSD is a comfortable starting point; 500 GB adds headroom for retained evidence. This is capacity planning, not a claim that crash capture is already qualified. Unacknowledged evidence must never be deleted to free space for another experiment.
 
-Controller storage is separate: initially budget roughly 200 GiB for sources, builds, symbols, retained RPMs and evidence, in addition to the enforced 20 GiB free-space reserve. Keep enough extra capacity for independent backups; their OSTree objects do not share hardlinks with the source repository. The compact initial image commissions the six-role layout on first recovery boot; see [the image contract](debug-image.md).
+Controller storage is separate: initially budget roughly 200 GiB for sources, builds, symbols, retained RPMs and evidence, in addition to the configured free-space reserve. Keep enough extra capacity for independent backups; their OSTree objects do not share hardlinks with the source repository. The compact initial image commissions the six-role layout on first recovery boot; see [the image contract](debug-image.md).
 
 ### CLI entry points
 

@@ -176,7 +176,9 @@ def _repo_names(path: Path) -> list[str]:
     return names
 
 
-def extract_payload(archive: Path, destination: Path, *, userspace: bool) -> None:
+def extract_payload(archive: Path, destination: Path, *, userspace: bool, reserve_bytes=None) -> None:
+    from .resource_budget import disk_reserve
+    reserve_bytes=disk_reserve(reserve_bytes,DISK_RESERVE)
     """Extract untrusted build output without traversal, credentials or special files."""
     destination.mkdir(parents=True, exist_ok=True)
     with tarfile.open(archive, "r:*") as handle:
@@ -198,8 +200,8 @@ def extract_payload(archive: Path, destination: Path, *, userspace: bool) -> Non
             if member.isdir():
                 target.mkdir(parents=True, exist_ok=True)
             elif member.isfile():
-                if shutil.disk_usage(destination).free - member.size < DISK_RESERVE:
-                    raise BuildError("20 GiB free-space reserve reached")
+                if shutil.disk_usage(destination).free - member.size < reserve_bytes:
+                    raise BuildError("configured free-space reserve reached")
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with handle.extractfile(member) as source, target.open("xb") as output:
                     shutil.copyfileobj(source, output)
@@ -258,12 +260,14 @@ cp -a %{{_sourcedir}}/payload/. %{{buildroot}}/
 
 
 class ComposeRunner:
-    def __init__(self, workspace: Path, event: Callable[[dict], None] | None = None):
+    def __init__(self, workspace: Path, event: Callable[[dict], None] | None = None, *, reserve_bytes=None):
+        from .resource_budget import disk_reserve
+        self.reserve_bytes=disk_reserve(reserve_bytes,DISK_RESERVE)
         self.workspace, self.event = workspace, event or (lambda value: None)
 
     def run(self, argv: list[str], *, phase: str, cwd: Path, env: dict, timeout: int = 3600) -> str:
-        if shutil.disk_usage(self.workspace).free < DISK_RESERVE:
-            raise BuildError("20 GiB composition free-space reserve reached")
+        if shutil.disk_usage(self.workspace).free < self.reserve_bytes:
+            raise BuildError("configured composition free-space reserve reached")
         log = cwd / f"{phase}.log"
         deadline = time.monotonic() + timeout
         self.event({"phase": phase, "status": "running", "output_bytes": 0, "timeout_s": timeout})
@@ -285,8 +289,8 @@ class ComposeRunner:
                 while selector.get_map():
                     if time.monotonic() > deadline:
                         raise BuildError(f"{phase} exceeded {timeout}s; see {log}")
-                    if shutil.disk_usage(self.workspace).free < DISK_RESERVE:
-                        raise BuildError("20 GiB composition free-space reserve reached")
+                    if shutil.disk_usage(self.workspace).free < self.reserve_bytes:
+                        raise BuildError("configured composition free-space reserve reached")
                     for key, _ in selector.select(timeout=1):
                         block = os.read(key.fileobj.fileno(), 65536)
                         if not block:
@@ -350,12 +354,14 @@ def compose_lock(path: Path, event=None):
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-def archive_rpms(source: Path, output: Path, epoch: int, event=None, *, mode=None):
+def archive_rpms(source: Path, output: Path, epoch: int, event=None, *, mode=None, reserve_bytes=None):
+    from .resource_budget import disk_reserve
+    reserve_bytes=disk_reserve(reserve_bytes,DISK_RESERVE)
     files = sorted(source.glob("*.rpm"))
     if any(path.is_symlink() or not path.is_file() for path in files):
         raise BuildError("RPM snapshot must contain regular files")
-    if shutil.disk_usage(output.parent).free - sum(path.stat().st_size for path in files) < DISK_RESERVE:
-        raise BuildError("20 GiB reserve reached while archiving replay inputs")
+    if shutil.disk_usage(output.parent).free - sum(path.stat().st_size for path in files) < reserve_bytes:
+        raise BuildError("configured reserve reached while archiving replay inputs")
     phase = "archive-" + source.name
     if event:
         event({"phase": phase, "status": "running", "timeout_s": 1200, "output_bytes": 0})
@@ -375,7 +381,9 @@ def archive_rpms(source: Path, output: Path, epoch: int, event=None, *, mode=Non
 
 
 class FedoraComposer:
-    def __init__(self, workspace: Path, publish_repo: Path, event=None, controller_state: Path | None = None, *, stage_only=False):
+    def __init__(self, workspace: Path, publish_repo: Path, event=None, controller_state: Path | None = None, *, stage_only=False, reserve_bytes=None):
+        from .resource_budget import disk_reserve
+        self.reserve_bytes=disk_reserve(reserve_bytes,DISK_RESERVE)
         _safe_build_path(workspace)
         _safe_build_path(publish_repo)
         if workspace.resolve() != workspace or publish_repo.resolve() != publish_repo:
@@ -407,7 +415,7 @@ class FedoraComposer:
         self.publish_repo.parent.mkdir(parents=True, exist_ok=True)
         with compose_lock(self.publish_repo.parent / (self.publish_repo.name + ".compose.lock"), self.event):
             stage = Path(tempfile.mkdtemp(prefix="compose-", dir=self.workspace))
-            runner = ComposeRunner(self.workspace, self.event)
+            runner = ComposeRunner(self.workspace, self.event,reserve_bytes=self.reserve_bytes)
             env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
                    "HOME": str(stage / "home"), "GNUPGHOME": str(inputs.signing_home),
                    "SOURCE_DATE_EPOCH": str(inputs.source_date_epoch)}
@@ -433,7 +441,7 @@ class FedoraComposer:
                 payload = top / "SOURCES/payload"
                 if is_kernel:
                     target = payload / "usr/lib/modules" / inputs.kernel_release
-                    extract_payload(inputs.artifact_paths["modules"], target, userspace=False)
+                    extract_payload(inputs.artifact_paths["modules"], target, userspace=False,reserve_bytes=self.reserve_bytes)
                     for role, filename in (("kernel", "vmlinuz"), ("config", "config")):
                         shutil.copyfile(inputs.artifact_paths[role], target / filename)
                     # rpm-ostree removes or rejects preinstalled initrds during
@@ -443,7 +451,7 @@ class FedoraComposer:
                     saved_initrd.parent.mkdir(parents=True)
                     shutil.copyfile(inputs.artifact_paths["initramfs"], saved_initrd)
                 else:
-                    extract_payload(inputs.artifact_paths["userspace"], payload, userspace=True)
+                    extract_payload(inputs.artifact_paths["userspace"], payload, userspace=True,reserve_bytes=self.reserve_bytes)
                     from .boot import install_candidate_runtime
                     install_candidate_runtime(payload)
                     policy = payload / "usr/etc/systemd/system"
@@ -467,7 +475,7 @@ class FedoraComposer:
             pinned_entry=pinned_snapshot=None
             if inputs.pinned_baseline is not None:
                 from .pinned_composition import prepare
-                pinned_entry,pinned_snapshot=prepare(inputs.pinned_baseline,stage,run,reserve=DISK_RESERVE)
+                pinned_entry,pinned_snapshot=prepare(inputs.pinned_baseline,stage,run,reserve=self.reserve_bytes)
             replacement_names = []
             for number, rpm in enumerate(inputs.replacement_rpms):
                 nevra = run(["rpm", "-qp", "--queryformat", "%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}", str(rpm)], f"inspect-replacement-{number}", 60).strip()
@@ -537,8 +545,8 @@ class FedoraComposer:
                 digest = sha256_file(rpm)
                 target = snapshot / (digest + ".rpm")
                 if not target.exists():
-                    if shutil.disk_usage(stage).free - rpm.stat().st_size < DISK_RESERVE:
-                        raise BuildError("20 GiB reserve reached while retaining dependency RPMs")
+                    if shutil.disk_usage(stage).free - rpm.stat().st_size < self.reserve_bytes:
+                        raise BuildError("configured reserve reached while retaining dependency RPMs")
                     shutil.copyfile(rpm, target)
             if not list(snapshot.glob("*.rpm")):
                 raise BuildError("download did not retain dependency RPMs for replay")
@@ -575,8 +583,8 @@ class FedoraComposer:
                 _sync_tree(self.publish_repo)
             dependency_archive = stage / "dependency-rpms.tar"
             custom_archive = stage / "custom-rpms.tar"
-            archive_rpms(snapshot, dependency_archive, inputs.source_date_epoch, self.event,mode=0o600 if pinned_entry is not None else None)
-            archive_rpms(packages, custom_archive, inputs.source_date_epoch, self.event,mode=0o600 if pinned_entry is not None else None)
+            archive_rpms(snapshot, dependency_archive, inputs.source_date_epoch, self.event,mode=0o600 if pinned_entry is not None else None,reserve_bytes=self.reserve_bytes)
+            archive_rpms(packages, custom_archive, inputs.source_date_epoch, self.event,mode=0o600 if pinned_entry is not None else None,reserve_bytes=self.reserve_bytes)
             generated_evidence = {"compose_dependency_rpms": dependency_archive,
                 "compose_custom_rpms": custom_archive, "compose_tree": stage / "tree.json",
                 "compose_finalize_hook": finalize,

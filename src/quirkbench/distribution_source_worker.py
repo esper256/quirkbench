@@ -22,7 +22,7 @@ def verify_base(entry):
         raise Conflict('distribution builder Fedora base marker differs from pinned baseline')
 
 
-def inner(stage, *,runner=None,limits=None):
+def inner(stage, *,runner=None,limits=None,reserve=20*1024**3):
     from .build import _require_container
     from .build_pipeline import BoundedRunner, ResourceLimits, run_recovery_source_stage
     from .source_capture import load_document
@@ -38,8 +38,8 @@ def inner(stage, *,runner=None,limits=None):
     if runner is None:
         _require_container()
         verify_base(value['entry'])
-        runner = BoundedRunner(stage)
-        limits = ResourceLimits.from_cgroup()
+        runner = BoundedRunner(stage,reserve_bytes=reserve)
+        limits = ResourceLimits.from_cgroup(workload="preparation")
     elif limits is None:
         raise ContractError('injected distribution runner requires explicit limits')
     result = run_recovery_source_stage(srpm=stage/'input.src.rpm',entry=value['entry'],stage=stage,
@@ -82,11 +82,11 @@ def prepare(root, stage, entry, builder, epoch, workspace_id, verify, report, de
         guard(); atomic_write(source/'manifest.json',canonical({'schema_version':1,'entry':entry,'source_date_epoch':epoch})); guard()
         if stage_only: return {'payload_staged':True}
         package = Path(__file__).resolve().parent
-        argv = ['/usr/bin/bash',str(package/'run-bounded-podman.sh'),'--rm','--pull=never','--network=none',
+        argv = ['/usr/bin/bash',str(package/'run-bounded-podman.sh'),'--workload=preparation','--rm','--pull=never','--network=none',
             '--userns=keep-id','--security-opt=no-new-privileges',
             '--volume',f'{source}:{source}:rw,z','--volume',f'{package}:{package}:ro,z',
             '--env',f'PYTHONPATH={package.parent}','--env','PYTHONDONTWRITEBYTECODE=1',builder['builder_config_digest'],
-            '/usr/bin/python3','-m','quirkbench.distribution_source_worker','--stage-dir',str(source)]
+            '/usr/bin/python3','-m','quirkbench.distribution_source_worker','--stage-dir',str(source),'--reserve-bytes',str(store.reserve_bytes)]
         report('distribution-source','Preparing the pinned distribution SRPM in the rootless worker container.')
         guard()
         summary = (execute or execute_rootfs)(argv,stage/'diagnostics/distribution-source.log',verify=guard,deadline=deadline,max_duration=7200)
@@ -99,8 +99,9 @@ def prepare(root, stage, entry, builder, epoch, workspace_id, verify, report, de
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--stage-dir',type=Path,required=True)
+    parser.add_argument('--reserve-bytes',type=int,default=20*1024**3)
     args = parser.parse_args(argv)
-    inner(args.stage_dir)
+    inner(args.stage_dir,reserve=args.reserve_bytes)
     return 0
 
 
