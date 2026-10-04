@@ -129,20 +129,28 @@ class ComposeInputs:
         if provenance.get("kernel_release") != self.kernel_release:
             raise BuildError("kernel release differs from build provenance")
 
-    def identity(self) -> str:
+    def identity(self, *, payload=None, policy=None) -> str:
         extra={}
         if self.pinned_baseline is not None:
             extra={"pinned_baseline":{key:self.pinned_baseline[key] for key in ("entry_sha256","snapshot_sha256","rpms_sha256")}}
-        from .package_resources import target_assets_dir
+        from .candidate_payload import capture
+        payload = capture() if payload is None else payload
+        policy = composition_policy() if policy is None else policy
         return hashlib.sha256(canonical({**extra,"artifacts": self.artifact_sha256,
             "kernel_release": self.kernel_release, "fedora_release": self.fedora_release,
             "fedora_repo_sha256": self.fedora_repo_sha256, "source_date_epoch": self.source_date_epoch,
-            "composer_sha256": sha256_file(Path(__file__)), "protection_profile": self.protection_profile,
+            "composition_identity_version": 2, "composition_policy_sha256": policy,
+            "protection_profile": self.protection_profile,
             "replacement_rpm_sha256": sorted(self.replacement_rpms.values()),
             "build_evidence_sha256": self.evidence_sha256,
-            "runtime_assets_sha256": {p.name: sha256_file(p) for p in sorted(target_assets_dir().iterdir()) if p.is_file()},
-            "candidate_runtime_sha256": {name: sha256_file(Path(__file__).parent / name)
-                for name in sorted(path.name for path in Path(__file__).parent.glob("*.py"))}})).hexdigest()
+            "candidate_payload_sha256": payload.identity()})).hexdigest()
+
+
+def composition_policy():
+    """Procedure identity is separate from the target's installed byte identity."""
+    return {name: sha256_file(Path(__file__).parent/name) for name in (
+        'compose.py', 'target_install.py', 'candidate_payload.py', 'target_payload.py',
+        'recipe_registry.py', 'pinned_composition.py')}
 
 
 def builder_base_digest() -> str:
@@ -220,6 +228,11 @@ def extract_payload(archive: Path, destination: Path, *, userspace: bool, reserv
 def rpm_spec(name: str, version: str, payload: Path, *, kernel_release: str | None = None) -> str:
     files = []
     for path in sorted(payload.rglob("*")):
+        if path.is_dir() and not path.is_symlink():
+            relative = path.relative_to(payload).as_posix()
+            if any(character in relative for character in ('%', '\n', '"', '\\', ' ')):
+                raise BuildError("RPM payload filename has unsupported syntax")
+            files.append("%dir /"+relative)
         if path.is_file() or path.is_symlink():
             relative = path.relative_to(payload).as_posix()
             if any(character in relative for character in ('%', '\n', '"', '\\', ' ')):
@@ -430,7 +443,10 @@ class FedoraComposer:
             modules = run(["lsinitrd", "-m", str(inputs.artifact_paths["initramfs"])], "inspect-initramfs", 60)
             if not re.search(r"(?m)^\s*ostree\s*$", modules):
                 raise BuildError("candidate initramfs must include the ostree dracut module")
-            identity = inputs.identity()
+            from .candidate_payload import capture, audit, CandidatePayload
+            runtime_payload = capture()
+            policy_identity = composition_policy()
+            identity = inputs.identity(payload=runtime_payload, policy=policy_identity)
             version = f"0.{inputs.source_date_epoch}.{identity[:12]}"
             packages = stage / "packages"
             packages.mkdir()
@@ -453,7 +469,7 @@ class FedoraComposer:
                 else:
                     extract_payload(inputs.artifact_paths["userspace"], payload, userspace=True,reserve_bytes=self.reserve_bytes)
                     from .target_install import install_candidate_runtime
-                    install_candidate_runtime(payload)
+                    install_candidate_runtime(payload, payload=runtime_payload)
                     policy = payload / "usr/etc/systemd/system"
                     policy.mkdir(parents=True, exist_ok=True)
                     for unit in UNSAFE_UNITS:
@@ -559,14 +575,22 @@ class FedoraComposer:
             if not re.fullmatch(r"[0-9a-f]{64}", revision):
                 raise BuildError("composer returned invalid revision")
             pinned_result=None
+            checkout=stage/("pinned-checkout" if pinned_entry is not None else "candidate-checkout")
+            run(["ostree",f"--repo={repo}","checkout","--user-mode","--force-copy",revision,str(checkout)],
+                "checkout-pinned-baseline" if pinned_entry is not None else "checkout-candidate-runtime")
             if pinned_entry is not None:
                 from .pinned_composition import verify_checkout
-                checkout=stage/"pinned-checkout"
-                run(["ostree",f"--repo={repo}","checkout","--user-mode","--force-copy",revision,str(checkout)],"checkout-pinned-baseline")
                 pinned_result=verify_checkout(pinned_entry,pinned_snapshot,packages,checkout,run,inputs.pinned_baseline["entry_sha256"])
                 from .pinned_composition import validate_lock
                 validate_lock(json.loads(lockfile.read_bytes()),pinned_result["packages"])
                 (stage/"pinned-baseline.json").write_bytes(canonical(pinned_result))
+            # Audit after RPM merging and finalize hooks, before signing/publication.
+            final_payload = CandidatePayload(dict(runtime_payload.files), dict(runtime_payload.links), dict(runtime_payload.directories))
+            final_payload.links.update({'usr/etc/systemd/system/'+unit:'/dev/null' for unit in UNSAFE_UNITS})
+            final_payload.files['usr/lib/quirkbench/deployment-build.json'] = canonical({
+                'build_identity':identity,'kernel_release':inputs.kernel_release,
+                'protection_profile':inputs.protection_profile})+b'\n'
+            audit(checkout, final_payload)
             inputs.validate()  # fail before publication if sources changed during composition
             if inputs.identity() != identity or builder_base_digest() != base_digest:
                 raise BuildError("composition inputs or runtime changed during build")
@@ -596,6 +620,8 @@ class FedoraComposer:
             self.evidence_files = {**inputs.evidence_paths, **generated_evidence}
             evidence_hashes = {role: sha256_file(path) for role, path in self.evidence_files.items()}
             provenance = {"build_identity": identity, "build_provenance_sha256": inputs.artifact_sha256["build_provenance"],
+                          "composition_identity_version": 2, "candidate_payload_sha256": runtime_payload.identity(),
+                          "composition_policy_sha256": policy_identity,
                           "build_evidence": {"schema_version": 1, "artifacts": evidence_hashes},
                           "artifact_sha256": inputs.artifact_sha256, "kernel_release": inputs.kernel_release,
                           "config_sha256": inputs.artifact_sha256["config"],

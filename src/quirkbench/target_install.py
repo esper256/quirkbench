@@ -291,7 +291,7 @@ def _check_recovery_unit_links(rootfs: Path, *, strict_direct_links: bool = Fals
         raise BootError("required recovery systemd enablement missing")
 
 
-def _install_runtime_files(rootfs: Path, assets_dir: Path | None = None, *, candidate: bool = False) -> None:
+def _install_runtime_files(rootfs: Path, assets_dir: Path | None = None, *, candidate: bool = False, payload=None) -> None:
     """Install generic target runtime files before image-specific identity.
 
     The caller supplies a disposable rootfs copy. This function never runs
@@ -367,6 +367,10 @@ def _install_runtime_files(rootfs: Path, assets_dir: Path | None = None, *, cand
     fstab = rootfs / "etc/fstab"
     if fstab.exists() and any(line.strip() and not line.lstrip().startswith("#") for line in fstab.read_text().splitlines()):
         raise BootError("target fstab may not contain automatic mounts")
+    if candidate:
+        from .candidate_payload import capture, install
+        install(rootfs, payload if payload is not None else capture(assets=assets))
+        return
     package = rootfs / "usr/lib/quirkbench/quirkbench"
     settings = rootfs / "etc/quirkbench"
     for destination in (package, settings):
@@ -480,7 +484,7 @@ def install_recovery_runtime_base(rootfs: Path, assets_dir: Path | None = None) 
 
 
 def install_runtime(rootfs: Path, config: RecoveryConfig | dict | None = None,
-                    assets_dir: Path | None = None, *, candidate: bool = False) -> None:
+                    assets_dir: Path | None = None, *, candidate: bool = False, payload=None) -> None:
     """Install target runtime and, for recovery, its image-specific boot ID."""
     if isinstance(config, dict):
         config = RecoveryConfig(**config)
@@ -492,26 +496,43 @@ def install_runtime(rootfs: Path, config: RecoveryConfig | dict | None = None,
     if boot_record.exists():
         if config is None or boot_record.read_bytes() != _canonical(config.to_dict()) + b"\n":
             raise BootError("staged boot identity differs from image configuration")
-    _install_runtime_files(rootfs, assets_dir, candidate=candidate)
+    _install_runtime_files(rootfs, assets_dir, candidate=candidate, payload=payload)
     if config is not None:
         boot_record.write_bytes(_canonical(config.to_dict()) + b"\n")
 
 
-def install_candidate_runtime(rootfs: Path, assets_dir: Path | None = None) -> None:
+def install_candidate_runtime(rootfs: Path, assets_dir: Path | None = None, *, payload=None) -> None:
     """Stage generic runtime RPM payload; OSTree owns image-specific identity."""
     rootfs = Path(rootfs)
     if not rootfs.is_absolute() or rootfs == Path('/') or rootfs.is_symlink() or not rootfs.is_dir():
         raise BootError('candidate runtime requires staged payload directory')
+    from .candidate_payload import capture, audit
+    payload = payload if payload is not None else capture(assets=assets_dir)
+    for name in ('etc', 'usr', 'usr/etc'):
+        path=rootfs/name
+        if path.is_symlink() or (path.exists() and not path.is_dir()):
+            raise BootError('candidate configuration directory substitution')
     etc = rootfs / 'etc'
     etc.mkdir(exist_ok=True)
-    (etc / 'quirkbench-rootfs').write_text('quirkbench-fedora-target-v1\n')
-    install_runtime(rootfs, assets_dir=assets_dir, candidate=True)
+    marker=etc/'quirkbench-rootfs'
+    if marker.exists() and not marker.is_file() and not marker.is_symlink():
+        raise BootError('invalid staged candidate marker')
+    marker.unlink(missing_ok=True)
+    marker.write_text('quirkbench-fedora-target-v1\n')
+    install_runtime(rootfs, assets_dir=assets_dir, candidate=True, payload=payload)
     destination = rootfs / 'usr/etc'
     if destination.exists():
+        from .candidate_payload import _path
+        for path in etc.rglob('*'):
+            _path(rootfs, 'usr/etc/'+path.relative_to(etc).as_posix())
+            target=destination/path.relative_to(etc)
+            if target.is_symlink():
+                raise BootError('candidate configuration merge substitution')
         shutil.copytree(etc, destination, symlinks=True, dirs_exist_ok=True)
         shutil.rmtree(etc)
     else:
         etc.rename(destination)
+    audit(rootfs, payload)
     for relative in ("boot/quirkbench-state", "boot", "var", "tmp"):
         directory = rootfs / relative
         if directory.is_dir() and not directory.is_symlink() and not any(directory.iterdir()):
