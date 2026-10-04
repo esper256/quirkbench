@@ -176,7 +176,8 @@ config and referenced layer hashes before returning an argv. A rebuilt builder
 needs its own newly retained archive, image ID and operation input record.
 
 The controller container adapter requests at most four CPUs (and half the host's
-reported CPUs), 4 GiB memory, no extra swap and 4096 tasks, then checks the engine's
+reported CPUs), 4 GiB memory for recovery (managed development jobs use up to
+8 GiB within half the host's memory), no extra swap and 4096 tasks, then checks the engine's
 recorded bounds before accepting a launch. Every phase has a fixed entry point and
 elapsed deadline; the journal records the engine, immutable container ID and claim.
 The owner verifies whole-container termination and retains bounded logs before

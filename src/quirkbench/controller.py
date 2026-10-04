@@ -516,8 +516,19 @@ class _LifecycleOwner:
         return {'operation':published,'image_sha256':refs[1],
                 'qualification_status':signed['candidate']['qualification_status']}
 
+    def interrupt_and_reconcile(self, services):
+        """Fence active work, then stop containers before releasing ownership."""
+        if self.closed or self.controller._lifecycle_owner is not self:
+            raise Conflict('controller lifecycle ownership ended')
+        with self.controller.transaction() as db:
+            current=db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
+            if current!=self.epoch:
+                raise Conflict('controller lifecycle epoch changed')
+            self.controller._startup_db(db)
+        return self.reconcile_units(services)
+
     def reconcile_units(self, services):
-        """Clear ownership only after a full service/cgroup stop is established."""
+        """Clear ownership only after whole-worker shutdown is established."""
         if self.closed or self.controller._lifecycle_owner is not self:
             raise Conflict('controller lifecycle ownership ended')
         if hasattr(services, 'root'): services.root = self.controller.root
@@ -683,8 +694,8 @@ class Controller(OperatorApprovals):
     def lifecycle(self):
         """Hold the controller owner lock and fence old publications for its lifetime.
 
-        This is only the ownership boundary. P2b service dispatch and cgroup
-        termination must be added before claims can run product operations.
+        Dispatch and shutdown use the selected bounded worker backend. Callers
+        stop their workers before leaving this ownership context.
         """
         if self._lifecycle_owner is not None:
             raise Conflict('controller lifecycle already owned by this process')

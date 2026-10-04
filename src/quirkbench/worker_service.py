@@ -46,7 +46,9 @@ class ContainerWorkerServices:
         self.monotonic=monotonic
         self.root = None
         self.cpu_count = min(4, max(1, (os.cpu_count() or 1)//2))
-        self.memory_limit = 4*1024**3
+        self.development = development
+        memory_total=int(next(line.split()[1] for line in Path("/proc/meminfo").read_text().splitlines() if line.startswith("MemTotal:")))*1024
+        self.memory_limit = min(8*1024**3,memory_total//2) if development else 4*1024**3
         self._claim_reader = None
 
     @staticmethod
@@ -92,6 +94,8 @@ class ContainerWorkerServices:
         return item
 
     def preflight(self, state_root, deadline):
+        if self.development and self.memory_limit<4*1024**3:
+            raise WorkerServiceError("controller capacity below the 4 GiB builder minimum within the half-host budget")
         root=Path(state_root)
         if not root.is_absolute() or root.resolve()!=root or root.is_symlink():
             raise WorkerServiceError('worker state root must be canonical')
@@ -201,7 +205,7 @@ class ContainerWorkerServices:
         command+=['--log-driver='+('json-file' if self.engine=='docker' else 'k8s-file'),
                   '--log-opt=max-size=8m']
         if self.engine=='podman' and spec.get('user')!='0': command+=['--userns=keep-id']
-        if self.engine=='podman': command+=['--pid=private']
+        if self.engine=='podman': command+=['--pid=private','--timeout='+str(remaining)]
         command+=spec.get('options',[])
         for source,target,mode in spec['mounts']:
             from .recovery_podman import _canonical

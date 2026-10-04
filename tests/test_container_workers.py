@@ -176,3 +176,60 @@ def test_preparation_hides_configured_secrets_and_authoritative_execution_journa
         assert masked.read_bytes()==b'' and mode.startswith('ro')
         assert any(str(c.root/'private') in option for option in spec['options'])
         service.stop_and_verify(claim['worker_unit'],BOOT)
+
+
+def test_delayed_child_start_uses_remaining_elapsed_budget():
+    from quirkbench.container_worker import remaining_seconds
+    record={'monotonic_deadline':160.0}
+    assert remaining_seconds(record,monotonic=lambda:159.0)==1
+    with pytest.raises(Conflict,match='expired'):
+        remaining_seconds(record,monotonic=lambda:160.0)
+
+
+def test_serve_interrupt_stops_running_worker_before_owner_lock_release(worker,monkeypatch):
+    import threading
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from quirkbench import cli
+    from quirkbench.job_coordinator import JobCoordinator
+    c,service,engine=worker
+    stopped=threading.Event();owners=[];claims=[]
+    class Server:
+        def serve_forever(self):stopped.wait(5)
+        def shutdown(self):stopped.set()
+        def server_close(self):pass
+    monkeypatch.setattr('quirkbench.transport.make_server',lambda *a,**k:Server())
+    monkeypatch.setattr('quirkbench.enrollment_runtime.publication_runtime',
+                        lambda *a,**k:nullcontext(SimpleNamespace(application=None,tls_context=None)))
+    monkeypatch.setattr('quirkbench.worker_service.ContainerWorkerServices',lambda **kw:service)
+    def tick(jobs):
+        owners.append(jobs.owner)
+        claims.append(launch(jobs.owner.controller,jobs.owner,service))
+        raise KeyboardInterrupt
+    monkeypatch.setattr(JobCoordinator,'tick',tick)
+    native=engine.__call__
+    def checked(argv,timeout):
+        if argv[1]=='stop':
+            assert owners[0].controller._lifecycle_owner is owners[0] and not owners[0].closed
+            assert owners[0].controller.operation_status(claims[0]['id'])['data']['state']=='INTERRUPTED'
+        return native(argv,timeout)
+    service.runner=checked
+    tokens=c.root/'tokens.json';tokens.write_text('{}')
+    assert cli.main(['--state',str(c.root),'--reserve-gib','0','serve','--cert','unused',
+        '--key','unused','--tokens-file',str(tokens),'--job-worker','unused',
+        '--worker-engine','docker','--worker-image',IMAGE])==130
+    assert not engine.containers and any(args[0]=='stop' for args in engine.calls)
+    row=c.operation_status(claims[0]['id'])['data']
+    assert row['state']=='INTERRUPTED' and row['worker_unit'] is None
+    assert (Path(claims[0]['stage_dir'])/'diagnostics/prepare.log').read_bytes()
+
+
+def test_managed_development_admission_leaves_half_the_host_memory(worker,monkeypatch):
+    c,_,engine=worker
+    original=Path.read_text
+    monkeypatch.setattr(Path,'read_text',lambda path,*a,**kw:
+        'MemTotal: 6291456 kB\n' if str(path)=='/proc/meminfo' else original(path,*a,**kw))
+    service=ContainerWorkerServices(engine='docker',worker_image=IMAGE,runner=engine,development=True)
+    with pytest.raises(WorkerServiceError,match='half-host'):
+        service.preflight(c.root,c.clock()+60)
+    assert not engine.calls

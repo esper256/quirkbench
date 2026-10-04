@@ -1370,8 +1370,8 @@ def _main(argv=None):
                                     server.shutdown(); thread.join(5)
                         finally:
                             server.server_close()
-                            if coordinator is not None: owner.reconcile_units(coordinator.services)
-                            if jobs is not None: owner.reconcile_units(jobs.services)
+                            if coordinator is not None: owner.interrupt_and_reconcile(coordinator.services)
+                            if jobs is not None: owner.interrupt_and_reconcile(jobs.services)
                 answer = {'stopped': True}
             else:
                 raise ValueError('unknown command')

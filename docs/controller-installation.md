@@ -99,7 +99,7 @@ use its launcher to install the original archive:
 The response's `data.runtime_root` is the canonical runtime beneath
 `$XDG_DATA_HOME/quirkbench/controller/VERSION-ARCHIVE_SHA256` (default
 `~/.local/share/quirkbench/controller`). Run that directory's `bin/quirkbench`
-for initial `setup`, `status` and the manual service setup below.
+for initial `setup`, `status` and the foreground setup below.
 The installation is verified before publication, repeatable and never overwritten
 with differing bytes. Installing alone selects no service and starts no work.
 Archive checksums establish integrity and identity, not publisher authenticity;
@@ -127,7 +127,7 @@ false. No publisher key or compatible signed release set is bundled yet, so this
 an explicit trust-input foundation, not the completed `./quirkbench/install` release
 journey or automatic key rotation.
 
-After manual service/trust setup, or when upgrading an existing installation:
+After controller/trust setup, or when upgrading an existing installation:
 
 ```sh
 quirkbench controller-install /absolute/output/controller.tar.gz --activate --json
@@ -178,8 +178,8 @@ the desired policy; check the observed logout behavior. Existing initialized dat
 are inspected without migrations; active owners/work and changed recorded choices
 block setup. `setup-state` and `setup-check` remain supported.
 State selection stays valid if the extracted archive is moved.
-Run service checks from the native controller shell. An optional development
-container can expose a different service manager and PATH. No daemon,
+Run capability checks from the controller shell. An optional development
+container can expose different engines, cgroups and PATH. No daemon,
 firewall or power policy is changed. Build toolchains stay in the isolated builder.
 
 ## Installed rootfs worker

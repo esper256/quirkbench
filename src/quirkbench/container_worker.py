@@ -1,5 +1,7 @@
 """Fixed PID-1 workload dispatcher; no engine access or publication authority."""
 import json
+import math
+import time
 import os
 from pathlib import Path
 import re
@@ -56,6 +58,12 @@ def prepare(root, stage, record):
     return 0
 
 
+def remaining_seconds(record, *, monotonic=time.monotonic):
+    remaining=record['monotonic_deadline']-monotonic()
+    if remaining<=0:raise Conflict('worker elapsed deadline expired before startup')
+    return max(1,math.ceil(remaining))
+
+
 def main(argv=None):
     arguments=sys.argv[1:] if argv is None else argv
     timeout=int(arguments[0]); phase=arguments[1]; root=Path(arguments[2]);stage=Path(arguments[3])
@@ -65,6 +73,7 @@ def main(argv=None):
     signal.signal(signal.SIGALRM,lambda *_:os._exit(124));signal.alarm(timeout)
     record=execution_record()
     verify_execution(root,record['unit'],os.environ['QUIRKBENCH_WORKER_RECORD'])
+    signal.alarm(min(timeout,remaining_seconds(record)))
     claim=record['claim']
     if stage!=Path(claim['stage_dir']) or phase!=record['phase']:
         raise Conflict('fixed container stage differs from its execution record')
