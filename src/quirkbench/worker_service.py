@@ -84,6 +84,28 @@ class ContainerWorkerServices:
         return item
 
     def preflight(self, state_root, deadline):
+        remaining = self.engine_preflight(state_root, deadline)
+        if self.worker_image is None:
+            from .controller_service import configuration
+            from .installed_release import inspect_selected
+            from .builder_setup import retained_builder
+            try:
+                config = configuration(self.root)
+                selected = retained_builder(self.root, inspect_selected(Path(config['runtime']).parent.parent))
+            except (OSError, ValueError) as exc:
+                raise WorkerServiceError('prepare the signed first builder with setup --builder-archive; no verified worker image is selected') from exc
+            self.worker_image = selected['builder_config_digest']
+        self._image(self.worker_image)
+        return remaining
+
+    def preflight_operation(self, state_root, deadline, operation_id):
+        with StateReader(state_root).connection() as db:
+            row = db.execute('SELECT kind FROM operations WHERE id=?', (operation_id,)).fetchone()
+        if row is not None and row['kind'] == 'builder_prepare':
+            return self.engine_preflight(state_root, deadline)
+        return self.preflight(state_root, deadline)
+
+    def engine_preflight(self, state_root, deadline):
         root=Path(state_root)
         if not root.is_absolute() or root.resolve()!=root or root.is_symlink():
             raise WorkerServiceError('worker state root must be canonical')
@@ -101,7 +123,6 @@ class ContainerWorkerServices:
             if not endpoint.startswith('unix:///'):
                 raise WorkerServiceError('controller workers require a local Docker Unix socket and shared filesystem')
         self._engine_identity()
-        self._image(self.worker_image)
         return deadline-self.clock()
 
     def _path(self, unit):
@@ -113,7 +134,7 @@ class ContainerWorkerServices:
         path=self._path(unit)
         from .worker_execution import load
         record=load(read_file(path.parent,path.name,limit=65536),self.root)
-        if (record.get('schema_version')!=2 or record.get('unit')!=unit
+        if (record.get('schema_version') not in (2,3) or record.get('unit')!=unit
                 or record.get('engine')!=self.engine
                 or record.get('engine_identity')!=self._engine_identity()):
             raise WorkerServiceError('worker execution backend differs from its recorded owner')
@@ -202,7 +223,7 @@ class ContainerWorkerServices:
         self.backend.start(identity)
 
     def launch(self, claim, state_root):
-        self.preflight(state_root,claim['deadline'])
+        self.preflight_operation(state_root,claim['deadline'],claim['id'])
         unit=claim['worker_unit']; path=self._path(unit)
         if unit!=self.worker_identity(claim['id'],claim['worker_generation']) or path.exists():
             raise WorkerServiceError('worker execution identity is already used')
@@ -211,14 +232,22 @@ class ContainerWorkerServices:
         from .worker_container_plan import intent_document, capture_runtime, private_inputs
         from .worker_execution import CLAIM_FIELDS
         intent=intent_document(self.root,claim)
+        bootstrap = claim['kind'] == 'builder_prepare'
         record={'schema_version':2,'unit':unit,'engine':self.engine,
                 'engine_identity':self._engine_identity(),'claim':{k:claim[k] for k in CLAIM_FIELDS},
                 'worker_image':self.worker_image,'reserve_bytes':int(config.get('reserve_gib',20)*1024**3),
                 'monotonic_deadline':self.monotonic()+min(86400,claim['deadline']-self.clock()),
                 'payload_args':{k:v for k,v in intent['arguments'].items() if k=='recipe_sha256'},
                 'executions':[],'phase':'reserved','complete':False}
+        if bootstrap:
+            record.update(schema_version=3, bootstrap=True,
+                          worker_image=intent['arguments']['builder_config_digest'])
         self._save(record)
         try:
+            if bootstrap:
+                from .worker_container_plan import bootstrap_builder
+                bootstrap_builder(self, record, intent)
+                return
             # Keep WAL/shm present while preparation uses a read-only bind.
             # SQLite otherwise removes them at the last close and a subsequent
             # read-only process cannot recreate its shared-memory index.
@@ -277,6 +306,11 @@ class ContainerWorkerServices:
         if validate_boot_id(boot_id)!=validate_boot_id(self.boot_id_reader()):
             raise WorkerServiceError('worker boot changed; reconcile before consuming output')
         record=self._load(unit)
+        if record.get('bootstrap'):
+            from .retention import stop_proof
+            try: stop_proof(Path(record['claim']['stage_dir']))
+            except (OSError, ValueError) as exc:
+                raise WorkerServiceError('bootstrap subprocess stop remains unresolved') from exc
         return record['complete']
 
     def stop_and_verify(self, unit, recorded_boot_id):
@@ -285,6 +319,11 @@ class ContainerWorkerServices:
             if recorded!=validate_boot_id(self.boot_id_reader()): return 'previous_boot'
             raise WorkerServiceError('legacy worker must be stopped using its original installation, or reconciled after host reboot; no container stop proof exists')
         record=self._load(unit)
+        if record.get('bootstrap'):
+            from .retention import stop_proof
+            try: stop_proof(Path(record['claim']['stage_dir']))
+            except (OSError, ValueError) as exc:
+                raise WorkerServiceError('bootstrap subprocess stop remains unresolved') from exc
         for execution in record['executions']:
             if execution.get('removed'): continue
             if not execution.get('start_requested',True) or execution.get('stopped'):

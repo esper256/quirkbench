@@ -1332,8 +1332,6 @@ def _main(argv=None):
                         from .worker_service import ContainerWorkerServices
                         from .recovery_coordinator import RecoveryImageCoordinator
                         services=ContainerWorkerServices(worker_program=args.recovery_worker.resolve(),engine=args.worker_engine,worker_image=args.worker_image)
-                        owner.reconcile_units(services)
-                        services.preflight(controller.root,controller.clock()+60)
                         coordinator=RecoveryImageCoordinator(owner,services,signing_home=args.recovery_signing_home,
                             trusted_public_key=args.recovery_public_key,fingerprint=args.recovery_fingerprint)
                     jobs=None
@@ -1341,9 +1339,9 @@ def _main(argv=None):
                         from .worker_service import ContainerWorkerServices
                         from .job_coordinator import JobCoordinator
                         services=ContainerWorkerServices(worker_program=args.job_worker.resolve(),development=True,engine=args.worker_engine,worker_image=args.worker_image)
-                        owner.reconcile_units(services)
-                        services.preflight(controller.root,controller.clock()+60)
                         jobs=JobCoordinator(owner,services)
+                    from .controller_compute import ComputeGate
+                    compute=ComputeGate(owner,[item for item in (coordinator,jobs) if item is not None])
                     from .enrollment_runtime import publication_runtime
                     with publication_runtime(controller,registry=registry,service_runtime=args.service_runtime,
                             host=args.host,port=args.port,certfile=args.cert,keyfile=args.key,allow_lan=args.allow_lan) as publication:
@@ -1363,10 +1361,8 @@ def _main(argv=None):
                                     with heartbeat as failures:
                                         while True:
                                             if failures: raise failures[0]
-                                            result=coordinator.tick() if coordinator is not None else None
-                                            if result is not None: print('RECOVERY_IMAGE '+json.dumps(result,sort_keys=True),flush=True)
-                                            result=jobs.tick() if jobs is not None else None
-                                            if result is not None: print('JOB '+json.dumps(result,sort_keys=True),flush=True)
+                                            for result in compute.tick():
+                                                print('OPERATION '+json.dumps(result,sort_keys=True),flush=True)
                                             owner.housekeep_requested()
                                             time.sleep(2)
                                 finally:

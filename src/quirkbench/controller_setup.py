@@ -222,6 +222,9 @@ def controller_status(root=None, *, config_home=None, filesystem=None,
         report.update((ready or require_ready)(root))
     except (OSError, ValueError, sqlite3.Error) as exc:
         report['instructions'].append(str(exc)[:512])
+    if report['background_work_ready']:
+        from .controller_compute import readiness
+        report.update(readiness(root))
     report.update((installation_inspector or installation_report)(root, service_ready=report['background_work_ready']))
     count = None
     database_available = False
@@ -299,6 +302,7 @@ def controller_status(root=None, *, config_home=None, filesystem=None,
         'readiness': {'state_selected': bool(selected), 'database_available': database_available,
                       'resources_recorded': bool(matches and preferences_match),
                       'runtime_verified': runtime_verified, 'service_ready': report['background_work_ready'],
+                      'compute_ready': report.get('compute_ready', False),
                       'builder_ready': builder['ready'], 'release_verified': release['publisher_authenticated'] and release['interfaces_compatible'], 'enrollment_available': enrollment['enrollment_available'],
                       'target_count': count, 'setup_complete': False},
         'pending_integration': ([] if enrollment['enrollment_available'] else ['enrollment_exchange']) + ([] if builder['ready'] else ['builder_preparation']) +

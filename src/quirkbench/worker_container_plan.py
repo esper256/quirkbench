@@ -174,6 +174,50 @@ def _job_record(claim, state, **extra):
             'state':state,**extra}
 
 
+def bootstrap_builder(services, record, intent):
+    """Trusted capture/import under the existing owner; no prior image executes."""
+    from .builder_setup import binding, capture, check_space, MAX_ARCHIVE
+    from .process_identity import controller_boot_id
+    from .process_ownership import ACTIVE_WORK
+    from .retention import stop_proof
+    from .recovery_builder_archive import inspect_builder_archive
+    from .recovery_podman import _copy_cas_object
+    claim=record['claim']; stage=Path(claim['stage_dir']); args=binding(intent)
+    verify=lambda: services._current(record)
+    for name in ('output','diagnostics'):
+        (stage/name).mkdir(mode=0o700)
+    atomic_write(stage/'binding.json',canonical({'input_digest':claim['input_digest']}))
+    # Reuse subprocess recording, including the crash-before-PID uncertainty bit.
+    atomic_write(stage/'process-groups.json',canonical({'boot':controller_boot_id(),
+        'pid_namespace':os.readlink('/proc/self/ns/pid'),'groups':[]}))
+    token=ACTIVE_WORK.set(stage)
+    try:
+        verify()
+        if claim['stage']=='builder_capture':
+            result=capture(intent,stage,verify,lambda *_:None,state_root=services.root)
+            atomic_write(stage/'diagnostics/stage-result.json',canonical(_job_record(claim,'COMPLETE',result=result)))
+            record['complete']=True
+            services._save(record)
+            return
+        archive=stage/'builder.tar'
+        _copy_cas_object(services.root/'artifacts',args['builder_archive_sha256'],archive,MAX_ARCHIVE,
+            space_check=lambda amount: (verify(),check_space(stage,amount,record['reserve_bytes'])))
+        with archive.open('rb') as stream:
+            inspect_builder_archive(stream,args['builder_config_digest'],require_no_entrypoint=True,verify=verify)
+        verify()
+        remaining=min(claim['deadline']-services.clock(),record['monotonic_deadline']-services.monotonic())
+        services._invoke('load','--input',str(archive),timeout=min(1800,max(1,remaining)))
+        verify()
+        services._image(args['builder_config_digest'])
+        stop_proof(stage)
+        runtime=services._path(record['unit']).parent/record['unit']
+        runtime.mkdir(mode=0o700)
+        capture_runtime(runtime/'code',excluded=private_inputs(services.root))
+        services._start(record,'builder-marker')
+    finally:
+        ACTIVE_WORK.reset(token)
+
+
 def completed(services, record, code):
     claim=record['claim']; stage=Path(claim['stage_dir']); root=services.root
     path=stage/'diagnostics/stage-result.json'
