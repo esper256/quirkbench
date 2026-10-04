@@ -150,3 +150,9 @@ def preflight_recipe(recipe: dict, catalog: dict, store) -> dict:
             "recovery_fragment_symbols": len(fragment),
             "staged_kernel_config_sha256": digest(merged_config),
             "recipe_digest": digest(canonical(recipe))}
+
+
+def require_executable_recipe(recipe: dict) -> None:
+    """Historical v1 records remain readable, but no longer start work."""
+    if not isinstance(recipe, dict) or type(recipe.get('schema_version')) is not int or recipe['schema_version'] != 2:
+        raise BuildError('custom-kernel recovery recipe execution is retired; prepare a stock Fedora schema-v2 recipe')

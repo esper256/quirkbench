@@ -21,7 +21,7 @@ FAKE_IMAGE_SHA = "a" * 64
 
 
 def assembled(tmp_path, monkeypatch):
-    import quirkbench.recovery_release as release
+    import quirkbench.recovery_stock_release as release
 
     catalog, recipe, store, stage, record = prepared(tmp_path, monkeypatch)
     inputs = plan(catalog, recipe, store, stage, record, tmp_path / "factory.img")
@@ -73,30 +73,29 @@ def assembled(tmp_path, monkeypatch):
 def test_candidate_binds_recipe_rpms_kernel_runtime_and_image(tmp_path, monkeypatch):
     catalog, recipe, store, record, inputs, manifest = assembled(tmp_path, monkeypatch)
     candidate = recovery_release_candidate(recipe, catalog, store, record, inputs)
-    schema = json.loads((ROOT / "schemas/recovery-release-candidate.v1.schema.json").read_text())
+    schema = json.loads((ROOT / "schemas/recovery-release-candidate.v2.schema.json").read_text())
     Draft202012Validator.check_schema(schema)
     Draft202012Validator(schema).validate(candidate)
     assert load_release_candidate(canonical(candidate)) == candidate
     assert candidate["recipe_digest"] == record["recipe_digest"]
     assert candidate["image_sha256"] == FAKE_IMAGE_SHA
     assert candidate["kernel_sha256"] == manifest["recovery_kernel_sha256"]
-    assert candidate["rpm_snapshot_sha256"] == catalog["entries"][0]["rpm_snapshot_sha256"]
+    assert candidate["rpm_snapshot_sha256"] == json.loads(store.get(recipe["rootfs_lock_sha256"]))["rpm_snapshot_sha256"]
     assert candidate["qualification_status"] == "unqualified"
     assert candidate["qualified_capabilities"] == []
     assert not Path(str(inputs.output) + ".release.json").exists()
 
 
 @pytest.mark.parametrize("change,match", [
-    ("checksum", "checksum sidecar"),
+    ("checksum", "checksum differs"),
     ("manifest", "manifest differs"),
     ("candidate", "manifest differs"),
-    ("input", "capacity record differs"),
-    ("recipe", "inputs differ"),
-    ("provenance", "provenance differs"),
-    ("sidecar_link", "checksum sidecar"),
-    ("source", "source differs"),
-    ("identity", "manifest differs"),
-    ("size", "size differs"),
+    ("input", "manifest differs"),
+    ("recipe", "record differs"),
+    ("provenance", "manifest differs"),
+    ("sidecar_link", "checksum differs"),
+        ("identity", "factory image"),
+    ("size", "manifest differs"),
 ])
 def test_changed_or_nonfactory_evidence_cannot_make_candidate(tmp_path, monkeypatch,
                                                                change, match):
@@ -115,15 +114,13 @@ def test_changed_or_nonfactory_evidence_cannot_make_candidate(tmp_path, monkeypa
         record = {**record, "recipe_digest": "0" * 64}
     elif change == "provenance":
         value = json.loads(inputs.recovery_provenance.read_bytes())
-        value["source_tree_sha256"] = "0" * 64
+        value["recipe_digest"] = "0" * 64
         inputs.recovery_provenance.write_bytes(canonical(value) + b"\n")
-    elif change == "source":
-        (inputs.rootfs_dir.parent / "source/unexpected").write_text("changed")
     elif change == "identity":
         manifest["identity"]["target_id"] = "enrolled"
         Path(str(inputs.output) + ".json").write_bytes(canonical(manifest))
     elif change == "size":
-        import quirkbench.recovery_release as release
+        import quirkbench.recovery_stock_release as release
         monkeypatch.setattr(release, "_image_identity", lambda _: (FAKE_IMAGE_SHA, 8))
     else:
         sidecar = Path(str(inputs.output) + ".sha256")
@@ -145,11 +142,11 @@ def test_candidate_validator_rejects_qualification_claim(tmp_path, monkeypatch):
         load_release_candidate(canonical(candidate))
     candidate["qualified_capabilities"] = []
     candidate["policy"] = {**candidate["policy"], "root_read_only": 1}
-    with pytest.raises(BuildError, match="identity or layout"):
+    with pytest.raises(BuildError, match="identity/policy"):
         validate_release_candidate(candidate)
     candidate["policy"]["root_read_only"] = True
     candidate["esp_required_bytes"] = candidate["esp_payload_bytes"]
-    with pytest.raises(BuildError, match="identity or layout"):
+    with pytest.raises(BuildError, match="size/capacity"):
         validate_release_candidate(candidate)
 
 
@@ -160,7 +157,7 @@ def test_candidate_loader_requires_exact_canonical_bytes(tmp_path, monkeypatch, 
     if change == "spacing":
         raw = b" " + raw
     elif change == "duplicate":
-        raw = raw.replace(b'"schema_version":1', b'"schema_version":1,"schema_version":1')
+        raw = raw.replace(b'"schema_version":2', b'"schema_version":2,"schema_version":2')
     else:
         raw += b"\n"
     with pytest.raises(BuildError):

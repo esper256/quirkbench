@@ -169,11 +169,11 @@ recovery boot and driver-exclusion checks do not establish safety of every kerne
 patch. Record that limit with experiment evidence. No universal hardware safety
 claim follows from a generic design or passing software fixtures.
 
-Existing profiles and recovery recipes conflate these policies and require custom
-kernel provenance. A future versioned migration must represent recovery package
-identity and boot-device policy separately from candidate exclusions. Do not change
-old identifiers' meaning, relax existing validators or relabel historical artifacts.
-The implementation does not yet satisfy this revised contract.
+Recovery recipe/rootfs-lock/release v2 represent stock package identity and
+boot-device policy separately from candidate exclusions. Recovery execution accepts
+v2 only; historical v1 readers retain original custom-kernel provenance meaning.
+Do not change old identifiers or relabel historical artifacts. Software validation
+does not establish physical boot or storage protection on a target.
 
 See [recovery and evidence](recovery-and-evidence.md) for separate selection, reset
 and diagnostic requirements. Current no-kexec policy leaves kdump unavailable.
