@@ -14,7 +14,9 @@
       "tests/test_job_*",
       "tests/test_builder_setup.py",
       "src/quirkbench/container_worker.py",
-      "tests/test_container_workers.py"
+      "tests/test_container_workers.py",
+      "src/quirkbench/container_engine.py",
+      "tests/test_container_engine.py"
     ],
     "tests": [
       "tests/test_distribution_source.py",
@@ -25,7 +27,8 @@
       "tests/test_worker_claim.py",
       "tests/test_worker.py",
       "tests/test_container_workers.py",
-      "tests/test_worker_service.py"
+      "tests/test_worker_service.py",
+      "tests/test_container_engine.py"
     ]
   },
   "endpoint-control": {
