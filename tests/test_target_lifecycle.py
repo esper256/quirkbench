@@ -74,12 +74,12 @@ def test_revocation_reports_unresolved_work_and_never_revives_issued_authority(t
     # physical campaign; construct that independent device-bound claim directly.
     with c.lifecycle() as owner:
         c.resume('campaign')
+        operation=c.admit_operation('old-build','build',{},device_id='target')
+        worker=owner.claim(operation['id'],stage='job_inputs',deadline=c.clock()+60)
         claim=c.claim('target',report.boot_id,'physical-claim');attempt=claim['attempt_id']
         c.decide_attempt(attempt,'approved',request_id='approve-1')
         if handoff:c.handoff(attempt,claim['token'],report.boot_id,'a'*64)
         original=c.status('campaign')['attempts'][0]
-        operation=c.admit_operation('old-build','build',{},device_id='target')
-        worker=owner.claim(operation['id'],stage='job_inputs',deadline=c.clock()+60)
         receipt=revoke_target(c.root,'target','revoke')
         assert receipt['workers_pending_at_revoke']==[worker['id']]
         assert c.status('campaign')['state']=='PAUSE_REQUESTED'
