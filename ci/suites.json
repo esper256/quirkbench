@@ -248,6 +248,9 @@
       "tests/test_recovery_vendor.py",
       "src/quirkbench/recovery_vendor.py",
       "src/quirkbench/profiles/vendor-fedora44.v1.json",
+      "src/quirkbench/recovery_bundle*",
+      "tests/test_recovery_bundle.py",
+      "schemas/recovery-input-bundle.v1.schema.json",
       "src/quirkbench/target_install.py",
       "src/quirkbench/target_payload.py",
       "src/quirkbench/recovery_runtime_revision.py",
@@ -267,6 +270,7 @@
       "tests/test_recovery_foreground.py",
       "tests/test_recovery_space.py",
       "tests/test_recovery_vendor.py",
+      "tests/test_recovery_bundle.py",
       "tests/test_recovery_runtime_revision.py"
     ]
   }

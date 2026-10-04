@@ -29,3 +29,5 @@ does not authorize dropping compatibility or reinterpreting stored evidence.
 
 - [Attributable investigation reports and retention](investigation-reports.md)
 - [Public patches and investigation export](investigation-export.md)
+
+- [Portable recovery input bundles](recovery-input-bundles.md): prepare, verify, transfer and build without a controller.
