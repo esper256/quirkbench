@@ -314,6 +314,17 @@ def parser():
     recovery_image=commands.add_parser('recovery-image',help='admit a complete stock image for the fixed recovery coordinator')
     recovery_image.add_argument('--recipe',required=True); recovery_image.add_argument('--builder-archive',required=True)
     recovery_image.add_argument('--request-id',required=True)
+    foreground=commands.add_parser('recovery-image-build',help='build an unsigned stock recovery image in the foreground; no controller or systemd required')
+    foreground.add_argument('--store',type=Path,required=True,help='existing CAS containing verified stock recipe and RPM inputs')
+    foreground.add_argument('--recipe',required=True)
+    foreground.add_argument('--builder-image',required=True,help='exact local sha256 image configuration ID from the verified recipe')
+    foreground.add_argument('--engine',choices=('podman','docker'),default='podman')
+    foreground.add_argument('--output',type=Path,required=True,help='new output directory outside Git')
+    foreground.add_argument('--cpus',type=int,default=4)
+    foreground.add_argument('--memory-gib',type=int,default=4)
+    foreground.add_argument('--timeout',type=int,default=3600,help='whole-container deadline in seconds')
+    cleanup=commands.add_parser('recovery-image-cleanup',help='stop and remove only the container recorded by a foreground image build; preserve files')
+    cleanup.add_argument('output',type=Path)
     recovery_images=commands.add_parser('recovery-images',help='list published recovery images and exact retained file paths; read-only')
     recovery_images.add_argument('--json',action='store_true')
     recovery_images.add_argument('--limit',type=int,default=20)
@@ -1373,6 +1384,18 @@ def _main(argv=None):
 def main(argv=None):
     """A publication barrier, not a scheduler; read-only commands do no housekeeping."""
     args=parser().parse_args(argv)
+    if args.command in ('recovery-image-build','recovery-image-cleanup'):
+        from .recovery_foreground import build,cleanup
+        from .build import BuildError
+        import subprocess
+        try:
+            answer=(cleanup(args.output) if args.command=='recovery-image-cleanup' else
+                    build(cas_root=args.store,recipe_sha256=args.recipe,image=args.builder_image,
+                          output=args.output,engine=args.engine,cpus=args.cpus,
+                          memory_gib=args.memory_gib,timeout=args.timeout))
+            print(json.dumps(answer,sort_keys=True));return 0
+        except (BuildError,OSError,ValueError,KeyError,subprocess.TimeoutExpired) as exc:
+            print('Recovery image unavailable: '+str(exc),file=sys.stderr);return 2
     readonly=((args.command=='recovery-inputs' and args.action in ('replay-check','candidate-spec')) or args.command in ('storage','experiment','build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
                                'target','endpoint','target-service','serve-repository','release-check') or
               (args.command=='campaign' and args.action=='status') or

@@ -1,7 +1,11 @@
 # Fedora build environment
 
-Native controller user services and rootless Podman own product execution. Distrobox
-is an optional development shell. `build` and `compose` submit durable jobs through
+Systemd is optional host integration. Foreground recovery image generation uses
+Podman or Docker without a running controller; see
+[foreground image generation](../docs/recovery-operations.md#foreground-image-generation).
+The current durable controller adapter uses systemd user services and rootless
+Podman; alternate background supervision is tracked separately. Distrobox is an
+optional development shell. `build` and `compose` submit durable jobs through
 [controller service setup](../docs/controller-installation.md#durable-build-and-composition-service)
 and return operation IDs; `--wait` reads their results. No image build is required
 for ordinary software edits. Recovery uses stock packages; kernel compile guidance
