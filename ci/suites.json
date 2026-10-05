@@ -296,7 +296,8 @@
       "src/quirkbench/target_install.py",
       "src/quirkbench/target_payload.py",
       "src/quirkbench/recovery_runtime_revision.py",
-      "tests/test_recovery_runtime_revision.py"
+      "tests/test_recovery_runtime_revision.py",
+      "src/quirkbench/recovery_initramfs_audit.py"
     ],
     "tests": [
       "tests/test_release_plan.py",
@@ -313,7 +314,9 @@
       "tests/test_recovery_space.py",
       "tests/test_recovery_vendor.py",
       "tests/test_recovery_bundle.py",
-      "tests/test_recovery_runtime_revision.py"
+      "tests/test_recovery_runtime_revision.py",
+      "tests/test_recovery_initramfs_audit.py",
+      "tests/test_recovery_image_plan.py"
     ]
   }
 }

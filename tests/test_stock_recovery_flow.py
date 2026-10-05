@@ -40,6 +40,9 @@ class Runner:
             parent=command.cwd.parent
             generated=tree(parent)
             install_guard(generated)
+            from quirkbench.recovery_storage import ROOT_GENERATOR
+            generator=generated/'etc/systemd/system-generators/systemd-fstab-generator'
+            generator.write_text(ROOT_GENERATOR); generator.chmod(0o755)
             (generated/'lib/dracut/modules.txt').write_text('base\nrootfs-block\nsystemd\nquirkbench-storage\n')
             command.cwd.rmdir(); generated.rename(command.cwd)
         else: pytest.fail('unexpected compiler or stage: '+phase)
