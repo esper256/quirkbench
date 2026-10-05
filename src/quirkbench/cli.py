@@ -1,8 +1,9 @@
-"""Controller administration and positively verified external-USB target services."""
+"""Task-oriented public CLI over the existing controller application services."""
 from __future__ import annotations
 import argparse
 from dataclasses import asdict
 import json
+import shlex
 import sqlite3
 from pathlib import Path
 import sys
@@ -249,8 +250,9 @@ def _main(argv=None):
                 if args.output:
                     from .backup_coverage import load_summary
                     answer['coverage']=load_summary(args.destination)
+                    prefix=shlex.join(['quirkbench','--state',str(controller.root)])
                     answer['next_steps']=['Keep private identity and operator configuration in a separate protected backup.',
-                        'For incomplete sources: stop writers, investigation capture-source NAME --workspace ID --quiesced --request-id ID; inspect operation status, then back up to a new destination.',
+                        f'For incomplete sources: stop writers, run {prefix} investigation source capture NAME --workspace ID --quiesced --request-id ID; inspect {prefix} admin operation show OPERATION_ID, then back up to a new destination.',
                         'Reconcile offline targets and pending evidence; target-only backlog is unknown.']
             elif args.command == 'resolve':
                 answer = controller.resolve(args.attempt_id, args.disposition, args.note)

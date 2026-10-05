@@ -35,13 +35,18 @@ def test_build_arguments_cannot_override_execution_ownership_or_limits(option):
     with pytest.raises(ContractError):arguments([option,IMAGE,'true'])
 
 
-def test_ad_hoc_build_retains_output_after_verified_container_stop(tmp_path,monkeypatch):
+def test_ad_hoc_build_retains_output_after_verified_container_stop(tmp_path,monkeypatch,capsys):
     c=Controller(tmp_path/'state',reserve_bytes=0)
     monkeypatch.setattr(development_run,'discover_state_root',lambda:c.root)
     monkeypatch.setattr(development_run,'ArtifactStore',lambda _:c.store)
     run_id='quirkbench-build-test';stage=c.root/'development-runs'/run_id/'work';stage.mkdir(parents=True)
     values=['--rm','--network=none',IMAGE,'true']
-    development_run.prepare(run_id,stage,'build.log','build.status',values)
+    prepared=development_run.prepare(run_id,stage,'build.log','build.status',values)
+    import shlex
+    from quirkbench.cli import parser
+    args=parser().parse_args(shlex.split(prepared['monitor'])[1:])
+    assert args.route=='dev monitor' and args.run_id==run_id
+    assert args.investigation is None
     run=json.loads((stage.parent/'run.json').read_bytes());engine=Podman()
     service=DevelopmentServices(c.root,runner=engine)
     def execute(argv,log,**kwargs):
@@ -52,6 +57,12 @@ def test_ad_hoc_build_retains_output_after_verified_container_stop(tmp_path,monk
     assert service.run(run,values)==0
     assert (stage.parent/'build.status').read_text()=='0\n'
     assert json.loads((stage.parent/'stopped.json').read_bytes())['proof']=='stopped'
+    from quirkbench.cli import main
+    database=(c.root/'controller.sqlite').read_bytes()
+    assert main(['dev','monitor',run_id,'--state',str(c.root),'--once','--json'])==0
+    viewed=json.loads(capsys.readouterr().out)['data']['run']
+    assert viewed['run_id']==run_id and viewed['state']=='SUCCEEDED'
+    assert (c.root/'controller.sqlite').read_bytes()==database
     monkeypatch.setattr(development_run,'DevelopmentServices',lambda _:service)
     saved=development_run.retain(c.root,run_id,outputs=['result'])
     assert c.store.get(saved['retained_outputs']['result'])==b'retained artifact'

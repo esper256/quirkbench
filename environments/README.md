@@ -10,9 +10,10 @@ Controller execution requires no systemd integration. Foreground recovery image 
 Podman or Docker without a running controller; see
 [foreground image generation](../docs/recovery-operations.md#foreground-image-generation).
 The foreground controller owns bounded container workers. Distrobox is an
-optional development shell. `build` and `compose` submit durable jobs through
+optional development shell. `experiment submit` coordinates preparation through
 [controller service setup](../docs/controller-installation.md#foreground-build-and-composition-controller)
-and return operation IDs; `--wait` reads their results. No image build is required
+and returns a submission ID; use `experiment status` or `monitor` to follow it.
+Explicit `investigation build` stages remain available for diagnostics. No image build is required
 for ordinary software edits. Recovery uses stock packages; kernel compile guidance
 below applies to experimental kernels and explicitly requested custom builds.
 
@@ -89,8 +90,8 @@ can survive disposal of bulky work. The launcher prints the monitor command and
 stays attached until completion. Use another terminal for the monitor.
 
 ```sh
-quirkbench monitor --run "$RUN_ID"
-quirkbench monitor --run "$RUN_ID" --once
+quirkbench dev monitor "$RUN_ID"
+quirkbench dev monitor "$RUN_ID" --once
 ```
 
 The monitor runs in your existing terminal. No Konsole, desktop environment,

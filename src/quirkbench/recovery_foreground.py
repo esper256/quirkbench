@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import signal
+import shlex
 import sys
 import uuid
 
@@ -195,7 +196,7 @@ def build(*, cas_root, recipe_sha256, image, output, engine='podman', cpus=None,
             record['stopped'] = True
             atomic_write(output/'build.json', canonical(record))
         except Exception as exc:
-            print('Container cleanup remains uncertain: '+str(exc)+'. Use recovery-image-cleanup '+str(output), file=sys.stderr)
+            print('Container cleanup remains uncertain: '+str(exc)+'. Use quirkbench dev recovery cleanup '+shlex.quote(str(output)), file=sys.stderr)
         raise
 
 

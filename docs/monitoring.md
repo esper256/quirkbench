@@ -32,14 +32,19 @@ schemas and unavailable services are reported. The display separates phase advan
 heartbeat age, measured counters, waits, deadlines, worker completion and publication.
 Stock preparation reports package/runtime installation, initramfs, assembly and owner
 validation/signing/publication. Build/compose jobs report input preparation, compilation
-or composition, owner validation, signing and publication. `--wait` is optional;
-default submission returns the job ID and monitoring commands immediately. Worker JSON remains advisory and is accepted only by
+or composition, owner validation, signing and publication. Use `experiment status`
+or `experiment logs` for a submitted test, and `admin operation show` for low-level
+troubleshooting;
+test submission returns its request ID and next-step commands immediately. Worker
+JSON remains advisory and is accepted only by
 the current owner under its exact epoch/generation/claim fence. Malformed advisory
 records cannot become execution authorization or terminate the coordinator.
 
 `admin operation list --json` pages at most 100 summaries with `--after`/`--limit`.
-`admin operation show ID` retains the existing focused view and interval controls;
-Ctrl+C stops only the view. Output bytes measure activity, not percent complete.
+`admin operation show ID` prints one recorded status snapshot. Use `monitor` to
+follow investigation progress continuously; Ctrl+C stops only that view.
+For a bounded ad hoc development build, use `dev monitor RUN_ID [--once] [--json]`.
+Output bytes measure activity, not percent complete.
 A quiet command is not proof of deadlock. Logs come only from the selected run's
 allowlisted directories; reads are bounded, links are rejected and terminal control
 characters are filtered in human views.

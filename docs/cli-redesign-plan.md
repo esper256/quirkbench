@@ -262,7 +262,7 @@ This plan removes controller CLI prompts, not necessary physical target confirma
 | `recovery-bundle` | `dev recovery plan/prepare/verify/export/import/build` |
 | `recovery-inputs` | `dev recovery inputs` for necessary specialist actions |
 | `recovery-image` | `dev recovery submit` for controller-managed production |
-| `recovery-image-build` | `dev recovery build`; use the portable bundle path normally |
+| `recovery-image-build` | `dev recovery build-recipe`; use the portable bundle `dev recovery build` path normally |
 | `recovery-image-cleanup` | `dev recovery cleanup` |
 | `build`, `candidate-rootfs`, `compose` | Investigation-scoped build stages only |
 | `image`, `qualify-image` | `dev image assemble/qualify` |
@@ -271,6 +271,7 @@ This plan removes controller CLI prompts, not necessary physical target confirma
 | `settings`, `backup`, `restore` | `admin settings/backup/restore` |
 | `library-maintenance` | `admin recovery maintenance` |
 | `monitor`, redundant `watch` | Keep `monitor`; remove public `watch` |
+| Development `monitor --run RUN_ID` | `dev monitor RUN_ID`; reuse the existing read-only development view |
 | `campaign`, `register`, `artifact`, `snapshot`, `agent-step`, `demo` | Remove public prototypes; retain useful services/fixtures |
 | Raw `serve`, `serve-repository`, flags-only target client, `target-service` | Remove user CLI facades; preserve actual packaged process entry points |
 

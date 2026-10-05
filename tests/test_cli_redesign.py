@@ -55,6 +55,20 @@ def test_missing_observation_does_not_prompt_or_open_state(tmp_path,monkeypatch,
     assert not (tmp_path/'absent').exists()
 
 
+def test_development_monitor_uses_existing_readonly_view(tmp_path,monkeypatch,capsys):
+    calls=[]
+    def monitor(root,**kwargs):
+        calls.append((root,kwargs))
+        return 0
+    monkeypatch.setattr('quirkbench.tui.monitor',monitor)
+    state=tmp_path/'absent'
+    assert cli.main(['dev','monitor','quirkbench-build-test','--state',str(state),'--once','--json'])==0
+    assert calls==[(state,{'run_id':'quirkbench-build-test','investigation':None,'once':True,'json_output':True})]
+    assert not state.exists()
+    with pytest.raises(SystemExit):
+        parser().parse_args(['monitor','--run','quirkbench-build-test'])
+
+
 def test_private_controller_process_has_no_public_facade():
     from quirkbench.controller_process import parser as process
     args=process().parse_args(['--state','/tmp/example','--cert','cert','--key','key','--credential-registry'])

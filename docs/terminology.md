@@ -27,10 +27,10 @@ Some existing technical names legitimately retain other terms:
   component, not a Quirkbench machine role. CLI help must say so.
 - Container host OS, VM host/guest and SSH host keys describe established technical
   relationships. State the relationship explicitly where ambiguity is possible.
-- Existing `device_id`, `--device`, `DeviceClient`, registration routes and
-  `library-maintenance` arguments identify an enrolled target. Preserve these
-  stored names and data for compatibility; the owner-approved CLI redesign replaces
-  public command names without aliases. Do not rename wire fields merely
+- Existing `device_id`, `DeviceClient` and registration routes identify an enrolled
+  target. Preserve stored and wire names and data for compatibility; public target
+  selection uses `--target`. The owner-approved CLI redesign replaces public command
+  names without aliases. Do not rename wire fields merely
   to change prose. Describe them as target IDs. "Device" also legitimately names a
   peripheral, such as a watchdog or audio device.
 - Historical artifact filenames, measurements and serialized provenance remain

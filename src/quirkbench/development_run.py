@@ -62,7 +62,7 @@ def prepare(unit, stage, log, status, arguments=()):
     atomic_write(directory/'command.json',canonical({'podman_arguments':list(arguments)}))
     atomic_write(directory / status, b'queued\n')
     return {'run_id': run_id, 'state_root': str(root), 'log': str(directory / log),
-            'monitor': f'quirkbench monitor --run {run_id}'}
+            'monitor': f'quirkbench dev monitor {run_id}'}
 
 
 def retain(root, run_id, *, outputs=(), abandon=False):
