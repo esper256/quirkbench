@@ -17,6 +17,8 @@ def test_native_package_locations_follow_source_builds_and_pins():
     assert '/packages/systemd/' in native_recovery.rpm_location(systemd)[1]
     gcc = next(p for p in packages if p['name'] == 'libgcc')
     assert '/packages/gcc/' in native_recovery.rpm_location(gcc)[1]
+    python = next(p for p in packages if p['name'] == 'python3-libs')
+    assert '/packages/python3.14/' in native_recovery.rpm_location(python)[1]
 
 
 def test_cached_dependency_mutations_are_detected_without_download(tmp_path, monkeypatch):
@@ -48,3 +50,41 @@ def test_pin_changes_select_real_consumer():
     result = select(['src/quirkbench/profiles/stock-fedora44-rpm-candidate.v1.json'])
     assert 'recovery-native' in result['selected']
     assert 'integration/test_recovery_native.py' in result['tests']
+
+
+@pytest.mark.parametrize('wrong_bytes', [False, True])
+def test_cold_prepare_downloads_signed_bytes_and_rejects_different_payload(tmp_path, monkeypatch, wrong_bytes):
+    import hashlib
+    import io
+    import tarfile
+    signed = b'signed RPM fixture'
+    package = dict(native_recovery.packages()[0], sha256=hashlib.sha256(signed).hexdigest())
+    monkeypatch.setattr(native_recovery, 'packages', lambda: [package])
+    requested = []
+    def download(url, timeout):
+        requested.append(url)
+        key = native_recovery.ACQUISITION_SPEC['rpm_key_fingerprint'][-8:].lower()
+        assert f'/data/signed/{key}/' in url
+        return io.BytesIO(b'unsigned RPM fixture' if wrong_bytes else signed)
+    monkeypatch.setattr(native_recovery.urllib.request, 'urlopen', download)
+    extracted = []
+    def extract(argv, *, stdin, stdout, check, timeout):
+        assert stdin.read() == signed
+        extracted.append(argv)
+        with tarfile.open(fileobj=stdout, mode='w') as archive:
+            info = tarfile.TarInfo('usr/bin/generator')
+            info.mode = 0o755; info.size = len(b'tool')
+            archive.addfile(info, io.BytesIO(b'tool'))
+    monkeypatch.setattr(native_recovery.subprocess, 'run', extract)
+    cache = tmp_path/'cache'
+    if wrong_bytes:
+        with pytest.raises(ValueError, match='RPM differs from pinned candidate'):
+            native_recovery.prepare(cache)
+        assert not cache.exists() and not extracted
+    else:
+        native_recovery.prepare(cache)
+        assert native_recovery.verify(cache) == cache/'root'
+        assert (cache/'root/usr/bin/generator').read_bytes() == b'tool'
+        assert len(extracted) == 1
+    assert requested == [native_recovery.rpm_location(package)[1]]
+    assert not list(tmp_path.glob('qb-native-prepare-*'))

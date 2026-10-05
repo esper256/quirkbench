@@ -15,14 +15,16 @@ import tempfile
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
-SNAPSHOT = ROOT/'src/quirkbench/profiles/stock-fedora44-rpm-candidate.v1.json'
+ACQUISITION = ROOT/'src/quirkbench/profiles/legacy-stock-acquisition.v1.json'
+ACQUISITION_SPEC = json.loads(ACQUISITION.read_text())
+SNAPSHOT = ACQUISITION.parent/ACQUISITION_SPEC['package_snapshot']
 PACKAGES = ('bash', 'glibc', 'libgcc', 'libxcrypt', 'openssl-libs', 'python3',
             'python3-libs', 'systemd', 'systemd-libs', 'systemd-shared', 'systemd-udev',
             'util-linux-core', 'zlib-ng-compat', 'libmount', 'libblkid', 'libcap',
             'libselinux', 'pcre2', 'ncurses-libs', 'libseccomp')
 
 # Fedora subpackages are published under their source build, not their RPM name.
-SOURCE_BUILDS = {'libgcc': 'gcc', 'openssl-libs': 'openssl', 'python3-libs': 'python3',
+SOURCE_BUILDS = {'libgcc': 'gcc', 'openssl-libs': 'openssl', 'python3': 'python3.14', 'python3-libs': 'python3.14',
                  'systemd-libs': 'systemd', 'systemd-shared': 'systemd', 'systemd-udev': 'systemd',
                  'util-linux-core': 'util-linux', 'libmount': 'util-linux', 'libblkid': 'util-linux',
                  'zlib-ng-compat': 'zlib-ng', 'ncurses-libs': 'ncurses'}
@@ -34,7 +36,10 @@ def rpm_location(package):
     release, arch = release_arch.rsplit('.', 1)
     filename = f'{name}-{version}-{release}.{arch}.rpm'
     source = SOURCE_BUILDS.get(name, name)
-    return filename, f'https://kojipkgs.fedoraproject.org/packages/{source}/{version}/{release}/{arch}/{filename}'
+    # The snapshot hashes signed RPMs. Koji's ordinary build path is unsigned,
+    # even when its NEVRA is identical; never relax hashes or fall back to it.
+    key = ACQUISITION_SPEC['rpm_key_fingerprint'][-8:].lower()
+    return filename, f'https://kojipkgs.fedoraproject.org/packages/{source}/{version}/{release}/data/signed/{key}/{arch}/{filename}'
 
 
 def digest(path):
@@ -87,10 +92,12 @@ def prepare(cache, rpms=None):
             filename, url = rpm_location(package)
             rpm = (rpms/filename) if rpms else stage/filename
             if rpms is None:
+                print(f'Acquiring {filename} from {url}', flush=True)
                 with urllib.request.urlopen(url, timeout=30) as source, rpm.open('wb') as output:
                     shutil.copyfileobj(source, output)
             if digest(rpm) != package['sha256']:
-                raise ValueError('RPM differs from pinned candidate: ' + filename)
+                raise ValueError(f'RPM differs from pinned candidate: {filename}; '
+                                 f'expected {package["sha256"]}, received {digest(rpm)}')
             archive = stage/'package.tar'
             with rpm.open('rb') as source, archive.open('wb') as output:
                 subprocess.run(['rpm2archive', '-n', '-'], stdin=source, stdout=output,

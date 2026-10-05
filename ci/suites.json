@@ -362,7 +362,8 @@
       "tests/test_watchdog.py",
       "integration/*",
       "ci/native_recovery.py",
-      "src/quirkbench/profiles/stock-fedora44-rpm-candidate.v1.json"
+      "src/quirkbench/profiles/stock-fedora44-rpm-candidate.v1.json",
+      "src/quirkbench/profiles/legacy-stock-acquisition.v1.json"
     ],
     "tests": [
       "integration/test_recovery_native.py"
