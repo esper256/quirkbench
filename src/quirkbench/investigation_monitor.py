@@ -41,10 +41,12 @@ def _facts(reader,name):
     if workers:waits.append('Worker units remain; let the existing owner drain and verify whole-unit stops.')
     if unresolved:waits.append('Target work requires reconciliation; contact loss proves no physical outcome.')
     if not status['recovery']['contact_current']:waits.append('Current target contact unavailable; inspect local recovery status.')
-    if pending:waits.append('Answer pending human requests with investigation observation commands.')
+    if pending:waits.append('Answer pending human requests with investigation observation show commands.')
     if upload:waits.append('Controller upload records remain; retained bytes and acknowledgment are separate.')
     if shutdown:waits.append('Shutdown '+shutdown['request_id']+': '+shutdown['state']+'; confirm physical poweroff locally before removing media.')
-    result={'schema_version':1,'investigation':name,'device_id':target,
+    from .submission_views import listing
+    submissions=listing(reader,name,limit=5)
+    result={'submissions':submissions,'schema_version':1,'investigation':name,'device_id':target,
         'admission_stopped':campaign['state']!='RUNNING','worker_units_remaining':workers,
         'target_work_unresolved':unresolved,'recovery':status['recovery'],
         'controller_upload_records':upload,'shutdown':shutdown,
@@ -64,9 +66,11 @@ def lines(value):
         'Recovery/contact: '+json.dumps(value['recovery'],sort_keys=True),
         'Recorded local evidence durability: '+json.dumps(value['local_evidence_durable'])+'; upload backlog: '+json.dumps(value['upload_backlog_local'],sort_keys=True),
         'Physical poweroff and safe removal: unverified; confirm locally.']
+    for submission in value.get('submissions',{}).get('items',[]):
+        answer.append('Test '+submission['request_id']+': '+submission['state']+' | '+submission['stage']+' | '+submission['next_action'])
     answer+=value['waits']
     for item in value['pending_observations']:
         request=item['request'];answer.append(f"Human request {request['request_id']}: {item['state']} | {request['prompt']}")
     if value['observation_next_cursor'] is not None:
-        answer.append('More requests: quirkbench investigation observations '+value['investigation']+' --after '+str(value['observation_next_cursor']))
+        answer.append('More requests: quirkbench investigation observation list '+value['investigation']+' --after '+str(value['observation_next_cursor']))
     return answer

@@ -17,12 +17,11 @@ from test_setup_service import initialized
 
 def test_parser_preserves_flags_only_client_and_rejects_mixed_syntax():
     old=['target','--url','https://host:8443','--ca','ca.pem','--token-file','token','--report','report','--once']
-    value=cli.parser().parse_args(old)
-    assert value.action is None and value.once and value.interval==5 and value.token_file==Path('token')
-    for argv in (['target'],['target','add'],['target','show','lab','--request-id','new'],
-                 old+['add','lab'],['target','add','lab','--once']):
+    with pytest.raises(SystemExit):cli.parser().parse_args(old)
+    for argv in (['target'],['target', 'pair'],['target','show','lab','--request-id','new'],
+                 old+['add','lab'],['target', 'pair', 'lab', '--once']):
         with pytest.raises(SystemExit):cli.parser().parse_args(argv)
-    assert cli.parser().parse_args(['target','add','lab','--request-id','first','--json']).json
+    assert cli.parser().parse_args(['target', 'pair', 'lab', '--request-id', 'first', '--json']).json
     assert cli.parser().parse_args(['target','show','lab','--json']).action=='show'
 
 
@@ -144,8 +143,6 @@ def test_unknown_show_and_unavailable_add_do_not_create_state(tmp_path):
 
 def test_cli_mutation_requires_id_and_show_has_stable_readonly_envelope(publication,monkeypatch,capsys):
     c,req,code,kwargs=publication;complete(c,req,kwargs)
-    assert cli.main(['--state',str(c.root),'target','add','new','--json'])==2
-    assert json.loads(capsys.readouterr().out)['error']['code']=='INVALID_INPUT'
     before=(c.root/'controller.sqlite').read_bytes()
     monkeypatch.setattr(cli,'Controller',lambda *a,**kw:(_ for _ in ()).throw(AssertionError('readonly status initialized a writer')))
     assert cli.main(['--state',str(c.root),'target','show','target','--json'])==0

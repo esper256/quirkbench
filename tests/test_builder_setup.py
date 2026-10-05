@@ -158,7 +158,7 @@ def test_restart_interrupts_builder_and_requires_stop_then_explicit_resume(tmp_p
                 cgroup_reader=lambda:'0::/user.slice/'+claim['worker_unit']+'/runtime\n')
 
 
-@pytest.mark.parametrize('change',['image','marker','failure','fence'])
+@pytest.mark.parametrize('change',['image', 'marker', 'failure', 'fence'])
 def test_import_native_results_and_live_claim_fail_closed(tmp_path, change):
     c=Controller(tmp_path/'state',reserve_bytes=0)
     value=c.store.put(builder_archive())

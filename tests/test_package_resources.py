@@ -83,13 +83,13 @@ def test_built_wheel_resolves_same_assets_without_checkout(tmp_path):
     clean_home = tmp_path / "clean-home"
     clean_home.mkdir()
     setup_code = ("import sys; sys.path.insert(0,sys.argv[1]); "
-                  "from quirkbench.cli import main; raise SystemExit(main(['setup-state']))")
+                  "from quirkbench.cli import main; raise SystemExit(main(['setup','--json']))")
     setup = subprocess.run([sys.executable, "-I", "-c", setup_code, str(extracted)],
                            cwd=clean_home, env={**os.environ, "HOME": str(clean_home),
                                                 "XDG_CONFIG_HOME": str(clean_home / "config"),
                                                 "XDG_STATE_HOME": str(clean_home / "state")},
                            capture_output=True, text=True, timeout=20)
     assert setup.returncode == 0, setup.stderr
-    assert json.loads(setup.stdout)["state_root"] == str(clean_home / "state/quirkbench")
+    assert json.loads(setup.stdout)["data"]["state_root"] == str(clean_home / "state/quirkbench")
     assert (clean_home / "config/quirkbench/controller.json").is_file()
     assert (clean_home / "state/quirkbench/controller.sqlite").exists()

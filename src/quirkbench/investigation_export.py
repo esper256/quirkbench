@@ -418,7 +418,7 @@ def export(root,name,output,*,capture_id=None,author=None,plan=None,timeout_s=30
                 'evidence':evidence_rows,'symbols':symbol_rows,'missing':missing,'limitations':limitations}
             write_public(bundle/'experiments/report.json',canonical({'schema_version':1,'report_pages':pages}))
             write_public(bundle/'report.md',('# Investigation '+name+'\n\nConclusion: inconclusive. Validation: '+public['validation_status']+'.\n\n'+ '\n'.join('* '+s for s in limitations)+'\n').encode())
-            instructions='''# Quirkbench public investigation export
+            instructions='''# Quirkbench public investigation results export
 
 Read report.md and manifest.json. An export is not a backup or a causal claim.
 Source changes are an export representation with explicit author, not inferred history.

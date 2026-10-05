@@ -4,7 +4,7 @@
     {
       "argv": [
         "target",
-        "add",
+        "pair",
         "lab",
         "--request-id",
         "pair-1",
@@ -30,26 +30,8 @@
       "expected": {
         "action": "show",
         "name": "lab",
-        "json": true
-      }
-    },
-    {
-      "argv": [
-        "target",
-        "--url",
-        "https://192.0.2.1:8443",
-        "--ca",
-        "ca.pem",
-        "--token-file",
-        "token",
-        "--report",
-        "report",
-        "--once"
-      ],
-      "expected": {
-        "action": null,
-        "url": "https://192.0.2.1:8443",
-        "once": true
+        "json": true,
+        "status_version": 2
       }
     },
     {
@@ -57,8 +39,6 @@
         "target",
         "show",
         "lab",
-        "--status-version",
-        "2",
         "--json"
       ],
       "expected": {

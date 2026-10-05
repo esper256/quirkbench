@@ -51,7 +51,7 @@ class StateReader:
     def _connect(self):
         path = self.root / 'controller.sqlite'
         if path.resolve() != path or not path.is_file():
-            raise ContractError('controller state unavailable; run quirkbench setup-state first')
+            raise ContractError('controller state unavailable; run quirkbench setup first')
         db = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=0.2)
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA query_only=ON')
@@ -112,7 +112,7 @@ class StateReader:
 
     def operation_list(self, *, after=0, limit=100):
         if type(after) is not int or after < 0 or type(limit) is not int or not 1 <= limit <= 100:
-            raise ContractError('invalid operation list cursor/limit')
+            raise ContractError('invalid admin operation list cursor/limit')
         with self.connection() as db:
             rows = [dict(row) for row in db.execute(
                 'SELECT rowid AS cursor,id,kind,state,stage,campaign,device,created,updated '

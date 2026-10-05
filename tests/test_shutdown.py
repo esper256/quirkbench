@@ -354,13 +354,13 @@ def test_unconfirmed_console_has_no_native_side_effects(spool):
 
 def test_shutdown_cli_requires_exact_mutation_identity_and_readonly_status(paired,capsys,monkeypatch):
     c,control,result,report=paired;base=['--state',str(c.root),'target']
-    assert cli.main(base+['poweroff',report.device_id,'--json'])==2
+    assert cli.main(base+['shutdown','request',report.device_id,'--json'])==2
     assert json.loads(capsys.readouterr().out)['error']['code']=='INVALID_INPUT'
-    assert cli.main(base+['poweroff',report.device_id,'--request-id','shutdown','--json'])==0
+    assert cli.main(base+['shutdown','request',report.device_id,'--request-id','shutdown','--json'])==0
     assert json.loads(capsys.readouterr().out)['data']['admission_stopped']
     before=(c.root/'controller.sqlite').read_bytes()
     monkeypatch.setattr('quirkbench.controller.Controller.__init__',lambda *a,**kw:pytest.fail('readonly writer'))
-    assert cli.main(base+['poweroff-status',report.device_id,'--json'])==0
+    assert cli.main(base+['shutdown','status',report.device_id,'--json'])==0
     assert not json.loads(capsys.readouterr().out)['data']['physical_poweroff_verified']
     assert (c.root/'controller.sqlite').read_bytes()==before
 

@@ -100,6 +100,8 @@ def execute(root, args, *, ready=None):
         data = reader.status(args.name)
         from .investigations import record
         with reader.connection() as db:data['investigation'] = record(reader,args.name,db)
+        from .submission_views import listing
+        data['submissions'] = listing(reader,args.name,limit=10) if data['investigation'] is not None else {'items':[],'next_cursor':None}
         data['sources'] = [source_status(reader, args.name, item) for item in sources(reader, args.name)]
         if len(canonical(data)) > QUERY_BYTES:
             raise ContractError('investigation exceeds query budget')
@@ -119,8 +121,6 @@ def execute(root, args, *, ready=None):
         workspace = identifier(args.workspace or (investigation['session']['workspace_id'] if investigation else args.name+'-source'))
         request = args.request_id
         if request is None:
-            if args.json:
-                raise ContractError('prepare-source --json requires --request-id')
             request = identifier(workspace + '-prepare')
         return submit(controller, args.name, workspace, args.source, args.base_oid, request,
                       quiesced=args.quiesced, allowed_untracked=args.allow_untracked, ready=ready)

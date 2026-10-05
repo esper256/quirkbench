@@ -131,25 +131,12 @@ def test_response_command_ids_share_operation_namespace_and_answer_cannot_predat
         controller.admit_operation('human-command', 'source_capture', {})
 
 
-def test_cli_missing_input_and_monitor_client(lab, tmp_path, capsys):
-    controller, now = lab
-    controller.issue_observation('campaign', question(now[0], 'readiness', 'pre_test_readiness'))
-    state = str(controller.root)
-    assert main(['--state', state, '--reserve-gib', '0', 'session', 'respond', 'session',
-                 '--request', 'readiness', '--file', str(tmp_path / 'missing'), '--request-id', 'command']) == 2
-    assert json.loads(capsys.readouterr().out)['error']['code'] == 'INVALID_INPUT'
-    response_file = tmp_path / 'response.json'
-    response_file.write_bytes(canonical(answer(now[0], 'readiness')))
-    assert main(['--state', state, '--reserve-gib', '0', 'session', 'respond', 'session',
-                 '--request', 'readiness', '--file', str(response_file), '--request-id', 'command']) == 0
-    assert json.loads(capsys.readouterr().out)['ok']
-    assert main(['--state', state, '--reserve-gib', '0', 'session', 'observations', 'session', '--json']) == 0
-    assert json.loads(capsys.readouterr().out)['data']['items'][0]['state'] == 'answered'
-    controller.issue_observation('campaign', question(now[0], 'post', 'post_test_interpretation'))
-    assert main(['--state', state, '--reserve-gib', '0', 'watch', 'campaign', '--session', 'session', '--once']) == 0
-    assert 'Human request post' in capsys.readouterr().out
-    assert 'Human request post' in render({**controller.monitor('campaign'),
-                                            'observations': controller.list_observations('session')})
+def test_removed_session_cli_fails_without_mutation(lab, tmp_path, capsys):
+    controller, now=lab
+    before=controller.list_observations('session')
+    assert main(['--state',str(controller.root),'session','respond','session','--request','readiness','--file',str(tmp_path/'missing'),'--request-id','command','--json'])==2
+    assert json.loads(capsys.readouterr().out)['error']['code']=='INVALID_INPUT'
+    assert controller.list_observations('session')==before
 
 
 def test_observation_query_cursor_and_overdue_are_bounded(lab):
@@ -179,6 +166,4 @@ def test_large_unicode_record_has_bounded_list_and_exact_detail(lab, capsys):
     assert listing['items'][0]['truncated']
     assert controller.observation_detail('session', 'large')['request']['prompt'] == long_prompt
     assert controller.observation_detail('session', 'large')['response']['note'] == long_note
-    assert main(['--state', str(controller.root), '--reserve-gib', '0', 'session', 'observation',
-                 'session', '--request', 'large', '--json']) == 0
-    assert json.loads(capsys.readouterr().out)['data']['response']['note'] == long_note
+    assert controller.observation_detail('session','large')['response']['note']==long_note

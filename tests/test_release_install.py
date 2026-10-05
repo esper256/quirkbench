@@ -52,7 +52,7 @@ def fixture(tmp_path):
 def test_production_path_unavailable_before_download_or_state(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'config'))
     monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / 'cache'))
-    assert cli.main(['release-install', '0.1.0', '--request-id', 'first', '--json']) == 4
+    assert cli.main(['admin', 'install', '0.1.0', '--request-id', 'first', '--json']) == 4
     response = json.loads(capsys.readouterr().out)
     assert response['error']['code'] == 'UNAVAILABLE'
     assert not list(tmp_path.iterdir())

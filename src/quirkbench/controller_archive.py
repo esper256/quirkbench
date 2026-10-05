@@ -36,7 +36,7 @@ raise SystemExit(main())
 INSTRUCTIONS = b'''Quirkbench controller development archive (unsigned, unqualified)
 
 Extract temporarily into a user-owned directory and run:
-bin/quirkbench controller-install /absolute/original-archive.tar.gz --json
+bin/quirkbench dev install /absolute/original-archive.tar.gz --json
 Then use the returned canonical runtime_root/bin/quirkbench --help.
 Python 3.11+ must already be installed. No virtualenv, pip installation or
 source checkout is needed for the controller CLI.
@@ -46,21 +46,20 @@ then bin/quirkbench status to inspect independent readiness. Setup remains parti
 Use setup --configure-controller for local TLS and foreground configuration and, with a signed
 installed release, setup --builder-archive /absolute/builder.tar for durable builder
 preparation. Shipped production publisher trust remains pending.
-The legacy setup-state/setup-check commands remain available.
-For first registry publication, stop the foreground controller and use publication setup
+For first registry publication, stop the foreground controller and use admin repository configure
 with an explicit fresh repository alias, HTTPS endpoint and existing operator
-GnuPG home/full signing fingerprint. Then explicitly run controller-run
-and use target add for an attended invitation. Follow
+GnuPG home/full signing fingerprint. Then explicitly run admin controller run
+and use target pair for an attended invitation. Follow
 lib/quirkbench/guide/controller-installation.md; no handwritten private configuration
 is required for this initial path. Extraction does
 not start a service, change lingering or install any host package.
 
-Run setup-check in the controller environment to inspect current owner readiness.
+Run doctor in the controller environment to inspect current owner readiness.
 Distrobox is an optional development environment. Build/compose tools belong in
 the isolated builder. State remains at its independently selected path.
-Upgrade with controller-install ARCHIVE --activate after reconciling active work.
+Upgrade with dev install ARCHIVE --activate after reconciling active work.
 Activation switches CLI and worker paths together; start the controller separately.
-Current commands and planned session interfaces are distinguished in
+Current commands and preparation instructions are documented in
 lib/quirkbench/guide/agent-guide.md; case histories are evidence, not prerequisites.
 
 Fixed worker entry points are internal to recorded container execution. It accepts only an existing live controller claim; it is not

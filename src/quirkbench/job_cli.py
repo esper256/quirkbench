@@ -22,7 +22,7 @@ def wait(root,operation,*,sleep=time.sleep):
             if value is None: raise ContractError('operation has no build/compose final output')
             return json.loads(read_file(Path(root),'artifacts/objects/'+value,limit=1024**2))
         if row['state'] in ('FAILED','INTERRUPTED','CANCELLED'):
-            raise Conflict('Job '+operation+' '+row['state'].lower()+'; use operation status and monitor. Resume interrupted work explicitly.')
+            raise Conflict('Job '+operation+' '+row['state'].lower()+'; use admin operation show and monitor. Resume interrupted work explicitly.')
         sleep(2)
 
 
@@ -67,7 +67,7 @@ def run(args):
         else: print(json.dumps(answer,sort_keys=True))
         return 0
     except KeyboardInterrupt:
-        print('Wait interrupted; the accepted job continues. Use operation status or monitor.',file=sys.stderr)
+        print('Wait interrupted; the accepted job continues. Use admin operation show or monitor.',file=sys.stderr)
         return 130
     except (OSError,ValueError,sqlite3.Error,StoragePressure) as exc:
         if args.command=='candidate-rootfs':

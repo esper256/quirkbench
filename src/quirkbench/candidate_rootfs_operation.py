@@ -61,7 +61,7 @@ def declared_closure(store,value):
     return entry,refs
 
 
-def submit(controller,value,request_id, *,builder=None,ready=None):
+def submit(controller,value,request_id, *,builder=None,ready=None,_commit=None):
     from .controller_service import require_ready,configuration
     from .job_operations import envelope
     from .operations import operation_intent
@@ -106,6 +106,7 @@ def submit(controller,value,request_id, *,builder=None,ready=None):
     retained=controller.store.put(raw)
     with controller.transaction() as db:
         row=controller._admit_operation_db(db,request_id,KIND,intent,request_digest,retained.sha256,refs)
+        if _commit is not None:_commit(db,row)
     return envelope(controller.root,row,request_id)
 
 

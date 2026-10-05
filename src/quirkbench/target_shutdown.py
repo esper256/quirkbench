@@ -119,7 +119,7 @@ def request(root,target,request_id, *,replace=None):
             receipt={'schema_version':1,'record_type':'target-shutdown-request','request_id':request_id,
                 'intent':intent,'admission_stopped':True,'paused_campaign_count':len(paused),**blockers(db,device),
                 'physical_poweroff_verified':False,'safe_removal_verified':False,
-                'next_command':'quirkbench target poweroff-status '+target}
+                'next_command':'quirkbench target shutdown status '+target}
             db.execute('INSERT INTO target_shutdown_requests VALUES(?,?,?,?,?,?,?,NULL)',
                 (request_id,digest(raw),target,device,canonical(intent).decode(),canonical(receipt).decode(),'REQUESTED'))
             return validate_public(receipt)

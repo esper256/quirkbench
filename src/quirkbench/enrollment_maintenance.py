@@ -301,7 +301,7 @@ def _select_locked(control,url,pin,code_id,request_id, *,action,confirmed_reques
     return {'request_id':record['selected']['intent']['request_id'],'code_id':code_id,'boot_authorized':False}
 
 def pending_choice(control,url,pin,code_id, *, verify_target,binding_reader=read_system_uuid,run=subprocess.run):
-    """Bounded console choice; an already selected operation resumes normally."""
+    """Bounded console choice; an already selected admin operation resumes normally."""
     control,verify=_storage(control,verify_target)
     with private_lock(control/'runtime-config.lock'):
         from .shutdown_local import require_available

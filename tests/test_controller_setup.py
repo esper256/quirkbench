@@ -12,7 +12,7 @@ def test_foreground_setup_needs_no_host_manager_or_lingering():
     assert report['user_manager']=='not_required' and report['lingering']=='not_required'
     assert not report['background_work_ready']
     assert 'no automatic restart' in report['logout_behavior']
-    assert any('controller-run' in item for item in report['instructions'])
+    assert any('admin controller run' in item for item in report['instructions'])
 
 
 def test_missing_builder_is_actionable_without_blocking_software_development():
@@ -40,7 +40,7 @@ def test_distrobox_is_optional_and_docker_is_a_supported_engine():
 def test_cli_setup_check_adds_revision_report_without_initializing_state(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(controller_setup, 'inspect_user_manager', lambda: {
         'user_manager':'available','background_work_ready':False,'instructions':[]})
-    assert cli.main(['--state',str(tmp_path/'absent'),'setup-check'])==0
+    assert cli.main(['--state', str(tmp_path / 'absent'), 'doctor'])==0
     report=json.loads(capsys.readouterr().out)
     assert report['user_manager']=='available' and not report['background_work_ready']
     assert 'installations' in report

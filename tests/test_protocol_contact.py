@@ -105,13 +105,13 @@ def test_cli_versions_and_recent_contact_are_explicit(publication,capsys):
     assert observe_contact(c,result['device_id'],result['device_token'],report.boot_id)
     argv=['--state',str(c.root),'target','show',result['device_id']]
     assert main(argv+['--json'])==0
-    assert json.loads(capsys.readouterr().out)['data']['schema_version']==1
-    assert main(argv+['--status-version','2','--json'])==0
+    assert json.loads(capsys.readouterr().out)['data']['schema_version']==2
+    assert main(argv+['--json'])==0
     answer=json.loads(capsys.readouterr().out)['data']
     assert answer['schema_version']==2 and answer['recovery']['contact_current']
     assert main(argv)==0
     assert 'Recent authenticated contact: within 30 seconds' in capsys.readouterr().out
-    for args in (['target','add','name','--status-version','2'],
+    for args in (['target', 'pair', 'name', '--status-version', '2'],
                  ['target','show','name','--status-version','3'],
                  ['target','--url','https://host:8443','--ca','ca','--token-file','token',
                   '--report','report','--status-version','2']):

@@ -44,7 +44,7 @@ def prepare(unit, stage, log, status, arguments=()):
     identifier(run_id)
     root = canonical_user_path(discover_state_root())
     if not (root / 'controller.sqlite').is_file():
-        raise ContractError('run quirkbench setup-state before starting a build')
+        raise ContractError('run quirkbench setup before starting a build')
     stage = canonical_user_path(stage)
     if stage != root / 'development-runs' / run_id / 'work':
         raise ContractError(f'build stage must be {root}/development-runs/{run_id}/work')

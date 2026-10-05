@@ -176,7 +176,7 @@ def test_cli_partial_exit_preserves_inspection_and_does_not_initialize_state(pub
     monkeypatch.setenv('XDG_STATE_HOME',str(tmp_path/'state-home'))
     original=release_plan.inspect
     monkeypatch.setattr(release_plan,'inspect',lambda *a,**kw:original(*a,run=fake_gpg,**kw))
-    assert cli.main(['release-check',str(directory),'--inputs',str(store.root),'--trust-bundle',str(trust),'--json'])==2
+    assert cli.main(['dev', 'release', 'check', str(directory), '--inputs', str(store.root), '--trust-bundle', str(trust), '--json'])==2
     answer=json.loads(capsys.readouterr().out)
     assert answer['ok'] and answer['data']['missing_count']==1
     assert not (tmp_path/'state-home').exists()
@@ -223,7 +223,7 @@ def test_real_disposable_signer_inspection_and_fresh_installed_verification(publ
     assert not installed['signed'] and not installed['qualified']
     # Installed command/resources are usable without source-checkout PYTHONPATH.
     env={k:v for k,v in os.environ.items() if k!='PYTHONPATH'}
-    help_run=subprocess.run([str(Path(installed['runtime_root'])/'bin/quirkbench'),'release-check','--help'],
+    help_run=subprocess.run([str(Path(installed['runtime_root']) / 'bin/quirkbench'), 'dev', 'release', 'check', '--help'],
         env=env,cwd=tmp_path,capture_output=True,timeout=15,check=True)
     assert b'--inputs' in help_run.stdout and b'--trust-bundle' in help_run.stdout
     assert (Path(installed['runtime_root'])/'lib/quirkbench/guide/release-publication.md').is_file()
@@ -289,7 +289,7 @@ def test_nested_controller_expansion_observes_cooperative_deadline(publication):
 
 
 def test_cli_unavailable_trust_and_infrastructure_are_distinct(tmp_path,monkeypatch,capsys):
-    args=['release-check',str(tmp_path),'--inputs',str(tmp_path),'--trust-bundle',str(tmp_path/'absent'),'--json']
+    args=['dev', 'release', 'check', str(tmp_path), '--inputs', str(tmp_path), '--trust-bundle', str(tmp_path / 'absent'), '--json']
     assert cli.main(args)==4
     assert json.loads(capsys.readouterr().out)['error']['code']=='UNAVAILABLE'
     def fail(*a,**k):raise OSError('injected I/O failure')
@@ -306,6 +306,6 @@ def test_cli_authenticated_malformed_archive_has_stable_json_error(publication,m
     statement['controller_archive_sha256']=digest(raw);resign()
     original=release_plan.inspect
     monkeypatch.setattr(release_plan,'inspect',lambda *a,**kw:original(*a,run=fake_gpg,**kw))
-    assert cli.main(['release-check',str(directory),'--inputs',str(store.root),'--trust-bundle',str(trust),'--json'])==2
+    assert cli.main(['dev', 'release', 'check', str(directory), '--inputs', str(store.root), '--trust-bundle', str(trust), '--json'])==2
     error=json.loads(capsys.readouterr().out)['error']
     assert error['code']=='INVALID_INPUT' and 'malformed or truncated' in error['message']

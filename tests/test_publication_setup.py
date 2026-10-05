@@ -93,7 +93,7 @@ def test_first_publication_zero_targets_exact_setup_retry_without_handwritten_co
 def test_packaged_command_runs_without_checkout_or_ambient_pythonpath(installed,tmp_path):
     root=installed[0];runtime=Path(configuration(root)['runtime']).parent.parent
     env={**os.environ,'PYTHONPATH':'/nonexistent','XDG_CONFIG_HOME':str(tmp_path/'config')}
-    result=subprocess.run([sys.executable,'-I',str(runtime/'bin/quirkbench'),'publication','--help'],
+    result=subprocess.run([sys.executable,'-I',str(runtime/'bin/quirkbench'),'admin','repository','configure','--help'],
         cwd=tmp_path,env=env,capture_output=True,text=True,timeout=20)
     assert result.returncode==0,result.stderr
     assert '--signing-home' in result.stdout and '--request-id' in result.stdout
@@ -413,8 +413,7 @@ def test_missing_public_key_cannot_initialize_repository(installed):
 def test_exact_cli_success_calls_same_service(installed,monkeypatch,capsys):
     root,services,signing,options,calls=installed;original=publication.configure
     monkeypatch.setattr(publication,'configure',lambda *a,**kw:original(*a,**(kw|options)))
-    args=['--state',str(root),'publication','setup','--repository','lab','--url','https://127.0.0.1:8444',
-        '--signing-home',str(signing),'--fingerprint',FPR,'--request-id','publication-1','--json']
+    args=['--state', str(root), 'admin', 'repository', 'configure', '--repository', 'lab', '--url', 'https://127.0.0.1:8444', '--signing-home', str(signing), '--fingerprint', FPR, '--request-id', 'publication-1', '--json']
     assert cli.main(args)==0
     result=json.loads(capsys.readouterr().out)['data'];assert result['configured'] and result['service_start_required']
     assert cli.main(args)==0 and json.loads(capsys.readouterr().out)['data']==result
@@ -467,7 +466,6 @@ def test_setup_replay_cannot_accept_unjournaled_additional_settings(installed,tm
 
 def test_actual_cli_reports_missing_signing_home_as_unavailable(installed,monkeypatch,capsys):
     root,services,signing,options,calls=installed
-    argv=['--state',str(root),'publication','setup','--repository','lab','--url','https://127.0.0.1:8444',
-        '--signing-home',str(root/'missing'),'--fingerprint',FPR,'--request-id','publication-1','--json']
+    argv=['--state', str(root), 'admin', 'repository', 'configure', '--repository', 'lab', '--url', 'https://127.0.0.1:8444', '--signing-home', str(root / 'missing'), '--fingerprint', FPR, '--request-id', 'publication-1', '--json']
     assert cli.main(argv)==4
     assert json.loads(capsys.readouterr().out)['error']['code']=='UNAVAILABLE'

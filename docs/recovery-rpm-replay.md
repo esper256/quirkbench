@@ -23,7 +23,7 @@ and does not install RPMs on the host. Use absolute paths below.
 ## Check the selected inputs
 
 ```sh
-quirkbench recovery-inputs replay-check --spec /absolute/selected-candidate.json \
+quirkbench dev recovery inputs replay-check --spec /absolute/selected-candidate.json \
   --directory /absolute/retained-stock > /absolute/replay-inventory.json
 ```
 
@@ -69,7 +69,7 @@ For a first pairing image, the supported reviewed selection needs no package-lis
 editing:
 
 ```sh
-quirkbench recovery-inputs candidate-spec --candidate fedora44-pairing-v1 \
+quirkbench dev recovery inputs candidate-spec --candidate fedora44-pairing-v1 \
   --repository /absolute/retained-stock.repo --repository-id retained-stock \
   > /absolute/replay-candidate.json
 ```
@@ -147,7 +147,7 @@ Do not run `lock` on a failed or manually filled acquisition generation.
 After acquisition completes, separately verify and retain its RPMs:
 
 ```sh
-quirkbench --state /absolute/controller-state recovery-inputs lock \
+quirkbench --state /absolute/controller-state dev recovery inputs lock \
   /absolute/controller-state/inputs/replay-1/rpms \
   --spec /absolute/replay-candidate.json --public-key /absolute/reviewed-fedora-public.asc \
   --builder-image-digest sha256:ACTUAL_BUILDER_DIGEST \

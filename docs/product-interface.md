@@ -47,7 +47,7 @@ image boot or release-qualification run.
 
 ## Persistent services and state
 
-Initial registry-mode installations can explicitly run `publication setup --repository
+Initial registry-mode installations can explicitly run `admin repository configure --repository
 ALIAS --url HTTPS_URL --signing-home EXISTING_PRIVATE_HOME --fingerprint FULL_FINGERPRINT
 --request-id ID [--unit PATH] [--json]` with the existing native controller service
 stopped and no issued target trust. It initializes a fresh state-owned repository
@@ -93,90 +93,96 @@ records remain, with expired payloads unavailable. See [current settings and cov
 
 ## Public CLI and sessions
 
-### Durable experiment submission foundation
+### Task-oriented CLI and durable experiment submission
 
-The owner-approved [CLI redesign](cli-redesign-plan.md) permits replacing old command
-spellings without aliases. This subsection implements only the pre-build submission
-foundation, not the new CLI or the entire preparation pipeline. Existing public
-commands remain in place until the coordinated interface cutover.
+The owner-approved [CLI redesign](cli-redesign-plan.md) replaces former public
+commands without aliases. Public families are setup, doctor, status, recovery,
+target, investigation, experiment, run, monitor, admin and dev. Parsing and help
+never create controller state. `--state` and `--json` are accepted along the command
+path. No public action prompts. Normal progress uses investigation names, submission
+request IDs, immutable experiment IDs and exact run IDs. Internal operation inspection
+belongs to `admin operation`; the packaged controller process has its own private
+entry point, independent of the public parser.
 
-`experiment_submissions` exposes `load/validate`, `submit`, `status`, `logs`, `resume`
-and an owner-only `link_proposal`. Input follows
-[`experiment-submission.v1.schema.json`](../schemas/experiment-submission.v1.schema.json);
-the [neutral example](../examples/experiment-submission.json) selects an existing
-investigation's workspace and reviewed recipe. The runtime has no jsonschema
-dependency. Both validation forms reject unknown fields; runtime additionally bounds
-serialized size to 64 KiB and nesting to 32. Repetitions default to one; timeout and
-recipe parameters are explicit and checked against the installed pinned recipe.
+`experiment_submissions` exposes input validation, submit, status, logs and resume.
+Input follows [experiment-submission v1](../schemas/experiment-submission.v1.schema.json).
+Both schema and runtime reject unknown fields; runtime bounds size to 64 KiB and
+nesting to 32. Repetitions default to one. Timeout and recipe parameters are explicit
+and checked against the installed pinned recipe. A missing repository is resolved
+only when exactly one is configured. The selected repository path/signing fingerprint,
+baseline, recipe, builder and source identity are frozen before work begins.
 
-Workspace source is `{ "mode": "workspace", "quiesced": true }`; baseline source is
-`{ "mode": "baseline" }`. Workspace mode requires an already prepared registered
-workspace and uses the existing source-capture worker. Baseline mode selects the
-completed distribution preparation's pristine capture, without checking out, resetting
-or capturing an edited workspace. Missing preparation is a blocker; automatically
-preparing missing sources is subsequent pipeline work. Source-ready external Git
-captures do not imply that the current distribution builder can build them.
+Workspace mode is `{"mode":"workspace","quiesced":true}`. It requires a registered
+source workspace and acknowledgement that all writers stopped. Baseline mode is
+`{"mode":"baseline"}` and selects the completed distribution preparation's pristine
+capture. It never resets the editable workspace. Prepare missing source using
+`investigation source prepare`, follow investigation status and explicitly resume a
+paused investigation. Ad hoc captured Git sources do not imply support by the current
+distribution builder.
 
-**Identity and transactions.** One `experiment_submission` operation uses the existing
-WAITING/INTERRUPTED/FAILED states. A row in `experiment_submissions` associates the
-public request ID, investigation, operation, normalized caller-input digest, frozen
-intent digest, source operation and optional proposal operation. There is no second
-execution state machine. A submit transaction creates the parent, retains the exact
-choices, admits/links a workspace capture and changes its writer to QUIESCED together.
-Workspace capture uses request ID `submission-capture-<parent operation ID>`. Baseline
-mode instead links its already completed source-preparation operation. Failure rolls
-back all database changes; unreferenced CAS writes remain eligible garbage.
+**Identity and transactions.** One `experiment_submission` operation uses existing
+operation states. Its database row links the caller request ID, input digest, frozen
+intent, source operation, candidate preparation and proposal. There is no separate
+scheduler or execution owner. Admission, retained intent, capture child and writer
+handoff commit together. Identical retries return the same public reference before
+consulting changed defaults or readiness; changed inputs conflict.
 
-Caller input and resolved input have distinct digests. On an exact request replay,
-return the same `SubmissionReference(investigation, request_id)` before resolving
-configuration or readiness again. Changed input conflicts. Omitted repository selects
-only a single configured repository; freeze its alias/path and signing fingerprint,
-baseline, recipe and source scope. Replays never adopt later defaults. The operation
-request namespace continues to prevent collisions with existing commands.
+Child identities are deterministic: `submission-capture-`, `submission-proposal-`,
+`submission-candidate-` and `submission-dispatch-` plus the parent operation ID.
+Candidate and proposal admission have narrow commit callbacks that validate the owner,
+link the child and retain its inputs in the same transaction. The established proposal
+dispatcher owns build, composition and final experiment admission for both source modes.
+Its final publication transaction also completes the submission. Result CAS writes
+precede the final source/composition/native-retention proof. There is no second
+experiment or approval path.
 
-**Execution and retention.** The existing `JobCoordinator` advances metadata after the
-source worker has stopped and published, verifies the exact capture/source selection,
-and retains the complete source dependencies under the parent. Live parent references
-also protect the linked source/proposal operation from count-based retirement before
-adoption, including while interrupted. A missing or mismatched source fails the parent
-without inventing an experiment. Failed parent metadata enters existing diagnostic
-retention; unfinished work remains retained until explicitly resolved by later adapters.
-No permanent storage pins or second cleanup mechanism are created.
+**Source and compatibility.** [Proposal v3](../schemas/agent-proposal.v3.schema.json)
+and [context v2](../schemas/proposal-context.v2.schema.json) identify
+`workspace_capture` or `baseline_preparation`, their actual operation ID, capture
+hash and workspace hash. The shared resolver proves stopped completion, investigation,
+target, workspace, baseline, capture and retained dependencies. It never fabricates
+a capture operation for pristine source. Joined build and artifact-link v2 records
+use `source_kind` and `source_operation_id`; v1 records retain their original meaning.
+Old proposal v2/context v1 and joined v1 readers preserve retained evidence hashes.
+Target protocol and attempt authorization meanings are unchanged.
 
-The resulting parent remains WAITING at `source_ready`. `experiment_id` is null,
-`pipeline_connected` is false and `boot_authorized` is false. `status` reads persisted
-facts without reconciliation; `logs` returns bounded, paginated, sanitized source
-event messages without arbitrary CAS selection. Native compiler output selection is
-later pipeline work. The source capture remains quiesced until explicit release under
-existing rules; status does not grant writer ownership.
+The submission owns exact source bytes before releasing its writer handoff, after
+its proposal has retained the same capture. Status derives permission to edit from
+the current workspace writer state, including other submissions. Later edits do not
+change captured inputs. Controller-generated proposal text records no invented agent
+usage or reasoning.
 
-**Restart and continuation.** Existing lifecycle startup interrupts the waiting parent
-and any unfinished source child and pauses investigations. An explicit `resume` creates
-an existing `operation_resume` command, returning a `ResumeReceipt` including that
-command's QUEUED/SUCCEEDED/FAILED state. A queued continuation waits while the
-investigation is paused. The current owner checks frozen publication choices and
-source handoff, requires whole-worker reconciliation, and requeues the same child.
-The child requeue commits first; a submission guard prevents dispatch until parent
-continuation commits. That final transaction also records successful resume-command
-acknowledgement. A crash between child requeue and parent continuation can replay
-without duplication. A released/replaced writer handoff, terminal failure or changed
-publication identity blocks continuation. Failed resume-command replay reports FAILED;
-it does not claim that the requested continuation succeeded.
+**Progress and logs.** Status and monitor project source, candidate, build and system
+stages from durable links; queries never advance work. An experiment ID is null until
+immutable experiment publication. Logs select only the linked stage's existing bounded
+diagnostic roots, list selectors, and expose bounded byte/event pagination. There is
+no arbitrary digest or filesystem-path reader. Missing logs and retained payloads
+remain explicit. Stage progress is measured when available; no aggregate percentage
+is invented. Preparation, approval, target execution, recovery and evidence durability
+remain distinct.
 
-**Proposal extension point.** `link_proposal(owner, investigation, request_id,
-proposal_operation)` verifies an admitted workspace experiment proposal's exact
-hypothesis, recipe/limits and source capture, retains its inputs and records a single
-link. It creates no proposal and performs no dispatch. Baseline admission remains a
-separate future adapter. Linked proposals cannot use the old direct dispatch path:
-the later submission adapter must enforce frozen candidate/publication choices and
-connect final experiment results before enabling it. Unlinked existing proposals
-continue through their existing API. Repeating the same link is harmless; replacement
-or binding an already-dispatched proposal is rejected.
+**Restart and continuation.** Existing owner startup interrupts work and pauses
+investigations. Submission resume creates an `operation_resume` command. Descendants
+are reconciled and requeued under the same identities; submission and proposal guards
+prevent claims until their ancestors are current and permitted. The final continuation
+transaction acknowledges the resume command atomically. Paused continuation remains
+pending without blocking other work. Terminal failures require a new request. Changed
+publication identity and unresolved worker ownership block continuation. Raw internal
+resume cannot bypass submission guards or approve a run.
 
-The CLI cutover, automatic missing-input preparation, candidate/build/composition
-orchestration, final experiment admission and user-facing status/monitor wiring are
-explicitly not complete in this foundation. The later implementer should extend this
-service and the existing coordinator rather than adding another command-owned loop.
+**Retention.** Unfinished parents protect linked source, candidate, proposal, build
+and composition operations from retirement. Completed experiments retain required
+source and deployment proof. Terminal submissions use existing successful-input or
+failed-diagnostic retention, as do their terminal generated proposals; they do not
+retain large archives indefinitely. A failed submission terminalizes an undispatched
+generated proposal, but never declares a live or interrupted worker safe to retire.
+The bounded public request summary remains in SQLite; small result/error metadata
+remains attributable under a submission record owner. Queries report unavailable
+older payloads without rebuilding them. Standalone proposal retention is unchanged.
+
+No image build, physical run, release qualification or live activation is implied by
+software integration tests. The current supported platform and native commissioning
+gates remain separate.
 
 **Investigation** is the public organizing concept: problem, target, source workspace,
 limits, decisions and accumulated evidence. Its durable identity maps to an existing
@@ -185,25 +191,23 @@ human name resolves to that stable identity; renaming must not rewrite attributi
 Do not reinterpret historical free-standing session strings as complete investigations.
 Keep one controller owner and one attempt state machine.
 
-Human CLI, machine JSON, setup wizard and monitor call the same typed application
+Human CLI, machine JSON, explicit setup and monitor call the same typed application
 services for validation, mutation and readiness. Presentation clients do not acquire
 worker ownership or introduce independent scheduling/authorization logic. External
 mode executes submitted lab work durably but never invokes an agent automatically.
 
-The following forms replace the earlier planned `session start/context/propose`
-presentation. They are desired interfaces, not executable-command claims. Preserve
-existing campaign commands, implemented `session` observations, `--device`, `--host`,
-positional backup/restore, explicit `--state` and current target HTTPS-client flags.
-New `target` subcommands must coexist with that flags-only client syntax, with
-unambiguous dispatch and compatibility fixtures. Preserve the old specification
-parser/fixtures as v1; add a new contract revision before implementing the new facade.
+The owner-approved task-oriented CLI replaces the prototype command tree outright.
+There are no aliases for removed commands, flags-only target clients or public
+process-server facades. Packaged process entry points retain their existing
+lifecycle. Stored records and wire identifiers keep their original meanings;
+public command spelling is independent of those records.
 
 JSON retains C2 versioned envelopes, stable errors and bounded cursor queries.
-Machine mutations supply explicit request IDs. Human commands may generate IDs,
-but must persist the intent/ID before dispatch and expose them for status/retry;
+Human and JSON mutations have identical input requirements. Commands that generate
+a request ID persist it before dispatch and expose it for status/retry;
 repeated input after a lost reply resumes the pending intent or requires explicit
 new-intent selection. Same ID/content returns the same durable result; changed content
-conflicts. A friendly wizard must not turn a lost acknowledgment into another attempt.
+conflicts. A repeated command must not turn a lost acknowledgment into another attempt.
 
 M1a implements additive `setup`/`status` syntax in the executable parser; the earlier
 product CLI v1 fixture stays unchanged. `setup --json` requires `--request-id`;
@@ -221,7 +225,7 @@ archive and manifest digests), resource/connection/logout choices and ordered co
 steps. Runtime validation additionally checks canonical paths/IPs and digest relationships.
 Readiness retains existing service fields and separately reports database, resources,
 runtime, release, builder, enrollment and target count. Accepted setup is still partial:
-native service startup is available with explicit `--start-service`. Signed release
+native service startup is available with explicit `--configure-controller`. Signed release
 readiness rechecks retained authenticated archives. `setup --builder-archive` admits
 capture/import through the existing worker; read-only builder readiness requires
 retained exact OCI inputs and current native image availability. A separately
@@ -229,26 +233,22 @@ advertised current-owner publication capability reports enrollment availability;
 it requires explicit repository publication and verified current TLS identity.
 Full setup acceptance and native commissioning remain pending.
 
-The executable target CLI v2 adds `target add NAME [--request-id ID]
-[--ttl-seconds 60..900] [--json]` and `target show TARGET [--json]` alongside the
-existing flags-only HTTPS client. JSON add requires an explicit request ID. Human
-add retains a name-derived request and original lifetime before dispatch; expired
-or redeemed intents need a new explicit ID. The displayed endpoint/full leaf SHA-256
-must be compared on the recovery console before transmitting the one-use code.
-Show derives names from existing invitation records, or accepts assigned target IDs;
-ambiguous names require IDs. Status v1 reports recorded recovery, live credentials
-and candidate inputs independently. JSON defaults to this unchanged v1 shape.
-`target show TARGET --status-version 2 --json` adds the last authenticated protocol
-receipt time and a 30-second advisory contact window; human output uses v2.
+Target pairing uses target pair NAME with an optional request ID and invitation
+lifetime. Human and JSON calls retain the same name-derived retry identity when it
+is omitted; expired or redeemed invitations require a new explicit ID. The full
+controller fingerprint must be compared on the recovery console before transmitting
+the one-use code. Target show resolves an unambiguous recorded name or exact target
+ID and exposes the current v2 status in both presentation modes. Historical v1
+record readers remain internal. The status includes a 30-second advisory contact
+window, separate from readiness or execution permission.
 Only successful registry-authenticated registration, claim or reconciliation
 records a receipt. Current boot/generation and live credentials must still match;
 this does not prove continuous connectivity, hardware binding or candidate readiness.
 Unattended eligibility remains unknown; pairing/status never grants an attempt approval.
 
-The executable target CLI v4 adds local `target revoke TARGET [--generation ID]
-[--request-id ID] [--json]` and `target revoke-code CODE_ID [--request-id ID] [--json]`.
-JSON mutation requires an explicit request ID. Human retry retains its target/action
-request; another generation requires a new explicit ID. Revocation is available
+Credential revocation uses `target access revoke TARGET [--generation ID]
+[--request-id ID] [--json]` and `target pairing cancel CODE_ID [--request-id ID] [--json]`.
+Human and JSON retry retain the same target/action request; another generation requires a new explicit ID. Revocation is available
 without a live publication service. Exact generation selection, both-channel denial,
 active campaign pauses and the strict target-revocation v1 receipt commit atomically.
 Receipt facts describe the decision time, with complete counts and bounded sorted
@@ -257,12 +257,12 @@ require explicit generation revocation; BOUND pending requests are terminally re
 Existing attempts/evidence and worker stop obligations remain separately unresolved;
 revocation grants no physical stop, one-shot clearance, drain or retarget authority.
 
-Explicit `target drain-approve TARGET --file PLAN --request-id ID [--ttl-seconds N]
+Explicit `target evidence approve TARGET --file PLAN --request-id ID [--ttl-seconds N]
 [--json]` grants only the original evidence manifest (at most 128 records/1 GiB)
 for one exact revoked generation/attempt/boot/media/binding, after all target work
 and worker stops are reconciled. Public output names a private credential file;
 tokens stay outside public results/CAS. Grants expire within one hour; exact replay
-never extends them. `target drain-revoke TARGET --grant ID [--json]` is terminal.
+never extends them. `target evidence revoke TARGET --grant ID [--json]` is terminal.
 Only two explicit registry routes accept this separate credential: upload and
 evidence acknowledgment. No register/claim/start/heartbeat/handoff/completion,
 repository access or physical-state claim is permitted. Fresh owner/scope/time
@@ -274,7 +274,7 @@ requests and selected ACK saves; retries never widen the plan or complete the at
 It reports selected versus additional retained records. Changed hardware stays blocked
 pending explicit retarget maintenance.
 
-Explicit `target retarget-code OLD --generation EXACT --new-name NAME --new-uuid
+Explicit `target reassign OLD --generation EXACT --new-name NAME --new-uuid
 UUID --request-id ID [--ttl-seconds N] [--json]` issues a short-lived invitation
 after exact original revocation and all target reconciliation/whole-worker stops.
 It preserves original media and binds a different new UUID. Purpose/scope commit
@@ -295,11 +295,11 @@ an explicit request ID; human retry retains the release/archive-derived ID. Curr
 independent publisher trust and an authenticated compatible v2 installation are
 required. The exact signed statement must match the installed release. Completion
 retains public factory image, manifest, candidate, statement/signature and the
-released-recovery-acquisition v1 index in operation output/CAS. Use the ordinary
-operation status/output readers to inspect references; CAS image bytes may be supplied
+released-recovery-acquisition v1 index in admin operation output/CAS. Use the ordinary
+admin operation show/output readers to inspect references; CAS image bytes may be supplied
 to a separately operated standard writer. Acquisition neither writes media nor
 establishes qualification, builder, baseline or physical execution readiness.
-The existing read-only `recovery-images` lists successful acquired sets alongside
+The existing read-only `recovery list` lists successful acquired sets alongside
 prepared images. Additive fields expose publisher statement/signature paths and
 fingerprint; old prepared-image fields retain their meanings. Exact retained index,
 statement linkage, references and asset sizes are checked within bounded reads.
@@ -309,25 +309,25 @@ assert current trust. Missing or inconsistent retained objects are unavailable.
 | Commands | Contract |
 | --- | --- |
 | `setup`, `status` | Resumable controller setup and read-only readiness, including an empty target registry; no fabricated enrollment. |
-| `recovery download`, `target add NAME`, `target show TARGET` | Verify compatible released image; C4 interactive enrollment; separate recovery/enrollment/experiment readiness. |
+| `recovery download`, `target pair NAME`, `target show TARGET` | Verify compatible released image; C4 interactive enrollment; separate recovery/enrollment/experiment readiness. |
 | `investigation start NAME --target TARGET [--problem FILE]` | Persist scope/limits/workspace and supported baseline selection; default external/attended. Preparation never grants boot approval. |
 | `investigation brief INVESTIGATION` | Installed guide, workspace, durable context references and ready-to-copy external-agent prompt. |
-| `investigation context/recipes/proposal-schema INVESTIGATION --json` | Bounded context, eligible installed recipes and exact supported proposal schema. |
-| `investigation propose INVESTIGATION --file FILE --request-id ID` | Accept proposal durably; source validation/freezing and dispatch use C3. |
-| `investigation capture-source INVESTIGATION --request-id ID` | Explicit exclusive-writer handoff; return capture operation, not immediate snapshot completion. |
-| `investigation submit-baseline INVESTIGATION --compose OPERATION --request-id ID` | Admit one stopped published unmodified baseline to existing jobs; grants no boot/approval authority. |
-| `experiment list --investigation INVESTIGATION --json`, `experiment review EXPERIMENT`, `attempt show ATTEMPT --json` | Keep experiment and physical attempt distinct; review exact source/candidate/recipe/risks. Retain current `attempt status`. |
-| `attempt approve ATTEMPT` | Human facade supplies durable retry identity; keep existing explicit `--request-id` form and exact approval semantics. |
-| `evidence read DIGEST --investigation INVESTIGATION --offset N --length N` | Authorized bounded reads, never private configuration. |
-| `operation status ID --json`, `investigation status INVESTIGATION`, `monitor [INVESTIGATION]` | Shared facts and actionable waits; retain current monitor flags. Watching launches no agent. |
-| `investigation pause/resume INVESTIGATION`, `target poweroff TARGET` | Reuse pause/reconciliation; coordinated shutdown with local recovery equivalent and explicit uncertainty. |
-| `investigation observations INVESTIGATION --json`, `investigation respond INVESTIGATION` | Interactive response uses same durable typed API; machine form takes `--request ID --file FILE --request-id ID`. |
-| `investigation report INVESTIGATION`, `investigation export INVESTIGATION --output PATH` | Evidence-linked patch or inconclusive report; public bundle, not a backup. |
-| `backup --output PATH`, `restore`, `storage` | Guided completeness, paused restoration and retention services; preserve existing positional/maintenance interfaces. |
+| `investigation context`, `investigation recipe list`, `investigation proposal schema` | Bounded context, eligible installed recipes and exact supported proposal schema. |
+| `investigation proposal add INVESTIGATION --file FILE --request-id ID` | Accept proposal durably; source validation/freezing and dispatch use C3. |
+| `investigation source capture INVESTIGATION --request-id ID` | Explicit exclusive-writer handoff; return capture operation, not immediate snapshot completion. |
+| `experiment submit INVESTIGATION --file BASELINE_JSON --request-id ID` | Select baseline source explicitly and prepare an unmodified test; grants no boot/approval authority. |
+| `experiment list INVESTIGATION --json`, `experiment show EXPERIMENT`, `run show RUN --json` | Keep experiment and physical attempt distinct; review exact source/candidate/recipe/risks. |
+| `run approve RUN` | Human facade supplies durable retry identity; keep existing explicit `--request-id` form and exact approval semantics. |
+| `investigation evidence read DIGEST INVESTIGATION --offset N --length N` | Authorized bounded reads, never private configuration. |
+| `admin operation show ID --json`, `investigation status INVESTIGATION`, `monitor [INVESTIGATION]` | Shared facts and actionable waits; retain current monitor flags. Watching launches no agent. |
+| `investigation pause/resume INVESTIGATION`, `target shutdown request TARGET` | Reuse pause/reconciliation; coordinated shutdown with local recovery equivalent and explicit uncertainty. |
+| `investigation observation list INVESTIGATION --json`, `investigation observation answer INVESTIGATION` | All responses use the same durable typed API and explicit `--request ID --file FILE --request-id ID`. |
+| `investigation results show INVESTIGATION`, `investigation results export INVESTIGATION --output PATH` | Evidence-linked patch or inconclusive report; public bundle, not a backup. |
+| `admin backup --output PATH`, `admin restore`, `admin storage` | Explicit coverage, paused restoration and existing retention services. |
 | `agent configure`, `investigation driver INVESTIGATION --managed` | M7 optional configured invocation, paused/reconciled writer handoff; never default or implicit. |
 | `target qualify TARGET` | M7 separately authorized qualification; bounded unattended authority remains C6, not a consequence of pairing or managed mode. |
 
-Specify exact argument/schema/help fixtures per owning P0 packet; unsupported
+The CLI redesign plan owns current spelling and help fixtures; unsupported
 commands must not pretend to work. Keep frozen wire names such as `device_id`,
 `session_id` and existing `--device` options. No bulk database vocabulary migration.
 
@@ -503,10 +503,10 @@ exports still exclude private credentials and are not resumable backups.
 
 #### Available immutable investigation build/composition facade
 
-`investigation prepare-candidate NAME --request-id ID` derives candidate-rootfs
-input v1 from the investigation baseline. `investigation build NAME --capture OP
+`investigation build prepare NAME --request-id ID` derives candidate-rootfs
+input v1 from the investigation baseline. `investigation build kernel NAME --capture OP
 --candidate OP --request-id ID` binds stopped source/candidate receipts to
-investigation-build-input v1. `investigation compose NAME --build OP --repository
+investigation-build-input v1. `investigation build system NAME --build OP --repository
 ALIAS --request-id ID` binds a completed joined build and configured publication
 to investigation-compose-input v1. All accept `--json`, return the existing durable
 operation envelope, and use existing build/compose worker kinds with versioned
@@ -526,21 +526,23 @@ operation retirement does not destroy that join.
 
 #### Available external proposal admission
 
-`investigation propose NAME --file FILE --request-id ID [--json]` accepts strict
-agent-proposal v2. `proposal-schema` returns the installed standalone schema and
+`investigation proposal add NAME --file FILE --request-id ID [--json]` accepts strict
+agent-proposal v3. `investigation proposal schema` returns the installed standalone schema and
 current `proposal_scope`/`source_free_scope` receipts. `context` includes the same
 proposal scope and known usage totals with incomplete-observation counts.
-`investigation proposals NAME [--after CURSOR --limit N] --json` pages retained
+`investigation proposal list NAME [--after CURSOR --limit N] --json` pages retained
 decisions and immutable dispatch intents without starting a controller or agent.
 
-V2 `base_oid` is the actual Git object ID. Existing proposal-v1 `base_revision`
+Proposal `base_oid` is the actual Git object ID. Existing proposal-v1 `base_revision`
 remains a digest and its reader is unchanged. `input_context_digest` hashes the
-canonical proposal-context v1 receipt supplied in `input_context`; it identifies
+canonical proposal-context v2 receipt supplied in `input_context`; it identifies
 the immutable investigation/baseline/capture scope, not all mutable context or the
 external agent's full prompt. The controller independently binds that scope.
-Experiment proposals require a completed stopped capture and its latest unreleased
-QUIESCED writer handoff, exact baseline/build/installed reviewed recipe identities,
-and parameters/deadline within the reviewed manifest. Target installation,
+Editable-source proposals require a completed stopped capture and its latest
+unreleased QUIESCED writer handoff. Baseline proposals select a real distribution
+preparation with retained pristine bytes. Both require exact baseline/build/installed
+recipe identities and parameters/deadlines within the reviewed manifest. Retained
+v2 proposals and v1 contexts keep their original readers and hashes. Target installation,
 peripheral availability and exact-attempt approval remain separate gates.
 
 Source-free `needs_human` and `conclude` proposals may describe selection or
@@ -556,7 +558,7 @@ known totals do not claim to meter unrelated external spending.
 Admission is bounded metadata work, not a full archive rehash or source scan.
 Captured bytes were verified at stopped publication and are retained for later
 independent execution validation. An unbound operation has the named
-`external_loop_pending` reason. `dispatch-proposal NAME --proposal OP
+`external_loop_pending` reason. `investigation proposal submit NAME --proposal OP
 --candidate CANDIDATE_OP --repository ALIAS --request-id ID` binds one strict
 proposal-dispatch-input v1 to the original operation. Source-free actions omit
 candidate/repository. Exact replay precedes current readiness/source checks;
@@ -574,7 +576,7 @@ Experiment submission reuses the published-composition proof, with strict
 proposal-experiment-input v1 attribution. It binds the exact recipe, parameters,
 repetitions, deadline and candidate deployment; existing experiment/jobs/refs and
 parent completion commit atomically after final CAS/native-retention fences.
-`proposals` exposes the linked child/experiment IDs. Source-free human/conclusion
+`investigation proposal list` exposes the linked child/experiment IDs. Source-free human/conclusion
 actions retain their decision and pause without build or experiment. Parent success
 means submission; attempt approval, evidence acknowledgement, recovery and problem
 reproduction remain separate. No managed invocation or unattended grant is implied.

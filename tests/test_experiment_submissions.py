@@ -110,7 +110,7 @@ def test_completed_capture_status_logs_and_no_experiment(lab, monkeypatch):
         admit(c); c.resume('investigation'); claim = complete(c, owner, monkeypatch)
         view = submissions.status(StateReader(c.root), 'investigation', 'test-001')
         assert view['stage'] == 'source_ready' and view['experiment_id'] is None
-        assert not view['pipeline_connected'] and not view['boot_authorized']
+        assert view['pipeline_connected'] and not view['boot_authorized']
         page = submissions.logs(StateReader(c.root), 'investigation', 'test-001', limit=1)
         assert len(page['items']) == 1 and page['next_cursor'] is not None
         with pytest.raises(ContractError): submissions.logs(StateReader(c.root), 'another', 'test-001')
@@ -232,7 +232,7 @@ def test_proposal_link_checks_exact_submission_and_does_not_dispatch(lab, monkey
         assert submissions.link_proposal(owner, 'investigation', 'test-001', admitted).request_id == 'test-001'
         assert submissions.link_proposal(owner, 'investigation', 'test-001', admitted).request_id == 'test-001'
         from quirkbench.proposal_dispatch import declare
-        with pytest.raises(Conflict, match='adapter'):
+        with pytest.raises(Conflict, match='submission owns dispatch'):
             declare(c, 'investigation', admitted, 'dispatch-001', repository='lab', ready=lambda _: None)
         with c.transaction() as db:
             assert not db.execute('SELECT 1 FROM proposal_dispatch_commands').fetchone()
@@ -261,7 +261,7 @@ def test_raw_child_resume_cannot_dispatch_before_parent_reconciliation(lab):
         row, parent = rows(c); c.resume('investigation')
         resume(owner, row['source_operation'])
         assert JobCoordinator(owner, Workers()).tick() is None
-        with pytest.raises(Conflict, match='reconciliation'):
+        with pytest.raises(Conflict, match='continuation'):
             owner.claim(row['source_operation'], stage='source_capture', deadline=c.clock() + 30)
 
 

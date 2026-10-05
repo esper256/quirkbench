@@ -51,7 +51,7 @@ def inspect_user_manager(*, runner: Callable = _run, uid: int | None = None,
     environment=os.environ if environ is None else environ
     in_distrobox=bool(environment.get('CONTAINER_ID') and environment.get('DISTROBOX_ENTER_PATH'))
     tools={name:which(name) for name in ('podman','docker','distrobox')}
-    instructions=['Start the configured controller with quirkbench controller-run and keep that terminal open.']
+    instructions=['Start the configured controller with quirkbench admin controller run and keep that terminal open.']
     if not (tools['podman'] or tools['docker']):
         instructions.append('Install a supported local container engine for controller workers; software development and smoke tests do not require it.')
     return {
@@ -259,7 +259,7 @@ def controller_status(root=None, *, config_home=None, filesystem=None,
             'host': choice['host'], 'port': choice['port'], 'allow_lan': choice['allow_lan'],
             'status': 'recorded_not_activated'}))(intent)
     if report['installations']['mismatch']:
-        report['instructions'].append('CLI, configured and advertised service revisions differ; reconcile work before controller-install --activate.')
+        report['instructions'].append('CLI, configured and advertised service revisions differ; reconcile work before quirkbench dev install --activate (unsigned development) or quirkbench admin install (signed release).')
     service_setup = None
     try:
         from .setup_service import service_progress

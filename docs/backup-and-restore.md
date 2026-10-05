@@ -5,8 +5,8 @@ remain supported. The output/input aliases add guidance to the existing synchron
 backup and restore commands; they do not start another service or background job.
 
 ```sh
-quirkbench backup --output /backup/quirkbench-cut
-quirkbench --state /new/controller/state restore --input /backup/quirkbench-cut
+quirkbench admin backup --output /backup/quirkbench-cut
+quirkbench --state /new/controller/state admin restore --input /backup/quirkbench-cut
 ```
 
 `backup DESTINATION` and `restore BACKUP` preserve their answer formats. New CLI
@@ -21,10 +21,10 @@ directory without that marker is incomplete and cannot be restored.
 Stop every writer before explicitly handing off a registered source workspace:
 
 ```sh
-quirkbench investigation source NAME --workspace WORKSPACE
-quirkbench investigation capture-source NAME --workspace WORKSPACE --quiesced --request-id CAPTURE_ID
-quirkbench operation status OPERATION_ID
-quirkbench backup --output /backup/quirkbench-new-cut
+quirkbench investigation source show NAME
+quirkbench investigation source capture NAME --workspace WORKSPACE --quiesced --request-id CAPTURE_ID
+quirkbench admin operation show OPERATION_ID
+quirkbench admin backup --output /backup/quirkbench-new-cut
 ```
 
 Use the returned operation ID. Capture runs through the existing configured
@@ -81,11 +81,11 @@ cut**, not the modified paused database or current restored readiness.
 ## Storage and cleanup guidance
 
 ```sh
-quirkbench storage --json --limit 20
-quirkbench storage --json --after OWNER --limit 20
-quirkbench maintenance status
-quirkbench maintenance pin OWNER --note 'Keep required evidence'
-quirkbench maintenance prune --dry-run
+quirkbench admin storage show --json --limit 20
+quirkbench admin storage show --json --after OWNER --limit 20
+quirkbench admin storage show
+quirkbench admin storage pin OWNER --note 'Keep required evidence'
+quirkbench admin storage prune --dry-run
 ```
 
 `storage` is a bounded read-only query: it lists retained owners, pin presence,

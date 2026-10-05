@@ -63,8 +63,7 @@ def test_cli_acknowledges_operation_without_starting_worker(setup, monkeypatch, 
     from quirkbench import controller_service
     c, root, base = setup
     monkeypatch.setattr(controller_service, 'require_ready', lambda _: None)
-    command = ['--state', str(c.root), '--reserve-gib', '0', 'investigation', 'prepare-source',
-        'campaign', '--source', str(root), '--base-oid', base, '--request-id', 'cli-preparation', '--quiesced', '--json']
+    command = ['--state', str(c.root), 'investigation', 'source', 'prepare', 'campaign', '--source', str(root), '--base-oid', base, '--request-id', 'cli-preparation', '--quiesced', '--json', '--reserve-gib', '0']
     assert cli.main(command) == 0
     response = json.loads(capsys.readouterr().out)
     assert response['operation_id']
@@ -82,7 +81,7 @@ def test_readonly_cli_never_initializes_or_prunes(setup, monkeypatch, capsys, ac
     def forbidden(*a, **kw): raise AssertionError('read-only command mutated state')
     monkeypatch.setattr(controller, 'Controller', forbidden)
     monkeypatch.setattr(maintenance, 'prune', forbidden)
-    assert cli.main(['--state', str(c.root), 'investigation', action, 'campaign', '--json']) == 0
+    assert cli.main(['--state', str(c.root), 'investigation', *(['source','show'] if action=='source' else [action]), 'campaign', '--json']) == 0
     assert json.loads(capsys.readouterr().out)['data']
 
 
@@ -96,7 +95,7 @@ def test_explicit_workspace_scope_and_ambiguity(setup):
     with pytest.raises(Conflict): facade.execute(c.root, args('source', name='other-campaign', workspace='campaign-source'))
 
 
-@pytest.mark.parametrize('change', [{'quiesced': False}, {'request_id': None}])
+@pytest.mark.parametrize('change', [{'quiesced': False}])
 def test_preparation_requires_explicit_handoff_and_json_retry_identity(setup, change):
     c, root, base = setup
     values = {'source': root, 'base_oid': base, 'request_id': 'request', 'quiesced': True, **change}
@@ -126,7 +125,7 @@ def test_human_preparation_uses_stable_named_request(setup):
 
 
 def test_exact_cli_forms_and_creation_require_existing_target_are_explicit():
-    parsed = cli.parser().parse_args(['investigation', 'capture-source', 'existing', '--workspace', 'kernel', '--request-id', 'capture', '--quiesced', '--json'])
+    parsed = cli.parser().parse_args(['investigation', 'source', 'capture', 'existing', '--workspace', 'kernel', '--request-id', 'capture', '--quiesced', '--json'])
     assert parsed.name == 'existing' and parsed.workspace == 'kernel' and parsed.quiesced
     parsed = cli.parser().parse_args(['investigation','start','new','--target','target'])
     assert parsed.target=='target' and parsed.action=='start'

@@ -79,7 +79,7 @@ def response(saved):
         'repository_alias':intent['repository_alias'],'signing_fingerprint':intent['signing_fingerprint'],
         'public_key_sha256':intent['public_key_sha256'],'controller_certificate_sha256':intent['controller_certificate_sha256'],
         'enrollment_available':False,'service_start_required':True,'boot_authorized':False,
-        'next_command':'quirkbench controller-run'}
+        'next_command':'quirkbench admin controller run'}
 
 
 def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,runner=subprocess.run,

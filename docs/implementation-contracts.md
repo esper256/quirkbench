@@ -195,7 +195,7 @@ including recovery-only mode, with a 512 KiB report budget and cooperative
 ACPI/I2C/HID, non-serial model/BIOS and first-logical-CPU identity/features; v1
 retains its original property allowlist. Registration preserves the actual boot/media
 context and references canonical validated bytes in existing CAS. Missing or partial
-collection must not block retained attempt evidence upload. `target-inventory`
+collection must not block retained attempt evidence upload. `target inventory`
 returns observations and candidate planning blockers without creating attempts,
 queueing builds or granting execution authority. See the [current handoff](recovery-operations.md#automatic-first-boot-hardware-report).
 
@@ -275,7 +275,7 @@ Campaign pause is separate: it blocks admission of the **next stage**, not merel
 new top-level operations. An already-running build may finish and publish; its
 queued compose/submit stages wait. An already-started bounded physical attempt
 finishes and returns to recovery. Pause never turns success into failure or erases
-queued work. Non-campaign image preparation has explicit operation resume after
+queued work. Non-campaign image preparation has explicit admin operation resume after
 restart; do not auto-resume it just because it has no campaign.
 
 Unresolved physical execution fences the next controller stage for that operation's

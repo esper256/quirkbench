@@ -1,6 +1,6 @@
 # Prepare and build from one recovery input bundle
 
-Use `quirkbench recovery-bundle` for controller-free preparation and image
+Use `quirkbench dev recovery` for controller-free preparation and image
 production. It wraps the existing signed-RPM retention, stock recipe and foreground
 image builder. No daemon or controller state is needed. Software CI does not build
 or boot images.
@@ -12,16 +12,16 @@ selected immutable local builder image in Podman or Docker. Use the repository's
 
 ```sh
 # Stage the specification's repository bytes and print the exact download argv.
-quirkbench recovery-bundle plan --spec selected-spec.json --output acquisition
+quirkbench dev recovery plan --spec selected-spec.json --output acquisition
 # Execute the returned download_argv. This downloads packages, never installs them
 # into the host. Keep TLS and repository signature verification enabled.
 
-quirkbench recovery-bundle prepare \
+quirkbench dev recovery prepare \
   --spec acquisition/acquisition-spec.v1.json --packages acquisition/rpms \
   --public-key RPM-GPG-KEY-fedora --builder-image sha256:YOUR_BUILDER_IMAGE_ID \
   --epoch 1700000000 --output recovery-inputs
-quirkbench recovery-bundle verify recovery-inputs --engine podman
-quirkbench recovery-bundle build recovery-inputs --engine podman --output recovery-output
+quirkbench dev recovery verify recovery-inputs --engine podman
+quirkbench dev recovery build recovery-inputs --engine podman --output recovery-output
 ```
 
 For changed Fedora package pins, supply an explicitly reviewed vendor inventory
@@ -49,9 +49,9 @@ and cleanup workflow.
 ## Transfer and snapshot contract
 
 ```sh
-quirkbench recovery-bundle export recovery-inputs --output exported-inputs
+quirkbench dev recovery export recovery-inputs --output exported-inputs
 # Transfer that directory using ordinary filesystem tools.
-quirkbench recovery-bundle import exported-inputs --output local-inputs \
+quirkbench dev recovery import exported-inputs --output local-inputs \
   --manifest-sha256 EXPECTED_MANIFEST_SHA256
 ```
 
@@ -80,5 +80,5 @@ builds offline with the existing network-isolated worker.
 
 A future release may distribute this immutable input snapshot alongside its pinned
 builder and application versions. Creating or exporting a bundle does not publish
-a release or claim boot qualification. Lower-level `recovery-inputs`,
-`recovery-image-build` and `recovery-image-cleanup` remain available for diagnosis.
+a release or claim boot qualification. Lower-level `dev recovery inputs`,
+`dev recovery build` and `dev recovery cleanup` remain available for diagnosis.

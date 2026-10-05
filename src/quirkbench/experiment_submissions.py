@@ -1,8 +1,4 @@
-"""Pre-capture submission identity on the existing controller operation owner.
-
-This foundation stops at source_ready. Candidate preparation and dispatch are a
-later adapter; no public CLI, second scheduler or experiment is created here.
-"""
+"""Durable experiment request identities and source handoff on the controller owner."""
 from dataclasses import dataclass, asdict
 import json
 import re
@@ -130,7 +126,7 @@ def _freeze(c, db, name, request):
     from .controller_service import configuration
     inv = record(c, name, db)
     if inv is None or inv['baseline_sha256'] is None:
-        raise Conflict('prepare a supported investigation baseline first')
+        raise Conflict('prepare a supported investigation baseline show first')
     if inv['session']['driver'] != 'external' or inv['session']['execution_owner'] != 'external':
         raise Conflict('submission requires external investigation ownership')
     workspace_id = inv['session']['workspace_id']
@@ -172,9 +168,20 @@ def _freeze(c, db, name, request):
         if any(base[k] != workspace[k] for k in ('base_oid', 'allowed_untracked', 'provenance')):
             raise Conflict('baseline preparation differs from registered source')
         refs |= base_refs | {base_capture, base['archive_sha256'], base['manifest_sha256']}
+    builder = None
+    prep = db.execute('SELECT operation FROM source_preparations WHERE campaign=? AND workspace_id=?',(name,workspace_id)).fetchone()
+    if prep is not None:
+        prep_row = db.execute('SELECT input_digest FROM operations WHERE id=?',(prep[0],)).fetchone()
+        prep_args = _document(c,prep_row[0])['arguments']
+        if prep_args.get('schema_version') == 2:
+            from .distribution_prepare_operation import validate_input
+            prepared = validate_input(_document(c,prep_args['preparation_sha256']))
+            from .investigation_pipeline import BUILDER
+            builder = {k:prepared[k] for k in BUILDER}
+            refs.add(builder['builder_archive_sha256'])
     from .external_proposals import availability
     availability(c, refs)
-    return {'schema_version': 1, 'request': request, 'investigation_id': name,
+    return {'builder': builder, 'schema_version': 1, 'request': request, 'investigation_id': name,
             'investigation_sha256': investigation_sha, 'device_id': inv['session']['device_id'],
             'workspace_id': workspace_id, 'workspace_sha256': saved['document_digest'],
             'experiment': experiment, 'repository': repository,
@@ -206,13 +213,14 @@ def submit(controller, name, value, request_id, *, ready=None):
         stored = controller.store.put(encoded)
         parent = controller._admit_operation_db(db, request_id, KIND, intent, checksum, stored.sha256, refs,
                                                campaign_id=name, device_id=frozen['device_id'])
+        public = canonical({'request':request, 'workspace_id':frozen['workspace_id']}).decode()
         child_request = 'submission-capture-' + parent['id']
         if frozen['request']['source']['mode'] == 'workspace':
             child = handoff_db(controller, db, frozen['workspace_id'], child_request, quiesced=True)
         else:
             child = {'id': frozen['baseline_operation']}
-        db.execute('INSERT INTO experiment_submissions VALUES(?,?,?,?,?,?,NULL)',
-                   (request_id, name, parent['id'], request_digest, record.sha256, child['id']))
+        db.execute('INSERT INTO experiment_submissions(request_id,campaign,operation,request_digest,intent_digest,source_operation,proposal_operation,public_document) VALUES(?,?,?,?,?,?,NULL,?)',
+                   (request_id, name, parent['id'], request_digest, record.sha256, child['id'], public))
         db.execute("UPDATE operations SET state='WAITING',stage=?,worker_epoch=queued_epoch WHERE id=?",
                    ('source_capture' if frozen['baseline_operation'] is None else 'baseline_selection', parent['id']))
     return SubmissionReference(name, request_id)
@@ -303,11 +311,16 @@ def link_proposal(owner, name, request_id, proposal_operation):
     return SubmissionReference(name, request_id)
 
 
-def guard_proposal_dispatch(db, operation):
-    # The later adapter must bind the frozen repository/candidate and publish the
-    # final experiment before enabling dispatch of submission-owned proposals.
-    if db.execute('SELECT 1 FROM experiment_submissions WHERE proposal_operation=?', (operation,)).fetchone():
-        raise Conflict('submission candidate/build dispatch adapter is not connected yet')
+def guard_proposal_dispatch(db, operation, *, owner=None, candidate=None, repository=None):
+    row = db.execute('SELECT * FROM experiment_submissions WHERE proposal_operation=?', (operation,)).fetchone()
+    if row is None:
+        return
+    if owner is None:
+        raise Conflict('submission owns dispatch; use experiment status or resume')
+    from .submission_pipeline import fence
+    frozen, parent = fence(owner, db, row)
+    if candidate != row['candidate_operation'] or repository != frozen['repository']:
+        raise Conflict('dispatch differs from frozen submission choices')
 
 
 def _owner(owner, db, parent):
@@ -320,13 +333,23 @@ def _owner(owner, db, parent):
 
 
 def guard_child(owner, db, child):
-    row = db.execute('SELECT operation FROM experiment_submissions WHERE source_operation=?', (child['id'],)).fetchone()
-    if row is None:
-        return
-    parent = db.execute('SELECT * FROM operations WHERE id=?', (row['operation'],)).fetchone()
-    _owner(owner, db, parent)
-    if parent['state'] != 'WAITING' or parent['stage'] != 'source_capture' or parent['worker_epoch'] != owner.epoch:
-        raise Conflict('submission requires reconciliation before capture')
+    rows = db.execute('SELECT * FROM experiment_submissions WHERE source_operation=? OR candidate_operation=?',
+                      (child['id'], child['id'])).fetchall()
+    for row in rows:
+        if row['source_operation'] == child['id']:
+            frozen = _document(owner.controller, row['intent_digest'])
+            if frozen['request']['source']['mode'] == 'baseline':
+                continue  # Already completed shared preparation, never claimed here.
+        parent=db.execute('SELECT * FROM operations WHERE id=?',(row['operation'],)).fetchone()
+        _owner(owner,db,parent)
+        if parent['state']!='WAITING' or parent['worker_epoch']!=owner.epoch:
+            raise Conflict('submission requires explicit continuation by its current owner')
+        if row['candidate_operation']==child['id']:
+            from .submission_pipeline import fence
+            fence(owner,db,row)
+        stage = 'source_capture' if row['source_operation'] == child['id'] else 'candidate'
+        if parent['stage'] != stage:
+            raise Conflict('submission requires reconciliation before child dispatch')
 
 
 def tick(owner):
@@ -340,17 +363,32 @@ def tick(owner):
             AND c.state IN ('SUCCEEDED','FAILED') AND c.worker_unit IS NULL AND i.state='RUNNING'
             ORDER BY p.created LIMIT 1''', (owner.epoch,)).fetchone()
         if row is None:
-            return None
+            pass
+        else:
+            return _source_ready(owner, db, row)
+    from .submission_pipeline import tick as pipeline_tick
+    return pipeline_tick(owner)
+
+
+def _source_ready(owner, db, row):
+        c = owner.controller
         parent = db.execute('SELECT * FROM operations WHERE id=?', (row['operation'],)).fetchone()
         _owner(owner, db, parent)
         try:
             _, child, refs = _proof(c, db, row)
         except (OSError, ValueError) as exc:
-            error = c.store.put(canonical({'code': 'SUBMISSION_SOURCE_BLOCKED', 'message': str(exc)[:512], 'retryable': False}))
-            db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)', (parent['id'], error.sha256))
-            db.execute("INSERT OR IGNORE INTO operation_refs VALUES(?,'output',?)", (parent['id'], error.sha256))
-            db.execute("UPDATE operations SET state='FAILED',error_digest=?,updated=? WHERE id=?",
-                       (error.sha256, c.clock(), parent['id']))
+            from .store import StoragePressure
+            error = None
+            try:
+                error = c.store.put(canonical({'code': 'SUBMISSION_SOURCE_BLOCKED', 'message': str(exc)[:512], 'retryable': False})).sha256
+            except (OSError, StoragePressure):
+                pass
+            if error is not None:
+                db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)', (parent['id'], error))
+                db.execute("INSERT OR IGNORE INTO operation_refs VALUES(?,'output',?)", (parent['id'], error))
+                db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)',('submission-record:'+parent['id'],error))
+            db.execute("UPDATE operations SET state='FAILED',error_digest=?,wait_event='source-inputs-unavailable; new-submission-required',updated=? WHERE id=?",
+                       (error, c.clock(), parent['id']))
             db.execute("INSERT OR REPLACE INTO storage_groups VALUES(?,'input',?,?,'FAILED','[]',?)",
                        (parent['id'], parent['created'], c.clock(), canonical({'kind': KIND, 'no_worker': True}).decode()))
             return {'id': parent['id'], 'state': 'FAILED'}
@@ -363,45 +401,13 @@ def tick(owner):
 
 
 def status(reader, name, request_id):
-    """Read-only view: capture completion is not experiment readiness."""
-    with reader.connection() as db:
-        row = _find(reader, db, name, request_id)
-        parent = db.execute('SELECT * FROM operations WHERE id=?', (row['operation'],)).fetchone()
-        child = db.execute('SELECT * FROM operations WHERE id=?', (row['source_operation'],)).fetchone()
-        result = {**asdict(SubmissionReference(name, request_id)), 'state': parent['state'],
-                  'stage': parent['stage'], 'source_state': child['state'],
-                  'last_activity': max(parent['updated'], child['updated']), 'experiment_id': None,
-                  'approval_required': True, 'boot_authorized': False,
-                  'continuation_available': parent['state'] == 'INTERRUPTED',
-                  'pipeline_connected': False, 'diagnostics': {'operation_id': parent['id']}}
-        if parent['stage'] == 'source_ready':
-            result['blocking_reason'] = 'candidate/build dispatch adapter is not connected in this foundation'
-        if parent['error_digest']:
-            result['error'] = reader.operation_failure(parent['id'])
-        if child['error_digest']:
-            result['source_error'] = reader.operation_failure(child['id'])
-        if child['progress']:
-            from .state_reader import safe_text
-            progress = json.loads(child['progress'])
-            result['progress'] = {k: progress.get(k) for k in ('phase', 'state', 'completed', 'total', 'unit')}
-            result['progress']['message'] = safe_text(progress.get('message', ''))[:1024]
-        return result
+    from .submission_views import status as view
+    return view(reader,name,request_id)
 
 
-def logs(reader, name, request_id, *, after=0, limit=20):
-    """Bounded capture event log; no private paths or arbitrary CAS selectors."""
-    from .state_reader import safe_text
-    with reader.connection() as db:
-        row = _find(reader, db, name, request_id)
-        operation = row['source_operation']
-    page = reader.operation_events(operation, after=after, limit=limit)['data']
-    items = []
-    for event in page['items']:
-        document = event['document']
-        items.append({'cursor': event['id'], 'at': event['created'], 'event': safe_text(event['kind']),
-                      'message': safe_text(str(document.get('message', '')))[:1024]})
-    return {**asdict(SubmissionReference(name, request_id)), 'stage': 'source',
-            'items': items, 'next_cursor': page['next_cursor']}
+def logs(reader, name, request_id, **options):
+    from .submission_views import logs as view
+    return view(reader,name,request_id,**options)
 
 
 def resume(controller, name, request_id, resume_request_id, *, ready=None):
@@ -432,6 +438,11 @@ def resume(controller, name, request_id, resume_request_id, *, ready=None):
 def resume_owned(owner, operation, *, command=None):
     from .job_operations import resume as resume_child
     c = owner.controller
+    with c.transaction() as db:
+        linked = db.execute('SELECT candidate_operation,proposal_operation FROM experiment_submissions WHERE operation=?',(operation,)).fetchone()
+    if linked and any(linked):
+        from .submission_pipeline import resume_owned as resume_pipeline
+        return resume_pipeline(owner, operation, command=command)
     with c.transaction() as db:
         row = db.execute('SELECT * FROM experiment_submissions WHERE operation=?', (operation,)).fetchone()
         parent = db.execute('SELECT * FROM operations WHERE id=?', (operation,)).fetchone()

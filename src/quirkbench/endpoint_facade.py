@@ -115,6 +115,6 @@ def wizard(root, *,unit=None,input_stream=None,output_stream=None,run=None,runne
     if runner is not None:adapters['runner']=runner
     result=execute(root,'apply',request_id=request_id,identity_sha256=selected['identity_sha256'],fingerprint=approved,
         unit=unit,repository_url=repository_url,**adapters)
-    print('Controller configuration applied. Run quirkbench controller-run, then apply this address and fingerprint on each target.',file=output)
+    print('Controller configuration applied. Run quirkbench admin controller run, then apply this address and fingerprint on each target.',file=output)
     print('Targets keep their evidence and credentials. Reachability and boot approval remain separate.',file=output,flush=True)
     return result

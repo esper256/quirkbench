@@ -63,7 +63,7 @@ def run_retarget(control,config, *,verify_target,input_stream=None,output_stream
         prepare_retarget(control,config,request_id,old,actual,verify_target=verify,binding_reader=binding_reader,
                          clearer=clearer,recovery_verifier=recovery_verifier)
     print('Retarget is paused. Finish with the same local request and retained controller invitation after interruption.',file=output)
-    url=_answer(source,output,'Controller HTTPS endpoint from target retarget-code: ',4096)
+    url=_answer(source,output,'Controller HTTPS endpoint from target reassign: ',4096)
     if url is None or not url:return None
     endpoint(url);verify();observation=certificate_inspector(url,clock=clock)
     print('Controller: '+url,file=output)
@@ -73,7 +73,7 @@ def run_retarget(control,config, *,verify_target,input_stream=None,output_stream
     if approval is None or not approval:return None
     sha256(approval)
     if approval!=observation['certificate_sha256']:raise Conflict('retarget fingerprint mismatch; no code transmitted')
-    code_id=_answer(source,output,'Code ID from target retarget-code: ',128)
+    code_id=_answer(source,output,'Code ID from target reassign: ',128)
     if code_id is None or not code_id:return None
     identifier(code_id)
     from .retarget_maintenance import pending_choice,select_invitation

@@ -152,8 +152,8 @@ Privileged cleanup stays in recovery; a library script receives no arbitrary dis
 wipe authority. Kernel-coupled tools belong in the experimental deployment.
 
 Begin maintenance with the controller CLI after pausing all campaigns on the device:
-`quirkbench library-maintenance begin target-01 --selection HASH`. The durable fence
-prevents resume until `quirkbench library-maintenance finish target-01`. The target
+`quirkbench admin recovery maintenance begin target-01 --selection HASH`. The durable fence
+prevents resume until `quirkbench admin recovery maintenance finish target-01`. The target
 `python3 -m quirkbench.library_maintenance` command verifies the fence, downloads through authenticated resumable
 artifact transport, publishes verified packs atomically, then restores read-only
 access. Backup/checkpoint retention includes selections, manifests and file content.

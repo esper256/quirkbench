@@ -153,15 +153,14 @@ def test_installed_cli_propose_schema_replay_and_readonly_listing(captured,monke
     from quirkbench import cli,agent
     c,value,private,original=captured;file=tmp_path/'proposal.json';file.write_bytes(canonical(value))
     monkeypatch.setattr(agent.CommandAgent,'decide',lambda *a:pytest.fail('external admission invoked managed agent'))
-    command=['--state',str(c.root),'--reserve-gib','0','investigation','propose','investigation',
-        '--file',str(file),'--request-id','cli-proposal','--json']
+    command=['--state', str(c.root), 'investigation', 'proposal', 'add', 'investigation', '--file', str(file), '--request-id', 'cli-proposal', '--json', '--reserve-gib', '0']
     assert cli._main(command)==0;answer=json.loads(capsys.readouterr().out)
     assert cli._main(command)==0;assert json.loads(capsys.readouterr().out)==answer
     monkeypatch.setattr(Controller,'__init__',lambda *a,**kw:pytest.fail('read initialized state'))
     monkeypatch.setattr('quirkbench.maintenance.prune',lambda *a,**kw:pytest.fail('read pruned state'))
     monkeypatch.setattr('quirkbench.filesystem.private_lock',lambda *a,**kw:pytest.fail('read acquired publication lock'))
-    for action in ('proposals','proposal-schema','context'):
-        assert cli.main(['--state',str(c.root),'investigation',action,'investigation','--json'])==0
+    for action in (('proposal','list'),('proposal','schema'),('context',)):
+        assert cli.main(['--state',str(c.root),'investigation',*action,'investigation','--json'])==0
         assert not json.loads(capsys.readouterr().out)['data']['execution_authorized']
 
 
@@ -232,7 +231,7 @@ def test_legacy_readonly_context_and_listing_need_no_migration_or_housekeeping(s
     monkeypatch.setattr('quirkbench.filesystem.private_lock',forbidden)
     monkeypatch.setattr('quirkbench.maintenance.prune',forbidden)
     for action in ('context','proposals','proposal-schema'):
-        assert cli.main(['--state',str(c.root),'investigation',action,'investigation','--json'])==0
+        assert cli.main(['--state',str(c.root),'investigation',*action,'investigation','--json'])==0
         data=json.loads(capsys.readouterr().out)['data']
         if action=='context':assert data['proposal_usage']['migration_required']
         if action=='proposals':assert data['migration_required'] and data['items']==[]
@@ -247,8 +246,7 @@ def test_installed_propose_unavailable_workspace_metadata_has_c2_envelope(captur
     if corruption=='missing':c.store.path(workspace).unlink()
     else:c.store.path(workspace).write_bytes(b'{}')
     path=tmp_path/'proposal.json';path.write_bytes(canonical(value))
-    result=cli.main(['--state',str(c.root),'--reserve-gib','0','investigation','propose','investigation',
-        '--file',str(path),'--request-id','unavailable','--json'])
+    result=cli.main(['--state', str(c.root), 'investigation', 'proposal', 'add', 'investigation', '--file', str(path), '--request-id', 'unavailable', '--json', '--reserve-gib', '0'])
     answer=json.loads(capsys.readouterr().out)
     assert result==3 and answer['error']['code']=='CONFLICT' and answer['operation_id'] is None
     assert 'workspace metadata unavailable' in answer['error']['message']

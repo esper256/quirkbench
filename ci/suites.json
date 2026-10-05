@@ -159,7 +159,14 @@
       "src/quirkbench/experiment_submissions.py",
       "tests/test_experiment_submissions.py",
       "schemas/experiment-submission.*.schema.json",
-      "examples/experiment-submission.json"
+      "examples/experiment-submission.json",
+      "src/quirkbench/submission_*.py",
+      "src/quirkbench/proposal_source.py",
+      "src/quirkbench/cli_*.py",
+      "tests/test_submission_pipeline.py",
+      "tests/test_cli_redesign.py",
+      "schemas/agent-proposal.v3.schema.json",
+      "schemas/proposal-context.v2.schema.json"
     ],
     "tests": [
       "tests/test_investigation_pipeline.py",
@@ -185,7 +192,9 @@
       "tests/test_investigation_report.py",
       "tests/test_investigation_export.py",
       "tests/test_installed_journey.py",
-      "tests/test_experiment_submissions.py"
+      "tests/test_experiment_submissions.py",
+      "tests/test_submission_pipeline.py",
+      "tests/test_cli_redesign.py"
     ]
   },
   "filesystem": {

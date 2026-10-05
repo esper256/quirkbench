@@ -16,8 +16,7 @@ def test_watch_once_preserves_active_worker_and_lifecycle_epoch(tmp_path, capsys
     with controller.lifecycle() as owner:
         operation = controller.admit_operation('watch', 'image_prepare', {})
         claim = owner.claim(operation['id'], stage='recovery_rootfs', deadline=controller.clock() + 60)
-        assert main(['--state', str(controller.root), '--reserve-gib', '0',
-                     'operation', 'watch', operation['id'], '--once', '--json']) == 0
+        assert main(['--state', str(controller.root), 'admin', 'operation', 'show', operation['id'], '--json']) == 0
         assert json.loads(capsys.readouterr().out)['data'] == claim
         with sqlite3.connect(controller.root / 'controller.sqlite') as db:
             assert db.execute('SELECT epoch FROM controller_lifecycle').fetchone()[0] == owner.epoch
@@ -53,6 +52,6 @@ def test_watch_invalid_interval_never_reads_controller(interval):
 
 def test_watch_missing_state_does_not_create_database(tmp_path, capsys):
     root = tmp_path / 'absent'
-    assert main(['--state', str(root), 'operation', 'watch', 'unused', '--once']) == 2
-    assert 'existing controller state' in capsys.readouterr().err
+    assert main(['--state', str(root), 'admin', 'operation', 'show', 'unused']) == 2
+    assert 'controller state unavailable' in capsys.readouterr().err
     assert not root.exists()

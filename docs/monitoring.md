@@ -6,7 +6,7 @@ Remaining guided integration and investigation views are tracked in
 [GitHub #29](https://github.com/esper256/quirkbench/issues/29); the
 [roadmap](product-roadmap.md) defines scope.
 
-Run `quirkbench setup-state` once, then open `quirkbench monitor` manually in an
+Run `quirkbench setup` once, then open `quirkbench monitor` manually in an
 existing terminal. State defaults to `$XDG_STATE_HOME/quirkbench`, or
 `~/.local/state/quirkbench`. The TUI lists operations and investigations, refreshing
 bounded summaries every two seconds. Use arrows/j/k to select, Enter for details,
@@ -37,8 +37,8 @@ default submission returns the job ID and monitoring commands immediately. Worke
 the current owner under its exact epoch/generation/claim fence. Malformed advisory
 records cannot become execution authorization or terminate the coordinator.
 
-`operation list --json` pages at most 100 summaries with `--after`/`--limit`.
-`operation watch ID` retains the existing focused view and interval controls;
+`admin operation list --json` pages at most 100 summaries with `--after`/`--limit`.
+`admin operation show ID` retains the existing focused view and interval controls;
 Ctrl+C stops only the view. Output bytes measure activity, not percent complete.
 A quiet command is not proof of deadlock. Logs come only from the selected run's
 allowlisted directories; reads are bounded, links are rejected and terminal control

@@ -96,14 +96,14 @@ def test_complete_installed_attended_journey(tmp_path,case):
     # Exercise the distributed launcher on this same completed state, outside Git.
     launcher=[sys.executable,'-I',str(runtime/'bin/quirkbench'),'--state',str(tmp_path/'fresh/state')]
     for args in [['investigation','brief','investigation','--json'],
-                 ['investigation','report','investigation','--comparison',str(tmp_path/'fresh/comparison.json'),'--json'],
-                 ['target','poweroff-status',evidence['enrolled_target_id'],'--json'],
-                 ['investigation','export','investigation','--comparison',str(tmp_path/'fresh/comparison.json'),
+                 ['investigation','results','show','investigation','--comparison',str(tmp_path/'fresh/comparison.json'),'--json'],
+                 ['target','shutdown','status',evidence['enrolled_target_id'],'--json'],
+                 ['investigation','results','export','investigation','--comparison',str(tmp_path/'fresh/comparison.json'),
                   '--output',str(tmp_path/'launcher-public.tar'),'--author','Fixture Export Author <fixture@example.invalid>','--json']]:
         launched=subprocess.run(launcher+args,cwd=sandbox,env=env,capture_output=True,text=True,timeout=30)
         assert launched.returncode==0,launched.stdout+launched.stderr
         actual=json.loads(launched.stdout)['data']
-        if args[1]=='report':assert actual['conclusion']=='inconclusive'
-        if args[1]=='poweroff-status':assert actual['state']=='PREPARED' and not actual['physical_poweroff_verified']
-        if args[1]=='export':assert actual['source_reconstructed'] and actual['validation_status']=='tested-source-match' and not actual['native_qualification']
+        if args[1:3]==['results','show']:assert actual['conclusion']=='inconclusive'
+        if args[1:3]==['shutdown','status']:assert actual['state']=='PREPARED' and not actual['physical_poweroff_verified']
+        if args[1:3]==['results','export']:assert actual['source_reconstructed'] and actual['validation_status']=='tested-source-match' and not actual['native_qualification']
     verify_installation(runtime)

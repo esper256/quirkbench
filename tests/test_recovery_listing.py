@@ -167,7 +167,7 @@ def test_published_schema_and_cli_versions_match_strict_reader():
             assert {key:str(actual[key]) if isinstance(actual[key],Path) else actual[key] for key in case['expected']}==case['expected']
 
 
-@pytest.mark.parametrize('change',['version','extra','role','size','flag','statement','canonical','duplicate'])
+@pytest.mark.parametrize('change',['version', 'extra', 'role', 'size', 'flag', 'statement', 'canonical', 'duplicate'])
 def test_acquisition_reader_rejects_ambiguous_or_authority_bearing_records(change):
     value=json.loads((ROOT/'examples/released-recovery-acquisition.json').read_bytes())
     if change=='version':value['schema_version']=True

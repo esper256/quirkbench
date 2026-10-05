@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import stat
 
+from .proposal_source import operation as source_operation, build_source
 from .contracts import ContractError,Conflict,canonical,digest,identifier,sha256
 from .distribution_prepare_operation import document
 
@@ -24,12 +25,16 @@ FIXED_RECIPE={'schema_version':1,'record_type':'fixed-build-recipe','recipe_id':
 
 
 def validate(value):
-    if not isinstance(value,dict) or type(value.get('schema_version')) is not int or value['schema_version']!=1:
+    if not isinstance(value,dict) or type(value.get('schema_version')) is not int or value['schema_version'] not in (1,2):
         raise ContractError('invalid joined input version')
     kind=value.get('record_type')
     if not isinstance(kind,str):raise ContractError('record type required')
     fields={'investigation-build-input':BUILD_FIELDS,'investigation-compose-input':COMPOSE_FIELDS,
             'investigation-artifact-link':LINK_FIELDS}.get(kind)
+    if value['schema_version']==2:
+        if kind not in ('investigation-build-input','investigation-artifact-link'):
+            raise ContractError('unsupported joined record version')
+        fields=(fields-{'source_capture_operation_id'})|{'source_kind','source_operation_id'}
     if kind=='fixed-build-recipe':
         if value!=FIXED_RECIPE:raise ContractError('unsupported fixed build recipe semantics')
         return value
@@ -45,6 +50,8 @@ def validate(value):
         elif key=='signing_fingerprint':
             import re
             if not isinstance(item,str) or not re.fullmatch('[A-Fa-f0-9]{40}|[A-Fa-f0-9]{64}',item):raise ContractError('full signing fingerprint required')
+        elif key=='source_kind':
+            if item not in ('workspace_capture','baseline_preparation'):raise ContractError('invalid joined source kind')
         elif key=='kind':
             if item not in ('build','compose'):raise ContractError('invalid linked operation kind')
         else:identifier(item)
@@ -89,7 +96,7 @@ def retained(controller,db,op,kind, *,campaign=None,workspace=None,owned_refs=()
     refs.update(owned_refs)
     if workspace is not None:
         refs|={r[0] for r in db.execute('SELECT digest FROM refs WHERE owner=?',('workspace:'+identifier(workspace),))}
-    if row['final_output_digest'] not in refs:raise Conflict('operation output was retired')
+    if row['final_output_digest'] not in refs:raise Conflict('admin operation output was retired')
     return dict(row),refs
 
 
@@ -122,7 +129,7 @@ def graph(controller,name,source,candidate,db, *,proposal=None):
     if proposal is not None:
         from .proposal_dispatch import admitted
         row,value,owned=admitted(controller,name,proposal,db)
-        if value['action']!='experiment' or value['source']['capture_operation_id']!=source:
+        if value['action']!='experiment' or source_operation(value['source'])!=source:
             raise Conflict('proposal does not select this immutable capture')
         # A completed baseline/comparison can still retain candidate preparation
         # after that preparation's own count-based owner has expired. Reuse only
@@ -132,14 +139,27 @@ def graph(controller,name,source,candidate,db, *,proposal=None):
             WHERE j.campaign=? LIMIT 32769''',(name,)).fetchall()
         if len(historical)>32768:raise ContractError('investigation input closure exceeds metadata bound')
         owned|={r[0] for r in historical}
-    source_row,refs=retained(controller,db,source,'source_capture',campaign=name,owned_refs=owned)
+    if proposal is not None:
+        from .proposal_source import resolve
+        selected = value['source']
+        if value['schema_version'] == 2:
+            selected = {**selected, 'workspace_sha256': value['input_context']['source']['workspace_sha256']}
+        source_row,capture,workspace,refs=resolve(controller,name,selected,db,owned=owned)
+        source_sha=selected['capture_sha256']
+        workspace_sha=selected['workspace_sha256']
+        source_kind='baseline_preparation' if source_row['kind']=='source_prepare' else 'workspace_capture'
+    else:
+        source_row,refs=retained(controller,db,source,'source_capture',campaign=name,owned_refs=owned)
+        source_intent=document(controller.store,source_row['input_digest']);scope=source_binding(source_intent)
+        workspace_sha=scope['workspace_sha256']
+        workspace=workspace_record(document(controller.store,workspace_sha))
+        source_sha=source_row['final_output_digest']
+        capture=validate_capture(document(controller.store,source_sha))
+        source_kind='workspace_capture'
+        if (workspace['campaign_id']!=name or workspace['workspace_id']!=inv['session']['workspace_id'] or
+                any(capture[k]!=workspace[k] for k in ('base_oid','allowed_untracked','provenance'))):
+            raise Conflict('captured source differs from investigation workspace')
     candidate_row,candidate_refs=retained(controller,db,candidate,'candidate_prepare',owned_refs=owned);refs|=candidate_refs
-    source_intent=document(controller.store,source_row['input_digest']);scope=source_binding(source_intent)
-    workspace=workspace_record(document(controller.store,scope['workspace_sha256']))
-    capture=validate_capture(document(controller.store,source_row['final_output_digest']))
-    if (workspace['campaign_id']!=name or workspace['workspace_id']!=inv['session']['workspace_id'] or
-            any(capture[k]!=workspace[k] for k in ('base_oid','allowed_untracked','provenance'))):
-        raise Conflict('captured source differs from investigation workspace')
     prepared=db.execute('SELECT operation FROM source_preparations WHERE workspace_id=? AND campaign=?',(workspace['workspace_id'],name)).fetchone()
     if prepared is None:raise Conflict('supported distribution preparation required')
     prep_row,prep_refs=retained(controller,db,prepared['operation'],'source_prepare',campaign=name,workspace=workspace['workspace_id'],owned_refs=owned);refs|=prep_refs
@@ -158,13 +178,16 @@ def graph(controller,name,source,candidate,db, *,proposal=None):
             rootfs_input['rpm_snapshot_sha256']!=entry['rpm_snapshot_sha256'] or rootfs_input['target_rpm_lock_sha256']!=entry['target_rpm_lock_sha256'] or
             any(prep_input[k]!=candidate_result[k] for k in BUILDER) or prep['base_oid']!=capture['base_oid'] or
             capture['provenance']!=base_capture['provenance']):raise Conflict('candidate/source builder, baseline or actual base differs')
-    value=validate({'schema_version':1,'record_type':'investigation-build-input','investigation_id':name,
-        'baseline_sha256':inv['baseline_sha256'],'source_capture_operation_id':source,'source_capture_sha256':source_row['final_output_digest'],
+    value={'schema_version':1,'record_type':'investigation-build-input','investigation_id':name,
+        'baseline_sha256':inv['baseline_sha256'],'source_capture_operation_id':source,'source_capture_sha256':source_sha,
         'source_preparation_operation_id':prep_row['id'],'source_preparation_sha256':prep_row['final_output_digest'],
-        'source_workspace_sha256':scope['workspace_sha256'],'base_capture_sha256':prep['capture_sha256'],
+        'source_workspace_sha256':workspace_sha,'base_capture_sha256':prep['capture_sha256'],
         'distribution_provenance_sha256':capture['provenance']['distribution_patches_sha256'],
         'candidate_operation_id':candidate,'candidate_result_sha256':candidate_row['final_output_digest'],
-        **{k:candidate_result[k] for k in BUILDER}})
+        **{k:candidate_result[k] for k in BUILDER}}
+    if proposal is not None and selected.get('operation_id') is not None:
+        value.update(schema_version=2,source_kind=source_kind,source_operation_id=value.pop('source_capture_operation_id'))
+    validate(value)
     return value,refs,[source_row,prep_row,candidate_row]
 
 
@@ -191,7 +214,7 @@ def submit(controller,name,kind,request_id, *,source=None,candidate=None,build=N
                 raise Conflict('request ID belongs to another operation kind or input version')
             args=binding(intent)
             saved=validate(document(controller.store,args['join_input_sha256']))
-            old_request={'name':saved['investigation_id'],'kind':old['kind'],'source':saved.get('source_capture_operation_id'),
+            old_request={'name':saved['investigation_id'],'kind':old['kind'],'source':build_source(saved)['source_operation_id'] if old['kind']=='build' else None,
                 'candidate':saved.get('candidate_operation_id'),'build':saved.get('build_operation_id'),'repository':saved.get('repository')}
             if request!=old_request:raise Conflict('joined request identity was reused with different input')
             if _commit is not None:_commit(db,dict(old))
@@ -391,11 +414,15 @@ def validate_captured(coordinator,claim,args,prepared):
 def artifact_link(root,args,claim,index,deployment):
     reader,value=input_record(root,args,claim['kind']);build=value
     if claim['kind']=='compose':build=validate(document(reader.store,value['build_input_sha256']))
-    return validate({'schema_version':1,'record_type':'investigation-artifact-link','investigation_id':value['investigation_id'],
+    result={'schema_version':1,'record_type':'investigation-artifact-link','investigation_id':value['investigation_id'],
         'operation_id':claim['id'],'kind':claim['kind'],'join_input_sha256':args['join_input_sha256'],
-        'baseline_sha256':value['baseline_sha256'],'source_capture_operation_id':build['source_capture_operation_id'],
+        'baseline_sha256':value['baseline_sha256'],'source_capture_operation_id':build_source(build)['source_operation_id'],
         'candidate_operation_id':build['candidate_operation_id'],'build_operation_id':claim['id'] if claim['kind']=='build' else value['build_operation_id'],
-        'outputs_index_sha256':index,'deployment_revision':deployment[1].revision if deployment is not None else None})
+        'outputs_index_sha256':index,'deployment_revision':deployment[1].revision if deployment is not None else None}
+    if build['schema_version']==2:
+        result.pop('source_capture_operation_id')
+        result.update(schema_version=2,**build_source(build))
+    return validate(result)
 
 
 def publication_fence(coordinator,claim,args, *,outputs=(),index=None,link=None,deployment=None):

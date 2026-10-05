@@ -91,7 +91,7 @@ def test_image_cli_stages_separately_from_explicit_checkout_output(tmp_path, mon
             Path(str(inputs.output)+suffix).write_text('artifact'+suffix)
         return Path(str(inputs.output)+'.json')
     monkeypatch.setattr('quirkbench.image.create_image',create)
-    assert main(['--state',str(state),'--reserve-gib','0','image',str(manifest)])==0
+    assert main(['--state', str(state), 'dev', 'image', 'assemble', str(manifest), '--reserve-gib','0'])==0
     assert output.read_text()=='artifact'
     assert stages[0].is_relative_to(state/'workspaces')
     assert 'image.raw.json' in capsys.readouterr().out

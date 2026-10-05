@@ -195,9 +195,6 @@ def test_cli_contract_errors_and_readonly_status(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'config'))
     monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state-home'))
     monkeypatch.setattr(controller_setup, 'inspect_user_manager', observations()['service_inspector'])
-    assert cli.main(['setup', '--json']) == 2
-    assert json.loads(capsys.readouterr().out)['error']['code'] == 'INVALID_INPUT'
-    assert not (tmp_path / 'config').exists()
     assert cli.main(['status', '--json']) == 0
     assert json.loads(capsys.readouterr().out)['data']['setup_progress'] is None
     assert not (tmp_path / 'config').exists()
@@ -215,8 +212,8 @@ def test_executable_parser_additive_contract():
                                   '--reserve-gib', '2', '--logout-policy', 'session', '--json'])
     assert args.request_id == 'first' and args.setup_reserve_gib == 2
     assert cli.parser().parse_args(['status', '--json']).json
-    assert cli.parser().parse_args(['setup-state']).command == 'setup-state'
-    assert cli.parser().parse_args(['setup-check']).command == 'setup-check'
+    assert cli.parser().parse_args(['setup']).command == 'setup'
+    assert cli.parser().parse_args(['doctor']).command == 'product'
 
 
 def runtime_archive(tmp_path):

@@ -65,7 +65,7 @@ before any claim.
 
 `POST /v1/progress` accepts `schema_version`, `attempt_id`, `token`, and `report` (the Progress contract). Device authentication scopes the attempt; campaign ownership is checked separately. Local builder and coding-agent activities use `Controller.progress` without a device token. Activity IDs, producer sequence numbers and immutable deadlines make progress durable and replay-safe. Progress never renews the execution lease. Use a fresh activity ID for a retried operation; do not reset its counter or slide its deadline.
 
-`quirkbench watch CAMPAIGN` exposes timestamped phase, measured progress, reporting age, advancement age, waits, suspected stalls and deadlines. `Controller.events` supports incremental retrieval. The controller automatically tracks attempt times and durable upload bytes; detailed recipe-specific progress is an explicit future adapter responsibility.
+`quirkbench monitor INVESTIGATION` exposes timestamped phase, measured progress, reporting age, advancement age, waits, suspected stalls and deadlines. `Controller.events` supports incremental retrieval. The controller automatically tracks attempt times and durable upload bytes; detailed recipe-specific progress is an explicit future adapter responsibility.
 
 ## OS deployment references
 
