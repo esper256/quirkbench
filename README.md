@@ -2,6 +2,9 @@
 
 Development: [contribution workflow](CONTRIBUTING.md) · [testing policy](docs/testing-policy.md).
 
+Run from a clone: `./quirkbench --help` (Python 3.11+; no venv needed).
+See the [checkout and manual symlink guide](docs/controller-installation.md#run-from-a-source-checkout).
+
 **Turn a reproducible Linux problem into a patch, with an experiment history you can inspect.**
 
 > [!WARNING]

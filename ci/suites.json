@@ -101,13 +101,18 @@
       "Makefile",
       "tests/test_ci_*",
       "environments/bootstrap.py",
+      "quirkbench",
+      "environments/quirkbench",
+      "src/quirkbench/runtime_version.py",
+      "tests/test_checkout_launcher.py",
       "development/constraints.txt",
       "tests/test_development_bootstrap.py"
     ],
     "tests": [
       "tests/test_ci_tools.py",
       "tests/test_ci_diagnostics.py",
-      "tests/test_development_bootstrap.py"
+      "tests/test_development_bootstrap.py",
+      "tests/test_checkout_launcher.py"
     ]
   },
   "investigation-product": {
@@ -214,6 +219,7 @@
     ],
     "tests": [
       "tests/test_build_storage.py",
+      "tests/test_controller_archive.py",
       "tests/test_recovery_storage.py",
       "tests/test_runtime.py",
       "tests/test_recovery_inventory.py",

@@ -76,6 +76,47 @@ directory before signing. Do not relocate keys into worker/output directories.
 Release-download verification uses an isolated public keyring with `--no-autostart`
 and does not need a signing agent; shortening its input paths is unnecessary.
 
+## Run from a source checkout
+
+On Linux with Python 3.11 or newer, clone and run:
+
+```sh
+git clone https://github.com/esper256/quirkbench.git
+cd quirkbench
+./quirkbench --help
+./quirkbench version
+```
+
+The root executable uses the checkout directly. No virtualenv activation, Python
+package installation or dependency download is needed: the application runtime uses
+Python's standard library. Missing or older Python produces an actionable error.
+Help and runtime identity work offline without controller setup. Commands that need
+external tools or configured controller state still require those prerequisites;
+see the relevant guide. Test and archive-build dependencies are separate development
+tools, described in [development setup](testing-policy.md#portable-software-development).
+
+To use `quirkbench` from any directory, optionally create your own symlink (choose
+an unused destination and ensure `~/.local/bin` is on your PATH):
+
+```sh
+mkdir -p ~/.local/bin
+ln -s "$PWD/quirkbench" ~/.local/bin/quirkbench
+quirkbench version --json
+```
+
+The launcher follows symlinks to the checkout, including paths containing spaces.
+Keep that checkout in place; the command follows its current code as you change
+branches or pull updates. Running it creates no home-bin link, selects no installed
+runtime and starts no controller service. Ordinary commands use the existing state
+selection rules. The older `environments/quirkbench` entry point remains compatible.
+
+`version` (also `--version` for human output) reports the running CLI's package path,
+Python version and checkout commit plus local-change status when Git is available.
+An extracted archive reports its manifest hash, and an installed archive also reports
+the archive hash from its installation record. Unknown source revisions remain
+explicitly unavailable. These are CLI identity observations, not publisher verification,
+qualification or proof that a configured controller is running the same code.
+
 ## Packaging and installation
 
 The controller can now be packaged as an unsigned development archive, with
@@ -175,8 +216,8 @@ special umask or mode is required. System trees such as `/var/lib`,
 for durable work; temporary storage may be cleaned by the host. These controller
 path choices do not change the target's boot-device-only storage policy.
 Use `quirkbench monitor` for the manual terminal dashboard; see [monitoring](monitoring.md).
-Without an installed archive, the checkout's `./environments/quirkbench` development
-launcher exposes the same commands without relying on a moved virtualenv's shebang.
+Without an installed archive, the checkout's `./quirkbench` launcher exposes the
+same commands; see [running from a checkout](#run-from-a-source-checkout).
 
 `setup` now journals initial state/resource/connection/logout choices and resumes
 interrupted setup. For example, run the installed launcher with

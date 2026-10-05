@@ -55,6 +55,13 @@ def test_archive_runs_relocated_without_checkout_and_keeps_selected_state(tmp_pa
     def invoke(path, *args):
         return subprocess.run([sys.executable, '-I', str(path / 'bin/quirkbench'), *args],
                           cwd=clean_home, env=env, capture_output=True, text=True, timeout=20)
+    identity = invoke(release, 'version', '--json')
+    assert identity.returncode == 0, identity.stderr
+    value = json.loads(identity.stdout)
+    assert value['kind'] == 'archive'
+    assert value['runtime_root'] == str(release)
+    assert value['manifest_sha256'] == hashlib.sha256((release / 'controller-manifest.json').read_bytes()).hexdigest()
+    assert not (clean_home / 'state').exists() and not (clean_home / 'config').exists()
     signed = subprocess.run([sys.executable, '-I', str(release / 'install'), '0.1.0',
                              '--request-id', 'production-install', '--json'], cwd=clean_home,
                             env={**env, 'XDG_CACHE_HOME': str(clean_home / 'cache')},
