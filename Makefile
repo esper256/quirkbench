@@ -100,3 +100,10 @@ VENV ?= .venv
 .PHONY: bootstrap
 bootstrap:
 	$(BOOTSTRAP_PYTHON) environments/bootstrap.py --python "$(BOOTSTRAP_PYTHON)" --venv "$(VENV)" $(BOOTSTRAP_ARGS)
+
+# Cached userspace tools only; downloads and RPM extraction are separate preparation.
+.PHONY: test-recovery-native
+test-recovery-native:
+	@native_evidence=$$(mktemp -d /tmp/quirkbench-native-evidence.XXXXXXXX); \
+	 echo "Evidence: $$native_evidence/evidence"; \
+	 $(PYTHON) -m ci.run run --suite recovery-native --timeout 60 --output "$$native_evidence/evidence"

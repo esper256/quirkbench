@@ -41,6 +41,25 @@ runs:
       run: |
         umask "$QB_UMASK"
         python environments/bootstrap.py --python python --venv .venv --skip-smoke --report "$QB_EVIDENCE/bootstrap.json"
+    - name: Install native test harness prerequisites
+      if: inputs.suite == 'recovery-native'
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends bubblewrap rpm rpm2cpio
+    - uses: actions/cache@v4
+      if: inputs.suite == 'recovery-native'
+      with:
+        path: ~/.cache/quirkbench/native-recovery
+        key: recovery-native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ci/native_recovery.py', 'src/quirkbench/profiles/stock-fedora44-rpm-candidate.v1.json') }}
+    - name: Prepare verified native dependencies (outside the test deadline)
+      if: inputs.suite == 'recovery-native'
+      shell: bash
+      run: |
+        export PYTHONPATH="$GITHUB_WORKSPACE/src"
+        cache="$HOME/.cache/quirkbench/native-recovery"
+        .venv/bin/python -m ci.native_recovery prepare --cache "$cache" >"$QB_EVIDENCE/native-prepare.log" 2>&1
+        echo "QB_NATIVE_RECOVERY_CACHE=$cache" >> "$GITHUB_ENV"
     - name: Run software selection
       shell: bash
       env:
