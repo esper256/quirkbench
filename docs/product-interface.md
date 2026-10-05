@@ -93,6 +93,91 @@ records remain, with expired payloads unavailable. See [current settings and cov
 
 ## Public CLI and sessions
 
+### Durable experiment submission foundation
+
+The owner-approved [CLI redesign](cli-redesign-plan.md) permits replacing old command
+spellings without aliases. This subsection implements only the pre-build submission
+foundation, not the new CLI or the entire preparation pipeline. Existing public
+commands remain in place until the coordinated interface cutover.
+
+`experiment_submissions` exposes `load/validate`, `submit`, `status`, `logs`, `resume`
+and an owner-only `link_proposal`. Input follows
+[`experiment-submission.v1.schema.json`](../schemas/experiment-submission.v1.schema.json);
+the [neutral example](../examples/experiment-submission.json) selects an existing
+investigation's workspace and reviewed recipe. The runtime has no jsonschema
+dependency. Both validation forms reject unknown fields; runtime additionally bounds
+serialized size to 64 KiB and nesting to 32. Repetitions default to one; timeout and
+recipe parameters are explicit and checked against the installed pinned recipe.
+
+Workspace source is `{ "mode": "workspace", "quiesced": true }`; baseline source is
+`{ "mode": "baseline" }`. Workspace mode requires an already prepared registered
+workspace and uses the existing source-capture worker. Baseline mode selects the
+completed distribution preparation's pristine capture, without checking out, resetting
+or capturing an edited workspace. Missing preparation is a blocker; automatically
+preparing missing sources is subsequent pipeline work. Source-ready external Git
+captures do not imply that the current distribution builder can build them.
+
+**Identity and transactions.** One `experiment_submission` operation uses the existing
+WAITING/INTERRUPTED/FAILED states. A row in `experiment_submissions` associates the
+public request ID, investigation, operation, normalized caller-input digest, frozen
+intent digest, source operation and optional proposal operation. There is no second
+execution state machine. A submit transaction creates the parent, retains the exact
+choices, admits/links a workspace capture and changes its writer to QUIESCED together.
+Workspace capture uses request ID `submission-capture-<parent operation ID>`. Baseline
+mode instead links its already completed source-preparation operation. Failure rolls
+back all database changes; unreferenced CAS writes remain eligible garbage.
+
+Caller input and resolved input have distinct digests. On an exact request replay,
+return the same `SubmissionReference(investigation, request_id)` before resolving
+configuration or readiness again. Changed input conflicts. Omitted repository selects
+only a single configured repository; freeze its alias/path and signing fingerprint,
+baseline, recipe and source scope. Replays never adopt later defaults. The operation
+request namespace continues to prevent collisions with existing commands.
+
+**Execution and retention.** The existing `JobCoordinator` advances metadata after the
+source worker has stopped and published, verifies the exact capture/source selection,
+and retains the complete source dependencies under the parent. Live parent references
+also protect the linked source/proposal operation from count-based retirement before
+adoption, including while interrupted. A missing or mismatched source fails the parent
+without inventing an experiment. Failed parent metadata enters existing diagnostic
+retention; unfinished work remains retained until explicitly resolved by later adapters.
+No permanent storage pins or second cleanup mechanism are created.
+
+The resulting parent remains WAITING at `source_ready`. `experiment_id` is null,
+`pipeline_connected` is false and `boot_authorized` is false. `status` reads persisted
+facts without reconciliation; `logs` returns bounded, paginated, sanitized source
+event messages without arbitrary CAS selection. Native compiler output selection is
+later pipeline work. The source capture remains quiesced until explicit release under
+existing rules; status does not grant writer ownership.
+
+**Restart and continuation.** Existing lifecycle startup interrupts the waiting parent
+and any unfinished source child and pauses investigations. An explicit `resume` creates
+an existing `operation_resume` command, returning a `ResumeReceipt` including that
+command's QUEUED/SUCCEEDED/FAILED state. A queued continuation waits while the
+investigation is paused. The current owner checks frozen publication choices and
+source handoff, requires whole-worker reconciliation, and requeues the same child.
+The child requeue commits first; a submission guard prevents dispatch until parent
+continuation commits. That final transaction also records successful resume-command
+acknowledgement. A crash between child requeue and parent continuation can replay
+without duplication. A released/replaced writer handoff, terminal failure or changed
+publication identity blocks continuation. Failed resume-command replay reports FAILED;
+it does not claim that the requested continuation succeeded.
+
+**Proposal extension point.** `link_proposal(owner, investigation, request_id,
+proposal_operation)` verifies an admitted workspace experiment proposal's exact
+hypothesis, recipe/limits and source capture, retains its inputs and records a single
+link. It creates no proposal and performs no dispatch. Baseline admission remains a
+separate future adapter. Linked proposals cannot use the old direct dispatch path:
+the later submission adapter must enforce frozen candidate/publication choices and
+connect final experiment results before enabling it. Unlinked existing proposals
+continue through their existing API. Repeating the same link is harmless; replacement
+or binding an already-dispatched proposal is rejected.
+
+The CLI cutover, automatic missing-input preparation, candidate/build/composition
+orchestration, final experiment admission and user-facing status/monitor wiring are
+explicitly not complete in this foundation. The later implementer should extend this
+service and the existing coordinator rather than adding another command-owned loop.
+
 **Investigation** is the public organizing concept: problem, target, source workspace,
 limits, decisions and accumulated evidence. Its durable identity maps to an existing
 campaign and any existing session observation identity in the same database. A chosen

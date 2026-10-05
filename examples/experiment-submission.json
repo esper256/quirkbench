@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "hypothesis": "The captured change preserves the reported hardware inventory.",
+  "source": {
+    "mode": "workspace",
+    "quiesced": true
+  },
+  "recipe": {
+    "id": "system-observation",
+    "parameters": {},
+    "repetitions": 1,
+    "timeout_seconds": 300
+  },
+  "repository": "lab"
+}

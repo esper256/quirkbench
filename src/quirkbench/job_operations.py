@@ -210,6 +210,9 @@ def request_resume(controller,operation,request_id):
 def resume(owner,operation):
     controller=owner.controller
     with controller.transaction() as db:kind=db.execute('SELECT kind FROM operations WHERE id=?',(operation,)).fetchone()
+    if kind and kind[0]=='experiment_submission':
+        from .experiment_submissions import resume_owned
+        return resume_owned(owner,operation)
     if kind and kind[0]=='external_proposal':
         from .proposal_dispatch import resume as proposal_resume
         return proposal_resume(owner,operation)

@@ -120,6 +120,8 @@ CREATE TABLE report_retention_commands(
  request_id TEXT PRIMARY KEY,request_digest TEXT NOT NULL,
  campaign TEXT NOT NULL REFERENCES investigations(id),result_document TEXT NOT NULL);
 """)
+from .experiment_submissions import MIGRATION as SUBMISSION_MIGRATION
+MIGRATIONS.append(SUBMISSION_MIGRATION)
 
 
 def uid():
@@ -183,6 +185,8 @@ class _LifecycleOwner:
                 raise Conflict('operation is not queued in the current lifecycle')
             from .proposal_dispatch import guard_child
             guard_child(self,db,row)
+            from .experiment_submissions import guard_child as guard_submission_child
+            guard_submission_child(self,db,row)
             from .job_operations import STAGES, physical_fenced, operation_target
             if (row['kind'],stage) not in STAGES:
                 raise Conflict('worker kind/stage is not allowed')

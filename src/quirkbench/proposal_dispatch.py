@@ -133,6 +133,8 @@ def declare(controller,name,operation,request, *,candidate=None,repository=None,
     with controller.transaction() as db:
         old=replay(db,request,request_digest)
         if old is not None:return old
+        from .experiment_submissions import guard_proposal_dispatch
+        guard_proposal_dispatch(db,operation)
         if db.execute('SELECT 1 FROM proposal_dispatch_commands WHERE operation=?',(operation,)).fetchone():
             raise Conflict('proposal already bound; replay its original dispatch request')
         parent,proposal,refs=admitted(controller,name,operation,db)
@@ -160,6 +162,7 @@ def declare(controller,name,operation,request, *,candidate=None,repository=None,
         old=replay(db,request,request_digest)
         if old is not None:return old
         fresh,current,owned=admitted(controller,name,operation,db)
+        guard_proposal_dispatch(db,operation)
         if fresh!=parent or current!=proposal or not owned<=refs:raise Conflict('proposal changed during dispatch declaration')
         if document(controller.store,artifact.sha256)!=value:raise Conflict('dispatch record changed during declaration')
         if proposal['action']=='experiment':
