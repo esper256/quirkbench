@@ -69,6 +69,13 @@ or inherit the controller's root UUID, cmdline, keys or host-only configuration.
 Peripheral/network modules may load after switch-root under the recovery policy.
 Out-of-tree-only peripherals remain explicit unsupported cases.
 
+The stock initrd mount adapter runs Fedora's fstab generator with only the reviewed
+root parameters and empty fstab inputs. It validates the generated read-only ext4
+root before removing its dependency on the masked fsck service; repair remains
+disabled. Unexpected output leaves a required blocked root job. Device arrival and
+mounting each have a 30-second bound, and mount failure enters emergency diagnostics.
+The guarded udev PARTUUID path still supplies physical boot-device authorization.
+
 ## Userspace and security policy
 
 Use Fedora RPMs for systemd/udev, D-Bus, NetworkManager, nmtui, Wi-Fi authentication,

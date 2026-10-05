@@ -11,11 +11,16 @@ from pathlib import Path
 import re
 import stat
 import struct
+import subprocess
+import tempfile
 import sys
 import uuid
 import zlib
 
 RULE_NAME = '99-quirkbench-storage.rules'
+ROOT_GENERATOR = '''#!/bin/sh
+exec /usr/bin/python3 -I -S /usr/lib/quirkbench/recovery-storage-guard.py --root-generator "$@"
+'''
 RULES = '''# Fixed recovery: vendor rules are masked; internal devices receive no probes.
 SUBSYSTEM=="block", TAG+="systemd"
 SUBSYSTEM=="block", ENV{QB_PARTUUID}=""
@@ -39,6 +44,7 @@ install() {
         done < <(find "$p/lib-dynload" -type f -name '*.so' -print0)
     done
     inst_simple /usr/lib/quirkbench/recovery-storage-guard.py
+    inst_simple /usr/lib/quirkbench/recovery-root-generator /etc/systemd/system-generators/systemd-fstab-generator
     inst_simple /etc/udev/rules.d/99-quirkbench-storage.rules
     mkdir -p "$initdir/etc/udev/rules.d" "$initdir/etc/systemd/system" "$initdir/etc/systemd/system-generators"
     for p in "$initdir"/usr/lib/udev/rules.d/*.rules "$initdir"/lib/udev/rules.d/*.rules "$initdir"/etc/udev/rules.d/*.rules; do
@@ -58,6 +64,103 @@ install() {
 
 class StoragePolicyError(ValueError):
     pass
+
+
+def generate_root(args, *, cmdline=Path('/proc/cmdline'), runner=subprocess.run):
+    """Adapt only the stock initrd root mount; udev still authorizes its device.
+
+    fsck.mode=skip controls the fsck executable, not the generator's Requires.
+    The masked repair service must never be pulled into the mount transaction.
+    """
+    if len(args)!=3:
+        raise StoragePolicyError('root generator requires three output directories')
+    output=Path(args[0])
+    mount=output/'sysroot.mount'
+    required=output/'initrd-root-fs.target.requires/sysroot.mount'
+    # A generator error alone can be ignored by systemd. Retain a required,
+    # masked root job on any failure instead of allowing an empty root target.
+    required.parent.mkdir(parents=True,exist_ok=True)
+    if not required.is_symlink(): required.symlink_to('../sysroot.mount')
+    try:
+        words=cmdline.read_text().split()
+        roles=boot_roles(' '.join(words))
+        allowed=('root=','rootflags=','rootfstype=')
+        forbidden=('mount.','rd.mount.','systemd.mount','systemd.swap','usr=','usrflags=',
+                   'usrfstype=','rootimage=','roothash=','systemd.volatile=')
+        if (any(w.startswith(forbidden) for w in words)
+                or [w for w in words if w.startswith('rootflags=')]!=['rootflags=noload']
+                or [w for w in words if w.startswith('rootfstype=')] not in ([],['rootfstype=ext4'])):
+            raise StoragePolicyError('unsupported recovery root mount arguments')
+        # Supply only the reviewed root parameters, not arbitrary mount requests.
+        environment=os.environ.copy()
+        environment.update(SYSTEMD_IN_INITRD='1',SYSTEMD_FSTAB='/dev/null',
+            SYSTEMD_SYSROOT_FSTAB='/dev/null',
+            SYSTEMD_PROC_CMDLINE=' '.join(w for w in words if w=='ro' or w.startswith(allowed)))
+        # PID 1 generators have private writable /tmp; /run/systemd itself is
+        # read-only inside their sandbox, apart from the three output directories.
+        staged=tempfile.TemporaryDirectory(prefix='quirkbench-root-',dir='/tmp')
+        stage=Path(staged.name)
+        destinations=[stage/name for name in ('normal','early','late')]
+        for path in destinations: path.mkdir()
+        runner(['/usr/lib/systemd/system-generators/systemd-fstab-generator',*map(str,destinations)],
+                      env=environment,check=True,timeout=10)
+        normal=destinations[0]
+        allowed_paths={'sysroot.mount','systemd-fsck-root.service',
+            'initrd-root-fs.target.requires','initrd-root-fs.target.requires/sysroot.mount',
+            'initrd-usr-fs.target.requires','initrd-usr-fs.target.requires/sysroot.mount',
+            'initrd-root-device.target.d','initrd-root-device.target.d/50-root-device.conf'}
+        if (any(path.relative_to(normal).as_posix() not in allowed_paths for path in normal.rglob('*'))
+                or any(any(path.iterdir()) for path in destinations[1:])
+                or (normal/'sysroot.mount').is_symlink()):
+            raise StoragePolicyError('unreviewed stock root generator namespace')
+        text=(normal/'sysroot.mount').read_text()
+        lines=text.splitlines()
+        expected={'What': '/dev/disk/by-partuuid/'+roles[1], 'Where':'/sysroot',
+                  'Options':'noload,ro','SourcePath':'/proc/cmdline'}
+        for key,value in expected.items():
+            if [line for line in lines if line.startswith(key+'=')]!=[key+'='+value]:
+                raise StoragePolicyError('unexpected stock root mount '+key)
+        if [line for line in lines if line.startswith('Type=')] not in ([],['Type=ext4']):
+            raise StoragePolicyError('unexpected stock root filesystem')
+        device='dev-disk-by\\x2dpartuuid-'+roles[1].replace('-','\\x2d')+'.device'
+        permitted={'[Unit]','[Mount]','', 'Documentation=man:fstab(5) man:systemd-fstab-generator(8)',
+            'Before=initrd-root-fs.target','After=imports.target',
+            'Requires=systemd-fsck-root.service','After=systemd-fsck-root.service',
+            'After=blockdev@'+device.removesuffix('.device')+'.target','Type=ext4',
+            *(key+'='+value for key,value in expected.items())}
+        if (any(line not in permitted and not line.startswith('#') for line in lines)
+                or lines.count('[Unit]')!=1 or lines.count('[Mount]')!=1
+                or lines.index('[Unit]')>=lines.index('[Mount]')):
+            raise StoragePolicyError('unreviewed stock root mount output')
+        section=None
+        fields={'[Unit]':{'Documentation','SourcePath','Before','After','Requires'},
+                '[Mount]':{'What','Where','Options','Type'}}
+        for line in lines:
+            if line in fields: section=line
+            elif line and not line.startswith('#') and line.split('=',1)[0] not in fields.get(section,set()):
+                raise StoragePolicyError('unexpected stock root mount section')
+        for key in ('Requires','After'):
+            dependency=key+'=systemd-fsck-root.service'
+            if lines.count(dependency)!=1:
+                raise StoragePolicyError('unexpected stock root fsck dependency')
+            lines.remove(dependency)
+        if 'Type=ext4' not in lines: lines.append('Type=ext4')
+        lines+=['TimeoutSec=30']
+        lines.insert(lines.index('[Mount]'),'OnFailure=emergency.target')
+        mount.write_text('\n'.join(lines)+'\n')
+        usr=output/'initrd-usr-fs.target.requires'; usr.mkdir(exist_ok=True)
+        (usr/'sysroot.mount').symlink_to('../sysroot.mount')
+        root_device=output/'initrd-root-device.target.d'; root_device.mkdir(exist_ok=True)
+        (root_device/'50-root-device.conf').write_text('[Unit]\nRequires='+device+'\nAfter='+device+'\n')
+        timeout=output/(device+'.d'); timeout.mkdir(exist_ok=True)
+        (timeout/'50-quirkbench-timeout.conf').write_text('[Unit]\nJobTimeoutSec=30\nJobTimeoutAction=none\n')
+    except (OSError,ValueError,subprocess.SubprocessError):
+        if mount.exists() or mount.is_symlink(): mount.unlink()
+        mount.symlink_to('/dev/null')
+        raise
+    finally:
+        if 'staged' in locals(): staged.cleanup()
+    return 0
 
 
 def boot_roles(cmdline):
@@ -196,6 +299,8 @@ def install_guard(root):
             mask.symlink_to('/dev/null')
     atomic_write(rules/RULE_NAME,RULES.encode())
     atomic_write(root/'usr/lib/quirkbench/recovery-storage-guard.py',Path(__file__).read_bytes())
+    generator=root/'usr/lib/quirkbench/recovery-root-generator'
+    atomic_write(generator,ROOT_GENERATOR.encode()); generator.chmod(0o755)
     setup=root/'usr/lib/dracut/modules.d/99quirkbench-storage/module-setup.sh'
     atomic_write(setup,guard_setup())
     setup.chmod(0o755)
@@ -212,9 +317,14 @@ def install_guard(root):
     audit_guard(root)
 
 
-def audit_guard(root, *, require_module=False):
+def audit_guard(root, *, require_module=False, require_initrd=False):
     """Permit only the literal reviewed udev rule and no vendor discovery rules."""
     root=Path(root)
+    if require_initrd:
+        generator=root/'etc/systemd/system-generators/systemd-fstab-generator'
+        if (generator.is_symlink() or not generator.is_file()
+                or generator.read_text()!=ROOT_GENERATOR or not generator.stat().st_mode & 0o111):
+            raise StoragePolicyError('fixed recovery root generator missing or changed')
     if require_module:
         setup=root/'usr/lib/dracut/modules.d/99quirkbench-storage/module-setup.sh'
         if setup.is_symlink() or not setup.is_file() or setup.read_bytes()!=guard_setup():
@@ -251,11 +361,12 @@ def audit_guard(root, *, require_module=False):
 def main(argv=None):
     args=sys.argv[1:] if argv is None else argv
     try:
+        if args and args[0]=='--root-generator': return generate_root(args[1:])
         if len(args)!=1: raise StoragePolicyError('one device event required')
         role=partition_role(args[0])
         print('QB_PARTUUID='+role)
         return 0
-    except (OSError,ValueError) as exc:
+    except (OSError,ValueError,subprocess.SubprocessError) as exc:
         print('QUIRKBENCH storage blocked: '+str(exc),file=sys.stderr)
         return 1
 

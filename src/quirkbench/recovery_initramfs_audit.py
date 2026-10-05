@@ -89,7 +89,7 @@ def audit_recovery_initramfs_tree(root: Path, release: str, profile: dict) -> di
     if stock:
         from .recovery_storage import audit_guard, StoragePolicyError
         try:
-            audit_guard(root)
+            audit_guard(root, require_initrd=True)
         except StoragePolicyError as exc:
             raise BuildError(str(exc)) from exc
     init = _resolve_inside(root, "init")
