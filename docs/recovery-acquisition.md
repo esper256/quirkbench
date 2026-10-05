@@ -3,7 +3,7 @@
 The current Fedora adapter accepts an explicit immutable specification:
 
 ```sh
-quirkbench recovery-inputs acquire-plan /SELECTED_STATE/inputs/GENERATION --spec /absolute/candidate.json
+quirkbench dev recovery inputs acquire-plan /SELECTED_STATE/inputs/GENERATION --spec /absolute/candidate.json
 ```
 
 This records a plan, not a download. Execute its returned `argv` only as an explicit
@@ -31,7 +31,7 @@ it does not use the host RPM trust database. Image assembly, boot-device storage
 rules remain unchanged.
 
 ```sh
-quirkbench recovery-inputs lock /SELECTED_STATE/inputs/GENERATION/rpms \
+quirkbench dev recovery inputs lock /SELECTED_STATE/inputs/GENERATION/rpms \
   --spec /absolute/candidate.json --public-key /absolute/reviewed-key \
   --builder-image-digest sha256:ACTUAL_DIGEST \
   --diagnostics /SELECTED_STATE/inputs/VERIFICATION_GENERATION
@@ -60,7 +60,7 @@ Changing a release, kernel, repository or key means a separately reviewed candid
 specification and fresh generation. No downloads, kernel/image builds or release
 qualification occur simply because this metadata or adapter is edited.
 
-`recovery-inputs recipe` accepts an explicit `--id`; when omitted, its ID is
+`dev recovery inputs recipe` accepts an explicit `--id`; when omitted, its ID is
 `stock-recovery-LOCK_SHA256`, derived from the verified lock. It carries no assumed
 release or issue name. Previously generated recipe IDs and bytes remain unchanged.
 
@@ -72,7 +72,7 @@ uses the same DNF5 acquisition owner and signature lock.
 
 ## Reviewed pairing candidate
 
-`recovery-inputs candidate-spec --candidate fedora44-pairing-v1 --repository
+`dev recovery inputs candidate-spec --candidate fedora44-pairing-v1 --repository
 /absolute/reviewed.repo --repository-id SELECTED_REPO_ID` prints a complete v1
 specification; redirect it to a new candidate JSON file and pass that to
 `acquire-plan --spec`. Repeat `--repository-id` for each explicitly selected ID.

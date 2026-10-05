@@ -283,7 +283,7 @@ def test_repeated_retarget_after_completed_retarget_endpoint_keeps_both_origins(
     with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM evidence').fetchone()[0]==0
 
 
-@pytest.mark.parametrize('change',['attempt','descriptor','snapshot'])
+@pytest.mark.parametrize('change',['attempt', 'descriptor', 'snapshot'])
 def test_archived_identity_and_snapshot_are_rechecked_after_capture_callbacks(moved,monkeypatch,change):
     control=moved[0][1];prepare(moved);receipt=activate(moved);archive=Path(receipt['original_archive']);changed=[False]
     actual=retarget_evidence._capture_source

@@ -285,12 +285,13 @@ def test_queued_restart_requires_explicit_resume_and_backup_keeps_closure(setup,
 
 
 def cli_args(setup,tmp_path,request='cli-candidate',**changed):
-    from quirkbench.cli import parser
+    from types import SimpleNamespace
     c,entry,value,builder,snapshot=setup
     path=tmp_path/'input.json';path.write_bytes(canonical(value))
-    args=parser().parse_args(['--state',str(c.root),'--reserve-gib','0','candidate-rootfs',str(path),
-        '--request-id',request,'--json','--builder-image-digest',builder['builder_image_digest'],
-        '--builder-config-digest',builder['builder_config_digest'],'--builder-archive',builder['builder_archive_sha256']])
+    # Test the retained internal adapter; standalone candidate CLI was removed.
+    args=SimpleNamespace(command='candidate-rootfs',state=c.root,input=path,request_id=request,json=True,
+                         builder_image_digest=builder['builder_image_digest'],builder_config_digest=builder['builder_config_digest'],
+                         builder_archive=builder['builder_archive_sha256'],reserve_gib=0,wait=False)
     for key,value in changed.items():setattr(args,key,value)
     return args
 

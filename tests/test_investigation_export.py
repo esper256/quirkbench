@@ -125,7 +125,7 @@ def test_cli_exports_existing_state_without_controller_initialization(lab,tmp_pa
     monkeypatch.setattr('quirkbench.maintenance.prune',forbidden)
     with c.transaction() as db:before=list(db.execute('SELECT * FROM refs ORDER BY owner,digest'))
     output=tmp_path/'cli.tar'
-    assert cli.main(['--state',str(c.root),'investigation','export','investigation','--output',str(output),'--json'])==0
+    assert cli.main(['--state', str(c.root), 'investigation', 'results', 'export', 'investigation', '--output', str(output), '--json'])==0
     assert json.loads(capsys.readouterr().out)['data']['conclusion']=='inconclusive'
     with c.transaction() as db:assert before==list(db.execute('SELECT * FROM refs ORDER BY owner,digest'))
 
@@ -206,7 +206,7 @@ def test_export_honors_configured_reserve_before_any_staging(lab,tmp_path,monkey
     output=tmp_path/'reserve.tar'
     with pytest.raises(StoragePressure):export.export(c.root,'investigation',output)
     assert not output.exists() and not list(tmp_path.glob('.quirkbench-export-*'))
-    assert cli.main(['--state',str(c.root),'investigation','export','investigation','--output',str(output),'--json'])==4
+    assert cli.main(['--state', str(c.root), 'investigation', 'results', 'export', 'investigation', '--output', str(output), '--json'])==4
     assert json.loads(capsys.readouterr().out)['error']['code']=='BLOCKED'
 
 
@@ -297,10 +297,10 @@ def test_installed_cli_and_resources_export_without_checkout(lab,tmp_path):
             'cert':str(placeholder),'key':str(placeholder),'tokens_file':str(placeholder),'reserve_gib':0}
     config_path=private/'controller-service.json';config_path.write_text(json.dumps(config));config_path.chmod(0o600)
     env={k:v for k,v in os.environ.items() if k not in ('PYTHONPATH','PYTHONHOME')}
-    help_run=subprocess.run([str(runtime/'bin/quirkbench'),'investigation','export','--help'],cwd=tmp_path,env=env,capture_output=True,text=True,timeout=15)
+    help_run=subprocess.run([str(runtime / 'bin/quirkbench'), 'investigation', 'results', 'export', '--help'],cwd=tmp_path,env=env,capture_output=True,text=True,timeout=15)
     assert help_run.returncode==0 and '--author' in help_run.stdout
     output=tmp_path/'installed.tar'
-    run=subprocess.run([str(runtime/'bin/quirkbench'),'--state',str(c.root),'investigation','export','investigation','--output',str(output),'--json'],
+    run=subprocess.run([str(runtime / 'bin/quirkbench'), '--state', str(c.root), 'investigation', 'results', 'export', 'investigation', '--output', str(output), '--json'],
                        cwd=tmp_path,env=env,capture_output=True,text=True,timeout=15)
     assert run.returncode==0,run.stderr+run.stdout
     assert json.loads(run.stdout)['data']['conclusion']=='inconclusive'

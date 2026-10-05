@@ -15,7 +15,7 @@ def test_actual_main_is_bounded_readonly_and_pin_notes_never_loaded(tmp_path,mon
     def forbidden(*_,**__):pytest.fail('query acquired mutation/cleanup authority')
     monkeypatch.setattr(Controller,'__init__',forbidden)
     monkeypatch.setattr(maintenance,'private_lock',forbidden);monkeypatch.setattr(maintenance,'prune',forbidden)
-    assert cli.main(['--state',str(c.root),'storage','--json','--limit','2'])==0
+    assert cli.main(['--state', str(c.root), 'admin', 'storage', 'show', '--json', '--limit', '2'])==0
     answer=json.loads(capsys.readouterr().out);assert answer['ok'] and answer['operation_id'] is None
     data=answer['data'];assert data['next_cursor']=='second'
     assert data['owners'][1]['pinned'] and data['owners'][1]['cleanup_eligible'] is None
@@ -35,5 +35,5 @@ def test_bad_cursor_or_oversized_legacy_owner_fails_without_hide_or_cleanup(tmp_
 
 def test_storage_does_not_create_missing_state(tmp_path,capsys):
     root=tmp_path/'absent'
-    assert cli.main(['--state',str(root),'storage','--json'])!=0
+    assert cli.main(['--state', str(root), 'admin', 'storage', 'show', '--json'])!=0
     assert not root.exists() and not json.loads(capsys.readouterr().out)['ok']

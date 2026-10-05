@@ -32,67 +32,42 @@ Controller storage is separate: initially budget roughly 200 GiB for sources, bu
 
 ### CLI entry points
 
-Submit from the controller's normal terminal after the [foreground controller setup](controller-installation.md#foreground-build-and-composition-controller).
-The pinned builder image must already exist locally. Inputs use the existing
-BuildInputs/ComposeInputs manifests and absolute declared paths; expensive capture
-and hash checks happen in the first worker stage. Persistent state and private
-worker staging live under the selected XDG home state.
+Use the [agent guide](agent-guide.md) for the normal investigation workflow:
 
-Retain the finished builder's verified OCI archive and config ID separately from
-the Fedora base marker. Version 2 job inputs preserve the original base identity
-in build provenance and execute the verified finished builder. Source archives
-keep contained links; captured target root filesystems also retain absolute OS
-symlinks and permissions without extracting members through those links.
+    quirkbench experiment submit first-fix --file experiment.json --request-id test-001
+    quirkbench experiment status first-fix --request-id test-001
+    quirkbench experiment logs first-fix --request-id test-001
+    quirkbench monitor first-fix
 
-```sh
-quirkbench build /absolute/inputs/build.json --request-id build-001
-quirkbench compose /absolute/inputs/compose.json --request-id compose-001 \
-  --publish-repo "$HOME/.local/state/quirkbench/repositories/lab"
-quirkbench monitor
-quirkbench operation status JOB_ID --json
-```
+The submission retains exact source, baseline, recipe and publication choices.
+The configured controller performs capture, candidate preparation, kernel build
+and system assembly. Preparation returns promptly and never approves target execution.
+After reconciliation, use experiment resume with the original request ID and
+a distinct resume request ID. See each action's help for the required inputs.
 
-Default output is the existing C2 operation response with job ID, request ID,
-status/monitor commands and log location. Accepted work continues after the CLI
-returns. Add `--wait` to await the original final build-output map or composition
-manifest/artifact JSON. Ctrl+C stops the waiter. Exact request retries return the
-same job; changed inputs conflict. `--workspace` is rejected because the controller
-owns private staging. Configure composition repository alias/signing identity in
-private service configuration first. Add `--campaign CAMPAIGN_ID` to bind campaign
-pause behavior. Explicit interrupted-job resume uses `operation resume JOB_ID
---request-id NEW_REQUEST_ID`; verified retained inputs avoid source recapture once
-capture has completed.
+For deliberate manual stages, investigation build prepare, kernel and system use
+the same services. They require exact completed inputs; they are not a separate
+build workflow. Private worker staging remains controller-owned.
 
-Software support does not establish real service containment or boot qualification.
+Software checks do not establish real containment or boot qualification.
 
 ### Durable candidate sysroot preparation
 
-`candidate-rootfs` prepares a retained package sysroot through the same operation
-controller and bounded container worker. Supply a strict
-[candidate-rootfs-input v1](../examples/candidate-rootfs-input.json) whose baseline,
-RPM snapshot, locks, recipes and packages are already retained in the controller
-artifact store. Missing pinned bytes are a blocker, not permission to download or
-substitute newer inputs.
+`investigation build prepare` prepares a retained package sysroot through the same operation
+controller and bounded container worker. The input is derived from the investigation's
+recorded baseline. Its RPM snapshot, locks, recipes and packages must already be
+retained in the controller artifact store. Missing pinned bytes are a blocker,
+not permission to substitute newer inputs.
 
 ```sh
-quirkbench candidate-rootfs /absolute/inputs/candidate-rootfs.json \
-  --request-id candidate-rootfs-001
-quirkbench operation status JOB_ID --json
+quirkbench investigation build prepare first-fix --request-id candidate-001
+quirkbench investigation status first-fix
 ```
 
-The command promptly returns the C2 operation envelope and durable ID. Admission
-reads bounded metadata and protects the entire declared dependency closure;
-large package/OCI verification and assembly happen in the worker. The builder
-defaults to exact configured identities or the retained signed preparation proof.
-Selection is not a native-readiness assertion. A manual binding must supply all
-three `--builder-image-digest`, `--builder-config-digest` and `--builder-archive`
-values. Exact request replay retains the originally selected builder even after
-configuration changes. `--wait` reads the final retained result; interrupting the
-waiter does not cancel accepted work.
-
-Responses always use the C2 JSON envelope. Exit codes are 0 accepted/query,
-2 invalid input, 3 conflicting intent, 4 blocked service/storage and
-5 infrastructure failure. An accepted ID does not mean assembly has succeeded.
+Use this individual stage only for deliberate diagnosis; `experiment submit`
+coordinates it automatically. Admission returns promptly. The configured builder
+identity stays pinned, and acceptance does not mean assembly succeeded. Use `--json`
+for the response envelope; action help explains resource overrides.
 
 Only after whole-worker stop does the current owner independently verify inputs,
 builder, result and tree, serialize a bounded sysroot archive and validate its
@@ -104,15 +79,14 @@ hardlinks become independent regular archive members. Credential exclusions matc
 the build pipeline. No private signing/control state enters the worker.
 
 Restart interrupts the job. Reconcile the old whole service before explicitly
-using `operation resume JOB_ID --request-id NEW_REQUEST_ID`; it uses a fresh
+using `admin operation resume JOB_ID --request-id NEW_REQUEST_ID`; it uses a fresh
 worker generation/stage and the same pinned inputs. A failed job is terminal;
 retry with a new candidate request ID. Partial artifact writes confer no readiness
 and remain unreferenced. The operation retains failed diagnostics and complete
 input/output references for existing retention and backup.
 
 This result is a package sysroot, not a built/composed candidate, physical attempt
-or operator approval. Connecting it to captured source builds/composition belongs
-to [issue #31](https://github.com/esper256/quirkbench/issues/31). Cloud tests inject
+or operator approval. The submission coordinator connects it to captured source build and composition. Cloud tests inject
 package/container calls and do not establish native installroot/build readiness.
 
 ### Worker validation and publication
@@ -145,12 +119,12 @@ The final image has fixed EFI/recovery, one-shot state, experiments, library and
 
 Recovery remains independent of candidate deployments. OSTree generates candidate boot entries without regenerating the system bootloader; Quirkbench validates and translates the entry into the fixed USB boot control. GRUB clears, saves and verifies one-shot state before candidate handoff. If that fails it selects recovery. Candidate content never replaces fixed recovery or the bootloader. Do not invoke `grub-reboot` against the controller installation or use `efibootmgr`.
 
-Use `recovery-image` with a retained v2 recipe and builder archive for stock media;
+Use `dev recovery submit` with a retained v2 recipe and builder archive for stock media;
 see [image admission and publication](recovery-operations.md#durable-workers-and-image-publication).
-`recovery-images --json` lists retained publications and their actual availability.
+`recovery list --json` lists retained publications and their actual availability.
 No image is delivered merely because rootfs preparation completed.
 
-Low-level `image` and `qualify-image` tools remain available to developers; their
+Low-level `dev image assemble` and `dev image qualify` tools remain available to developers; their
 argument help and [acceptance fixtures](../acceptance/README.md) describe fixture
 inputs. Smoke images are not commissioned hardware images. Physical writing uses a
 standard image writer on the operator-selected external drive.

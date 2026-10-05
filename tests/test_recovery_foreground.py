@@ -179,8 +179,7 @@ def test_cli_needs_no_controller_selection(monkeypatch, tmp_path, capsys):
     import quirkbench.state_config as config
     monkeypatch.setattr(config, 'configure_state_root', lambda *a,**k: pytest.fail('must not configure controller'))
     monkeypatch.setattr(foreground, 'build', lambda **kwargs: {'image': str(tmp_path/'recovery.img'), 'signed': False})
-    assert main(['recovery-image-build', '--store', str(tmp_path/'cas'), '--recipe', 'a'*64,
-                 '--builder-image', 'sha256:'+'b'*64, '--output', str(tmp_path/'output')]) == 0
+    assert main(['dev', 'recovery', 'build-recipe', '--store', str(tmp_path / 'cas'), '--recipe', 'a' * 64, '--builder-image', 'sha256:' + 'b' * 64, '--output', str(tmp_path / 'output')]) == 0
     assert json.loads(capsys.readouterr().out)['signed'] is False
 
 

@@ -40,6 +40,9 @@ class JobCoordinator:
     def tick(self):
         owner=self.owner;c=owner.controller
         if owner.closed or c._lifecycle_owner is not owner: raise Conflict('controller ownership ended')
+        from .experiment_submissions import tick as submissions
+        progressed=submissions(owner)
+        if progressed is not None:return progressed
         from .proposal_dispatch import tick as proposals
         submitted=proposals(owner)
         if submitted is not None:return submitted
@@ -73,13 +76,18 @@ class JobCoordinator:
             return result
         unavailable = None
         for row in queued:
-            if row['kind']=='operation_resume': return self.resume_request(row)
+            if row['kind']=='operation_resume':
+                resumed=self.resume_request(row)
+                if resumed is not None:return resumed
+                continue
             from .proposal_dispatch import guard_child
             from .job_operations import physical_fenced, operation_target
             with c.transaction() as db:
                 try:
                     if physical_fenced(db,operation_target(db,row)):continue
                     guard_child(owner,db,row)
+                    from .experiment_submissions import guard_child as guard_submission_child
+                    guard_submission_child(owner,db,row)
                 except (OSError,ValueError,BuildError):continue
             if row['campaign']:
                 with c.transaction() as db:
@@ -134,6 +142,11 @@ class JobCoordinator:
     def resume_request(self,row):
         c=self.owner.controller
         arguments=json.loads(c.store.get(row['input_digest']))['arguments']
+        with c.transaction() as db:
+            target=db.execute('SELECT kind FROM operations WHERE id=?',(arguments['operation_id'],)).fetchone()
+        if target and target[0]=='experiment_submission':
+            from .experiment_submissions import execute_resume
+            return execute_resume(self.owner,row)
         try:
             resume(self.owner,arguments['operation_id']); state='SUCCEEDED';message='Resume recorded by current owner.'
         except (ValueError,Conflict) as exc:

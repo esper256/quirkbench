@@ -217,9 +217,7 @@ def test_serve_interrupt_stops_running_worker_before_owner_lock_release(worker,m
         return native(argv,timeout)
     service.runner=checked
     tokens=c.root/'tokens.json';tokens.write_text('{}')
-    assert cli.main(['--state',str(c.root),'--reserve-gib','0','serve','--cert','unused',
-        '--key','unused','--tokens-file',str(tokens),'--job-worker','unused',
-        '--worker-engine','docker','--worker-image',IMAGE])==130
+    assert cli.main(__import__('quirkbench.controller_process',fromlist=['parser']).parser().parse_args(['--state', str(c.root), '--reserve-gib','0','--cert', 'unused', '--key', 'unused', '--tokens-file', str(tokens), '--job-worker', 'unused', '--worker-engine', 'docker', '--worker-image', IMAGE]))==130
     assert not engine.containers and any(args[0]=='stop' for args in engine.calls)
     row=c.operation_status(claims[0]['id'])['data']
     assert row['state']=='INTERRUPTED' and row['worker_unit'] is None

@@ -1,4 +1,4 @@
-# Public investigation export
+# Public investigation results export
 
 Export an immutable captured source and its attributed report from existing controller
 state. The installed command writes a **new uncompressed tar file** atomically. It
@@ -6,9 +6,9 @@ never starts a controller/service, prunes state, changes source, publishes patch
 authorizes execution or creates a resumable backup.
 
 ```sh
-quirkbench investigation report-retain input-device-investigation --note 'Preserve comparison inputs' --request-id retain-export-01 --json
-quirkbench investigation export input-device-investigation --output /absolute/public/input-investigation.tar --author 'Actual Author <actual@example.org>' --json
-quirkbench investigation export input-device-investigation --capture CAPTURE_OPERATION --comparison comparison.json --output /absolute/public/earlier-investigation.tar --author 'Actual Author <actual@example.org>' --timeout 300 --json
+quirkbench investigation results retain input-device-investigation --note 'Preserve comparison inputs' --request-id retain-export-01 --json
+quirkbench investigation results export input-device-investigation --output /absolute/public/input-investigation.tar --author 'Actual Author <actual@example.org>' --json
+quirkbench investigation results export input-device-investigation --capture CAPTURE_OPERATION --comparison comparison.json --output /absolute/public/earlier-investigation.tar --author 'Actual Author <actual@example.org>' --timeout 300 --json
 ```
 
 The output parent must exist and be outside private controller state. Ancestor
@@ -75,7 +75,7 @@ owner cannot resurrect evidence. Symbols require the validated experiment closur
 Existing owner/dependency references remain unchanged. Export holds the existing
 shared maintenance barrier; it creates no permanent pins. Use `report-retain` before
 export, inspect its missing/retired-owner receipt, and explicitly pin an older capture
-operation with `quirkbench maintenance pin CAPTURE_OPERATION --note 'Keep export source'`
+operation with `quirkbench admin storage pin CAPTURE_OPERATION --note 'Keep export source'`
 when needed. Pins cannot restore collected objects. See [report retention](investigation-reports.md)
 and [storage maintenance](local-state-maintenance.md).
 

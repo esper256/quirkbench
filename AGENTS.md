@@ -58,8 +58,10 @@ this revised contract rather than ask the owner to approve the same decision aga
 
 ## Preserve the boundaries
 
-- Keep existing wire names (`device_id`), CLI options (`--device`, network `--host`)
-  and schema meanings. Incompatible changes require versioned readers/migrations.
+- The owner-approved [CLI redesign](docs/cli-redesign-plan.md) replaces old public
+  spellings without aliases. Use task-oriented commands and public `--target`; keep
+  network `--host` for addresses. Preserve existing wire names (`device_id`) and
+  retained evidence meanings; schema extensions require explicit versioned readers.
 - Reuse the controller database and attempt state machine. No host systemd is required;
   preserve worker identity, bounded resources, whole-worker shutdown and restart
   fencing through the selected supervisor. Preserve state and unrelated uncommitted work.

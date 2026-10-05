@@ -208,10 +208,10 @@ def test_cli_returns_scope_and_managed_path_without_secret(reconciled,tmp_path,c
     c,now,attempt,raw,plan=reconciled
     # CLI native time differs from the deterministic controller clock.
     path=tmp_path/'plan.json';path.write_bytes(canonical(plan))
-    argv=['--state',str(c.root),'target','drain-approve','target','--file',str(path),'--request-id','cli','--json']
+    argv=['--state', str(c.root), 'target', 'evidence', 'approve', 'target', '--file', str(path), '--request-id', 'cli', '--json']
     assert cli.main(argv)==0;output=capsys.readouterr().out;answer=json.loads(output)['data']
     private=drain.read_credential(Path(answer['credential_file']));assert private['token'] not in output
-    assert cli.main(['--state',str(c.root),'target','drain-revoke','target','--grant',answer['record']['grant_id'],'--json'])==0
+    assert cli.main(['--state', str(c.root), 'target', 'evidence', 'revoke', 'target', '--grant', answer['record']['grant_id'], '--json'])==0
     assert json.loads(capsys.readouterr().out)['data']['revoked']
 
 

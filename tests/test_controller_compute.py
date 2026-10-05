@@ -38,8 +38,7 @@ def test_serve_exposes_authenticated_server_without_compute_preflight(worker,mon
     def stop(_):raise KeyboardInterrupt
     monkeypatch.setattr(cli.time,'sleep',stop)
     tokens=c.root/'tokens.json';tokens.write_text('{"target":"explicit-token"}')
-    assert cli.main(['--state',str(c.root),'--reserve-gib','0','serve','--cert','selected-cert',
-        '--key','selected-key','--tokens-file',str(tokens),'--job-worker','fixed-worker','--service-runtime','runtime'])==130
+    assert cli.main(__import__('quirkbench.controller_process',fromlist=['parser']).parser().parse_args(['--state', str(c.root), '--reserve-gib','0','--cert', 'selected-cert', '--key', 'selected-key', '--tokens-file', str(tokens), '--job-worker', 'fixed-worker', '--service-runtime', 'runtime']))==130
     assert observed==['serving']
 
 

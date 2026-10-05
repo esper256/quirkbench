@@ -120,6 +120,10 @@ CREATE TABLE report_retention_commands(
  request_id TEXT PRIMARY KEY,request_digest TEXT NOT NULL,
  campaign TEXT NOT NULL REFERENCES investigations(id),result_document TEXT NOT NULL);
 """)
+from .experiment_submissions import MIGRATION as SUBMISSION_MIGRATION
+MIGRATIONS.append(SUBMISSION_MIGRATION)
+MIGRATIONS.append("ALTER TABLE experiment_submissions ADD COLUMN candidate_operation TEXT REFERENCES operations(id);")
+MIGRATIONS.append("ALTER TABLE experiment_submissions ADD COLUMN public_document TEXT;")
 
 
 def uid():
@@ -183,6 +187,8 @@ class _LifecycleOwner:
                 raise Conflict('operation is not queued in the current lifecycle')
             from .proposal_dispatch import guard_child
             guard_child(self,db,row)
+            from .experiment_submissions import guard_child as guard_submission_child
+            guard_submission_child(self,db,row)
             from .job_operations import STAGES, physical_fenced, operation_target
             if (row['kind'],stage) not in STAGES:
                 raise Conflict('worker kind/stage is not allowed')
@@ -866,7 +872,7 @@ class Controller(OperatorApprovals):
                 os.close(fd)
 
     def operation_events(self, operation_id, *, after=0, limit=100):
-        """Page durable operation events without starting the lifecycle owner."""
+        """Page durable admin operation events without starting the lifecycle owner."""
         if type(after) is not int or after < 0 or type(limit) is not int or not 1 <= limit <= 100:
             raise ContractError('invalid operation event cursor or limit')
         db = self._connect()
@@ -904,7 +910,7 @@ class Controller(OperatorApprovals):
         sha256(artifact_digest)
         if (type(offset) is not int or offset < 0 or type(length) is not int
                 or not 1 <= length <= 16384):
-            raise ContractError('invalid operation output range')
+            raise ContractError('invalid admin operation output range')
         db = self._connect()
         try:
             self._operation_status(db, operation_id)
@@ -917,15 +923,15 @@ class Controller(OperatorApprovals):
             db.close()
         path = self.store.path(artifact_digest)
         if self.store.objects.is_symlink() or self.store.objects.resolve() != self.store.objects:
-            raise ContractError('operation output store is unavailable')
+            raise ContractError('admin operation output store is unavailable')
         try:
             fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         except OSError as exc:
-            raise ContractError('operation output is unavailable') from exc
+            raise ContractError('admin operation output is unavailable') from exc
         try:
             metadata = os.fstat(fd)
             if not stat.S_ISREG(metadata.st_mode) or offset > metadata.st_size:
-                raise ContractError('operation output range is unavailable')
+                raise ContractError('admin operation output range is unavailable')
             with os.fdopen(fd, 'rb') as stream:
                 fd = -1
                 stream.seek(offset)
@@ -934,7 +940,7 @@ class Controller(OperatorApprovals):
             identity = lambda info: (info.st_dev, info.st_ino, info.st_size,
                                      info.st_mtime_ns, info.st_ctime_ns)
             if identity(metadata) != identity(after):
-                raise ContractError('operation output changed during read')
+                raise ContractError('admin operation output changed during read')
             return operation_response(operation_id=operation_id, data={
                 'sha256': artifact_digest, 'offset': offset,
                 'length': len(chunk), 'total_bytes': metadata.st_size,
@@ -961,7 +967,7 @@ class Controller(OperatorApprovals):
         if type(worker_epoch) is not int or type(worker_generation) is not int:
             raise ContractError('worker fence must contain integer epoch and generation')
         if not isinstance(output_refs, (tuple, list, set)) or len(output_refs) > 256:
-            raise ContractError('invalid operation outputs')
+            raise ContractError('invalid admin operation outputs')
         outputs = sorted({sha256(value) for value in output_refs})
         for value in outputs:
             self.store.verify(value)

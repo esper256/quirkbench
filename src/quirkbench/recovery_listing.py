@@ -106,6 +106,6 @@ def render_images(answer):
                 lines.append('  Publisher fingerprint: '+item['publisher_fingerprint'])
             else:lines.append('  Checksums: '+item['checksums_path'])
     if not data['items']: lines.append('No recovery image operation recorded. Input preparation does not create an image until it succeeds.')
-    if data['next_cursor'] is not None: lines.append('Older entries: quirkbench recovery-images --before '+str(data['next_cursor']))
+    if data['next_cursor'] is not None: lines.append('Older entries: quirkbench recovery list --before '+str(data['next_cursor']))
     if any(item['image_path'] for item in data['items']): lines.append('Listing does not rehash image bytes. Verify checksums/signature before flashing the confirmed external drive.')
     return safe_text('\n'.join(lines))

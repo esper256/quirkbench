@@ -40,7 +40,7 @@ from test_source_operation import worker
 from test_distribution_source_worker import injected as native_source_prepare
 from test_candidate_rootfs_worker import execution as native_candidate
 from test_investigation_pipeline import complete_job,configure_build,configure_compose
-from test_proposal_dispatch import capture_proposal,dispatch_and_build
+
 from test_operator_approval import InspectableBackend
 from test_physical_handoff import Boot
 from test_investigation_context import question,answer
@@ -56,7 +56,7 @@ def query(root,*args):
     """Actual installed CLI and durable services, without replacing its output."""
     from contextlib import redirect_stdout
     output=StringIO()
-    with redirect_stdout(output):status=cli.main(['--state',str(root),'--reserve-gib','0',*args,'--json'])
+    with redirect_stdout(output):status=cli.main(['--state',str(root),*args,'--json'])
     assert status==0,(status,output.getvalue())
     value=json.loads(output.getvalue());assert value.get('ok',True)
     return value.get('data',value)
@@ -156,7 +156,12 @@ def runtime_step(home,control,client,inventory,backend,boot,boot_id,mode='recove
 def pair(home,runtime,patch,case):
     home.mkdir(mode=0o700);root=home/'state'
     observers=native_observations();observers.pop('installation_inspector')
-    setup=controller_setup.setup_controller(root,request_id='initial',runtime_root=runtime,reserve_gib=0,config_home=home/'config',**observers)
+    patch.setenv('XDG_CONFIG_HOME',str(home/'config'))
+    original_setup=controller_setup.setup_controller
+    def configured_setup(*args,**kwargs):
+        return original_setup(*args,**kwargs,**observers)
+    patch.setattr(controller_setup,'setup_controller',configured_setup)
+    setup=query(root,'setup','--request-id','initial','--runtime',str(runtime),'--reserve-gib','0')
     assert setup['readiness']['target_count']==0 and not setup['readiness']['release_verified']
     native=publication_inputs(home)
     _,services,signing,options,calls=native
@@ -210,17 +215,22 @@ def run(home,runtime,inputs,case):
         observed=inventory_report(collect(inv_inputs),mode='recovery')
         observed=replace(observed,device_id=device,inventory={**observed.inventory,'target_binding':{'schema_version':1,'system_uuid':UUID},'media_instance_id':json.loads((control/'media-instance.json').read_bytes())['media_instance_id']})
         c.register(observed)
-        started=investigations.start(c,'investigation',device,'start',workspace='kernel',problem=b'Observe a bounded non-audio symptom')
-        assert started['session']['execution_owner']=='external'
-        assert investigations.start(c,'investigation',device,'start',workspace='kernel',problem=b'Observe a bounded non-audio symptom')==started
-        cfg=controller_service.configuration(c.root)
+        problem=home/'problem.md';problem.write_text('Observe a bounded non-audio symptom')
+        start_args=('investigation','start','investigation','--target',device,'--workspace','kernel','--problem',str(problem),'--request-id','start','--reserve-gib','0')
+        started=query(c.root,*start_args)
+        assert started['investigation']['session']['execution_owner']=='external'
+        assert query(c.root,*start_args)==started
+        cfg={**controller_service.configuration(c.root),**builder}
+        from quirkbench.store import atomic_write
+        atomic_write(c.root/'private/controller-service.json',canonical(cfg))
+        patch.setattr(controller_service,'require_ready',lambda _:None)
         # Native OCI identity/import is outside this software journey. Explicit
         # builder input uses existing validated admission instead of signed-ready
         # claims or new handwritten application records.
         with c.lifecycle() as owner:
             services=Workers();coordinator=JobCoordinator(owner,services)
             patch.setattr(recovery_worker,'execute_rootfs',native_source_prepare)
-            prepared=distribution_prepare_operation.submit(c,'investigation','kernel',entry,builder,'prepare',ready=lambda _:None)
+            prepared=query(c.root,'investigation','source','prepare','investigation','--request-id','prepare','--reserve-gib','0')
             c.resume('investigation');claim=coordinator.tick();assert worker(c,claim,patch)==0
             services.done=True;assert coordinator.tick()['state']=='SUCCEEDED'
             captured=source_workspace.handoff(c,'kernel','capture',quiesced=True,ready=lambda _:None)
@@ -234,16 +244,47 @@ def run(home,runtime,inputs,case):
         configure_build(patch)
         configure_compose(joined,patch)
         with c.lifecycle() as owner,authenticated_transport(c,control) as client:
-            built=investigation_pipeline.submit(c,'investigation','build','build',source=captured['operation_id'],candidate=candidate['operation_id'],ready=lambda _:None)
-            assert investigation_pipeline.submit(c,'investigation','build','build',source=captured['operation_id'],candidate=candidate['operation_id'],ready=lambda _:None)==built
-            if case=='interrupted':
-                c.pause('investigation');assert JobCoordinator(owner,Workers()).tick() is None
-                assert c.operation_status(built['operation_id'])['data']['state']=='QUEUED'
-            complete_job(c,owner,patch)
-            composed=investigation_pipeline.submit(c,'investigation','compose','compose',build=built['operation_id'],repository='lab',ready=lambda _:None)
-            complete_job(c,owner,patch,kind='compose')
+            from quirkbench import experiment_submissions
+            # Inject host readiness; submission/ownership/worker services remain real.
+            patch.setattr(controller_service,'require_ready',lambda _:None)
+            def submit_test(request, mode):
+                payload={'schema_version':1,'hypothesis':'Observe the selected kernel source.',
+                         'source':{'mode':mode,**({'quiesced':True} if mode=='workspace' else {})},
+                         'recipe':{'id':'system-observation','parameters':{},'repetitions':1,'timeout_seconds':120},'repository':'lab'}
+                file=home/(request+'.json');file.write_bytes(canonical(payload))
+                accepted=query(c.root,'experiment','submit','investigation','--file',str(file),'--request-id',request,'--reserve-gib','0')
+                assert query(c.root,'experiment','submit','investigation','--file',str(file),'--request-id',request,'--reserve-gib','0')==accepted
+                coord=JobCoordinator(owner,Workers())
+                if mode=='workspace':
+                    services=Workers();capture=JobCoordinator(owner,services)
+                    claim=capture.tick();assert claim['kind']=='source_capture'
+                    assert worker(c,claim,patch)==0;services.done=True
+                    assert capture.tick()['state']=='SUCCEEDED'
+                assert coord.tick()['stage']=='source_ready'
+                assert coord.tick()['ok'] # immutable proposal
+                assert coord.tick()['ok'] # candidate preparation
+                progress=query(c.root,'experiment','status','investigation','--request-id',request)
+                assert progress['experiment_id'] is None
+                query(c.root,'experiment','logs','investigation','--request-id',request)
+                with patch.context() as native_patch:
+                    services=Workers();candidate_worker=JobCoordinator(owner,services)
+                    claim=candidate_worker.tick();assert claim['kind']=='candidate_prepare'
+                    native_patch.setattr(recovery_worker,'execute_rootfs',native_candidate((c.root,Path(claim['stage_dir']),c.store,entry,value,builder,snapshot),[]))
+                    assert worker(c,claim,native_patch)==0;services.done=True
+                    assert candidate_worker.tick()['state']=='SUCCEEDED'
+                assert coord.tick()['ok'] # dispatch
+                assert coord.tick()['ok'] # build
+                complete_job(c,owner,patch)
+                assert coord.tick()['ok'] # composition
+                complete_job(c,owner,patch,kind='compose')
+                assert coord.tick()['state']=='SUCCEEDED'
+                result=query(c.root,'experiment','status','investigation','--request-id',request)
+                assert result['experiment_id'] and result['state']=='SUCCEEDED'
+                query(c.root,'experiment','show',result['experiment_id'])
+                return result['experiment_id']
             native_commits=NativeCommitRepository();c.deployment_repository=native_commits
-            baseline=attended_baseline.admit(c,'investigation',composed['operation_id'],'baseline',ready=lambda _:None)['data']['experiment_id']
+            c.resume('investigation')
+            baseline=submit_test('baseline','baseline')
             report=observed
             backend=InspectableBackend(home);boot=Boot()
             def step(boot_id=report.boot_id,mode='recovery'):
@@ -256,28 +297,28 @@ def run(home,runtime,inputs,case):
                 nonlocal baseline,paused_baseline
                 assert step(recovery_boot)=='awaiting_operator_approval'
                 with c.transaction() as db:identity=db.execute('SELECT id FROM attempts ORDER BY rowid DESC LIMIT 1').fetchone()[0]
-                shown=query(c.root,'attempt','show',identity)
+                shown=query(c.root,'run','show',identity)
                 assert shown['approval_effective']['state']=='waiting'
                 if request=='baseline-attempt':assert boot.armed==[]
-                approved=query(c.root,'attempt','approve',identity,'--request-id','approve-'+identity)
-                assert query(c.root,'attempt','approve',identity,'--request-id','approve-'+identity)==approved
+                approved=query(c.root,'run','approve',identity,'--request-id','approve-'+identity)
+                assert query(c.root,'run','approve',identity,'--request-id','approve-'+identity)==approved
                 if case=='interrupted' and request=='baseline-attempt':
                     c.pause('investigation')
                     assert step(recovery_boot)=='awaiting_operator_approval' and boot.armed==[]
                     with pytest.raises(Conflict,match='reconciliation'):c.resume('investigation')
                     interrupted_attempt=identity;recovery_boot='approval-reset'
                     assert step(recovery_boot)=='completed' and boot.armed==[]
-                    interrupted=query(c.root,'attempt','show',interrupted_attempt)
+                    interrupted=query(c.root,'run','show',interrupted_attempt)
                     assert interrupted['execution']['terminal_result']['outcome']=='NEEDS_HUMAN'
                     assert not interrupted['execution']['candidate_started'] and interrupted['problem_reproduced'] is None
                     paused_baseline=baseline
-                    baseline=attended_baseline.admit(c,'investigation',composed['operation_id'],'baseline-after-pause',ready=lambda _:None)['data']['experiment_id']
                     c.resume('investigation')
+                    baseline=submit_test('baseline-after-pause','baseline')
                     assert step(recovery_boot)=='awaiting_operator_approval'
                     with c.transaction() as db:identity=db.execute('SELECT id FROM attempts ORDER BY rowid DESC LIMIT 1').fetchone()[0]
                     assert identity!=interrupted_attempt
-                    assert query(c.root,'attempt','show',identity)['approval_effective']['state']=='waiting'
-                    query(c.root,'attempt','approve',identity,'--request-id','approve-'+identity)
+                    assert query(c.root,'run','show',identity)['approval_effective']['state']=='waiting'
+                    query(c.root,'run','approve',identity,'--request-id','approve-'+identity)
                 assert step(recovery_boot)=='candidate_requested'
                 assert step(candidate_boot,'experiment')=='recovery_requested'
                 assert step(next_boot)=='completed'
@@ -292,33 +333,40 @@ def run(home,runtime,inputs,case):
                 diagnostic=baseline
                 assert step(report.boot_id)=='awaiting_operator_approval' and boot.armed==[]
                 with c.transaction() as db:denied=db.execute('SELECT id FROM attempts ORDER BY rowid DESC LIMIT 1').fetchone()[0]
-                decision=query(c.root,'attempt','reject',denied,'--request-id','deny-baseline')
-                assert query(c.root,'attempt','reject',denied,'--request-id','deny-baseline')==decision
+                decision=query(c.root,'run','reject',denied,'--request-id','deny-baseline')
+                assert query(c.root,'run','reject',denied,'--request-id','deny-baseline')==decision
                 with pytest.raises(Conflict):c.decide_attempt(denied,'approved',request_id='deny-baseline')
                 assert step(report.boot_id)=='completed' and boot.armed==[]
-                baseline=attended_baseline.admit(c,'investigation',composed['operation_id'],'baseline-after-denial',ready=lambda _:None)['data']['experiment_id']
                 c.resume('investigation')
+                baseline=submit_test('baseline-after-denial','baseline')
             first=attempt(report.boot_id,'candidate-base','recovery-base','baseline-attempt')
             brief=query(c.root,'investigation','brief','investigation');assert brief['driver']=='external'
             q=question('original-observation',attempt=first)
             request=home/'question.json';request.write_bytes(canonical(q))
-            query(c.root,'session','request','investigation','--campaign','investigation','--file',str(request))
+            c.issue_observation('investigation', q)
             response=home/'answer.json';response.write_bytes(canonical(answer(q)))
-            query(c.root,'investigation','respond','investigation','--request',q['request_id'],'--file',str(response),'--request-id','human-answer')
-            observation=query(c.root,'investigation','observation','investigation','--request',q['request_id'])
+            query(c.root,'investigation','observation','answer','investigation','--request',q['request_id'],'--file',str(response),'--request-id','human-answer')
+            observation=query(c.root,'investigation','observation','show','investigation','--request',q['request_id'])
             assert observation['request']['attempt_id']==first and observation['response']['answer']=='uncertain'
             assert observation['state']=='answered_late'
             c.resume('investigation')
-            proposal,proposal_value,workspace=capture_proposal(c,owner,patch,'patch','patched observed source\n')
-            dispatched,patched=dispatch_and_build(c,owner,patch,proposal,candidate['operation_id'],'dispatch')
+            query(c.root,'investigation','source','release','investigation')
+            (c.root/'workspaces/kernel/init/main.c').write_text('patched observed source\n')
+            patched=submit_test('patch','workspace')
             second=attempt('recovery-base','candidate-patch','recovery-patch','patched-attempt')
+            # Export needs an explicit stopped-writer handoff for Git attribution.
+            query(c.root,'investigation','source','capture','investigation','--quiesced','--request-id','export-source','--reserve-gib','0')
+            services=Workers();capture=JobCoordinator(owner,services)
+            claim=capture.tick();assert worker(c,claim,patch)==0;services.done=True
+            assert capture.tick()['state']=='SUCCEEDED'
+
         comparison={'schema_version':1,'record_type':'investigation-comparison','investigation_id':'investigation','roles':[{'role':'baseline','experiment_id':baseline},{'role':'patched','experiment_id':patched}]}
         if denied is not None:comparison['roles'].append({'role':'diagnostic','experiment_id':diagnostic})
         if paused_baseline is not None:comparison['roles'].append({'role':'diagnostic','experiment_id':paused_baseline})
         plan=home/'comparison.json';plan.write_bytes(canonical(comparison))
-        comparison_report=query(c.root,'investigation','report','investigation','--comparison',str(plan))
+        comparison_report=query(c.root,'investigation','results','show','investigation','--comparison',str(plan))
         assert comparison_report['conclusion']=='inconclusive'
-        query(c.root,'investigation','report-retain','investigation','--note','Keep installed software comparison','--request-id','retain')
+        query(c.root,'investigation','results','retain','investigation','--note','Keep installed software comparison','--request-id','retain')
         if case=='interrupted':
             interrupted=home/'interrupted.tar'
             def fault(phase):
@@ -328,14 +376,14 @@ def run(home,runtime,inputs,case):
             with c.transaction() as db:missing=db.execute('SELECT digest FROM evidence WHERE attempt=? ORDER BY stream,sequence LIMIT 1',(second,)).fetchone()[0]
             path=c.store.path(missing);original=path.read_bytes();path.unlink()
             missing_out=home/'missing-evidence.tar'
-            incomplete=query(c.root,'investigation','export','investigation','--comparison',str(plan),'--output',str(missing_out),'--author','Fixture Export Author <fixture@example.invalid>')
+            incomplete=query(c.root,'investigation','results','export','investigation','--comparison',str(plan),'--output',str(missing_out),'--author','Fixture Export Author <fixture@example.invalid>')
             assert incomplete['missing_count']>=1 and incomplete['conclusion']=='inconclusive'
             import tarfile
             with tarfile.open(missing_out) as archive:
                 value=json.load(archive.extractfile('manifest.json'))
             assert any(item['attempt_id']==second and item['sha256']==missing and not item['bytes_exported'] for item in value['evidence'])
             assert c.store.put(original).sha256==missing
-        out=home/'public.tar';receipt=query(c.root,'investigation','export','investigation','--comparison',str(plan),'--output',str(out),'--author','Fixture Export Author <fixture@example.invalid>')
+        out=home/'public.tar';receipt=query(c.root,'investigation','results','export','investigation','--comparison',str(plan),'--output',str(out),'--author','Fixture Export Author <fixture@example.invalid>')
         assert receipt['source_reconstructed'] and receipt['validation_status']=='tested-source-match' and not receipt['native_qualification']
         c.pause('investigation')
         # Compose installs its real repository adapter. Backup replaces only that
@@ -354,7 +402,7 @@ def run(home,runtime,inputs,case):
         repository=NativeCommitRepository();repository.contents.clear()
         restored=Controller.restore(backup,home/'restored',reserve_bytes=0,deployment_repository=repository)
         assert restored.status('investigation')['state']=='PAUSED' and not (restored.root/'private').exists()
-        assert query(restored.root,'investigation','report','investigation','--comparison',str(plan))['conclusion']=='inconclusive'
+        assert query(restored.root,'investigation','results','show','investigation','--comparison',str(plan))['conclusion']=='inconclusive'
         with c.lifecycle(),authenticated_transport(c,control) as client:
             shutdown=target_shutdown.request(c.root,device,'shutdown')
             assert shutdown['admission_stopped'] and not shutdown['physical_poweroff_verified']

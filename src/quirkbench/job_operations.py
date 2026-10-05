@@ -162,9 +162,10 @@ def envelope(root,row,request_id):
     from .operations import operation_response
     import shlex
     prefix='quirkbench --state '+shlex.quote(str(root))
+    campaign=row['campaign'] if 'campaign' in row.keys() else None
     return operation_response(operation_id=row['id'],data={'accepted':True,'request_id':request_id,
-        'state':row['state'],'status_command':prefix+' operation status '+row['id'],
-        'monitor_command':prefix+' monitor','log_location':str(Path(root)/'workers'/row['id'])})
+        'state':row['state'],'status_command':prefix+' investigation status '+campaign if campaign else prefix+' admin operation show '+row['id'],
+        'monitor_command':prefix+' monitor'+(' '+campaign if campaign else ''),'log_location':str(Path(root)/'workers'/row['id'])})
 
 
 def current(owner,db,claim):
@@ -210,6 +211,9 @@ def request_resume(controller,operation,request_id):
 def resume(owner,operation):
     controller=owner.controller
     with controller.transaction() as db:kind=db.execute('SELECT kind FROM operations WHERE id=?',(operation,)).fetchone()
+    if kind and kind[0]=='experiment_submission':
+        from .experiment_submissions import resume_owned
+        return resume_owned(owner,operation)
     if kind and kind[0]=='external_proposal':
         from .proposal_dispatch import resume as proposal_resume
         return proposal_resume(owner,operation)

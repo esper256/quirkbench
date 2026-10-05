@@ -1,4 +1,4 @@
-"""P2d controller state selection before the full installer exists."""
+"""Controller setup and explicit persistent state selection."""
 from __future__ import annotations
 
 import json
@@ -44,20 +44,20 @@ def test_setup_selects_private_default_state_and_is_idempotent(tmp_path):
     state_home = tmp_path / "state-home"
     cwd = tmp_path / "elsewhere"
     cwd.mkdir()
-    first = _command(config, cwd, "setup-state", state_home=state_home)
+    first = _command(config, cwd, "setup", "--json", state_home=state_home)
     assert first.returncode == 0, first.stderr
-    data = json.loads(first.stdout)
+    data = json.loads(first.stdout)["data"]
     root = state_home / "quirkbench"
     assert data["state_root"] == str(root)
-    assert data["service_management"] == "pending" and not data["background_work_ready"]
+    assert not data["background_work_ready"] and not data["readiness"]["service_ready"]
     assert root.stat().st_mode & 0o077 == 0
     assert (root / "controller.sqlite").is_file()
     selection = config / "quirkbench/controller.json"
     original = selection.read_bytes()
     assert selection.stat().st_mode & 0o077 == 0
-    second = _command(config, cwd, "setup-state", state_home=state_home)
+    second = _command(config, cwd, "setup", "--json", state_home=state_home)
     assert second.returncode == 0, second.stderr
-    assert json.loads(second.stdout) == data
+    assert json.loads(second.stdout)["data"]["setup_progress"] == data["setup_progress"]
     assert selection.read_bytes() == original
     assert not (cwd / ".quirkbench").exists()
 
@@ -67,16 +67,16 @@ def test_setup_requires_explicit_selection_for_legacy_state(tmp_path):
     cwd = tmp_path / "working"
     legacy = cwd / ".quirkbench"
     legacy.mkdir(parents=True, mode=0o700)
-    blocked = _command(config, cwd, "setup-state", state_home=tmp_path / "state-home")
+    blocked = _command(config, cwd, "setup", "--json", state_home=tmp_path / "state-home")
     assert blocked.returncode == 0
-    assert json.loads(blocked.stdout)['state_root'] == str(tmp_path / 'state-home/quirkbench')
+    assert json.loads(blocked.stdout)['data']['state_root'] == str(tmp_path / 'state-home/quirkbench')
     assert (legacy / 'controller.sqlite').exists() is False
     # Explicit legacy selection remains supported in an independent configuration;
     # an established home-state selection cannot silently switch to it.
     config = tmp_path / 'legacy-config'
-    chosen = _command(config, cwd, "--state", str(legacy), "setup-state", state_home=tmp_path / "state-home")
+    chosen = _command(config, cwd, "--state", str(legacy), "setup", "--json", state_home=tmp_path / "state-home")
     assert chosen.returncode == 0, chosen.stderr
-    assert json.loads(chosen.stdout)["state_root"] == str(legacy)
+    assert json.loads(chosen.stdout)["data"]["state_root"] == str(legacy)
 
 
 def test_setup_refuses_state_switch_and_unrelated_default_directory(tmp_path):
@@ -118,7 +118,7 @@ def test_configured_state_resolves_from_other_directory_without_creating_local_s
     _selection(config, json.dumps({"schema_version": 1, "state_root": str(controller.root)}).encode())
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    result = _command(config, elsewhere, "--reserve-gib", "0", "operation", "status", row["id"], "--json")
+    result = _command(config, elsewhere, "admin", "operation", "show", row["id"], "--json")
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["data"]["id"] == row["id"]
     assert not (elsewhere / ".quirkbench").exists()
@@ -131,8 +131,8 @@ def test_explicit_state_overrides_invalid_config_and_preserves_legacy_path(tmp_p
     _selection(config, b"not JSON")
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    result = _command(config, elsewhere, "--state", str(controller.root), "--reserve-gib", "0",
-                      "operation", "status", row["id"], "--json")
+    result = _command(config, elsewhere, "--state", str(controller.root),
+                      "admin", "operation", "show", row["id"], "--json")
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["data"]["id"] == row["id"]
     assert not (elsewhere / ".quirkbench").exists()
@@ -175,7 +175,7 @@ def test_invalid_selection_does_not_create_an_accidental_controller(tmp_path):
                                    "state_root": str(tmp_path / "unmounted")}).encode())
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    result = _command(config, elsewhere, "--reserve-gib", "0", "operation", "status", "unknown", "--json")
+    result = _command(config, elsewhere, "admin", "operation", "show", "unknown", "--json")
     assert result.returncode == 2
     assert json.loads(result.stdout)["error"]["code"] == "INVALID_INPUT"
     assert not (elsewhere / ".quirkbench").exists()

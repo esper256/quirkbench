@@ -147,10 +147,10 @@ def test_cli_status_json_does_not_reconcile_running_operation(tmp_path, capsys):
     row = c.admit_operation('req', 'image_prepare', {})
     with c.transaction() as db:
         db.execute("UPDATE operations SET state='RUNNING',worker_epoch=3,worker_generation=1 WHERE id=?", (row['id'],))
-    assert main(['--state', str(c.root), '--reserve-gib', '0', 'operation', 'status', row['id'], '--json']) == 0
+    assert main(['--state', str(c.root), 'admin', 'operation', 'show', row['id'], '--json']) == 0
     response = json.loads(capsys.readouterr().out)
     assert response['data']['state'] == 'RUNNING'
-    assert main(['--state', str(c.root), '--reserve-gib', '0', 'operation', 'status', 'unknown', '--json']) == 2
+    assert main(['--state', str(c.root), 'admin', 'operation', 'show', 'unknown', '--json']) == 2
     error = json.loads(capsys.readouterr().out)
     assert error['ok'] is False and error['error']['code'] == 'INVALID_INPUT'
 
@@ -165,7 +165,7 @@ def test_human_operation_status_renders_measured_progress_and_attached_failure(t
                        (json.dumps({'phase': 'rootfs', 'state': 'ACTIVE',
                                     'message': 'Installing retained packages',
                                     'completed': 4, 'total': None, 'unit': 'packages'}), row['id']))
-        args = ['--state', str(c.root), '--reserve-gib', '0', 'operation', 'status', row['id']]
+        args = ['--state', str(c.root), 'admin', 'operation', 'show', row['id']]
         assert main(args) == 0
         running = capsys.readouterr().out
         assert 'rootfs: ACTIVE | Installing retained packages' in running
@@ -200,13 +200,11 @@ def test_operation_events_are_bounded_paged_and_read_only(tmp_path, capsys):
     second = c.operation_events(row['id'], after=first['data']['next_cursor'], limit=3)
     assert len(second['data']['items']) == 3 and second['data']['next_cursor'] is None
     assert c.operation_status(row['id'])['data']['state'] == 'QUEUED'
-    assert main(['--state', str(c.root), '--reserve-gib', '0', 'operation', 'events',
-                 row['id'], '--limit', '2', '--json']) == 0
+    assert main(['--state', str(c.root), 'admin', 'operation', 'events', row['id'], '--limit', '2', '--json']) == 0
     cli_page = json.loads(capsys.readouterr().out)
     assert len(cli_page['data']['items']) == 2 and cli_page['data']['next_cursor'] is not None
 
-    assert main(['--state', str(c.root), '--reserve-gib', '0', 'operation', 'events',
-                 row['id'], '--limit', '2']) == 0
+    assert main(['--state', str(c.root), 'admin', 'operation', 'events', row['id'], '--limit', '2']) == 0
     rendered = capsys.readouterr().out
     assert 'accepted  state=QUEUED' in rendered
     assert 'measured' in rendered
@@ -225,8 +223,7 @@ def test_operation_event_renderer_shows_known_fields_without_unknown_document(tm
         db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
                    (row['id'], c.clock(), 'finished', json.dumps({
                        'state': 'SUCCEEDED', 'outputs': ['a' * 64]})))
-    assert main(['--state', str(c.root), '--reserve-gib', '0', 'operation', 'events',
-                 row['id']]) == 0
+    assert main(['--state', str(c.root), 'admin', 'operation', 'events', row['id']]) == 0
     rendered = capsys.readouterr().out
     assert 'stage=recovery-rootfs worker_generation=2' in rendered
     assert 'finished  state=SUCCEEDED outputs=1' in rendered
@@ -269,8 +266,7 @@ def test_operation_output_reads_only_attached_public_bytes(tmp_path, capsys):
     response = c.operation_output(row['id'], output.sha256, offset=2, length=4)
     assert base64.b64decode(response['data']['content_base64']) == b'cdef'
     assert response['data']['total_bytes'] == 9
-    assert main(['--state', str(c.root), '--reserve-gib', '0', 'operation', 'output',
-                 row['id'], output.sha256, '--offset', '6', '--length', '3', '--json']) == 0
+    assert main(['--state', str(c.root), 'admin', 'operation', 'output', row['id'], output.sha256, '--offset', '6', '--length', '3', '--json']) == 0
     printed = json.loads(capsys.readouterr().out)
     assert base64.b64decode(printed['data']['content_base64']) == b'\x00gh'
     with pytest.raises(ContractError, match='not a public output'):

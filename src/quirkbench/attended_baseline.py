@@ -6,6 +6,7 @@ and the final database/CAS fences precede its durable acknowledgement.
 import json
 from pathlib import Path
 
+from .proposal_source import operation as source_operation, build_source, selector as source_selector
 from .contracts import ContractError,Conflict,Experiment,canonical,digest,identifier,sha256
 from .attended_contracts import validate
 
@@ -56,7 +57,7 @@ def _prepared(reader,name,composition,experiment_id,db, *,proposal=None,dispatch
     from .controller import Controller
     from .recipe_registry import installed_registry,load_manifest
     inv=record(reader,name,db)
-    if inv is None or inv['baseline_sha256'] is None:raise Conflict('supported investigation baseline required')
+    if inv is None or inv['baseline_sha256'] is None:raise Conflict('supported investigation baseline show required')
     row,refs=pipeline.retained(reader,db,composition,'compose',campaign=name)
     if len(refs)>16384 or row['input_digest'] not in refs:raise Conflict('composition input closure unavailable')
     intent=document(reader,row['input_digest']);args=pipeline.binding(intent)
@@ -72,7 +73,8 @@ def _prepared(reader,name,composition,experiment_id,db, *,proposal=None,dispatch
     if proposal is None and any(capture[k]!=base[k] for k in ('base_oid','archive_sha256','manifest_sha256','file_count','allowed_untracked','provenance')):
         raise Conflict('baseline attempt requires unmodified distribution-prepared source')
     if proposal is not None and (build['source_capture_sha256']!=proposal['source']['capture_sha256'] or
-            build['source_capture_operation_id']!=proposal['source']['capture_operation_id'] or
+            build_source(build)['source_operation_id']!=source_operation(proposal['source']) or
+            build_source(build)['source_kind']!=source_selector(proposal['source'])['kind'] or
             capture['base_oid']!=proposal['base_oid'] or capture['base_oid']!=base['base_oid'] or
             build['candidate_operation_id']!=dispatch['candidate_operation_id'] or join['repository']!=dispatch['repository'] or
             join['signing_fingerprint']!=dispatch['signing_fingerprint']):
@@ -102,9 +104,12 @@ def _prepared(reader,name,composition,experiment_id,db, *,proposal=None,dispatch
     link_sha,link=links[0]
     expected={'investigation_id':name,'operation_id':composition,'kind':'compose',
         'join_input_sha256':args['join_input_sha256'],'baseline_sha256':inv['baseline_sha256'],
-        'source_capture_operation_id':build['source_capture_operation_id'],'candidate_operation_id':build['candidate_operation_id'],
+        'source_capture_operation_id':build_source(build)['source_operation_id'],'candidate_operation_id':build['candidate_operation_id'],
         'build_operation_id':join['build_operation_id'],'outputs_index_sha256':row['final_output_digest'],
         'deployment_revision':manifest.revision}
+    if link['schema_version']==2:
+        expected.pop('source_capture_operation_id')
+        expected.update(build_source(build))
     if any(link[k]!=v for k,v in expected.items()):raise Conflict('composition attribution differs from retained inputs')
     native=db.execute('SELECT repository,revision FROM deployment_refs WHERE owner=? AND manifest_digest=?',
         (composition,output['artifact']['sha256'])).fetchone()

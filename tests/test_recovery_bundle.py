@@ -101,9 +101,9 @@ def test_cli_needs_no_controller_and_import_requires_expected_digest(tmp_path,mo
     from quirkbench.cli import main,parser
     monkeypatch.setattr('quirkbench.state_config.configure_state_root',lambda *a,**k:pytest.fail('no controller'))
     monkeypatch.setattr(bundle,'verify',lambda *a,**k:{'ready':True,'qualified':False})
-    assert main(['recovery-bundle','verify',str(tmp_path)])==0
+    assert main(['dev', 'recovery', 'verify', str(tmp_path)])==0
     assert not json.loads(capsys.readouterr().out)['qualified']
-    with pytest.raises(SystemExit):parser().parse_args(['recovery-bundle','import',str(tmp_path),'--output','new'])
+    with pytest.raises(SystemExit):parser().parse_args(['dev', 'recovery', 'import', str(tmp_path), '--output', 'new'])
 
 
 def test_plan_uses_pinned_repositories_and_missing_inputs_have_next_action(tmp_path):
@@ -143,7 +143,7 @@ def test_cli_defaults_reach_real_foreground_admission(prepared,tmp_path,monkeypa
         return original(**kwargs,run=engine,execute=lambda *a,**k:(_ for _ in ()).throw(KeyboardInterrupt()))
     monkeypatch.setattr(recovery_foreground,'build',admission)
     with pytest.raises(KeyboardInterrupt):
-        main(['recovery-bundle','build',str(root),'--engine','docker','--output',str(tmp_path/'image')])
+        main(['dev', 'recovery', 'build', str(root), '--engine', 'docker', '--output', str(tmp_path / 'image')])
     create=next(c for c in engine.calls if c[1]=='create')
     assert '--memory='+str(4*1024**3) in create
     assert json.loads((tmp_path/'image/build.json').read_bytes())['stopped']

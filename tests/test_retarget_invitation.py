@@ -205,7 +205,7 @@ def test_later_media_owner_blocks_complete_replay(original):
 
 
 def test_cli_scope_arguments_and_no_missing_state_initialization(tmp_path,monkeypatch,capsys):
-    argv=['target','retarget-code','old','--generation','old-generation','--new-name','new','--new-uuid',NEW_UUID,'--request-id','request','--json']
+    argv=['target', 'reassign', 'old', '--generation', 'old-generation', '--new-name', 'new', '--new-uuid', NEW_UUID, '--request-id', 'request', '--json']
     parsed=cli.parser().parse_args(argv);assert parsed.action=='retarget-code' and parsed.new_uuid==NEW_UUID
     for removed in ('--generation','--new-name','--new-uuid','--request-id'):
         index=argv.index(removed)

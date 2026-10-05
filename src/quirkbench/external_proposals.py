@@ -90,6 +90,19 @@ def scope(reader,name,db, *,capture=None):
     return validate_context(value),refs,inv
 
 
+def selected_scope(reader, name, proposal, db):
+    if proposal['schema_version'] == 2:
+        return scope(reader, name, db, capture=proposal['source']['capture_operation_id'] if proposal['source'] else None)
+    value, refs, inv = scope(reader, name, db)
+    value['schema_version'] = 2
+    if proposal['source'] is not None:
+        from .proposal_source import resolve
+        _, _, _, selected_refs = resolve(reader, name, proposal['source'], db, admission=True)
+        refs |= selected_refs
+        value['source'] = proposal['source']
+    return validate_context(value), refs, inv
+
+
 def context_receipt(reader,name, *,include_source=True):
     """Bounded immutable decision-scope receipt; never hashes a mutable prompt."""
     capture=None;blocking_reason=None
@@ -108,6 +121,21 @@ def context_receipt(reader,name, *,include_source=True):
                 capture=None;blocking_reason='completed capture metadata unavailable; reconcile source or use source-free human/conclusion scope'
     return {'input_context':value,'input_context_digest':digest(canonical(value)),
         'source_available':capture is not None,'blocking_reason':blocking_reason,'execution_authorized':False}
+
+
+def public_context_receipt(reader, name, *, include_source=True):
+    """Current public proposal scope, retaining old stored receipts unchanged."""
+    receipt = context_receipt(reader, name, include_source=include_source)
+    value = dict(receipt['input_context'])
+    value['schema_version'] = 2
+    if value['source'] is not None:
+        from .proposal_source import selector
+        selected = selector(value['source'])
+        with reader.connection() as db:
+            workspace = db.execute('SELECT w.document_digest FROM investigations i JOIN source_workspaces w ON w.id=i.workspace_id WHERE i.id=?', (name,)).fetchone()
+        selected['workspace_sha256'] = workspace[0]
+        value['source'] = selected
+    return {**receipt, 'input_context': value, 'input_context_digest': digest(canonical(value))}
 
 
 def recipe_scope(reader,proposal):
@@ -176,15 +204,17 @@ def response(controller,db,operation,request):
     return answer
 
 
-def submit(controller,name,proposal,request_id):
+def submit(controller,name,proposal,request_id, *, _commit=None):
     from .operations import operation_intent
     identifier(name);identifier(request_id);validate(proposal)
     if proposal['campaign_id']!=name:raise Conflict('proposal belongs to another investigation')
     raw=canonical(proposal);proposal=load(raw);proposal_sha=digest(raw);decision=proposal['decision_id']
     with controller.transaction() as db:
         answer=replay(controller,db,request_id,proposal_sha,name,decision)
-        if answer is not None:return answer
-        context,refs,inv=scope(controller,name,db,capture=proposal['source']['capture_operation_id'] if proposal['source'] else None)
+        if answer is not None:
+            if _commit is not None:_commit(db,answer['operation_id'])
+            return answer
+        context,refs,inv=selected_scope(controller,name,proposal,db)
     if context!=proposal['input_context'] or proposal['workspace_id']!=inv['session']['workspace_id']:
         raise Conflict('proposal context/workspace changed; obtain a current scope receipt')
     if proposal['source'] is not None:
@@ -200,8 +230,10 @@ def submit(controller,name,proposal,request_id):
     # All CAS callbacks precede the final ownership/reference check and atomic admission.
     with controller.transaction() as db:
         answer=replay(controller,db,request_id,proposal_sha,name,decision)
-        if answer is not None:return answer
-        current,current_refs,current_inv=scope(controller,name,db,capture=proposal['source']['capture_operation_id'] if proposal['source'] else None)
+        if answer is not None:
+            if _commit is not None:_commit(db,answer['operation_id'])
+            return answer
+        current,current_refs,current_inv=selected_scope(controller,name,proposal,db)
         if current!=context or current_inv!=inv or current_refs|recipes|{context_sha,proposal_sha}!=refs:
             raise Conflict('source ownership or retained context changed during admission')
         if recipe_scope(controller,proposal)!=recipes:raise Conflict('reviewed recipe changed during admission')
@@ -219,6 +251,7 @@ def submit(controller,name,proposal,request_id):
         db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
             (row['id'],controller.clock(),'proposal-admitted',canonical({'action':proposal['action'],
                 'waiting_reason':'external_loop_pending','execution_authorized':False}).decode()))
+        if _commit is not None:_commit(db,row['id'])
         return response(controller,db,row['id'],request_id)
 
 

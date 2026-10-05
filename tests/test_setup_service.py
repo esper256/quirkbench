@@ -94,7 +94,7 @@ def test_configuration_does_not_claim_a_controller_was_started(tmp_path,initiali
     result=install_service(config_home=tmp_path/'config',bin_home=tmp_path/'bin',
         tls_run=TLSCommands(),runner=lambda *a,**kw:pytest.fail('unexpected host service action'),ready=unavailable)
     assert not result['background_work_ready'] and result['controller_start_required']
-    assert result['next_command'].endswith('controller-run')
+    assert result['next_command'].endswith('admin controller run')
 
 
 @pytest.mark.parametrize('step',['intent_recorded',*STEPS])
@@ -150,7 +150,7 @@ def test_cli_service_facade_uses_same_setup_and_zero_target_services(tmp_path,in
     monkeypatch.setattr(setup_service,'install_service',lambda:start(tmp_path,services))
     monkeypatch.setattr(controller_setup,'inspect_user_manager',observations()['service_inspector'])
     monkeypatch.setattr(controller_service,'require_ready',lambda root:services.ready(root) if services.active else observations()['ready'](root))
-    args=['--state',str(tmp_path/'state'),'setup','--request-id','initial','--start-service','--json']
+    args=['--state', str(tmp_path / 'state'), 'setup', '--request-id', 'initial', '--configure-controller', '--json']
     assert cli.main(args)==0
     response=json.loads(capsys.readouterr().out)['data']
     assert response['service_setup_result']['background_work_ready']
@@ -164,7 +164,7 @@ def test_cli_missing_native_dependency_is_typed_unavailable(tmp_path,initialized
     monkeypatch.setenv('XDG_CONFIG_HOME',str(tmp_path/'config'))
     def missing(): raise SetupUnavailable('native fixture dependency unavailable')
     monkeypatch.setattr(setup_service,'install_service',missing)
-    args=['--state',str(tmp_path/'state'),'setup','--request-id','initial','--start-service','--json']
+    args=['--state', str(tmp_path / 'state'), 'setup', '--request-id', 'initial', '--configure-controller', '--json']
     assert cli.main(args)==4
     response=json.loads(capsys.readouterr().out)
     assert response['error']['code']=='UNAVAILABLE' and response['operation_id']

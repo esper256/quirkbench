@@ -78,7 +78,7 @@ environments/start-bounded-podman-build.sh \
 The historical `.service` suffix is accepted as an input spelling, but creates no
 service. Container naming and resource/lifetime options belong to the launcher.
 
-First run `quirkbench setup-state`. Choose `RUN_ID=quirkbench-build-NEW_RUN_ID`
+First run `quirkbench setup`. Choose `RUN_ID=quirkbench-build-NEW_RUN_ID`
 and set `STAGE` to the canonical selected state's
 `development-runs/$RUN_ID/work` directory. Create both the run directory and work
 directory with usable owner permissions; no exact mode is required. `IMAGE_ID`
@@ -105,9 +105,9 @@ Ad hoc commands do not declare which outputs are important. Before disposing of 
 successful run's work, explicitly retain each required artifact relative to `work`:
 
 ```sh
-quirkbench maintenance retain-run "$RUN_ID" --output artifacts/bzImage --output artifacts/vmlinux
-quirkbench maintenance prune --dry-run
-quirkbench maintenance prune
+quirkbench admin storage retain-run "$RUN_ID" --output artifacts/bzImage --output artifacts/vmlinux
+quirkbench admin storage prune --dry-run
+quirkbench admin storage prune
 ```
 
 `retain-run` refuses a live container, verifies whole-container shutdown and retains the
@@ -119,7 +119,7 @@ retained using `--output`. Failed work remains for seven days after abandonment.
 No command here authorizes an experimental boot or changes target storage.
 
 Retention counts, pins and the optional-cache limit are configurable with
-`quirkbench settings show/set`; see [current storage policy](../docs/local-state-maintenance.md).
+`quirkbench admin settings show/set`; see [current storage policy](../docs/local-state-maintenance.md).
 New `build`/`compose` staging defaults to a fresh selected-state `workspaces/` directory;
 explicit workspaces must also be managed beneath that state. Composition repositories
 belong in state `repositories/`. New `image` exports and qualification staging require

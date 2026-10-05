@@ -165,7 +165,6 @@ def decide(root,args):
     binding=None
     operator=args.operator or 'uid:'+str(os.getuid())
     if request is None:
-        if args.json:raise ContractError('--request-id required with --json')
         with reader.connection() as db:
             row=attempt_row(db,args.attempt_id)
             binding,_=reader._approval_context(db,row)

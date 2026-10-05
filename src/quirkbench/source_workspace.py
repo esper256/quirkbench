@@ -90,33 +90,41 @@ def record(controller,workspace_id,db):
 def handoff(controller,workspace_id,request_id, *,quiesced,ready=None):
     """Atomically acknowledge writer quiescence and admit one immutable operation."""
     from .controller_service import require_ready
-    from .operations import operation_intent
     from .job_operations import envelope
-    from .source_operation import binding
     if quiesced is not True:raise Conflict('stop source writers and explicitly hand off the workspace')
     identifier(request_id);(ready or require_ready)(controller.root)
     with controller.transaction() as db:
-        saved,value=record(controller,workspace_id,db);owned_path(controller.root,value)
-        device=controller._campaign(db,saved['campaign'])['device']
-        refs=[saved['document_digest']]+[item for key,item in value['provenance'].items() if key.endswith('_sha256')]
-        for item in refs:controller.store.verify(item)
-        intent,raw,request_digest=operation_intent('source_capture',{'schema_version':1,'workspace_sha256':saved['document_digest']},
-            campaign_id=saved['campaign'],device_id=device,input_refs=refs)
-        binding(intent)
-        previous=db.execute('SELECT id,request_digest FROM operations WHERE request_id=?',(request_id,)).fetchone()
-        if previous:
-            if previous['request_digest']!=request_digest:raise Conflict('request ID already has another immutable source handoff')
-            if db.execute('SELECT 1 FROM storage_retired WHERE owner=?',(previous['id'],)).fetchone():raise Conflict('capture payload retired; use a new request ID')
-            # Historical acknowledgement never hands off a fresh writer period or
-            # takes over another already queued source capture.
-            return envelope(controller.root,controller._operation_status(db,previous['id']),request_id)
-        if saved['writer_state']!='EDITING':
-            raise Conflict('workspace already handed off; await capture or explicitly release its reconciled writer')
-        artifact=controller.store.put(raw)
-        row=controller._admit_operation_db(db,request_id,'source_capture',intent,request_digest,artifact.sha256,set(refs),
-            campaign_id=saved['campaign'],device_id=device)
-        db.execute("UPDATE source_workspaces SET writer_state='QUIESCED',capture_operation=? WHERE id=?",(row['id'],workspace_id))
+        row=handoff_db(controller,db,workspace_id,request_id,quiesced=quiesced)
     return envelope(controller.root,row,request_id)
+
+
+def handoff_db(controller,db,workspace_id,request_id, *,quiesced):
+    """Share the caller's transaction with submission admission; never dispatch."""
+    from .operations import operation_intent
+    from .source_operation import binding
+    if quiesced is not True:raise Conflict('stop source writers and explicitly hand off the workspace')
+    identifier(request_id)
+    saved,value=record(controller,workspace_id,db);owned_path(controller.root,value)
+    device=controller._campaign(db,saved['campaign'])['device']
+    refs=[saved['document_digest']]+[item for key,item in value['provenance'].items() if key.endswith('_sha256')]
+    for item in refs:controller.store.verify(item)
+    intent,raw,request_digest=operation_intent('source_capture',{'schema_version':1,'workspace_sha256':saved['document_digest']},
+        campaign_id=saved['campaign'],device_id=device,input_refs=refs)
+    binding(intent)
+    previous=db.execute('SELECT id,request_digest FROM operations WHERE request_id=?',(request_id,)).fetchone()
+    if previous:
+        if previous['request_digest']!=request_digest:raise Conflict('request ID already has another immutable source handoff')
+        if db.execute('SELECT 1 FROM storage_retired WHERE owner=?',(previous['id'],)).fetchone():raise Conflict('capture payload retired; use a new request ID')
+        # Historical acknowledgement never hands off a fresh writer period or
+        # takes over another already queued source capture.
+        return controller._operation_status(db,previous['id'])
+    if saved['writer_state']!='EDITING':
+        raise Conflict('workspace already handed off; await capture or explicitly release its reconciled writer')
+    artifact=controller.store.put(raw)
+    row=controller._admit_operation_db(db,request_id,'source_capture',intent,request_digest,artifact.sha256,set(refs),
+        campaign_id=saved['campaign'],device_id=device)
+    db.execute("UPDATE source_workspaces SET writer_state='QUIESCED',capture_operation=? WHERE id=?",(row['id'],workspace_id))
+    return row
 
 
 def release(controller,workspace_id):

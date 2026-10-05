@@ -5,6 +5,7 @@ from pathlib import Path
 import os
 import stat
 
+from .proposal_source import operation as source_operation, build_source
 from .contracts import ContractError, Conflict, Artifact, Experiment, Result, canonical, digest, identifier, sha256
 from .state_reader import StateReader, QUERY_BYTES, safe_text
 from .filesystem import read_file
@@ -101,7 +102,7 @@ def attribution(reader, db, name, spec):
                 or link['join_input_sha256'] != bound['composition_input_sha256']
                 or link['candidate_operation_id'] != build['candidate_operation_id']
                 or link['build_operation_id'] != join['build_operation_id']
-                or link['source_capture_operation_id'] != build['source_capture_operation_id']
+                or build_source(link) != build_source(build)
                 or link['outputs_index_sha256'] != bound['composition_output_sha256']):
             raise Conflict('source/build/composition join differs')
         output = document(reader, bound['composition_output_sha256'], QUERY_BYTES)
@@ -156,7 +157,8 @@ def attribution(reader, db, name, spec):
             if (final.get('input')!=bound or final.get('experiment_id')!=spec['experiment_id'] or final.get('action')!='experiment'
                     or proposal['campaign_id']!=name or proposal['action']!='experiment' or proposal['base_oid']!=bound['base_oid']
                     or proposal['source']['capture_sha256']!=bound['source_capture_sha256']
-                    or proposal['source']['capture_operation_id']!=build['source_capture_operation_id']
+                    or source_operation(proposal['source'])!=build_source(build)['source_operation_id']
+                    or build_source(build)['source_kind']!=('workspace_capture' if proposal['schema_version']==2 else proposal['source']['kind'])
                     or proposal['input_context_digest']!=original['context_digest']
                     or dispatch['record_type']!='proposal-dispatch-input' or dispatch['investigation_id']!=name
                     or dispatch['proposal_operation_id']!=bound['proposal_operation_id'] or dispatch['proposal_sha256']!=bound['proposal_sha256']
@@ -338,7 +340,7 @@ def report(reader, name, *, plan=None, after=0, limit=5, experiment=None, attemp
                 'Stored metadata verification does not verify large source, symbols or evidence bytes.',
                 'Per-attempt boot/generation differences and unrecorded peripherals remain confounders.',
                 'Report pages are independent read snapshots; export must hold a shared snapshot.'],
-            'retention':{'automatic_pin':False,'retain_command':'investigation report-retain '+name}}
+            'retention':{'automatic_pin':False,'retain_command':'investigation results retain '+name}}
         if len(canonical(data))>QUERY_BYTES:raise ContractError('report exceeds query budget')
         return data
 
@@ -433,8 +435,7 @@ def execute(root,args):
     if args.action=='report-retain':
         request=args.request_id
         if request is None:
-            if args.json:raise ContractError('--request-id required with --json')
-            request='report-retain-'+digest(canonical({'investigation_id':args.name,'note':args.note}))[:40]
+                request='report-retain-'+digest(canonical({'investigation_id':args.name,'note':args.note}))[:40]
         data=retain(root,args.name,args.note,request)
     else:data=report(ReportReader(root),args.name,plan=load_comparison(args.comparison,args.name),
         after=args.after,limit=args.limit,experiment=args.experiment,attempt_after=args.attempt_after,attempt_limit=args.attempt_limit)

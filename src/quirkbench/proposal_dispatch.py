@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import subprocess
 
+from .proposal_source import operation as source_operation, build_source
 from .contracts import ContractError,Conflict,Experiment,canonical,digest,identifier
 from .external_proposals import document,availability,recipe_scope
 from .proposal_contracts import validate as proposal_record
@@ -50,20 +51,13 @@ def admitted(controller,name,operation,db):
             intent['arguments']!={'schema_version':1,'proposal_sha256':saved['proposal_digest'],'context_sha256':saved['context_digest']}):
         raise Conflict('admitted proposal/context identity differs')
     if value['source'] is not None:
-        source=db.execute('SELECT * FROM operations WHERE id=?',(value['source']['capture_operation_id'],)).fetchone()
-        if (source is None or source['kind']!='source_capture' or source['state']!='SUCCEEDED' or source['worker_unit'] is not None
-                or source['campaign']!=name or source['device']!=row['device'] or source['final_output_digest']!=value['source']['capture_sha256']
-                or not {source['input_digest'],source['final_output_digest'],context['source']['workspace_sha256']}<=refs):
-            raise Conflict('admitted historical stopped capture unavailable')
-        source_intent=document(controller.store,source['input_digest'])
-        scope=workspace_record(document(controller.store,context['source']['workspace_sha256']))
-        capture=validate_capture(document(controller.store,source['final_output_digest']))
-        closure={capture['archive_sha256'],capture['manifest_sha256'],*source_intent['input_refs'],
-            *(v for k,v in capture['provenance'].items() if k.endswith('_sha256'))}
-        if (binding(source_intent)['workspace_sha256']!=context['source']['workspace_sha256'] or
-                scope['workspace_id']!=value['workspace_id'] or scope['campaign_id']!=name or scope['base_oid']!=value['base_oid'] or
-                any(scope[k]!=capture[k] for k in ('base_oid','allowed_untracked','provenance')) or not closure<=refs):
-            raise Conflict('proposal-owned source closure differs from admitted capture')
+        from .proposal_source import resolve
+        source_value = value['source']
+        if value['schema_version'] == 2:
+            source_value = {**source_value, 'workspace_sha256': context['source']['workspace_sha256']}
+        _, capture, scope, closure = resolve(controller, name, source_value, db, owned=refs)
+        if capture['base_oid'] != value['base_oid'] or scope['workspace_id'] != value['workspace_id']:
+            raise Conflict('proposal source base differs')
     recipe_scope(controller,value);availability(controller,refs)
     return dict(row),value,refs
 
@@ -98,7 +92,7 @@ def child_intent(controller,parent,child,phase,db,proposal,dispatch,command):
     intent=document(controller.store,child['input_digest']);args=pipeline.binding(intent)
     join=pipeline.validate(document(controller.store,args['join_input_sha256']))
     if phase=='build':
-        expected,_,_=pipeline.graph(controller,parent['campaign'],proposal['source']['capture_operation_id'],dispatch['candidate_operation_id'],db,proposal=parent['id'])
+        expected,_,_=pipeline.graph(controller,parent['campaign'],source_operation(proposal['source']),dispatch['candidate_operation_id'],db,proposal=parent['id'])
         if join!=expected:raise Conflict('child build differs from frozen proposal/candidate inputs')
     else:
         build,refs=pipeline.retained(controller,db,command['build_operation'],'build',campaign=parent['campaign'])
@@ -125,21 +119,25 @@ def guard_child(owner,db,child):
     child_intent(c,parent,child,phase,db,proposal,value,saved)
 
 
-def declare(controller,name,operation,request, *,candidate=None,repository=None,ready=None):
+def declare(controller,name,operation,request, *,candidate=None,repository=None,ready=None,_owner=None,_commit=None):
     from . import investigation_pipeline as pipeline
     from .controller_service import require_ready,configuration
     identifier(name);identifier(operation);identifier(request)
     request_digest=digest(canonical({'kind':'proposal-dispatch','name':name,'proposal':operation,'candidate':candidate,'repository':repository}))
     with controller.transaction() as db:
         old=replay(db,request,request_digest)
-        if old is not None:return old
+        if old is not None:
+            if _commit is not None:_commit(db)
+            return old
+        from .experiment_submissions import guard_proposal_dispatch
+        guard_proposal_dispatch(db,operation,owner=_owner,candidate=candidate,repository=repository)
         if db.execute('SELECT 1 FROM proposal_dispatch_commands WHERE operation=?',(operation,)).fetchone():
             raise Conflict('proposal already bound; replay its original dispatch request')
         parent,proposal,refs=admitted(controller,name,operation,db)
         if parent['state'] not in ('QUEUED','INTERRUPTED'):raise Conflict('proposal is already executing or terminal')
         fingerprint=None
         if proposal['action']=='experiment':
-            graph,closure,_=pipeline.graph(controller,name,proposal['source']['capture_operation_id'],candidate,db,proposal=operation)
+            graph,closure,_=pipeline.graph(controller,name,source_operation(proposal['source']),candidate,db,proposal=operation)
             refs|=closure
             config=configuration(controller.root);identifier(repository)
             publication=config.get('repositories',{}).get(repository);signing=config.get('composition_signing',{})
@@ -158,16 +156,19 @@ def declare(controller,name,operation,request, *,candidate=None,repository=None,
     artifact=controller.store.put(canonical(value));availability(controller,refs|{artifact.sha256})
     with controller.transaction() as db:
         old=replay(db,request,request_digest)
-        if old is not None:return old
+        if old is not None:
+            if _commit is not None:_commit(db)
+            return old
         fresh,current,owned=admitted(controller,name,operation,db)
+        guard_proposal_dispatch(db,operation,owner=_owner,candidate=candidate,repository=repository)
         if fresh!=parent or current!=proposal or not owned<=refs:raise Conflict('proposal changed during dispatch declaration')
         if document(controller.store,artifact.sha256)!=value:raise Conflict('dispatch record changed during declaration')
         if proposal['action']=='experiment':
-            fresh_graph,fresh_refs,_=pipeline.graph(controller,name,proposal['source']['capture_operation_id'],candidate,db,proposal=operation)
+            fresh_graph,fresh_refs,_=pipeline.graph(controller,name,source_operation(proposal['source']),candidate,db,proposal=operation)
             if fresh_graph!=graph or not fresh_refs<=refs:raise Conflict('candidate/source changed during dispatch declaration')
         result=operation_response(operation_id=operation,data={'accepted':True,'request_id':request,'investigation_id':name,
             'dispatch_sha256':artifact.sha256,'dispatch_connected':True,'approval_required':proposal['action']=='experiment',
-            'boot_authorized':False,'status_command':'quirkbench operation status '+operation,
+            'boot_authorized':False,'status_command':'quirkbench investigation status '+name,
             'monitor_command':'quirkbench monitor '+name})
         db.execute('INSERT INTO proposal_dispatch_commands VALUES(?,?,?,?,?,NULL,NULL,NULL)',(request,request_digest,operation,artifact.sha256,canonical(result).decode()))
         for identity in refs|{artifact.sha256}:
@@ -175,6 +176,7 @@ def declare(controller,name,operation,request, *,candidate=None,repository=None,
             db.execute("INSERT OR IGNORE INTO operation_refs VALUES(?,'input',?)",(operation,identity))
         db.execute("UPDATE operations SET prepared_digest=?,stage='proposal-dispatch',wait_event='existing-controller-service',updated=? WHERE id=?",
             (artifact.sha256,controller.clock(),operation))
+        if _commit is not None:_commit(db)
     return result
 
 
@@ -189,6 +191,8 @@ def fence(owner,db,parent, *,physical=True):
             (fresh['state']=='WAITING' and fresh['worker_epoch']!=owner.epoch) or
             c._campaign(db,parent['campaign'])['state']!='RUNNING'):
         raise Conflict('proposal owner, stage or campaign changed')
+    from .submission_pipeline import guard_proposal
+    guard_proposal(owner,db,parent['id'])
     from .job_operations import physical_fenced, operation_target
     if physical and physical_fenced(db,operation_target(db,parent)):
         raise Conflict('unresolved physical execution blocks proposal dispatch')
@@ -216,6 +220,8 @@ def finish(owner,parent,value,refs, *,experiment=None,inputs=None):
     with c.transaction() as db:original_proposal,original_refs,original_dispatch,original_command=checked_binding(c,parent,db)
     artifact=c.store.put(canonical(value))
     with c.transaction() as db:
+        from .submission_pipeline import completion
+        completed=completion(owner,db,parent['id'],experiment.experiment_id) if experiment is not None else None
         def common_fence():
             fence(owner,db,parent,physical=experiment is not None)
             fresh,owned,dispatch,command=checked_binding(c,parent,db)
@@ -252,6 +258,9 @@ def finish(owner,parent,value,refs, *,experiment=None,inputs=None):
             db.execute("INSERT OR IGNORE INTO operation_refs VALUES(?,'output',?)",(parent['id'],identity))
         db.execute("UPDATE operations SET state='SUCCEEDED',result_digest=?,final_output_digest=?,wait_event=NULL,updated=? WHERE id=?",
             (artifact.sha256,artifact.sha256,c.clock(),parent['id']))
+        if experiment is not None:
+            from .submission_pipeline import finish_submission
+            finish_submission(owner,db,parent['id'],experiment.experiment_id,refs|{artifact.sha256},completed)
         db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
             (parent['id'],c.clock(),'proposal-dispatched',canonical({'experiment_id':experiment.experiment_id if experiment else None,'action':value['action'],'boot_authorized':False}).decode()))
     return {'id':parent['id'],'state':'SUCCEEDED'}
@@ -275,7 +284,7 @@ def advance(owner,parent):
             'proposal_sha256':dispatch['proposal_sha256'],'dispatch_sha256':command['input_digest'],'boot_authorized':False},refs)
     if command['build_operation'] is None:
         return pipeline.submit(c,parent['campaign'],'build','proposal-build-'+parent['id'],
-            source=proposal['source']['capture_operation_id'],candidate=dispatch['candidate_operation_id'],ready=lambda _:None,
+            source=source_operation(proposal['source']),candidate=dispatch['candidate_operation_id'],ready=lambda _:None,
             _proposal=parent['id'],_commit=lambda db,child:link(owner,parent,'build',child,db))
     phase='compose' if command['composition_operation'] else 'build'
     child_id=command['composition_operation'] or command['build_operation']
@@ -386,7 +395,6 @@ def execute(root,args, *,ready=None):
     if not math.isfinite(args.reserve_gib) or args.reserve_gib<0:raise ContractError('reserve must be finite and nonnegative')
     request=args.request_id
     if request is None:
-        if args.json:raise ContractError('--request-id required with --json')
         request='dispatch-'+digest(canonical([args.name,args.proposal,args.candidate,args.repository]))[:32]
     request_digest=digest(canonical({'kind':'proposal-dispatch','name':args.name,'proposal':args.proposal,'candidate':args.candidate,'repository':args.repository}))
     with reader.connection() as db:

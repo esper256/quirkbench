@@ -333,7 +333,7 @@ def attended_drain(*,input_stream=None,output_stream=None,control=None,verify_ta
             if len(parts)==3 and parts[0]=='archived-plan':
                 answer=(archived_exporter or export_archived_plan)(control,config,parts[1],parts[2],verify_target=verify_target)
                 print('Original archived evidence plan: '+answer['plan_file'],file=output)
-                print('Approve this exact original plan with target drain-approve and stage setup/GRANT_ID.json privately. Use archived-drain with the same retarget and plan IDs.',file=output)
+                print('Approve this exact original plan with target evidence approve and stage setup/GRANT_ID.json privately. Use archived-drain with the same retarget and plan IDs.',file=output)
                 return answer
             if len(parts)==4 and parts[0]=='archived-drain':
                 answer=(archived_drainer or drain_archived)(control,config,parts[1],parts[2],parts[3],verify_target=verify_target)
@@ -344,7 +344,7 @@ def attended_drain(*,input_stream=None,output_stream=None,control=None,verify_ta
             answer=exporter(control,parts[1],verify_target=verify_target)
             print('Original evidence plan: '+answer['plan_file'],file=output)
             print('Selected '+str(answer['selected_records'])+' records; '+str(answer['additional_records_at_capture'])+' additional records remain.',file=output)
-            print('Approve this exact plan on the controller with target drain-approve. Stage its private credential as setup/GRANT_ID.json on this verified media, then use drain with the same request ID.',file=output)
+            print('Approve this exact plan on the controller with target evidence approve. Stage its private credential as setup/GRANT_ID.json on this verified media, then use drain with the same request ID.',file=output)
             return answer
         if len(parts)==3 and parts[0]=='drain':
             answer=drainer(control,parts[1],parts[2],verify_target=verify_target)

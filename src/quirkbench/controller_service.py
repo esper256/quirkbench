@@ -36,7 +36,7 @@ def require_ready(root,*,runner=subprocess.run,clock=time.time):
         return {'background_work_ready':True,'service_installation':'verified',
                 'controller_unit':row['unit'],'epoch':epoch}
     except (OSError,ValueError,sqlite3.Error,subprocess.TimeoutExpired) as exc:
-        raise Conflict('Background work unavailable: run the configured foreground controller, then run quirkbench setup-check. '+str(exc)) from exc
+        raise Conflict('Background work unavailable: run the configured foreground controller, then run quirkbench doctor. '+str(exc)) from exc
 
 
 def advertise(owner,runtime,capabilities=None):
@@ -132,14 +132,17 @@ def validate_configuration(root, config):
 
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--state',required=True,type=Path)
+    p.add_argument('--json',action='store_true')
     p.add_argument('--engine',choices=['podman','docker'])
     p.add_argument('--worker-image')
     p.add_argument('--podman-cgroup-manager',choices=['systemd','cgroupfs'])
     a=p.parse_args(argv);config=configuration(a.state)
     from .cli import main as cli
-    args=['--state',str(a.state),'--reserve-gib',str(config.get('reserve_gib',20)),'serve','--host',config.get('host','127.0.0.1'),'--port',str(config.get('port',8443)),
+    from .controller_process import parser as process_parser
+    args=['--state',str(a.state),'--reserve-gib',str(config.get('reserve_gib',20)),'--host',config.get('host','127.0.0.1'),'--port',str(config.get('port',8443)),
           '--cert',config['cert'],'--key',config['key'],
           '--job-worker',config['job_worker'],'--service-runtime',config['runtime']]
+    if a.json:args.append('--json')
     args+=['--worker-engine',a.engine or config.get('worker_engine','podman')]
     manager=a.podman_cgroup_manager or config.get('worker_cgroup_manager')
     if manager:args+=['--podman-cgroup-manager',manager]
@@ -154,7 +157,7 @@ def main(argv=None):
     previous=signal.getsignal(signal.SIGTERM)
     def terminate(*_): raise KeyboardInterrupt
     signal.signal(signal.SIGTERM,terminate)
-    try: return cli(args)
+    try: return cli(process_parser().parse_args(args))
     finally: signal.signal(signal.SIGTERM,previous)
 
 if __name__=='__main__': raise SystemExit(main())

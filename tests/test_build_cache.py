@@ -105,9 +105,9 @@ def test_cli_lists_and_prunes_only_intermediate_cache(tmp_path, capsys):
     source = _tree(tmp_path / "source", b"stable")
     key = cache.publish("recipe-a", "kernel", {"source": "a"},
                         {"tree": source}, {})
-    assert main(["--state", str(state), "build-cache", "list", "--json"]) == 0
+    assert main(['--state', str(state), 'admin', 'storage', 'cache', 'list', '--json']) == 0
     assert key in capsys.readouterr().out
-    assert main(["--state", str(state), "build-cache", "prune", key]) == 0
+    assert main(['--state', str(state), 'admin', 'storage', 'cache', 'prune', key]) == 0
     assert "Pruned" in capsys.readouterr().out
     assert cache.list() == []
 

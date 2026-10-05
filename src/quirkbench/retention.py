@@ -125,6 +125,10 @@ def status(root):
 
 def _retire_candidates(db,config,root):
     pinned={r[0] for r in db.execute('SELECT owner FROM storage_pins')}
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name='experiment_submissions'").fetchone():
+        for row in db.execute('''SELECT s.source_operation,s.proposal_operation,s.candidate_operation FROM experiment_submissions s
+            JOIN operations p ON p.id=s.operation WHERE p.state IN ('QUEUED','RUNNING','WAITING','INTERRUPTED')'''):
+            pinned.update(identity for identity in row if identity is not None)
     if db.execute("SELECT 1 FROM sqlite_master WHERE name='proposal_dispatch_commands'").fetchone():
         # Immutable children remain dependencies until submission succeeds or
         # fails terminally. Interrupted parents are resumable, not abandoned.

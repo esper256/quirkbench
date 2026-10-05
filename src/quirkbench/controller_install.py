@@ -287,7 +287,7 @@ def activate(record, root, *, config_home=None, bin_home=None,
     link = launchers/'quirkbench'
     selection = directory/'installation.json'
     with _lock(directory/'.installation.lock'), _lock(root/'command.lock'):
-        if journal.exists(): raise Conflict('unfinished activation; run controller-install --rollback first')
+        if journal.exists(): raise Conflict('unfinished activation; run quirkbench dev install --rollback first')
         old_config = configuration(root)
         _idle(root)
         # Refuse to overwrite a user-written executable or a different unit contract.
@@ -314,7 +314,7 @@ def activate(record, root, *, config_home=None, bin_home=None,
                 _link(link,runtime/'bin/quirkbench')
                 atomic_write(selection,canonical(record))
                 fault_hook('selection_published')
-            status = {'background_work_ready':False,'controller_start_required':True,'next_command':'quirkbench controller-run'}
+            status = {'background_work_ready':False,'controller_start_required':True,'next_command':'quirkbench admin controller run'}
             saved['phase']='VERIFIED';atomic_write(journal,canonical(saved))
             atomic_write(directory/'last-activation.json',canonical(saved))
             journal.unlink();sync_directory(directory)
@@ -346,7 +346,7 @@ def _rollback(journal,root,runner,ready):
         selection = journal.parent/'installation.json'
         if saved['old_selection'] is None: selection.unlink(missing_ok=True)
         else: atomic_write(selection,saved['old_selection'].encode())
-    status = {'background_work_ready':False,'controller_start_required':True,'next_command':'quirkbench controller-run'}
+    status = {'background_work_ready':False,'controller_start_required':True,'next_command':'quirkbench admin controller run'}
     saved['phase']='ROLLED_BACK';atomic_write(journal.parent/'last-activation.json',canonical(saved))
     journal.unlink();sync_directory(journal.parent)
     return {**status,'rolled_back':True}

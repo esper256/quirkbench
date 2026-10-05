@@ -95,11 +95,11 @@ def test_observation_types_and_deadline_fail_closed(kind, patch):
 
 
 @pytest.mark.parametrize("argv,expected", [
-    (["session", "respond", "session-01", "--request", "o1", "--file", "answer.json", "--request-id", "r3"], {"action": "respond", "request": "o1", "request_id": "r3"}),
-    (["experiment", "list", "--investigation", "investigation-01", "--json"], {"command": "experiment", "action": "list", "json": True}),
-    (["evidence", "read", "a" * 64, "--investigation", "investigation-01", "--length", "4096"], {"command": "evidence", "action": "read", "length": 4096}),
-    (["backup", "--output", "backup-dir"], {"command": "backup", "destination": Path("backup-dir")}),
-    (["backup", "backup-dir"], {"command": "backup", "destination": Path("backup-dir")}),
+    (["investigation","observation","answer", "session-01", "--request", "o1", "--file", "answer.json", "--request-id", "r3"], {"action": "respond", "request": "o1", "request_id": "r3"}),
+    (["experiment", "list", "investigation-01", "--json"], {"command": "submission", "action": "list", "json": True}),
+    (["investigation","evidence","read", "a" * 64, "investigation-01", "--length", "4096"], {"command": "evidence", "action": "read", "length": 4096}),
+    (['admin', 'backup', '--output', 'backup-dir'], {"command": "backup", "destination": Path("backup-dir")}),
+    (['admin', 'backup', 'backup-dir'], {"command": "backup", "destination": Path("backup-dir")}),
 ])
 def test_executable_cli_argument_contract(argv, expected):
     args = vars(parser().parse_args(argv))
@@ -109,9 +109,9 @@ def test_executable_cli_argument_contract(argv, expected):
 @pytest.mark.parametrize("argv", [
     ["session", "start"],
     ["session", "propose", "session-01", "--file", "proposal.json"],
-    ["session", "respond", "session-01", "--request", "o1", "--file", "answer.json"],
+    ["investigation","observation","answer", "session-01", "--request", "o1", "--file", "answer.json"],
     ["session", "start", "--device", "target-01", "--driver", "shell"],
-    ["operation", "status"],
+    ['admin', 'operation', 'show'],
 ])
 def test_executable_cli_rejects_missing_or_unsupported_arguments(argv):
     with pytest.raises(SystemExit) as exc:
@@ -130,5 +130,5 @@ def test_existing_executable_does_not_claim_planned_session_works(tmp_path):
 
 def test_executable_help_keeps_evidence_scope_visible():
     help_text = " ".join(parser().format_help().split())
-    assert "session" in help_text and "operation" in help_text
-    assert "without private CAS access" in help_text
+    assert "investigation" in help_text and "experiment" in help_text
+    assert "session" not in help_text and "job" not in help_text

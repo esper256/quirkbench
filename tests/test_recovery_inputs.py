@@ -29,8 +29,7 @@ def test_default_recipe_is_v2_and_independent_of_candidate_sources(tmp_path):
 def test_omitted_recipe_identity_comes_from_selected_lock(tmp_path):
     from quirkbench.cli import parser
     recipe, lock, _, store = stock_fixture(tmp_path)
-    args = parser().parse_args(['recovery-inputs', 'recipe', '--lock', recipe['rootfs_lock_sha256'],
-                               '--builder-image-digest', lock['builder_image_digest'], '--epoch', '0'])
+    args = parser().parse_args(['dev', 'recovery', 'inputs', 'recipe', '--lock', recipe['rootfs_lock_sha256'], '--builder-image-digest', lock['builder_image_digest'], '--epoch', '0'])
     assert args.id is None
     generated = generate_recipe(recipe['rootfs_lock_sha256'], store, recipe_id=args.id,
         builder_image_digest=lock['builder_image_digest'], source_date_epoch=0, layout=recipe['layout'])
@@ -127,9 +126,7 @@ def test_lock_cli_reports_native_phase_and_retained_log(tmp_path, monkeypatch, c
             return runner(*args, **kwargs)
         monkeypatch.setattr(ostree, 'CommandRunner', short_runner)
     diagnostics = root/'inputs/verification'
-    assert main(['--state', str(root), 'recovery-inputs', 'lock', str(root/'inputs/rpms'),
-                 '--public-key', str(tmp_path/'key'), '--builder-image-digest', 'sha256:'+'a'*64,
-                 '--diagnostics', str(diagnostics)]) == 1
+    assert main(['--state', str(root), 'dev', 'recovery', 'inputs', 'lock', str(root / 'inputs/rpms'), '--public-key', str(tmp_path / 'key'), '--builder-image-digest', 'sha256:' + 'a' * 64, '--diagnostics', str(diagnostics)]) == 1
     output = capsys.readouterr()
     assert not output.out
     assert phase in output.err and str(diagnostics/'package-verification.log') in output.err

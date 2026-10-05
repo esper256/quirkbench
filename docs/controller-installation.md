@@ -59,7 +59,7 @@ transfer the development archive through an authenticated channel and install wi
 that machine's Python; do not copy a development virtualenv.
 
 Continue with [initial controller setup](#initial-controller-setup), then inspect
-`status --json` and `setup-check`. Builder availability, authenticated target
+`status --json` and `doctor`. Builder availability, authenticated target
 enrollment, target connectivity and exact-attempt approval remain separate facts.
 
 ## Signing prerequisites
@@ -84,7 +84,7 @@ On Linux with Python 3.11 or newer, clone and run:
 git clone https://github.com/esper256/quirkbench.git
 cd quirkbench
 ./quirkbench --help
-./quirkbench version
+./quirkbench --version
 ```
 
 The root executable uses the checkout directly. No virtualenv activation, Python
@@ -101,7 +101,7 @@ an unused destination and ensure `~/.local/bin` is on your PATH):
 ```sh
 mkdir -p ~/.local/bin
 ln -s "$PWD/quirkbench" ~/.local/bin/quirkbench
-quirkbench version --json
+quirkbench --version --json
 ```
 
 The launcher follows symlinks to the checkout, including paths containing spaces.
@@ -146,7 +146,7 @@ For a fresh installation, extract the archive temporarily outside a checkout and
 use its launcher to install the original archive:
 
 ```sh
-./quirkbench-controller-0.1.0/bin/quirkbench controller-install /absolute/output/controller.tar.gz --json
+./quirkbench-controller-0.1.0/bin/quirkbench dev install /absolute/output/controller.tar.gz --json
 ```
 
 The response's `data.runtime_root` is the canonical runtime beneath
@@ -162,7 +162,7 @@ The M1c verification foundation accepts an independently authenticated publisher
 key and full fingerprint, a canonical release-set statement and detached signature:
 
 ```sh
-bin/quirkbench controller-install /downloads/controller.tar.gz --json \
+bin/quirkbench dev install /downloads/controller.tar.gz --json \
   --release-statement /downloads/release.json --release-signature /downloads/release.sig \
   --release-key /trusted/publisher.asc --release-fingerprint FULL_PUBLISHER_FINGERPRINT
 ```
@@ -183,8 +183,8 @@ journey or automatic key rotation.
 After controller/trust setup, or when upgrading an existing installation:
 
 ```sh
-quirkbench controller-install /absolute/output/controller.tar.gz --activate --json
-quirkbench setup-check
+quirkbench dev install /absolute/output/controller.tar.gz --activate --json
+quirkbench doctor
 ```
 
 Activation refuses queued/running work, unreconciled worker identities and unresolved
@@ -193,12 +193,12 @@ lifecycle ownership, updates the configured runtime/worker paths together, and s
 `~/.local/bin/quirkbench`. It preserves private settings, state and the old runtime.
 A durable rollback record precedes publication; failed publication restores the old
 selection. Successful activation reports that controller startup is still required.
-After interruption, run `quirkbench controller-install --rollback --json` once
+After interruption, run `quirkbench dev install --rollback --json` once
 outstanding work has been reconciled. No upgrade or rollback starts a daemon.
 Setup reports CLI, configured-service, verified active-service and last-advertised
 revision identities. A stored advertisement alone is not live readiness.
 
-`setup-state` creates private controller state at `$XDG_STATE_HOME/quirkbench`
+`setup` creates private controller state at `$XDG_STATE_HOME/quirkbench`
 (default `~/.local/state/quirkbench`) and records its identity in the user configuration.
 The current directory never selects a new `.quirkbench` root. Existing configured
 selections remain authoritative; explicit legacy paths remain available for read-only
@@ -223,13 +223,13 @@ same commands; see [running from a checkout](#run-from-a-source-checkout).
 interrupted setup. For example, run the installed launcher with
 `setup --request-id initial-setup --runtime /absolute/installed/runtime --json`.
 Human `setup` generates and prints a retry ID; repeated calls reuse its recorded
-choices. Machine calls require that ID. Use `status --json` for independent readiness
+choices. JSON calls follow the same retry rules. Use `status --json` for independent readiness
 without creating state or starting services. A successful setup acknowledgment is
 partial: release/setup binding, builder readiness and the M2 enrollment exchange remain pending.
 Connection choices do not activate a listener. Historical `existing_linger` records describe
 the desired policy; check the observed logout behavior. Existing initialized databases
 are inspected without migrations; active owners/work and changed recorded choices
-block setup. `setup-state` and `setup-check` remain supported.
+block setup. `setup` and `doctor` remain supported.
 State selection stays valid if the extracted archive is moved.
 Run capability checks from the controller shell. An optional development
 container can expose different engines, cgroups and PATH. No daemon,
@@ -264,7 +264,7 @@ checks the exact image/base marker without networking. Setup builders must have 
 OCI Entrypoint. Staging preserves the configured reserve; the required input group
 is pinned until explicitly unpinned through maintenance. Status checks current image
 availability separately from historical preparation, baseline closure and qualification.
-Interrupted work uses the existing explicit operation resume path. Fully configured
+Interrupted work uses the existing explicit admin operation resume path. Fully configured
 manual builder bindings remain supported; partial overrides of a signed builder must
 match its exact base/config/archive tuple. No host packages or popup viewer are started.
 
@@ -293,7 +293,7 @@ The archive supplies the CLI and fixed worker entry points. The historical
 entry point. No controller unit template is installed. Keep the runtime canonical
 and use guarded activation while the foreground controller is stopped.
 `setup --configure-controller` publishes local TLS, configuration and the CLI
-launcher; start execution separately with `controller-run`.
+launcher; start execution separately with `admin controller run`.
 
 Provision a complete `STATE/private/controller-service.json` pointing to existing
 TLS/device credentials. Keep actual keys and tokens in a private file or secret
@@ -354,27 +354,27 @@ verify these checks; native composition and boot acceptance remain separate.
 
 Foreground owner presence refreshes independently of validation, signing and housekeeping.
 It establishes a current owner; operation phases and measured output establish
-job advancement. One does not imply the other. Run `quirkbench setup-check` to inspect this installation's current readiness.
+job advancement. One does not imply the other. Run `quirkbench doctor` to inspect this installation's current readiness.
 Investigation-specific setup histories are not product prerequisites.
 
 After provisioning, explicitly run:
 
 ```sh
-quirkbench controller-run --engine podman --worker-image sha256:EXACT_LOCAL_BUILDER_IMAGE_ID
+quirkbench admin controller run --engine podman --worker-image sha256:EXACT_LOCAL_BUILDER_IMAGE_ID
 # In a second terminal:
-quirkbench setup-check
+quirkbench doctor
 ```
 
-`setup-check` verifies the controller epoch/boot/PID and the live process's exclusive
+`doctor` verifies the controller epoch/boot/PID and the live process's exclusive
 lifecycle lock, together with its configured runtime. Submission is refused until
 that owner is ready. Stop with Ctrl-C before maintenance or activation. Restart
-reconciles interrupted workers; explicit operation resume uses a fresh generation.
+reconciles interrupted workers; explicit admin operation resume uses a fresh generation.
 A paused campaign still blocks the next stage. Foreground execution does not install
 automatic login/boot restart, and sleep pauses execution.
 
 Start the configured foreground controller before preparing its first builder.
 Authenticated status, target communication and evidence remain available when the
-local engine or selected image is missing. `status`/`setup-check` report
+local engine or selected image is missing. `status`/`doctor` report
 `compute_ready` separately from controller availability and worker reconciliation.
 New compute remains blocked until its prerequisites and exact prior-worker stop
 are established; an engine outage never proves an uncertain worker stopped.
@@ -405,7 +405,7 @@ It uses only installed `production-release-trust.json` and its independently sup
 publisher key. No production bundle is shipped yet: this path returns `UNAVAILABLE`
 before downloading or creating state. Explicit `--trust-bundle PATH` is for separately
 provisioned trust; keys from the unverified download directory are rejected. No test
-publisher identity is included. The existing unsigned `controller-install ARCHIVE`
+publisher identity is included. The existing unsigned `quirkbench dev install ARCHIVE`
 path remains an explicit development option.
 
 Acquisition pins HTTPS location, exact key SHA256/full fingerprint, signed statement
@@ -441,7 +441,7 @@ bin/quirkbench setup --request-id INITIAL_SETUP --configure-controller --json
 
 This creates a private local controller CA/server certificate for the specific
 bind IP and publishes the configuration and launcher. It starts no process and
-requires no service manager. `--start-service` remains a compatibility alias for
+requires no service manager. `--configure-controller` remains a compatibility alias for
 this configuration step. Use the returned `next_command` to start the controller,
 selecting a pinned worker image as described above. OpenSSL 3 is required for TLS.
 LAN binding still requires `--allow-lan`. No target credentials or execution approval
@@ -459,13 +459,13 @@ operator GnuPG home and composition signing key, then configure its first reposi
 
 ```sh
 # Stop the foreground controller with Ctrl-C before maintenance.
-quirkbench publication setup --repository SELECTED_ALIAS \
+quirkbench admin repository configure --repository SELECTED_ALIAS \
   --url https://CONTROLLER_IP:REPOSITORY_PORT \
   --signing-home /absolute/private/operator-gnupg \
   --fingerprint FULL_UPPERCASE_SIGNING_FINGERPRINT --request-id PUBLICATION_SETUP --json
-quirkbench controller-run  # run status/enrollment commands in another terminal
+quirkbench admin controller run  # run status/enrollment commands in another terminal
 quirkbench status --json
-quirkbench target add SELECTED_NAME --request-id INVITATION --json
+quirkbench target pair SELECTED_NAME --request-id INVITATION --json
 ```
 
 Use the specific IP already covered by the controller certificate and a separate
@@ -483,13 +483,13 @@ repository contents or changed ownership block continuation. An interrupted
 native initialization without a config must have an empty, unmounted directory;
 other partial contents require reconciliation, never automatic deletion. Completed
 replay returns the historical acknowledgment and does not establish current readiness.
-Ordinary `setup --start-service` retries accept the verified journaled successor.
+Ordinary `setup --configure-controller` retries accept the verified journaled successor.
 Existing manually configured publication and endpoint maintenance remain supported.
 
 Starting the configured native service publishes its repository and enrollment listeners under the existing
 owner; the repository uses mutual TLS plus exact registered leaf lookup. Setup
 status observes a separate, current owner/configuration/TLS capability. Missing
-publication remains unavailable. Use `quirkbench target add NAME` to display the
+publication remains unavailable. Use `quirkbench target pair NAME` to display the
 short-lived invitation, endpoint, code ID and full certificate SHA-256; machine
 add supplies `--request-id ID --json`. `target show NAME` reads public recorded facts
 and does not establish current connectivity or authorize experiments.

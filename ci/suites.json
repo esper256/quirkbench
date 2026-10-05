@@ -155,7 +155,18 @@
       "examples/investigation-comparison.json",
       "tests/test_investigation_report.py",
       "tests/test_installed_journey.py",
-      "tests/installed_journey_scenario.py"
+      "tests/installed_journey_scenario.py",
+      "src/quirkbench/experiment_submissions.py",
+      "tests/test_experiment_submissions.py",
+      "schemas/experiment-submission.*.schema.json",
+      "examples/experiment-submission.json",
+      "src/quirkbench/submission_*.py",
+      "src/quirkbench/proposal_source.py",
+      "src/quirkbench/cli_*.py",
+      "tests/test_submission_pipeline.py",
+      "tests/test_cli_redesign.py",
+      "schemas/agent-proposal.v3.schema.json",
+      "schemas/proposal-context.v2.schema.json"
     ],
     "tests": [
       "tests/test_investigation_pipeline.py",
@@ -180,7 +191,10 @@
       "tests/test_monitor.py",
       "tests/test_investigation_report.py",
       "tests/test_investigation_export.py",
-      "tests/test_installed_journey.py"
+      "tests/test_installed_journey.py",
+      "tests/test_experiment_submissions.py",
+      "tests/test_submission_pipeline.py",
+      "tests/test_cli_redesign.py"
     ]
   },
   "filesystem": {
@@ -215,7 +229,8 @@
       "tests/test_build_launcher.py",
       "src/quirkbench/process_ownership.py",
       "src/quirkbench/retention.py",
-      "tests/test_retained_process.py"
+      "tests/test_retained_process.py",
+      "tests/test_installation.py"
     ],
     "tests": [
       "tests/test_build_storage.py",
@@ -251,7 +266,8 @@
       "tests/test_recipe_registry.py",
       "tests/test_manual_provisioning.py",
       "tests/test_build_launcher.py",
-      "tests/test_retained_process.py"
+      "tests/test_retained_process.py",
+      "tests/test_installation.py"
     ]
   },
   "release-preparation": {

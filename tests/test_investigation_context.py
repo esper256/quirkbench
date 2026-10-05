@@ -50,15 +50,15 @@ def test_fresh_context_resources_and_readonly_cli(lab,monkeypatch,capsys):
     def forbidden(*a,**kw): raise AssertionError('read initialized or pruned state')
     monkeypatch.setattr(Controller,'__init__',forbidden)
     monkeypatch.setattr('quirkbench.maintenance.prune',forbidden)
-    for action in ('context','history','recipes','proposal-schema','observations','brief'):
-        assert cli.main(['--state',str(c.root),'investigation',action,'investigation','--json'])==0
+    for action in (('context',),('history',),('recipe','list'),('proposal','schema'),('observation','list'),('brief',)):
+        assert cli.main(['--state',str(c.root),'investigation',*action,'investigation','--json'])==0
         data=json.loads(capsys.readouterr().out)['data']
         assert not data.get('execution_authorized',False)
         assert len(canonical(data))<QUERY_BYTES
     assert cli.main(['--state',str(c.root),'investigation','brief','investigation'])==0
     human=capsys.readouterr().out
     assert 'agent-guide.md' in human and 'product-contracts.v1.schema.json' in human
-    assert 'context investigation --json' in human and 'prepare-distribution' in human
+    assert 'context investigation --json' in human and 'source prepare' in human
 
 
 def test_large_history_cursor_attribution_and_no_tokens(lab):
@@ -122,7 +122,7 @@ def test_recipe_discovery_non_audio_missing_peripheral_and_unsupported(lab):
 def test_investigation_response_late_replay_conflict_and_foreign_session(lab,tmp_path,capsys):
     c,_=lab;q=question();c.issue_observation('investigation',q)
     path=tmp_path/'response.json';path.write_bytes(canonical(answer(q)))
-    command=['--state',str(c.root),'--reserve-gib','0','investigation','respond','investigation','--request','question','--file',str(path),'--request-id','answer-command','--json']
+    command=['--state', str(c.root), 'investigation', 'observation', 'answer', 'investigation', '--request', 'question', '--file', str(path), '--request-id', 'answer-command', '--json']
     assert cli.main(command)==0;first=json.loads(capsys.readouterr().out)['data'];assert first['late']
     assert cli.main(command)==0;assert json.loads(capsys.readouterr().out)['data']==first
     changed=answer(q);changed['answer']='observed';path.write_bytes(canonical(changed))
@@ -179,23 +179,21 @@ def test_schema_is_standalone_and_preserves_legacy_digest_semantics(lab):
     import jsonschema
     c,_=lab;data=context.proposal_schema(StateReader(c.root),'investigation')
     jsonschema.Draft202012Validator.check_schema(data['schema'])
-    assert data['schema']['properties']['schema_version']['const']==2
-    legacy=json.loads(open(data['legacy_schema_path']).read())
-    assert legacy['$defs']['agent-proposal']['properties']['base_revision']=={'$ref':'#/$defs/digest'}
+    assert data['schema']['properties']['schema_version']['const']==3
+    assert 'legacy_schema_path' not in data
     assert data['admission_available'] and not data['execution_authorized']
 
 
 def test_attended_answer_selection_and_lost_reply_retry(lab,monkeypatch,capsys):
     c,_=lab;q=question();c.issue_observation('investigation',q)
-    monkeypatch.setattr('sys.stdin.isatty',lambda:True)
-    inputs=iter(['question','operator','uncertain','observed only reset'])
-    monkeypatch.setattr('builtins.input',lambda prompt:next(inputs))
-    command=['--state',str(c.root),'--reserve-gib','0','investigation','respond','investigation','--request-id','attended-answer']
-    assert cli.main(command)==0;first=json.loads(capsys.readouterr().out)
+    file=c.root/'answer.json';file.write_bytes(canonical(answer(q)))
+    monkeypatch.setattr('builtins.input',lambda _:pytest.fail('command prompted'))
+    command=['--state',str(c.root),'investigation','observation','answer','investigation',
+             '--request','question','--file',str(file),'--request-id','attended-answer','--json']
+    assert cli.main(command)==0;first=json.loads(capsys.readouterr().out)['data']
     assert first['late'] and first['response']['request_id']=='question'
-    def forbidden(prompt):raise AssertionError('retry prompted or regenerated answer')
-    monkeypatch.setattr('builtins.input',forbidden)
-    assert cli.main(command)==0;assert json.loads(capsys.readouterr().out)==first
+    assert cli.main(command)==0
+    assert json.loads(capsys.readouterr().out)['data']==first
 
 
 def test_scoped_live_response_preserves_physical_deadline(lab):
@@ -233,6 +231,7 @@ def test_evidence_ancestor_swap_cannot_read_foreign_bytes(lab,tmp_path,monkeypat
 def test_attended_retry_rejects_changed_operator(lab,monkeypatch,capsys):
     c,_=lab;q=question();c.issue_observation('investigation',q)
     c.respond_observation('investigation','question','answer-command',canonical(answer(q)),campaign_id='investigation')
-    command=['--state',str(c.root),'--reserve-gib','0','investigation','respond','investigation','--request-id','answer-command','--operator','other','--json']
+    file=c.root/'changed-answer.json';file.write_bytes(canonical({**answer(q),'operator_id':'other'}))
+    command=['--state',str(c.root),'investigation','observation','answer','investigation','--request','question','--file',str(file),'--request-id','answer-command','--json']
     assert cli.main(command)==3
     assert json.loads(capsys.readouterr().out)['error']['code']=='CONFLICT'

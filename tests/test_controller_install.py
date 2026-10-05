@@ -271,7 +271,7 @@ def test_cli_activation_does_not_take_outer_shared_lock(tmp_path,archive,monkeyp
     original=controller_install.activate
     monkeypatch.setattr(controller_install,'activate',lambda record,root:original(record,root,config_home=conf,
         bin_home=binary,runner=Services(root,record),ready=ready))
-    assert cli.main(['--state',str(root),'controller-install',str(archive),'--activate','--json'])==0
+    assert cli.main(['--state', str(root), 'dev', 'install', str(archive), '--activate', '--json'])==0
     assert json.loads(capsys.readouterr().out)['data']['activated']
 
 

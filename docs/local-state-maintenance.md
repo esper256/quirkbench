@@ -3,7 +3,7 @@
 Persistent state uses `$XDG_STATE_HOME/quirkbench`, defaulting to
 `~/.local/state/quirkbench`; user configuration retains its canonical selection.
 No command defaults to checkout-local `.quirkbench`. New state/build staging in a
-Git checkout is rejected. Run `quirkbench setup-state`, then manually open `quirkbench monitor` in an existing
+Git checkout is rejected. Run `quirkbench setup`, then manually open `quirkbench monitor` in an existing
 terminal. No automatic Konsole windows or watching agents remain. See
 [monitoring](monitoring.md) and [development builds](../environments/README.md#observable-bounded-kernel-builds).
 
@@ -35,14 +35,14 @@ There is no cron job, timer or separate housekeeping service. Idle operators can
 inspect a dry run and explicitly prune:
 
 ```sh
-quirkbench settings show
-quirkbench settings set completed_attempts 5
-quirkbench maintenance status
-quirkbench maintenance pin OWNER --note 'Keep this investigation'
-quirkbench maintenance unpin OWNER
-quirkbench maintenance abandon OWNER
-quirkbench maintenance prune --dry-run
-quirkbench maintenance prune
+quirkbench admin settings show
+quirkbench admin settings set completed_attempts 5
+quirkbench admin storage show
+quirkbench admin storage pin OWNER --note 'Keep this investigation'
+quirkbench admin storage unpin OWNER
+quirkbench admin storage abandon OWNER
+quirkbench admin storage prune --dry-run
+quirkbench admin storage prune
 ```
 
 `maintenance status` reports owner identities, pins, settings and recent retirements.

@@ -116,15 +116,14 @@ def test_wrong_signer_signature_architecture_python_and_downloaded_key(inputs):
 
 def test_cli_all_or_none_and_verification_before_publication(inputs, tmp_path, monkeypatch, capsys):
     archive, key, _, raw, signature = inputs
-    assert cli.main(['controller-install', str(archive), '--release-key', str(key), '--json']) == 2
+    assert cli.main(['dev', 'install', str(archive), '--release-key', str(key), '--json']) == 2
     assert json.loads(capsys.readouterr().out)['error']['code'] == 'INVALID_INPUT'
     manifest = archive.parent / 'release.json'; manifest.write_bytes(raw)
     sig = archive.parent / 'release.sig'; sig.write_bytes(signature)
     original = controller_release.verify_release
     monkeypatch.setattr(controller_release, 'verify_release', lambda *a: original(*a, run=fake_gpg))
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'data'))
-    args = ['controller-install', str(archive), '--release-statement', str(manifest),
-            '--release-signature', str(sig), '--release-key', str(key), '--release-fingerprint', FINGERPRINT, '--json']
+    args = ['dev', 'install', str(archive), '--release-statement', str(manifest), '--release-signature', str(sig), '--release-key', str(key), '--release-fingerprint', FINGERPRINT, '--json']
     assert cli.main(args) == 0
     receipt = json.loads(capsys.readouterr().out)['data']['distribution_verification']
     assert receipt['controller_archive_authenticated'] and not receipt['other_release_assets_verified']

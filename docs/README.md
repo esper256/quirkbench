@@ -10,6 +10,7 @@ read-through. Superseded plans, run logs and investigation histories live in Git
 | Focused CI and retained failure evidence | [Subsystem suites and diagnostics](ci-evidence.md) |
 | Local or cloud software development | [Development setup and tests](testing-policy.md#portable-software-development) |
 | Product scope and acceptance | [Roadmap](product-roadmap.md), [acceptance guide](installation-to-patch.md); task status lives in GitHub |
+| Approved CLI redesign and implementation guidance | [CLI redesign plan](cli-redesign-plan.md); approved design; current commands are described in the agent guide and installed help |
 | Implementation rules | Relevant [C0–C7 contract](implementation-contracts.md), [C8 interface](product-interface.md) |
 | Current installation and commands | [Controller installation](controller-installation.md), [agent guide](agent-guide.md) |
 | Clone and run, optional manual command symlink | [Source checkout workflow](controller-installation.md#run-from-a-source-checkout) |
@@ -28,7 +29,7 @@ The executable CLI and installed schemas describe available interfaces. Historic
 record readers remain supported where the code requires them; removing old prose
 does not authorize dropping compatibility or reinterpreting stored evidence.
 
-- [Attributable investigation reports and retention](investigation-reports.md)
-- [Public patches and investigation export](investigation-export.md)
+- [Investigation results and retention](investigation-reports.md)
+- [Public patches and investigation results export](investigation-export.md)
 
 - [Portable recovery input bundles](recovery-input-bundles.md): prepare, verify, transfer and build without a controller.

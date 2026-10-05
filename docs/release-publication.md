@@ -1,6 +1,6 @@
 # Supported release publication preparation
 
-`quirkbench release-check DIRECTORY --inputs CAS_ROOT --trust-bundle TRUST_JSON
+`quirkbench dev release check DIRECTORY --inputs CAS_ROOT --trust-bundle TRUST_JSON
 [--baseline ID] [--timeout SECONDS] [--json]` is a read-only preflight for release-set
 v2. It uses existing publisher, controller archive, stock recovery, OCI builder and
 baseline readers. It does not install, initialize state, import containers, create
@@ -19,7 +19,7 @@ Stage one immutable version directory, externally hosted at the operator-selecte
 
 | Filename | Meaning and consumer |
 | --- | --- |
-| `release.json`, `release.sig` | Canonical release-set v2 plus detached publisher signature; `release-install` |
+| `release.json`, `release.sig` | Canonical release-set v2 plus detached publisher signature; `admin install` |
 | `controller.tar.gz` | Packaged Python 3.11+ controller, installed resources and verified file manifest |
 | `factory.img`, `factory.img.json`, `factory.img.release-candidate.json` | Existing stock Fedora factory assembler output, exact geometry/UUID/identity sidecars; `recovery download` |
 | `builder.tar` | Existing native OCI archive; explicit `setup --builder-archive` input |
@@ -81,7 +81,7 @@ independently distributed publisher public key/full uppercase fingerprint and
 validity/expiry policy. Also provide the exact baseline/source/RPM closure, native
 OCI builder identities, stock recovery inputs, and qualification/evidence policy.
 The packaged Fedora catalog contains pinned real identities; their existence in a
-catalog does not demonstrate their availability. `release-check` makes the absent
+catalog does not demonstrate their availability. `dev release check` makes the absent
 hashes actionable. A clean fixture run is software preparation, never delivery.
 
 1. Provision or select a production signing key in an operator-controlled private
@@ -113,7 +113,7 @@ hashes actionable. A clean fixture run is software preparation, never delivery.
    Do not learn replacement trust from a release statement, HTTPS download or the
    key itself. Ship/configure bootstrap trust via an independently authenticated
    channel; the repository intentionally ships no production/test publisher key.
-5. Run `release-check` for every advertised baseline against the approved retained
+5. Run `dev release check` for every advertised baseline against the approved retained
    input tree. Resolve mismatched/missing bytes and retain exact source/command/
    result evidence. Native RPM signature/package semantics, builder import,
    recovery boot, candidate execution and physical acceptance are separate gates.

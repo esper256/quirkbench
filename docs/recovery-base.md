@@ -256,7 +256,7 @@ required generator masks or recovery service policy.
 
 For a changed Fedora package selection, review a new inventory JSON alongside the
 package pins and boot behavior. Pass it explicitly with
-`quirkbench recovery-inputs lock --vendor-inventory /path/to/reviewed.json` and the
+`quirkbench dev recovery inputs lock --vendor-inventory /path/to/reviewed.json` and the
 other lock arguments. The schema is `recovery-vendor-inventory.v1.schema.json`.
 Do not generate approval by copying whatever an unreviewed rootfs happens to
 contain. Generator changes require reviewing their effects on internal-device

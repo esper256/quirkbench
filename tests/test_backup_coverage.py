@@ -178,17 +178,17 @@ def test_legacy_positional_and_guided_aliases_preserve_restore_checks_and_show_u
     c=Controller(tmp_path/'controller',reserve_bytes=0)
     legacy=tmp_path/'legacy';c.backup(legacy)
     assert coverage.verify_if_present(legacy) is None
-    assert cli.main(['--state',str(tmp_path/'restored'),'--reserve-gib','0','restore','--input',str(legacy)])==0
+    assert cli.main(['--state', str(tmp_path / 'restored'), 'admin', 'restore', '--input', str(legacy), '--reserve-gib', '0'])==0
     answer=json.loads(capsys.readouterr().out)
     assert answer['scheduling']=='paused' and answer['historical_backup_coverage']['coverage']=='unknown-legacy'
     for guided in (False,True):
         destination=tmp_path/('guided' if guided else 'positional')
-        command=['--state',str(c.root),'--reserve-gib','0','backup']+(['--output'] if guided else [])+[str(destination)]
+        command=['--state', str(c.root), 'admin', 'backup', '--reserve-gib', '0']+(['--output'] if guided else [])+[str(destination)]
         assert cli.main(command)==0;answer=json.loads(capsys.readouterr().out)
         assert answer['backup']==str(destination) and (('coverage' in answer)==guided)
         assert (coverage.verify_if_present(destination) is not None)==guided
-    with pytest.raises(SystemExit):cli.parser().parse_args(['backup',str(legacy),'--output',str(tmp_path/'bad')])
-    with pytest.raises(SystemExit):cli.parser().parse_args(['restore'])
+    with pytest.raises(SystemExit):cli.parser().parse_args(['admin', 'backup', str(legacy), '--output', str(tmp_path / 'bad')])
+    with pytest.raises(SystemExit):cli.parser().parse_args(['admin', 'restore'])
 
 
 @pytest.mark.parametrize('sidecar',['-wal','-shm','-journal'])

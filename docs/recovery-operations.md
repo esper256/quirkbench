@@ -10,7 +10,7 @@ Software support does not establish image or hardware qualification. Use
 
 For initial pairing on verified recovery, configure temporary networking with
 **Network**, then choose **Connect to controller**. Supply the endpoint from
-controller `target add NAME`; compare and type the full displayed certificate SHA-256
+controller `target pair NAME`; compare and type the full displayed certificate SHA-256
 before entering its code ID and one-use code. The console retains its own private
 key/request before exchange, stops the existing supervisor for activation and
 restarts it afterward. Pairing grants no candidate or attempt approval. Missing
@@ -52,15 +52,15 @@ The retained RPM/key/policy/lock objects travel in CAS and through operation bac
 Available controller commands, using its existing selected private state:
 
 ```sh
-quirkbench recovery-inputs candidate-spec --candidate fedora44-pairing-v1 \
+quirkbench dev recovery inputs candidate-spec --candidate fedora44-pairing-v1 \
   --repository /absolute/reviewed.repo --repository-id SELECTED_REPO_ID \
   > /absolute/reviewed-candidate.json
-quirkbench recovery-inputs acquire-plan /SELECTED_STATE/inputs/new-generation --spec /absolute/reviewed-candidate.json
-quirkbench recovery-inputs lock /SELECTED_STATE/inputs/new-generation/rpms \
+quirkbench dev recovery inputs acquire-plan /SELECTED_STATE/inputs/new-generation --spec /absolute/reviewed-candidate.json
+quirkbench dev recovery inputs lock /SELECTED_STATE/inputs/new-generation/rpms \
   --public-key /absolute/fedora-signing-key \
   --builder-image-digest sha256:ACTUAL_DIGEST \
   --diagnostics /SELECTED_STATE/inputs/new-signature-run
-quirkbench recovery-inputs recipe --lock ACTUAL_LOCK_SHA256 \
+quirkbench dev recovery inputs recipe --lock ACTUAL_LOCK_SHA256 \
   --builder-image-digest sha256:ACTUAL_DIGEST --epoch RECORDED_EPOCH
 ```
 
@@ -154,9 +154,9 @@ Use the existing pinned source/build/composition adapters and candidate profile
 review; preserve matching symbols and build provenance.
 
 ```sh
-quirkbench attempt status ATTEMPT_ID
-quirkbench attempt approve ATTEMPT_ID --request-id UNIQUE_DECISION_ID
-quirkbench attempt reject ATTEMPT_ID --request-id DIFFERENT_DECISION_ID
+quirkbench run show ATTEMPT_ID
+quirkbench run approve ATTEMPT_ID --request-id UNIQUE_DECISION_ID
+quirkbench run reject ATTEMPT_ID --request-id DIFFERENT_DECISION_ID
 ```
 
 Approval binds the attempt, claimed target/media, immutable experiment/deployment,
@@ -199,24 +199,23 @@ Completed image/manifest/checksum/candidate/signature artifacts are retained in 
 private staging directories remain omitted from backup. An adopted rootfs alone is
 not a delivered recovery image or a backup-complete private workspace.
 
-Start the existing authenticated controller service with explicit worker/signing
-configuration **before admitting work**, so admission belongs to its current durable
-execution owner. All other server/TLS arguments remain required:
+Configure the authenticated foreground controller and recovery worker/signing
+inputs using [controller installation](controller-installation.md), then start its
+existing lifecycle before submitting work:
 
 ```sh
-quirkbench serve --cert /absolute/server-cert --key /absolute/server-key \
-  --tokens-file /absolute/private-tokens \
-  --recovery-worker /absolute/installed/bin/quirkbench-worker \
-  --recovery-signing-home /absolute/private-signing-home \
-  --recovery-public-key /absolute/trusted-release-key \
-  --recovery-fingerprint ACTUAL_FULL_FINGERPRINT
+quirkbench admin controller run
 ```
+
+The configured runtime supplies its packaged worker entry points. Recovery signing
+still requires the operator's actual signing home, public key and full fingerprint;
+starting the controller does not invent those inputs or authorize a target run.
 
 In a second terminal, admit an explicitly requested image operation after retaining
 actual inputs:
 
 ```sh
-quirkbench recovery-image --recipe ACTUAL_RECIPE_SHA256 \
+quirkbench dev recovery submit --recipe ACTUAL_RECIPE_SHA256 \
   --builder-archive ACTUAL_OCI_ARCHIVE_SHA256 --request-id UNIQUE_IMAGE_REQUEST
 ```
 
@@ -228,7 +227,7 @@ The optional executor only advances admitted full recovery-image operations. It 
 the existing foreground lifecycle owner and bounded containers while HTTPS stays responsive; it does
 not schedule agent decisions or cancel rootfs-only work. Restart leaves interrupted
 operations for explicit reconciliation/resume, rather than automatically rebuilding.
-Use `operation status/watch/events/output` for durable executive progress and the
+Use `admin operation show/watch/events/output` for durable executive progress and the
 recorded private stage log for compile/tool stdout. Use the manual monitor and recorded logs; do not launch popup viewers or waiting agents.
 
 ## Automatic first-boot hardware report
@@ -258,7 +257,7 @@ V1 reports and the standalone collector's existing default remain supported;
 On the controller, retrieve the report and deterministic candidate planning facts:
 
 ```sh
-quirkbench --state /absolute/controller-state target-inventory TARGET_ID --json
+quirkbench --state /absolute/controller-state target inventory TARGET_ID --json
 ```
 
 The response includes the report/digest, recovery boot context, HardwarePlan, exact
@@ -279,12 +278,12 @@ factory set using the existing native background owner. Machine calls require
 provisioned trust, never a key from the download. Missing production trust is
 UNAVAILABLE. Inspect the returned operation/status command and manually open
 `quirkbench monitor` for progress. Interrupted acquisition requires confirmed worker
-stop and explicit ordinary operation resume; retries retain exact intent.
+stop and explicit ordinary admin operation resume; retries retain exact intent.
 
 A successful operation retains the released-recovery-acquisition v1 index and its
 public factory/metadata/signature digests. The image is an ordinary retained CAS
 file at the configured state's `artifacts/objects/IMAGE_SHA256`; use a standard image
-writer separately. `quirkbench recovery-images [--limit N] [--before CURSOR] [--json]`
+writer separately. `quirkbench recovery list [--limit N] [--before CURSOR] [--json]`
 lists these acquired sets alongside existing prepared images, with retained publisher
 statement/signature paths and full fingerprint. It validates bounded retained metadata,
 references and local asset sizes. It reports publication verification as historical;
@@ -306,7 +305,7 @@ request ID for retries. A new selection needs a new explicit request.
 
 On the original controller, explicitly revoke the original generation, pause and
 reconcile all target work and confirm whole-worker stops using the existing lifecycle
-commands. Then `quirkbench target drain-approve TARGET --file PLAN --request-id ID`
+commands. Then `quirkbench target evidence approve TARGET --file PLAN --request-id ID`
 produces a private credential file. Stage that exact file privately as
 `evidence/control/setup/GRANT_ID.json` (a credential: use a private file or
 its enclosing secret store). Enter
@@ -326,7 +325,7 @@ See [attended safe shutdown](#attended-safe-shutdown) before moving or disconnec
 media. Retargeting and shutdown remain separate explicit transactions.
 
 After explicit original-generation revocation and reconciliation/whole-worker stops,
-the controller can issue `quirkbench target retarget-code OLD --generation EXACT
+the controller can issue `quirkbench target reassign OLD --generation EXACT
 --new-name NAME --new-uuid ACTUAL_NEW_UUID --request-id ID`. It retains original
 media and scopes the invitation to that different UUID. Compare the full controller
 certificate fingerprint through the independently attended path. Retarget-only
@@ -359,8 +358,8 @@ commissioning is still required for the changed recovery inputs.
 On the controller, explicitly request shutdown of the enrolled, registered target:
 
 ```sh
-quirkbench target poweroff TARGET --request-id shutdown-1
-quirkbench target poweroff-status TARGET --json
+quirkbench target shutdown request TARGET --request-id shutdown-1
+quirkbench target shutdown status TARGET --json
 quirkbench monitor INVESTIGATION --once
 ```
 
@@ -374,7 +373,7 @@ owner. A candidate must return and reconcile first; its changed recovery boot ne
 an explicit replacement request, never an automatic grant:
 
 ```sh
-quirkbench target poweroff TARGET --request-id shutdown-2 --replace shutdown-1
+quirkbench target shutdown request TARGET --request-id shutdown-2 --replace shutdown-1
 ```
 
 An exact request retry returns its original receipt, even after credentials or
@@ -422,7 +421,7 @@ explicitly starting the supervisor or resuming an investigation.
 For an unprepared remote request, cancel its controller admission fence explicitly:
 
 ```sh
-quirkbench target poweroff-cancel TARGET --request-id shutdown-1
+quirkbench target shutdown cancel TARGET --request-id shutdown-1
 ```
 
 This does not clear any local fence or resume investigations. A PREPARED request
@@ -443,7 +442,7 @@ operator gate [#43](https://github.com/esper256/quirkbench/issues/43).
 
 ## Foreground image generation
 
-`recovery-image-build` generates an unsigned stock recovery image without systemd,
+`dev recovery build-recipe` generates an unsigned stock recovery image without systemd,
 a running controller, target enrollment or signing credentials. It uses the same
 verified RPM inputs, DNF5 installroot, dracut audits and regular-file GRUB/GPT
 assembler as managed image preparation. Docker and local Podman are supported
@@ -454,13 +453,13 @@ retain systemd as their normal Linux init system.
 First build the [Fedora tool image](../environments/README.md), inspect its exact
 local configuration ID (`docker image inspect --format '{{.Id}}' IMAGE` or
 `podman image inspect --format '{{.Id}}' IMAGE`), and use that `sha256:...` identity
-for the existing `recovery-inputs lock` and `recipe` commands above. The builder
+for the existing `dev recovery inputs lock` and `recipe` commands above. The builder
 must be Linux amd64 with no entrypoint. Keep the selected RPM closure and public
 key; [retained RPM replay](recovery-rpm-replay.md) works when moving repositories
 have dropped exact versions. Locking verifies every RPM against the selected key.
 
 ```sh
-quirkbench recovery-image-build --engine docker \
+quirkbench dev recovery build-recipe --engine docker \
   --store /SELECTED_STATE/artifacts --recipe ACTUAL_RECIPE_SHA256 \
   --builder-image sha256:ACTUAL_CONFIG_ID \
   --output /absolute/new-image-build --memory-gib 4 --timeout 3600
@@ -492,7 +491,7 @@ private staging diagnostics if needed. Explicit cleanup stops/verifies/removes
 only that recorded container and preserves files:
 
 ```sh
-quirkbench recovery-image-cleanup /absolute/new-image-build
+quirkbench dev recovery cleanup /absolute/new-image-build
 ```
 
 A generated image is unqualified and untested on hardware. Foreground generation
@@ -503,7 +502,7 @@ experiment. Existing managed operations and their stored records remain compatib
 Explicit build/output paths may be inside a checkout. Ordinary ancestor aliases
 are resolved once when selected; existing outputs and protected system destinations
 remain rejected. This does not make the output directory disposable. Foreground
-cleanup stops only its recorded container. The low-level `image` command assembles
+cleanup stops only its recorded container. The low-level `dev image assemble` command assembles
 in managed staging and exports the image plus `.sha256` and `.json` sidecars without
 overwriting files. Its selected output parent must already exist. An interrupted
 export may leave completed files for inspection; select a new destination to retry.

@@ -286,14 +286,14 @@ def test_installed_commands_derive_inputs_and_replay_without_private_manifests(j
     c,entry,builder,snapshot,source,candidate,config=joined
     monkeypatch.setattr(controller_service,'require_ready',lambda _:None)
     monkeypatch.setattr(baseline_inputs,'verify_object',lambda *a,**kw:pytest.fail('large admission hash'))
-    argv=['--state',str(c.root),'--reserve-gib','0','investigation','build','investigation','--capture',source,'--candidate',candidate,'--request-id','cli-build','--json']
+    argv=['--state', str(c.root), 'investigation', 'build', 'kernel', 'investigation', '--capture', source, '--candidate', candidate, '--request-id', 'cli-build', '--json', '--reserve-gib', '0']
     assert cli._main(argv)==0;first=json.loads(capsys.readouterr().out)
     assert cli._main(argv)==0;assert json.loads(capsys.readouterr().out)==first
     assert 'join_input_sha256' in pipeline.document(c.store,c.operation_status(first['operation_id'])['data']['input_digest'])['arguments']
     with pytest.raises(Conflict):pipeline.submit(c,'investigation','build','candidate',source=source,candidate=candidate,ready=lambda _:None)
-    parsed=cli.parser().parse_args(['investigation','compose','investigation','--build',first['operation_id'],'--repository','lab','--request-id','compose'])
+    parsed=cli.parser().parse_args(['investigation', 'build', 'system', 'investigation', '--build', first['operation_id'], '--repository', 'lab', '--request-id', 'compose'])
     assert parsed.repository=='lab' and not hasattr(parsed,'manifest')
-    prepared=['--state',str(c.root),'--reserve-gib','0','investigation','prepare-candidate','investigation','--request-id','cli-candidate','--json']
+    prepared=['--state', str(c.root), 'investigation', 'build', 'prepare', 'investigation', '--request-id', 'cli-candidate', '--json', '--reserve-gib', '0']
     assert cli._main(prepared)==0;answer=json.loads(capsys.readouterr().out)
     assert c.operation_status(answer['operation_id'])['data']['kind']=='candidate_prepare'
 
@@ -493,8 +493,7 @@ def test_joined_service_unavailability_has_c2_blocked_response(joined,monkeypatc
     c,entry,builder,snapshot,source,candidate,config=joined
     def unavailable(_):raise Conflict('supported service unavailable')
     monkeypatch.setattr(controller_service,'require_ready',unavailable)
-    result=cli._main(['--state',str(c.root),'--reserve-gib','0','investigation','build','investigation',
-        '--capture',source,'--candidate',candidate,'--request-id','blocked-build','--json'])
+    result=cli._main(['--state', str(c.root), 'investigation', 'build', 'kernel', 'investigation', '--capture', source, '--candidate', candidate, '--request-id', 'blocked-build', '--json', '--reserve-gib', '0'])
     answer=json.loads(capsys.readouterr().out)
     assert result==4 and answer['error']['code']=='BLOCKED' and answer['error']['retryable'] is True
     assert answer['operation_id'] is None
@@ -515,8 +514,7 @@ def test_joined_storage_pressure_has_c2_blocked_response(joined,bounded_build,mo
         arguments=['--build',build['operation_id'],'--repository','lab']
     def pressure(self,*args,**kwargs):raise StoragePressure('free-space reserve reached')
     monkeypatch.setattr(ArtifactStore,'put',pressure)
-    result=cli._main(['--state',str(c.root),'--reserve-gib','0','investigation',action,'investigation',
-        *arguments,'--request-id','pressure-'+action,'--json'])
+    result=cli._main(['--state', str(c.root), 'investigation', 'build', {'prepare-candidate':'prepare','build':'kernel','compose':'system'}[action], 'investigation', *arguments, '--request-id', 'pressure-' + action, '--json'])
     answer=json.loads(capsys.readouterr().out)
     assert result==4 and answer['error']=={'code':'BLOCKED','message':'free-space reserve reached','retryable':True}
     assert answer['operation_id'] is None

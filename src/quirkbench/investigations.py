@@ -31,7 +31,7 @@ def validate(value):
     if (value['inventory_sha256'] is None) != (value['plan_sha256'] is None):
         raise ContractError('investigation plan requires its actual inventory')
     if value['baseline_sha256'] is not None and value['plan_sha256'] is None:
-        raise ContractError('investigation baseline requires its actual plan')
+        raise ContractError('investigation baseline show requires its actual plan')
     return value
 
 
@@ -187,7 +187,7 @@ def execute(root,args, *,ready=None):
     if args.action=='start':
         with reader.connection() as db:db.execute('SELECT id FROM devices LIMIT 1').fetchone()
         if args.reserve_gib<0:raise ContractError('reserve must be nonnegative')
-        request = args.request_id or (None if args.json else identifier(args.name+'-start'))
+        request = args.request_id or identifier(args.name+'-start')
         if not request:raise ContractError('start --json requires --request-id')
         problem = b''
         if args.problem is not None:
@@ -196,7 +196,7 @@ def execute(root,args, *,ready=None):
         value = start(c,args.name,args.target,request,problem=problem,workspace=args.workspace,
             seconds=args.session_seconds,tokens=args.token_budget,baseline_id=args.baseline)
         return operation_response(data={'investigation':value,'state':reader.status(args.name)['state'],
-            'baseline':baseline_status(reader,value),'next_command':'quirkbench investigation prepare-distribution '+args.name})
+            'baseline':baseline_status(reader,value),'next_command':'quirkbench investigation source prepare '+args.name})
     with reader.connection() as db:value = record(reader,args.name,db)
     if value is None:raise ContractError('legacy campaign has no investigation record; source commands remain available')
     if args.action=='baseline':return operation_response(data=baseline_status(reader,value))
@@ -207,7 +207,7 @@ def execute(root,args, *,ready=None):
         from .controller_service import configuration
         if value['baseline_sha256'] is None:raise Conflict('no supported baseline; inspect investigation baseline')
         if args.reserve_gib<0:raise ContractError('reserve must be nonnegative')
-        request = args.request_id or (None if args.json else identifier(value['session']['workspace_id']+'-prepare'))
+        request = args.request_id or identifier(value['session']['workspace_id']+'-prepare')
         if not request:raise ContractError('prepare-distribution --json requires --request-id')
         config = configuration(reader.root)
         from .job_operations import resolve_builder
@@ -215,7 +215,7 @@ def execute(root,args, *,ready=None):
         c = Controller(root,reserve_bytes=int(args.reserve_gib*1024**3))
         config = resolve_builder(c,config,manifest_image=entry['builder_image_digest'])
         names = ('builder_image_digest','builder_config_digest','builder_archive_sha256')
-        if any(key not in config for key in names):raise Conflict('configured pinned builder unavailable; run setup-check')
+        if any(key not in config for key in names):raise Conflict('configured pinned builder unavailable; run quirkbench doctor --workflow build')
         return submit(c,args.name,value['session']['workspace_id'],entry,
             {key:config[key] for key in names},request,ready=ready)
     raise ContractError('unsupported investigation action')
@@ -230,10 +230,10 @@ def render_brief(data):
     if source and source.get('available'):
         lines += ['Workspace: '+source['workspace_path'],'Actual Git base: '+source['base_oid'],
                   'Writer state: '+source['writer_state']]
-    else:lines.append('Workspace pending: quirkbench investigation prepare-distribution '+session['session_id'])
+    else:lines.append('Workspace pending: quirkbench investigation source prepare '+session['session_id'])
     lines.append('Baseline: '+(baseline['baseline_id'] or 'unsupported/unavailable'))
     for item in baseline['missing_inputs']:lines.append('Missing '+item['role']+': '+item['sha256'])
     for key,path in data['resources'].items():lines.append(key+': '+path)
     lines += list(data['commands'].values())
-    lines += [data['instructions'],'Capture: quirkbench investigation capture-source '+session['session_id']+' --request-id NEW_ID --quiesced']
+    lines += [data['instructions'],'Capture: quirkbench investigation source capture '+session['session_id']+' --request-id NEW_ID --quiesced']
     return safe_text('\n'.join(lines))

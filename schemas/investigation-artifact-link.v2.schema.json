@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quirkbench:schema:investigation-artifact-link:v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_type",
+    "investigation_id",
+    "operation_id",
+    "kind",
+    "join_input_sha256",
+    "baseline_sha256",
+    "candidate_operation_id",
+    "build_operation_id",
+    "outputs_index_sha256",
+    "deployment_revision",
+    "source_kind",
+    "source_operation_id"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "record_type": {
+      "const": "investigation-artifact-link"
+    },
+    "investigation_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "operation_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "kind": {
+      "enum": [
+        "build",
+        "compose"
+      ]
+    },
+    "join_input_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "baseline_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "candidate_operation_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "build_operation_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "outputs_index_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "deployment_revision": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "source_operation_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "source_kind": {
+      "enum": [
+        "workspace_capture",
+        "baseline_preparation"
+      ]
+    }
+  }
+}

@@ -131,9 +131,9 @@ def render(status):
                 lines.append(f"Human request {request['request_id']} ({request['kind']}): {item['state']}; deadline {request['deadline_at']}")
                 lines.append('  ' + request['prompt'])
                 if item.get('truncated'):
-                    lines.append(f"  Full record: quirkbench session observation {observations['session_id']} --request {request['request_id']}")
+                    lines.append(f"  Full record: quirkbench investigation observation show {observations['session_id']} --request {request['request_id']}")
         if observations['next_cursor'] is not None:
-            lines.append(f"More human requests: quirkbench session observations {observations['session_id']} --after {observations['next_cursor']}")
+            lines.append(f"More human requests: quirkbench investigation observation list {observations['session_id']} --after {observations['next_cursor']}")
     active = [a for a in progress['activities'] if a['state'] not in ('COMPLETE','FAILED')]
     recent = [a for a in progress['activities'] if a['state'] in ('COMPLETE','FAILED')][-10:]
     for activity in active+recent:

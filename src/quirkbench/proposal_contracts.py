@@ -7,11 +7,15 @@ from .product_contracts import _object,_text,_integer,_usage,_depth,_pairs,MAX_D
 def context(value):
     fields={'schema_version','record_type','investigation_id','investigation_sha256','baseline_sha256','source'}
     _object(value,fields)
-    if type(value['schema_version']) is not int or value['schema_version']!=1 or value['record_type']!='proposal-context':
+    if type(value['schema_version']) is not int or value['schema_version'] not in (1,2) or value['record_type']!='proposal-context':
         raise ContractError('unsupported proposal context')
     identifier(value['investigation_id']);sha256(value['investigation_sha256'])
     if value['baseline_sha256'] is not None:sha256(value['baseline_sha256'])
     if value['source'] is not None:
+        if value['schema_version']==2:
+            from .proposal_source import validate_selector
+            validate_selector(value['source'])
+            return value
         source=_object(value['source'],{'workspace_sha256','capture_operation_id','capture_sha256'})
         identifier(source['capture_operation_id'])
         for name in ('workspace_sha256','capture_sha256'):sha256(source[name])
@@ -23,7 +27,7 @@ def validate(value):
     fields={'schema_version','record_type','decision_id','campaign_id','input_context_digest','input_context',
         'action','hypothesis','summary','rejected_approaches','workspace_id','base_oid','change_intent','source','experiment','usage'}
     _object(value,fields)
-    if type(value['schema_version']) is not int or value['schema_version']!=2 or value['record_type']!='agent-proposal':
+    if type(value['schema_version']) is not int or value['schema_version'] not in (2,3) or value['record_type']!='agent-proposal':
         raise ContractError('external admission requires agent-proposal v2; legacy v1 remains validation-only')
     for name in ('decision_id','campaign_id','workspace_id'):identifier(value[name])
     scope=context(value['input_context']);sha256(value['input_context_digest'])
@@ -37,6 +41,13 @@ def validate(value):
     source=value['source']
     if source is None:
         if value['base_oid'] is not None or scope['source'] is not None:raise ContractError('null source requires null source scope/base')
+    elif value['schema_version']==3:
+        from .proposal_source import validate_selector
+        validate_selector(source)
+        if scope['schema_version']!=2 or scope['source']!=source:
+            raise ContractError('source differs from context receipt')
+        if not isinstance(value['base_oid'],str) or not OID.fullmatch(value['base_oid']):
+            raise ContractError('actual Git base OID required')
     else:
         _object(source,{'kind','capture_operation_id','capture_sha256'})
         if source['kind']!='completed_capture':raise ContractError('select a completed source capture')

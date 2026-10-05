@@ -15,7 +15,7 @@ def watch_operation(controller, operation_id, *, once=False, json_output=False,
                     interval=2.0, stream=None, sleep=time.sleep, clock=time.time):
     if (isinstance(interval, bool) or not isinstance(interval, (int, float))
             or not math.isfinite(interval) or not 0.5 <= interval <= 60):
-        raise ContractError('operation watch interval must be 0.5..60 seconds')
+        raise ContractError('admin operation show interval must be 0.5..60 seconds')
     stream = sys.stdout if stream is None else stream
     tty = stream.isatty() and not json_output
     while True:

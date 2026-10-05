@@ -5,8 +5,9 @@ PYTHON ?= .venv/bin/python
 # modules just to deselect them. Keep this list small (see testing policy).
 SMOKE_TESTS := tests/test_contracts.py tests/test_store.py tests/test_state_config.py \
  tests/test_controller_review.py tests/test_controller_setup.py \
- tests/test_cli.py::test_demo_and_monitor_from_separate_interpreter \
- tests/test_cli.py::test_invalid_command_fails_without_system_changes
+ tests/test_cli.py::test_monitor_from_separate_interpreter \
+ tests/test_cli.py::test_invalid_command_fails_without_system_changes \
+ tests/test_cli_redesign.py::test_root_and_every_action_help_are_complete_and_stateless
 TESTS ?= $(SMOKE_TESTS)
 
 # Expensive real-system fixtures are explicit final major-version release gates.
@@ -18,7 +19,7 @@ $(error Release-only qualification: requires an explicitly requested final major
 endif
 endif
 
-.PHONY: test smoke test-full acceptance-m1 demo monitor acceptance-qemu acceptance-hardware acceptance-patch acceptance-m2 acceptance-ostree-repository acceptance-ostree-signatures acceptance-ostree-deployment acceptance-ostree-controller-backup
+.PHONY: test smoke test-full acceptance-m1 acceptance-qemu acceptance-hardware acceptance-patch acceptance-m2 acceptance-ostree-repository acceptance-ostree-signatures acceptance-ostree-deployment acceptance-ostree-controller-backup
 
 # Routine default is smoke; TESTS=... retains focused development checks.
 test:
@@ -40,7 +41,7 @@ controller-archive:
 # Real UEFI boot cycle: recovery, candidate, missing/load failure and panic fallback.
 acceptance-qemu:
 	@test -n "$(IMAGE)" -a -n "$(OVMF_CODE)" -a -n "$(OVMF_VARS)" -a -n "$(WORK_DIR)" || { echo "IMAGE, OVMF_CODE, OVMF_VARS and empty WORK_DIR are required" >&2; exit 2; }
-	$(PYTHON) -m quirkbench qualify-image "$(IMAGE)" --manifest "$(IMAGE).json" --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)" --work "$(WORK_DIR)"
+	$(PYTHON) -m quirkbench dev image qualify "$(IMAGE)" --manifest "$(IMAGE).json" --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)" --work "$(WORK_DIR)"
 
 acceptance-ostree-repository:
 	@test -n "$(REPOSITORY_WORK)" || { echo "REPOSITORY_WORK must name a new directory" >&2; exit 2; }
@@ -66,14 +67,6 @@ acceptance-m2: acceptance-m1 acceptance-ostree-repository acceptance-ostree-sign
 # No hardware cases are skipped inside this gate; separate qualification gates
 # fail visibly when their required real-world inputs are absent.
 acceptance-m1: test-full
-
-QUIRKBENCH_STATE_HOME := $(if $(XDG_STATE_HOME),$(XDG_STATE_HOME),$(HOME)/.local/state)
-DEMO_STATE ?= $(QUIRKBENCH_STATE_HOME)/quirkbench/development-demo
-demo:
-	$(PYTHON) -m quirkbench --state "$(DEMO_STATE)" demo
-
-monitor:
-	$(PYTHON) -m quirkbench --state "$(DEMO_STATE)/controller" watch demo
 
 acceptance-hardware:
 	@test -n "$(REPORT)" || { echo "REPORT must name a completed hardware endurance report" >&2; exit 2; }

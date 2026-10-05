@@ -3,7 +3,8 @@
   "cases": [
     {
       "argv": [
-        "endpoint",
+        "admin",
+        "connection",
         "show",
         "--json"
       ],
@@ -15,7 +16,8 @@
     },
     {
       "argv": [
-        "endpoint",
+        "admin",
+        "connection",
         "show",
         "--request-id",
         "endpoint-1",
@@ -29,7 +31,8 @@
     },
     {
       "argv": [
-        "endpoint",
+        "admin",
+        "connection",
         "stage",
         "--request-id",
         "endpoint-1",
@@ -48,7 +51,8 @@
     },
     {
       "argv": [
-        "endpoint",
+        "admin",
+        "connection",
         "renew",
         "--request-id",
         "endpoint-1",
@@ -64,16 +68,15 @@
     },
     {
       "argv": [
-        "endpoint",
+        "admin",
+        "connection",
         "apply",
         "--request-id",
         "endpoint-1",
         "--identity-sha256",
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "--fingerprint",
-        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-        "--unit",
-        "/home/operator/.config/systemd/user/quirkbench-controller.service"
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       ],
       "expected": {
         "action": "apply",
@@ -83,7 +86,8 @@
     },
     {
       "argv": [
-        "endpoint",
+        "admin",
+        "connection",
         "rollback",
         "--request-id",
         "endpoint-1",
@@ -93,18 +97,6 @@
       "expected": {
         "action": "rollback",
         "switch_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-      }
-    },
-    {
-      "argv": [
-        "endpoint",
-        "wizard",
-        "--unit",
-        "/home/operator/.config/systemd/user/quirkbench-controller.service"
-      ],
-      "expected": {
-        "action": "wizard",
-        "unit": "/home/operator/.config/systemd/user/quirkbench-controller.service"
       }
     }
   ]

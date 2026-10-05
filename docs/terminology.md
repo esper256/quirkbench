@@ -29,7 +29,8 @@ Some existing technical names legitimately retain other terms:
   relationships. State the relationship explicitly where ambiguity is possible.
 - Existing `device_id`, `--device`, `DeviceClient`, registration routes and
   `library-maintenance` arguments identify an enrolled target. Preserve these
-  public names and stored data for compatibility; do not rename wire fields merely
+  stored names and data for compatibility; the owner-approved CLI redesign replaces
+  public command names without aliases. Do not rename wire fields merely
   to change prose. Describe them as target IDs. "Device" also legitimately names a
   peripheral, such as a watchdog or audio device.
 - Historical artifact filenames, measurements and serialized provenance remain

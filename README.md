@@ -181,7 +181,7 @@ On the target, open **Network** and connect to the controller's network.
 On the controller, start pairing:
 
 ```sh
-quirkbench target add target-01
+quirkbench target pair target-01
 ```
 
 `target-01` is a name you choose. The command displays the controller address,
@@ -217,10 +217,10 @@ An investigation holds one problem, its source workspace and its accumulated
 reasoning and results. Create one:
 
 ```sh
-quirkbench investigation start first-fix --target target-01
+quirkbench investigation start first-fix --target target-01 --problem problem.md
 ```
 
-Use any name in place of `first-fix`. The wizard asks you to describe:
+Use any name in place of `first-fix`. Write a problem description that includes:
 
 - What happens, and what you expected instead.
 - The steps and circumstances that trigger the problem.
@@ -229,7 +229,7 @@ Use any name in place of `first-fix`. The wizard asks you to describe:
 - Earlier working versions, relevant logs and workarounds you have already tried.
 - What you can observe or do physically during a test.
 
-You can write this description beforehand and pass `--problem ./problem.md`.
+Save this description in a file and pass `--problem ./problem.md`.
 Distinguish observations from suspected causes: “the link disappears after this
 sequence” is more useful than asserting that a particular driver must be broken.
 
@@ -240,9 +240,9 @@ userspace and diagnostic tools that can run on the target. Review how it differs
 from the system where the problem occurs. Supplying a kernel version helps select
 inputs; it does not let Quirkbench reconstruct your installed system automatically.
 
-Accept a suitable baseline, or select another supported version. If you already
-maintain a kernel checkout, choose **Use existing source** and provide its path and
-base revision. Quirkbench checks that a supported build recipe can handle it and
+Select a suitable supported baseline explicitly when more than one matches. If you
+already maintain a kernel checkout, provide its path and exact base revision using
+investigation source preparation arguments. Quirkbench checks that a supported build recipe can handle it and
 creates a separate investigation workspace. Your original checkout is preserved.
 
 The investigation records the chosen base revision and prepares an editable source
@@ -250,8 +250,8 @@ workspace for the agent. Downloads and builds show progress without needing an
 agent to watch them. If a pinned input is unavailable, preparation stops with that
 missing input identified rather than substituting a newer version.
 
-The wizard also asks for practical limits: maximum test duration, repetitions,
-resource use and whether you can attend the target. **Attended operation is the
+Supply practical limits in each experiment: maximum test duration and repetitions.
+Configure controller resource limits during setup. **Attended operation is the
 starting choice.** Creating an investigation does not grant permission to boot
 new experimental code.
 
@@ -326,7 +326,7 @@ an expected observation. One experiment may need several physical **attempts**.
 When a build is ready, Quirkbench asks you to review it:
 
 ```sh
-quirkbench experiment review EXPERIMENT_ID
+quirkbench experiment show EXPERIMENT_ID
 ```
 
 Use the ID shown in the notification or monitor. The review presents the hypothesis,
@@ -337,7 +337,7 @@ boot or privileges require independent review before they become eligible.
 Approve the specific prepared attempt when you are ready:
 
 ```sh
-quirkbench attempt approve ATTEMPT_ID
+quirkbench run approve RUN_ID
 ```
 
 Approval applies to that exact candidate and attempt. A changed patch or a new
@@ -354,7 +354,7 @@ peripheral, or observing whether the reported behavior occurred. Read and answer
 the pending request:
 
 ```sh
-quirkbench investigation respond first-fix
+quirkbench investigation observation answer first-fix --request QUESTION_ID --file observation.json --request-id answer-001
 ```
 
 The command shows the relevant attempt and asks for the specific observation.
@@ -432,7 +432,7 @@ pending uploads. Also stop your external agent from editing the workspace.
 To turn off the target:
 
 ```sh
-quirkbench target poweroff target-01
+quirkbench target shutdown request target-01
 ```
 
 Wait for confirmed shutdown before disconnecting the external drive. If the
@@ -467,8 +467,8 @@ tested fix.
 Inspect the investigation summary and export it:
 
 ```sh
-quirkbench investigation report first-fix
-quirkbench investigation export first-fix --output ./first-fix-results
+quirkbench investigation results show first-fix
+quirkbench investigation results export first-fix --output ./first-fix-results.tar
 ```
 
 The export is a review package:
@@ -517,7 +517,7 @@ An export is for review and sharing. A backup preserves the state needed to cont
 work, including retained source workspaces and artifacts:
 
 ```sh
-quirkbench backup --output /path/to/backup-directory
+quirkbench admin backup --output /path/to/backup-directory
 ```
 
 Stop external editors when asked. The backup reports which workspaces were captured,
@@ -525,7 +525,7 @@ whether a target still holds evidence that has not uploaded, and how to preserve
 private controller credentials separately. It cannot include evidence that exists
 only on an offline drive.
 
-Restore into a new state location with `quirkbench restore`. The restore wizard
+Restore into a new state location with `quirkbench admin restore`. The restore command
 checks private configuration and reconnects targets before allowing paused
 investigations to resume.
 
@@ -583,7 +583,7 @@ hardware recovery checks.
 | The problem vanishes in the baseline | Record an inconclusive reproduction result and compare kernel, userspace, firmware and test conditions with the reported system. |
 | A build fails | Continue the agent with the build result. The failed build has logs and source identity; it has not become a target experiment. |
 | The target boots its installed OS after a reset | Select the external drive through the normal boot menu and let recovery reconcile the attempt. |
-| Storage is nearly full | Use `quirkbench storage` to review usage, retention and disposable caches. Add storage or remove eligible caches; do not manually delete evidence or active builds. |
+| Storage is nearly full | Use `quirkbench admin storage show` to review usage, retention and disposable caches. Add storage or remove eligible caches; do not manually delete evidence or active builds. |
 | You want to change agents | Pause, finish the workspace handoff, then give the new agent the existing investigation brief. |
 | No supported fix was found | Export the investigation. A reproducible failure, narrowed cause and clear account of failed approaches are useful results. |
 
@@ -595,8 +595,8 @@ This README defines the desired user experience. Use the
 remaining work. Follow [CONTRIBUTING](CONTRIBUTING.md) and the
 [cloud worker prompt](docs/cloud-worker-prompt.md) to select and finish issues;
 the [roadmap](docs/product-roadmap.md) and [contracts](docs/implementation-contracts.md)
-define scope and architecture. Changes to the future CLI shown here do not silently rename
-existing commands or stored protocol fields.
+define scope and architecture. The approved task-oriented CLI replaces earlier command spellings. Stored protocol
+fields and retained evidence keep their original meanings.
 
 Use `make smoke` (or `make test`) for a quick development check, and
 `make test TESTS=tests/test_<feature>.py` for affected regressions. Run

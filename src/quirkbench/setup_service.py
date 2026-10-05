@@ -152,6 +152,6 @@ def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, t
         try:status=ready(root)
         except (OSError,ValueError):status={'background_work_ready':False,'service_installation':'configured'}
     import shlex
-    command=shlex.join([str(runtime/'bin/quirkbench'),'--state',str(root),'controller-run'])
+    command=shlex.join([str(runtime/'bin/quirkbench'),'--state',str(root),'admin','controller','run'])
     return {'service_progress':progress,'certificate_sha256':tls['certificate_sha256'],
             **status,'next_command':command,'controller_start_required':not status.get('background_work_ready',False)}

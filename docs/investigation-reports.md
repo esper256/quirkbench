@@ -1,15 +1,15 @@
 # Investigation reports
 
-`quirkbench investigation report INVESTIGATION` reads committed state without
+`quirkbench investigation results show INVESTIGATION` reads committed state without
 initializing the controller, scheduling work or granting approval. Human output
 and `--json` show the same version 1 facts. Successful recipe execution does not
 establish problem reproduction or a patch effect; an inconclusive report is useful.
 
 ```sh
-quirkbench investigation report input-device-investigation --json
-quirkbench investigation report input-device-investigation --comparison comparison.json --json
-quirkbench investigation report input-device-investigation --after 12 --limit 2 --json
-quirkbench investigation report input-device-investigation --experiment patched-input-check --attempt-after 25 --attempt-limit 1 --json
+quirkbench investigation results show input-device-investigation --json
+quirkbench investigation results show input-device-investigation --comparison comparison.json --json
+quirkbench investigation results show input-device-investigation --after 12 --limit 2 --json
+quirkbench investigation results show input-device-investigation --experiment patched-input-check --attempt-after 25 --attempt-limit 1 --json
 ```
 
 Use `next_cursor` for experiment pages and each item's `next_attempt_cursor` for
@@ -55,8 +55,8 @@ report is not a second truth or a controller backup.
 Read-only reports never insert pins. To preserve the currently recorded owners:
 
 ```sh
-quirkbench investigation report-retain input-device-investigation --note 'Keep this inconclusive comparison' --request-id retain-comparison-01 --json
-quirkbench maintenance status
+quirkbench investigation results retain input-device-investigation --note 'Keep this inconclusive comparison' --request-id retain-comparison-01 --json
+quirkbench admin storage show
 ```
 
 This explicit command atomically uses existing retention pins for the investigation,

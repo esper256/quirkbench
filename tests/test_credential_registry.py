@@ -156,12 +156,13 @@ def test_registry_service_configuration_and_legacy_cli_contract(tmp_path, monkey
     atomic_write(private / 'controller-service.json', json.dumps(config).encode())
     assert controller_service.configuration(root) == config
     captured = []
-    monkeypatch.setattr(cli, 'main', lambda argv: captured.extend(argv) or 0)
+    monkeypatch.setattr(cli, 'main', lambda args: captured.append(args) or 0)
     assert controller_service.main(['--state', str(root)]) == 0
-    assert '--credential-registry' in captured and '--tokens-file' not in captured
+    assert captured[0].credential_registry and captured[0].tokens_file is None
     atomic_write(private / 'tokens', b'{}')
     atomic_write(private / 'controller-service.json', json.dumps({**config, 'tokens_file': str(private / 'tokens')}).encode())
     with pytest.raises(ContractError, match='exactly one'):
         controller_service.configuration(root)
-    args = cli.parser().parse_args(['serve', '--cert', 'cert', '--key', 'key', '--tokens-file', 'tokens'])
+    from quirkbench.controller_process import parser
+    args = parser().parse_args(['--state', str(root), '--cert', 'cert', '--key', 'key', '--tokens-file', 'tokens'])
     assert not args.credential_registry and args.tokens_file == Path('tokens')
