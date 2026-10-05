@@ -1,5 +1,11 @@
 # Fedora build environment
 
+To run Quirkbench itself from a clone, use the repository's root `./quirkbench`
+executable; no development virtualenv is needed. See the
+[source checkout guide](../docs/controller-installation.md#run-from-a-source-checkout).
+This directory contains build/development tooling; `environments/quirkbench` is
+retained as a compatibility launcher.
+
 Controller execution requires no systemd integration. Foreground recovery image generation uses
 Podman or Docker without a running controller; see
 [foreground image generation](../docs/recovery-operations.md#foreground-image-generation).

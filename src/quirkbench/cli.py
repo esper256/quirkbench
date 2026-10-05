@@ -62,10 +62,18 @@ class CommandParser(argparse.ArgumentParser):
 
 def parser():
     result = CommandParser(prog='quirkbench', description=__doc__)
+    class VersionAction(argparse.Action):
+        def __call__(self, parser, namespace, values, option_string=None):
+            from .runtime_version import display
+            display()
+            parser.exit()
+    result.add_argument('--version', nargs=0, action=VersionAction, help='show CLI runtime identity')
     result.add_argument('--state', type=Path, help='explicit controller state root; overrides configured selection')
     result.add_argument('--reserve-gib', type=float, default=20)
     result.add_argument('--repositories', type=Path, help='JSON mapping of configured OSTree repository aliases to absolute directories')
     commands = result.add_subparsers(dest='command', required=True)
+    version = commands.add_parser('version', help='show CLI source/archive identity without controller setup')
+    version.add_argument('--json', action='store_true')
     investigation = commands.add_parser('investigation', help='attended external investigation, source preparation and lifecycle')
     investigation_actions = investigation.add_subparsers(dest='action', required=True)
     export=investigation_actions.add_parser('export',help='atomic public source/patch/report/evidence tar; no private backup or execution grant')
@@ -1409,6 +1417,10 @@ def _main(argv=None):
 def main(argv=None):
     """A publication barrier, not a scheduler; read-only commands do no housekeeping."""
     args=parser().parse_args(argv)
+    if args.command == 'version':
+        from .runtime_version import display
+        display(machine=args.json)
+        return 0
     if args.command=='recovery-bundle':
         from .recovery_bundle_cli import run
         return run(args)
