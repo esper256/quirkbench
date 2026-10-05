@@ -11,6 +11,7 @@ from ci.evidence import FILE_LIMIT, ATTACHMENT_LIMIT, capture_stage, redact
     (['src/quirkbench/distribution_source_worker.py'], {'source-workers'}),
     (['src/quirkbench/endpoint_probe.py'], {'endpoint-control', 'endpoint-retarget'}),
     (['tests/test_retarget_evidence.py'], {'endpoint-retarget', 'evidence'}),
+    (['src/quirkbench/recovery_initramfs_audit.py'], {'release-preparation'}),
     (['tests/conftest.py'], set(SUITES)),
     (['schemas/operation.schema.json'], set(SUITES)),
     (['src/quirkbench/new_shared_module.py'], set(SUITES)),
@@ -31,6 +32,15 @@ def test_manual_names_and_fallback():
         select([], ['evidence; touch /tmp/unsafe'])
     for suite in SUITES.values():
         assert all((ROOT / test.split('::')[0]).is_file() for test in suite['tests'])
+
+
+def test_recovery_boot_change_selects_direct_and_joined_regressions():
+    value=select(['src/quirkbench/recovery_initramfs_audit.py',
+                  'src/quirkbench/recovery_storage.py', 'tests/test_stock_recovery_flow.py'])
+    assert not value['unmapped']
+    assert set(value['selected'])=={'filesystem','release-preparation'}
+    assert {'tests/test_recovery_storage.py','tests/test_recovery_initramfs_audit.py',
+            'tests/test_recovery_image_plan.py','tests/test_stock_recovery_flow.py'}<=set(value['tests'])
 
 
 def test_actual_merge_base_includes_renames_deletions_not_base_changes(tmp_path, monkeypatch):
