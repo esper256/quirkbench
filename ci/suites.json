@@ -219,6 +219,7 @@
     ],
     "tests": [
       "tests/test_build_storage.py",
+      "tests/test_controller_archive.py",
       "tests/test_recovery_storage.py",
       "tests/test_runtime.py",
       "tests/test_recovery_inventory.py",
