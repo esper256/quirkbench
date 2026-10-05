@@ -76,7 +76,7 @@ SERVICE_LAUNCHER = LAUNCHER.replace(b'from quirkbench.cli import main', b'from q
 WORKER_LAUNCHER = LAUNCHER.replace(b'from quirkbench.cli import main',
                                  b'from quirkbench.recovery_worker import main')
 INSTALL_LAUNCHER = LAUNCHER.replace(b'parents[1] / "lib"', b'parent / "lib"').replace(
-    b'raise SystemExit(main())', b'raise SystemExit(main(["release-install", *sys.argv[1:]]))')
+    b'raise SystemExit(main())', b'raise SystemExit(main(["admin", "install", *sys.argv[1:]]))')
 
 
 def build_controller_archive(wheel: Path, output: Path) -> dict:

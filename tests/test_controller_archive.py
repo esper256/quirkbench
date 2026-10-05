@@ -55,7 +55,7 @@ def test_archive_runs_relocated_without_checkout_and_keeps_selected_state(tmp_pa
     def invoke(path, *args):
         return subprocess.run([sys.executable, '-I', str(path / 'bin/quirkbench'), *args],
                           cwd=clean_home, env=env, capture_output=True, text=True, timeout=20)
-    identity = invoke(release, 'version', '--json')
+    identity = invoke(release, '--version', '--json')
     assert identity.returncode == 0, identity.stderr
     value = json.loads(identity.stdout)
     assert value['kind'] == 'archive'
@@ -70,33 +70,39 @@ def test_archive_runs_relocated_without_checkout_and_keeps_selected_state(tmp_pa
     assert json.loads(signed.stdout)['error']['code'] == 'UNAVAILABLE'
     assert not (clean_home / 'cache').exists() and not (clean_home / 'config').exists()
     assert not (clean_home / 'state').exists()
-    setup = invoke(release, 'setup-state')
+    setup = invoke(release, 'setup', '--request-id', 'relocatable-setup', '--json')
     assert setup.returncode == 0, setup.stderr
-    chosen = json.loads(setup.stdout)
+    chosen = json.loads(setup.stdout)['data']
     assert chosen['background_work_ready'] is False
     assert chosen['state_root'] == str(clean_home / 'state/quirkbench')
     moved = tmp_path / 'relocated'
     release.rename(moved)
-    again = invoke(moved, 'setup-state')
+    again = invoke(moved, 'setup', '--request-id', 'relocatable-setup', '--json')
     assert again.returncode == 0, again.stderr
-    assert json.loads(again.stdout) == chosen
-    prerequisites = invoke(moved, 'setup-check')
+    replayed = json.loads(again.stdout)['data']
+    assert replayed['state_root'] == chosen['state_root']
+    assert replayed['setup_progress'] == chosen['setup_progress']
+    prerequisites = invoke(moved, 'doctor', '--json')
     assert prerequisites.returncode == 0, prerequisites.stderr
-    assert json.loads(prerequisites.stdout)['background_work_ready'] is False
+    assert json.loads(prerequisites.stdout)['data']['background_work_ready'] is False
     worker_help = subprocess.run([sys.executable, '-I', str(moved / 'bin/quirkbench-worker'), '--help'],
                                  cwd=clean_home, env=env, capture_output=True, text=True, timeout=20)
     assert worker_help.returncode == 0, worker_help.stderr
     assert '--worker-generation' in worker_help.stdout
     assert not (clean_home / '.quirkbench').exists()
     assert (clean_home / 'state/quirkbench/controller.sqlite').exists()
-    # The current setup-state intentionally initializes the selected controller.
+    # Setup initializes selected state; relocation preserves the same intent.
     # Install the same archive through the managed helper in an unrelated home.
     from quirkbench.controller_install import install, verify_installation
     record = install(output, data_home=clean_home/'data')
     managed = Path(record['runtime_root'])
     assert verify_installation(managed) == record
     assert invoke(managed, '--help').returncode == 0
-    assert invoke(managed, 'setup-check').returncode == 0
+    assert invoke(managed, 'doctor').returncode == 0
+    clean_home = tmp_path / 'managed-home'
+    clean_home.mkdir()
+    env.update(HOME=str(clean_home), XDG_CONFIG_HOME=str(clean_home/'config'),
+               XDG_STATE_HOME=str(clean_home/'state'))
     guided = invoke(managed, 'setup', '--request-id', 'installed-setup', '--json')
     assert guided.returncode == 0, guided.stderr
     result = json.loads(guided.stdout)['data']

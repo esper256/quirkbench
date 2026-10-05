@@ -41,8 +41,9 @@ def test_fresh_offline_checkout_and_manual_symlink(checkout, tmp_path):
     for launcher in (checkout / 'quirkbench', link, checkout / 'environments/quirkbench'):
         help_result = run(launcher, '--help', cwd=tmp_path)
         assert help_result.returncode == 0, help_result.stderr
-        assert 'recovery-bundle' in help_result.stdout
-        result = run(launcher, 'version', '--json', cwd=tmp_path)
+        assert 'recovery' in help_result.stdout and 'investigation' in help_result.stdout
+        assert 'recovery-bundle' not in help_result.stdout
+        result = run(launcher, '--version', '--json', cwd=tmp_path)
         assert result.returncode == 0, result.stderr
         value = json.loads(result.stdout)
         assert value['kind'] == 'checkout'
@@ -56,8 +57,8 @@ def test_fresh_offline_checkout_and_manual_symlink(checkout, tmp_path):
 
 def test_arguments_and_exit_status(checkout, tmp_path):
     result = run(checkout / 'quirkbench', '--state', tmp_path / 'absent state',
-                 'campaign', 'status', 'missing', cwd=tmp_path)
-    assert result.returncode == 1
+                 'investigation', 'status', 'missing', cwd=tmp_path)
+    assert result.returncode == 2
     assert 'controller state unavailable' in result.stderr
     assert not (tmp_path / 'absent state').exists()
     assert run(checkout / 'quirkbench', 'nonexistent-command', cwd=tmp_path).returncode == 2
@@ -84,7 +85,7 @@ def test_identity_without_git_still_runs(checkout, tmp_path):
     path = tmp_path / 'tools'
     helpers(path)
     (path / 'python3').symlink_to(sys.executable)
-    result = run(checkout / 'quirkbench', 'version', '--json', cwd=tmp_path, path=path)
+    result = run(checkout / 'quirkbench', '--version', '--json', cwd=tmp_path, path=path)
     assert result.returncode == 0, result.stderr
     value = json.loads(result.stdout)
     assert value['kind'] == 'checkout' and value['revision'] is None
@@ -135,10 +136,10 @@ def test_checkout_revision_and_dirty_are_observations(checkout, tmp_path):
                     '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture'],
                    check=True, capture_output=True)
     expected = subprocess.check_output(['git', '-C', str(checkout), 'rev-parse', 'HEAD'], text=True).strip()
-    value = json.loads(run(checkout / 'quirkbench', 'version', '--json', cwd=tmp_path).stdout)
+    value = json.loads(run(checkout / 'quirkbench', '--version', '--json', cwd=tmp_path).stdout)
     assert value['revision'] == expected and value['dirty'] is False
     (checkout / 'untracked.txt').write_text('local changes')
-    value = json.loads(run(checkout / 'quirkbench', 'version', '--json', cwd=tmp_path).stdout)
+    value = json.loads(run(checkout / 'quirkbench', '--version', '--json', cwd=tmp_path).stdout)
     assert value['revision'] == expected and value['dirty'] is True
 
 
