@@ -220,6 +220,13 @@ def test_recovery_service_checks_commission_gate_before_preparation(tmp_path, mo
         boot.service_main(['--config', str(config_path)], cmdline_path=command_line)
 
     assert calls == ['nodes', 'commission-gate']
+    # Exercise the real dependent OnFailure handler with the prerequisite absent.
+    from quirkbench import watchdog
+    monkeypatch.setattr(watchdog, 'request_recovery', lambda *a, **k: pytest.fail('no verified reboot authority'))
+    marker = tmp_path/'unpublished-boot.json'
+    assert not marker.exists()
+    assert watchdog.failure_main(marker_path=marker, cmdline_path=command_line) == 0
+    assert not marker.exists()
 
 def test_runtime_keeps_candidate_var_separate(tmp_path):
     recovery=tmp_path/'recovery';(recovery/'etc').mkdir(parents=True);(recovery/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1')

@@ -112,7 +112,8 @@
       "tests/test_ci_tools.py",
       "tests/test_ci_diagnostics.py",
       "tests/test_development_bootstrap.py",
-      "tests/test_checkout_launcher.py"
+      "tests/test_checkout_launcher.py",
+      "tests/test_native_recovery_tools.py"
     ]
   },
   "investigation-product": {
@@ -317,6 +318,55 @@
       "tests/test_recovery_runtime_revision.py",
       "tests/test_recovery_initramfs_audit.py",
       "tests/test_recovery_image_plan.py"
+    ]
+  },
+  "recovery-integration": {
+    "paths": [
+      "src/quirkbench/recovery_storage.py",
+      "src/quirkbench/recovery_initramfs_audit.py",
+      "src/quirkbench/recovery_stock_pipeline.py",
+      "src/quirkbench/image.py",
+      "src/quirkbench/boot.py",
+      "src/quirkbench/watchdog.py",
+      "src/quirkbench/target_install.py",
+      "src/quirkbench/target_payload.py",
+      "src/quirkbench/recovery_runtime_revision.py",
+      "target-assets/*",
+      "tests/test_recovery_storage.py",
+      "tests/test_boot.py",
+      "tests/test_watchdog.py"
+    ],
+    "tests": [
+      "tests/test_recovery_storage.py",
+      "tests/test_recovery_initramfs_audit.py",
+      "tests/test_stock_recovery_flow.py",
+      "tests/test_recovery_runtime_revision.py",
+      "tests/test_boot.py",
+      "tests/test_watchdog.py"
+    ]
+  },
+  "recovery-native": {
+    "paths": [
+      "src/quirkbench/recovery_storage.py",
+      "src/quirkbench/recovery_initramfs_audit.py",
+      "src/quirkbench/recovery_stock_pipeline.py",
+      "src/quirkbench/image.py",
+      "src/quirkbench/boot.py",
+      "src/quirkbench/watchdog.py",
+      "src/quirkbench/target_install.py",
+      "src/quirkbench/target_payload.py",
+      "src/quirkbench/recovery_runtime_revision.py",
+      "target-assets/*",
+      "tests/test_recovery_storage.py",
+      "tests/test_boot.py",
+      "tests/test_watchdog.py",
+      "integration/*",
+      "ci/native_recovery.py",
+      "src/quirkbench/profiles/stock-fedora44-rpm-candidate.v1.json",
+      "src/quirkbench/profiles/legacy-stock-acquisition.v1.json"
+    ],
+    "tests": [
+      "integration/test_recovery_native.py"
     ]
   }
 }

@@ -60,6 +60,8 @@ def execute(output, suite, tests=None, timeout=720):
     saved = json.loads((output / 'metadata.json').read_text())
     if saved['command']:
         raise ValueError('An attempt already ran here; use a new output directory')
+    if suite == 'recovery-native':
+        timeout = min(timeout, 60)
     start = time.monotonic()
     record = metadata(suite)
     record['selection'] = tests or selection(suite)
@@ -72,6 +74,8 @@ def execute(output, suite, tests=None, timeout=720):
             command = [sys.executable, '-m', 'pytest', '-p', 'ci.diagnostics',
                        *record['selection'], '--tb=short', '--durations=25',
                        '-o', 'faulthandler_timeout=120', '--junitxml=' + str(junit)]
+            if suite == 'recovery-native':
+                command.append('-s')  # Retain real generator/verifier evidence.
             record['command'] = command
             write_json(output / 'metadata.json', record)
             env = dict(os.environ, QUIRKBENCH_CI_BUNDLE=str(output))

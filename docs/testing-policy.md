@@ -308,3 +308,54 @@ error categories and actionable fragments to freezing entire diagnostic prose.
 See the [first assertion audit](test-assertion-audit.md) for reviewed examples and
 retained safety coverage; boundary-sensitive test changes still require AGENTS.md's
 higher-reasoning review.
+
+## Fast recovery integration (no boot or image build)
+
+`recovery-integration` joins the existing portable boot, watchdog, storage,
+packaging and staging regressions. `recovery-native` checks the actual pinned
+Fedora generator and systemd unit verifier in a device-free Bubblewrap sandbox.
+It consumes current GRUB arguments, service masks, the installed generator wrapper
+and the packaged failure-handler command. It never invokes PID 1, dracut, a disk
+image builder, mount services, QEMU, flashing or compilation.
+
+Keep downloads/extraction separate from test execution. On Linux x86-64 with
+Bubblewrap, user namespaces and `rpm2archive` available:
+
+```sh
+# One-time dependency preparation. Uses the existing candidate's exact RPM hashes.
+PYTHONPATH=src .venv/bin/python -m ci.native_recovery prepare \
+  --cache /path/to/native-recovery-cache
+# Optional: add --rpms /path/to/already-acquired/rpms to avoid downloads.
+export QB_NATIVE_RECOVERY_CACHE=/path/to/native-recovery-cache
+make test-recovery-native
+```
+
+The fixture contains only userspace dependencies from the supported Fedora
+implementation; it is not a recovery rootfs or another image builder. RPM scriptlets
+are never run. Koji acquisition uses exact versions and verifies the repository's
+reviewed package hashes. No publisher trust is invented. Cache contents and executable
+bits are rechecked before use; a changed cache requires preparation at a fresh path.
+Missing packages/tools or unavailable namespaces fail explicitly, never silently skip
+or substitute host systemd. Ordinary Python development needs none of these tools.
+
+The native suite has a **60-second process-group deadline**, including cache
+verification, and a target below 30 seconds with dependencies present. The initial
+six-case run took **1.46 seconds** locally. Cache preparation and CI provisioning
+are separate costs; no network is used during test execution. CI caches the fixture
+by package snapshot and preparation code, selects the suite for producer/consumer
+changes, and retains commands, package identities and verifier diagnostics in its
+normal evidence bundle. A selected native lane must pass; a setup failure is not
+coverage. Local execution prints the evidence directory.
+
+The tests demonstrate both rejection and usable configuration: the stock generated
+mount conflicts with the actual fsck mask, the reviewed adapter passes systemd's
+verifier, an unrelated required masked service fails, forbidden staging writes fail,
+and failing producers never publish usable partial mounts. The packaged failure
+handler also runs with its boot prerequisite absent and cannot import missing
+modules from the developer checkout.
+
+These checks establish userspace integration only. They do not test dracut assembly,
+actual mounts, device discovery, firmware, kernel behavior or successful boot.
+Continue using explicitly requested end-to-end operations for those properties.
+When adding coverage, connect real producers and consumers and substitute only the
+physical/expensive effect; do not grow a general boot simulator or a full version matrix.

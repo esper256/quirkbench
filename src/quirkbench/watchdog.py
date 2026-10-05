@@ -385,20 +385,35 @@ def request_recovery(state_dir: str | Path, reason: str, *, mode: str,
     return record
 
 
-def failure_main() -> int:
+def failure_main(*, marker_path=Path('/run/quirkbench-boot.json'),
+                 cmdline_path=Path('/proc/cmdline')) -> int:
     """OnFailure hook: never reboot a failed recovery supervisor in a loop."""
-    marker = json.loads(Path("/run/quirkbench-boot.json").read_bytes())
-    words = Path("/proc/cmdline").read_text().split()
-    candidates = [word for word in words if word.startswith("quirkbench.mode=")]
-    if len(candidates) != 1 or candidates[0] not in {"quirkbench.mode=candidate", "quirkbench.mode=recovery"}:
-        raise ValueError("cannot identify verified Quirkbench boot mode")
-    mode = "experiment" if candidates[0].endswith("=candidate") else "recovery"
-    if marker.get("boot", {}).get("quirkbench.mode") != candidates[0].split("=", 1)[1]:
-        raise ValueError("verified boot marker differs from running mode")
+    from .boot import BootError, RecoveryConfig, parse_cmdline
+    try:
+        if (marker_path.is_symlink() or not marker_path.is_file()
+                or marker_path.stat().st_size > 1024**2):
+            raise ValueError('verified boot marker unavailable')
+        marker = json.loads(marker_path.read_bytes())
+        if (not isinstance(marker, dict) or set(marker) != {'config', 'boot'}
+                or not isinstance(marker['boot'], dict)):
+            raise ValueError('invalid verified boot marker')
+        config = RecoveryConfig(**marker['config'])
+        boot = parse_cmdline(cmdline_path.read_text(), config)
+        if any(marker['boot'].get(key) != value for key, value in boot.items()):
+            raise ValueError('verified boot marker differs from running boot')
+    except (OSError, ValueError, TypeError, KeyError, BootError, RecursionError):
+        # The prerequisite may fail before publishing its marker (for example,
+        # uncommissioned factory media). No mode means no reboot authority and
+        # no safe evidence destination. Report locally without guessing either.
+        print('Quirkbench boot verification is incomplete. Automatic recovery is blocked; '
+              'use the local recovery menu to review setup and boot diagnostics.',
+              file=sys.stderr, flush=True)
+        return 0
+    mode = 'experiment' if boot['quirkbench.mode'] == 'candidate' else 'recovery'
     # Never write through an unmounted/replaced evidence path after runtime failure.
     from .runtime import boot_context, CONTROL
     try:
-        _,_,verify=boot_context()
+        _,_,verify=boot_context(marker_path)
         verify()
         destination=CONTROL
     except Exception:

@@ -246,3 +246,90 @@ def test_changed_kernel_with_identical_release_cannot_activate(tmp_path):
     report = observe_watchdog(qualified(), sysfs_root=tmp_path, kernel_release='test-kernel',
                               hardware_id='test-board', kernel_build_id='cd'*20)
     assert report['qualification_matches'] is False
+
+
+@pytest.mark.parametrize('payload', [None, b'{', b'[]', b'{}',
+    b'{"config":{},"boot":null}', b'{"config":{},"boot":{"quirkbench.mode":"candidate"}}'])
+@pytest.mark.parametrize('mode', ['recovery', 'candidate'])
+def test_failure_hook_without_verified_context_never_requests_reboot(tmp_path, monkeypatch, capsys, payload, mode):
+    from quirkbench import watchdog, runtime
+    marker = tmp_path/'boot.json'
+    if payload is not None:
+        marker.write_bytes(payload)
+    command = tmp_path/'cmdline'
+    command.write_text('quirkbench.mode=' + mode)
+    monkeypatch.setattr(watchdog, 'request_recovery', lambda *a, **k: pytest.fail('unverified recovery request'))
+    monkeypatch.setattr(runtime, 'boot_context', lambda *a, **k: pytest.fail('unverified storage access'))
+    assert watchdog.failure_main(marker_path=marker, cmdline_path=command) == 0
+    diagnostic = capsys.readouterr().err
+    assert 'verification is incomplete' in diagnostic and 'local recovery menu' in diagnostic
+    assert 'Traceback' not in diagnostic
+    assert sorted(p.name for p in tmp_path.iterdir()) == (['cmdline'] if payload is None else ['boot.json', 'cmdline'])
+
+
+@pytest.mark.parametrize('mode', ['recovery', 'candidate'])
+@pytest.mark.parametrize('mismatch', [False, True])
+def test_failure_hook_binds_complete_marker_before_storage_and_recovery(tmp_path, monkeypatch, mode, mismatch):
+    from quirkbench import watchdog, runtime
+    from test_boot import CONFIG, cmdline
+    from quirkbench.boot import parse_cmdline
+    marker = tmp_path/'boot.json'
+    command = tmp_path/'cmdline'
+    command.write_text(cmdline(mode))
+    boot = parse_cmdline(command.read_text(), CONFIG)
+    if mismatch:
+        boot['root'] = 'PARTUUID=ffffffff-ffff-ffff-ffff-ffffffffffff'
+    marker.write_text(json.dumps({'config': CONFIG.to_dict(), 'boot': boot}))
+    events = []
+    def context(path):
+        assert path == marker
+        events.append('context')
+        return CONFIG, boot, lambda: events.append('verify')
+    monkeypatch.setattr(runtime, 'boot_context', context)
+    monkeypatch.setattr(watchdog, 'request_recovery', lambda path, reason, **kw: events.append((path, kw['mode'])))
+    assert watchdog.failure_main(marker_path=marker, cmdline_path=command) == 0
+    assert events == ([] if mismatch else ['context', 'verify', (runtime.CONTROL, 'experiment' if mode == 'candidate' else 'recovery')])
+
+
+@pytest.mark.parametrize('fault', ['guid', 'missing-mode', 'duplicate-mode', 'wrong-mode', 'changed-root', 'linked-marker'])
+def test_failure_hook_rejects_invalid_boot_identity(tmp_path, monkeypatch, capsys, fault):
+    from quirkbench import watchdog
+    from quirkbench.boot import parse_cmdline
+    from test_boot import CONFIG, cmdline
+    marker = tmp_path/'boot.json'
+    command = tmp_path/'cmdline'
+    text = cmdline()
+    record = {'config': CONFIG.to_dict(), 'boot': parse_cmdline(text, CONFIG)}
+    if fault == 'guid': record['config']['disk_guid'] = 'invalid'
+    if fault == 'missing-mode': text = text.replace('quirkbench.mode=recovery', '')
+    if fault == 'duplicate-mode': text += ' quirkbench.mode=candidate'
+    if fault == 'wrong-mode': text = text.replace('quirkbench.mode=recovery', 'quirkbench.mode=other')
+    if fault == 'changed-root': record['boot']['root'] = 'PARTUUID=' + 'a'*36
+    marker.write_text(json.dumps(record))
+    if fault == 'linked-marker':
+        saved = tmp_path/'saved.json'; marker.rename(saved); marker.symlink_to(saved)
+    command.write_text(text)
+    monkeypatch.setattr(watchdog, 'request_recovery', lambda *a, **k: pytest.fail('unverified reboot'))
+    assert watchdog.failure_main(marker_path=marker, cmdline_path=command) == 0
+    assert 'verification is incomplete' in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('mode', ['recovery', 'candidate'])
+@pytest.mark.parametrize('stage', ['context', 'verify'])
+def test_verified_failure_retains_storage_failure_fallback(tmp_path, monkeypatch, mode, stage):
+    from quirkbench import watchdog, runtime
+    from quirkbench.boot import parse_cmdline
+    from test_boot import CONFIG, cmdline
+    command = tmp_path/'cmdline'; command.write_text(cmdline(mode))
+    boot = parse_cmdline(command.read_text(), CONFIG)
+    marker = tmp_path/'boot.json'
+    marker.write_text(json.dumps({'config': CONFIG.to_dict(), 'boot': boot}))
+    def broken(): raise OSError('evidence volume unavailable')
+    def context(path):
+        if stage == 'context': broken()
+        return CONFIG, boot, broken
+    calls = []
+    monkeypatch.setattr(runtime, 'boot_context', context)
+    monkeypatch.setattr(watchdog, 'request_recovery', lambda path, reason, **kw: calls.append((path, kw['mode'])))
+    assert watchdog.failure_main(marker_path=marker, cmdline_path=command) == 0
+    assert calls == [(Path('/run/quirkbench-storage-failure'), 'experiment' if mode == 'candidate' else 'recovery')]

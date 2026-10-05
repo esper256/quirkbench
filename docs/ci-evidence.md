@@ -36,6 +36,12 @@ Python 3.13/077. Focused checks initially use only 3.13/077 to control cost.
 | `evidence` | Archived validation, retarget evidence, drain client/target and release HTTP |
 | `filesystem` | Storage admission, runtime destinations, revocation, read-only setup/SQLite lifetime and recovery listing |
 | `ci-tooling` | Selection, redaction/bounds, disposable pytest outcomes and artifact plumbing |
+| `recovery-integration` | Joined portable boot, failure-handler, storage and packaging regressions |
+| `recovery-native` | Pinned Fedora generator/unit verification and packaged failure entry point; isolated userspace only, 60-second deadline |
+
+The native suite requires a separately prepared dependency cache; see
+[fast recovery integration](testing-policy.md#fast-recovery-integration-no-boot-or-image-build).
+CI acquires/caches it before the timed test step; ordinary Python suites remain portable.
 
 Selectors deduplicate suites/files; separate suite jobs keep their own evidence.
 Shared contracts, schemas and fixtures deliberately select all named focused suites.
