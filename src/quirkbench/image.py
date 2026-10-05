@@ -211,15 +211,21 @@ def grub_config(partuuid: str, *, esp_uuid=None,root_uuid=None,state_uuid=None,d
     # IDs may be omitted only by callers inspecting a sample configuration.
     esp_uuid=esp_uuid or partuuid;state_uuid=state_uuid or partuuid;data_uuid=data_uuid or partuuid
     library_uuid=library_uuid or partuuid;evidence_uuid=evidence_uuid or partuuid
-    args=f'root=PARTUUID={partuuid} ro rootflags=noload fsck.mode=skip rd.skipfsck selinux=0 console=tty0 console=ttyS0,115200 panic=10 oops=panic noresume rd.auto=0 rd.luks=0 rd.lvm=0 rd.md=0 quirkbench.esp=PARTUUID={esp_uuid} quirkbench.state=PARTUUID={state_uuid} quirkbench.data=PARTUUID={data_uuid} quirkbench.library=PARTUUID={library_uuid} quirkbench.evidence=PARTUUID={evidence_uuid}'
+    # Keep serial output, but make the local screen the preferred /dev/console.
+    args=f'root=PARTUUID={partuuid} ro rootflags=noload fsck.mode=skip rd.skipfsck selinux=0 console=ttyS0,115200 console=tty0 panic=10 oops=panic noresume rd.auto=0 rd.luks=0 rd.lvm=0 rd.md=0 quirkbench.esp=PARTUUID={esp_uuid} quirkbench.state=PARTUUID={state_uuid} quirkbench.data=PARTUUID={data_uuid} quirkbench.library=PARTUUID={library_uuid} quirkbench.evidence=PARTUUID={evidence_uuid}'
     if stock_recovery: args+=' efi_pstore.pstore_disable=1 systemd.gpt_auto=0 rd.systemd.gpt_auto=0'
     if smoke:args+=' quirkbench.smoke=1'
+    diagnostics=('rd.debug rd.info loglevel=7 ignore_loglevel '
+                 'systemd.show_status=1 systemd.log_level=debug systemd.log_target=journal-or-kmsg '
+                 'systemd.journald.forward_to_console=1 systemd.journald.max_level_console=debug '
+                 'rd.udev.log_level=debug udev.log_level=debug')
     return f'''serial --unit=0 --speed=115200
 terminal_input console serial
 terminal_output console serial
 set default=0
 set fallback=0
-set timeout=1
+set timeout_style=menu
+set timeout=5
 set candidate_id=
 set chosen_candidate=
 set target_uuid=
@@ -290,6 +296,11 @@ if [ "$default" = "1" ]; then
     boot
   }}
 fi
+menuentry 'Quirkbench recovery - verbose boot diagnostics' --id=recovery-debug {{
+  echo 'QUIRKBENCH_GRUB recovery-debug: verbose recovery boot; storage checks remain enabled'
+  linux $esp/vmlinuz-recovery {args} quirkbench.mode=recovery {diagnostics}
+  initrd $esp/initramfs-recovery.img
+}}
 '''
 
 
