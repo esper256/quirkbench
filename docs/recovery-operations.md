@@ -8,6 +8,47 @@ Software support does not establish image or hardware qualification. Use
 [controller installation](controller-installation.md) and explicit
 [acquisition specifications](recovery-acquisition.md) before admitting work.
 
+## Boot progress and diagnostics
+
+Newly built images display a five-second GRUB menu. Press an arrow key during
+that interval to stop the countdown. Select **Quirkbench recovery - verbose boot
+diagnostics** when investigating a failed boot; no kernel command editing is needed.
+This starts the same fixed recovery kernel and initramfs, with verbose kernel,
+dracut, systemd and udev logging. Both recovery entries keep serial output and
+prefer the local screen for console diagnostics. An already armed, identity-checked
+candidate retains its existing one-shot default; selecting diagnostics boots recovery.
+
+The expected destination is the **Quirkbench target recovery** console menu.
+Before first-boot capacity setup, **pending or blocked** is expected there. If boot
+stops earlier, photograph the last errors and any dracut timeout/root-device messages;
+kernel USB-event messages alone do not establish successful recovery startup.
+The diagnostic entry grants no experiment approval and changes no storage protections,
+mounts, firmware settings or emergency-shell policy.
+
+Dracut diagnostic reports, when produced, are in `/run/initramfs/rdsosreport.txt`;
+the boot journal and early reports are held in RAM and may disappear on reboot.
+Do not expect persistent logs before evidence storage is verified. Retain photographs
+or a VM serial log before restarting, and review verbose logs for private details
+before sharing them. Keep the boot USB connected while recovery is running.
+
+The factory image file is smaller than the required commissioned USB. Check the
+recipe's experiment/library sizes plus the target-RAM-dependent evidence requirement;
+the current 32 GiB experiment and 32 GiB library defaults cannot fit a 32 GB stick.
+Capacity rejection should not be mistaken for a successful commissioned boot.
+These diagnostics improve observability; they do not establish physical boot,
+storage protection or release qualification. Existing images require rebuilding
+from freshly prepared inputs to receive this menu.
+
+If a keyboard combination reports **this sysrq is disabled**, the kernel received
+the request but its current SysRq policy disallows that operation. Where permitted,
+SysRq **h** displays help, **w** dumps blocked tasks, **t** dumps task states and
+**l** dumps CPU backtraces. These are diagnostics, not recovery readiness. Chromebook
+key mappings vary; numbered keys may represent function keys rather than digits.
+This diagnostic entry does not change the SysRq enablement policy. SysRq **b**
+immediately resets without syncing/unmounting and is not attended safe shutdown;
+do not treat generic reboot or crash-key sequences as evidence-preserving recovery.
+See the [kernel SysRq reference](https://docs.kernel.org/admin-guide/sysrq.html).
+
 For initial pairing on verified recovery, configure temporary networking with
 **Network**, then choose **Connect to controller**. Supply the endpoint from
 controller `target pair NAME`; compare and type the full displayed certificate SHA-256

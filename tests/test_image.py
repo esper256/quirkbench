@@ -62,11 +62,46 @@ def test_grub_defaults_to_recovery_and_checks_one_shot_clear():
     assert "source $data/quirkbench/boot/$chosen_candidate.cfg" in cfg
     assert "rootflags=noload fsck.mode=skip rd.skipfsck" in cfg
     recovery_lines = [line for line in cfg.splitlines() if line.lstrip().startswith('linux $esp/vmlinuz-recovery')]
-    assert len(recovery_lines) == 2 and all(' selinux=0 ' in line for line in recovery_lines)
+    assert len(recovery_lines) == 3 and all(' selinux=0 ' in line for line in recovery_lines)
     assert "init=/bin/sh" not in cfg
     fallback=cfg[cfg.index("echo 'QUIRKBENCH_GRUB candidate-load-failed'"):]
     assert 'linux $esp/vmlinuz-recovery' in fallback and 'initrd $esp/initramfs-recovery.img' in fallback
     assert 'quirkbench.mode=recovery' in fallback and '\n    boot\n' in fallback
+
+
+@pytest.mark.parametrize('smoke', [False, True])
+def test_recovery_diagnostics_preserve_boot_roles_and_candidate_selection(smoke):
+    from quirkbench.recovery_storage import boot_roles
+
+    roles = [f'00000000-0000-0000-0000-{number:012d}' for number in range(1, 7)]
+    cfg = grub_config(roles[1], esp_uuid=roles[0], state_uuid=roles[2],
+                      data_uuid=roles[3], library_uuid=roles[4], evidence_uuid=roles[5],
+                      stock_recovery=True, smoke=smoke)
+    assert 'set timeout_style=menu\nset timeout=5\n' in cfg
+    assert cfg.count('set default=1') == 1
+    # Keep candidate at index 1 when armed: diagnostics must follow its conditional
+    # menu definition, never displace it or become an automatic fallback.
+    assert cfg.index('--id=recovery {') < cfg.index('--id=candidate {') < cfg.index('--id=recovery-debug {')
+    assert cfg.index('save_env') < cfg.index('smbios --type 1') < cfg.index('--id=recovery-debug {')
+    lines = [line.strip().split(' ', 2)[2] for line in cfg.splitlines()
+             if line.strip().startswith('linux $esp/vmlinuz-recovery ')]
+    normal, fallback, debug = lines
+    assert normal == fallback
+    assert debug.startswith(normal + ' ')
+    assert set(debug[len(normal):].split()) == {
+        'rd.debug', 'rd.info', 'loglevel=7', 'ignore_loglevel',
+        'systemd.show_status=1', 'systemd.log_level=debug', 'systemd.log_target=journal-or-kmsg',
+        'systemd.journald.forward_to_console=1', 'systemd.journald.max_level_console=debug',
+        'rd.udev.log_level=debug', 'udev.log_level=debug',
+    }
+    for arguments in lines:
+        assert boot_roles(arguments) == roles
+        assert [word for word in arguments.split() if word.startswith('console=')] == [
+            'console=ttyS0,115200', 'console=tty0']
+        assert ('quirkbench.smoke=1' in arguments) == smoke
+    assert cfg.count('initrd $esp/initramfs-recovery.img') == 3
+    diagnostic_entry = cfg[cfg.index('menuentry \'Quirkbench recovery - verbose'):]
+    assert 'source ' not in diagnostic_entry and 'save_env' not in diagnostic_entry
 
 
 def test_factory_four_partitions_reserve_space_for_commissioning():
