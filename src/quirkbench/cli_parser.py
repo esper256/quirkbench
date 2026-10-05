@@ -70,7 +70,7 @@ def action(root,path,description,*,command,internal_action=None):
     parts=path.split()
     for index,name in enumerate(parts):
         if not hasattr(node,'commands'):
-            node.commands=node.add_subparsers(required=node is not root,metavar='COMMAND')
+            node.commands=node.add_subparsers(prog=node.prog,required=node is not root,metavar='COMMAND')
         if name not in node.commands.choices:
             desc=description if index==len(parts)-1 else FAMILIES.get(name,'Manage '+name.replace('-',' '))
             child=node.commands.add_parser(name,help=desc,description=desc,formatter_class=argparse.RawDescriptionHelpFormatter)

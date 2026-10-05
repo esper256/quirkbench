@@ -237,7 +237,7 @@ def test_lost_baseline_response_replays_after_restart_without_native_dependencie
     monkeypatch.setattr('quirkbench.ostree_repository.OstreeRepository.__init__',forbidden)
     monkeypatch.setattr('quirkbench.controller_service.require_ready',forbidden)
     from types import SimpleNamespace
-    args=SimpleNamespace(name='investigation',compose=composition,request_id='baseline',json=True,reserve_gib=0)
+    args=SimpleNamespace(name='investigation',compose=composition,request_id='baseline',json=True,reserve_gib=0,repositories=None)
     assert baseline.execute(c.root,args)==response
     with c.transaction() as db:
         assert db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0]==1
@@ -263,7 +263,7 @@ def test_human_retry_binding_and_legacy_explicit_output(published,capsys,tmp_pat
 
 
 @pytest.mark.parametrize('failure',['exit','timeout'])
-def test_actual_native_errors_return_c2_and_roll_back_admission(published,monkeypatch,capsys,failure):
+def test_actual_native_errors_roll_back_admission(published,monkeypatch,capsys,failure):
     import subprocess
     c,composition=published;repository=c.deployment_repository
     error=subprocess.CalledProcessError(1,['ostree','refs']) if failure=='exit' else subprocess.TimeoutExpired(['ostree','refs'],1)
@@ -271,15 +271,16 @@ def test_actual_native_errors_return_c2_and_roll_back_admission(published,monkey
     monkeypatch.setattr('quirkbench.ostree_repository.OstreeRepository',lambda mapping:repository)
     monkeypatch.setattr('quirkbench.controller_service.require_ready',lambda _:None)
     from types import SimpleNamespace
-    with pytest.raises(subprocess.SubprocessError):
-        baseline.execute(c.root,SimpleNamespace(name='investigation',compose=composition,request_id='baseline',json=True,reserve_gib=0))
+    with pytest.raises(OSError, match="native baseline retention unavailable") as raised:
+        baseline.execute(c.root,SimpleNamespace(name='investigation',compose=composition,request_id='baseline',json=True,reserve_gib=0,repositories=None))
+    assert raised.value.__cause__ is error
     with c.transaction() as db:
         assert db.execute('SELECT COUNT(*) FROM attended_baseline_commands').fetchone()[0]==0
         assert db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0]==0
 
 
 @pytest.mark.parametrize('mapping',[{'lab':3},{'lab':True},{'lab':'relative'},[],{}, {'bad alias':'/tmp'}])
-def test_invalid_repository_configuration_is_c2_before_native_work(tmp_path,monkeypatch,capsys,mapping):
+def test_invalid_repository_configuration_fails_before_native_work(tmp_path,monkeypatch,capsys,mapping):
     from quirkbench.controller import Controller
     c=Controller(tmp_path/'state',reserve_bytes=0)
     (c.root/'repositories.json').write_text(json.dumps(mapping))
@@ -287,7 +288,7 @@ def test_invalid_repository_configuration_is_c2_before_native_work(tmp_path,monk
     monkeypatch.setattr('quirkbench.ostree_repository.OstreeRepository',forbidden)
     from types import SimpleNamespace
     with pytest.raises(ContractError):
-        baseline.execute(c.root,SimpleNamespace(name='investigation',compose='composition',request_id='baseline',json=True,reserve_gib=0))
+        baseline.execute(c.root,SimpleNamespace(name='investigation',compose='composition',request_id='baseline',json=True,reserve_gib=0,repositories=None))
 
 
 def test_approval_and_baseline_ids_cannot_acquire_another_command_meaning(published,tmp_path):

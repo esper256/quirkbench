@@ -514,7 +514,7 @@ def test_joined_storage_pressure_has_c2_blocked_response(joined,bounded_build,mo
         arguments=['--build',build['operation_id'],'--repository','lab']
     def pressure(self,*args,**kwargs):raise StoragePressure('free-space reserve reached')
     monkeypatch.setattr(ArtifactStore,'put',pressure)
-    result=cli._main(['--state', str(c.root), 'investigation', action, 'investigation', *arguments, '--request-id', 'pressure-' + action, '--json'])
+    result=cli._main(['--state', str(c.root), 'investigation', 'build', {'prepare-candidate':'prepare','build':'kernel','compose':'system'}[action], 'investigation', *arguments, '--request-id', 'pressure-' + action, '--json'])
     answer=json.loads(capsys.readouterr().out)
     assert result==4 and answer['error']=={'code':'BLOCKED','message':'free-space reserve reached','retryable':True}
     assert answer['operation_id'] is None

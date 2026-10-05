@@ -6,7 +6,8 @@ PYTHON ?= .venv/bin/python
 SMOKE_TESTS := tests/test_contracts.py tests/test_store.py tests/test_state_config.py \
  tests/test_controller_review.py tests/test_controller_setup.py \
  tests/test_cli.py::test_monitor_from_separate_interpreter \
- tests/test_cli.py::test_invalid_command_fails_without_system_changes
+ tests/test_cli.py::test_invalid_command_fails_without_system_changes \
+ tests/test_cli_redesign.py::test_root_and_every_action_help_are_complete_and_stateless
 TESTS ?= $(SMOKE_TESTS)
 
 # Expensive real-system fixtures are explicit final major-version release gates.

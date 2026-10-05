@@ -231,7 +231,7 @@ def test_legacy_readonly_context_and_listing_need_no_migration_or_housekeeping(s
     monkeypatch.setattr('quirkbench.filesystem.private_lock',forbidden)
     monkeypatch.setattr('quirkbench.maintenance.prune',forbidden)
     for action in ('context','proposals','proposal-schema'):
-        assert cli.main(['--state',str(c.root),'investigation',*action,'investigation','--json'])==0
+        assert cli.main(['--state',str(c.root),'investigation',*{'context':['context'],'proposals':['proposal','list'],'proposal-schema':['proposal','schema']}[action],'investigation','--json'])==0
         data=json.loads(capsys.readouterr().out)['data']
         if action=='context':assert data['proposal_usage']['migration_required']
         if action=='proposals':assert data['migration_required'] and data['items']==[]
