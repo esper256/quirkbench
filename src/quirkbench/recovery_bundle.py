@@ -1,6 +1,7 @@
 """Portable, unsigned stock recovery inputs over the existing image pipeline."""
 from __future__ import annotations
 import json
+import shlex
 from pathlib import Path
 import tempfile
 
@@ -101,7 +102,7 @@ def prepare(*,packages,public_key,spec,output,builder_image,epoch,reserve_bytes=
     spec=load_spec(read_file(spec_path.parent,spec_path.name,limit=MAX_MANIFEST))
     packages=user_build_path(packages);public_key=user_build_path(public_key)
     if not packages.is_dir() or not any(packages.iterdir()):
-        raise BuildError('selected RPMs are missing; run recovery-bundle plan --spec '+str(spec_path)+
+        raise BuildError('selected RPMs are missing; run quirkbench dev recovery plan --spec '+shlex.quote(str(spec_path))+
                          ' --output NEW_DIRECTORY, run its download argv, then prepare using NEW_DIRECTORY/rpms')
     root=_new_output(output);store=ArtifactStore(root,reserve_bytes=reserve_bytes)
     options={}
@@ -190,4 +191,4 @@ def plan(spec,output):
     packages=root/'rpms';packages.mkdir(mode=0o700)
     return {'packages':str(packages),'spec':str(root/'acquisition-spec.v1.json'),
             'download_argv':list(acquisition_command(packages,selected)),
-            'download_started':False,'next_step':'Run download_argv, then recovery-bundle prepare.'}
+            'download_started':False,'next_step':'Run download_argv, then quirkbench dev recovery prepare.'}

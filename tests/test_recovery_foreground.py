@@ -135,6 +135,27 @@ def test_interrupted_build_stops_whole_container_and_retains_diagnostics(inputs)
     assert (output/'build.log').exists()
 
 
+def test_uncertain_cleanup_reports_current_command_with_quoted_output(inputs,monkeypatch,capsys):
+    import shlex
+    from quirkbench.cli import parser
+    kwargs,engine=inputs
+    kwargs['output']=kwargs['output'].with_name('output with spaces')
+    def interrupted(argv,log,**options):
+        log.write_text('retained interrupted build\n')
+        raise KeyboardInterrupt
+    def uncertain(*args,**kwargs):
+        raise WorkerServiceError('fixture stop remains uncertain')
+    monkeypatch.setattr(foreground,'_stopped',uncertain)
+    with pytest.raises(KeyboardInterrupt):
+        foreground.build(**kwargs,execute=interrupted)
+    text=capsys.readouterr().err
+    command=text.split('. Use ',1)[1].strip()
+    args=parser().parse_args(shlex.split(command)[1:])
+    assert args.route=='dev recovery cleanup' and args.output==kwargs['output']
+    assert (kwargs['output']/'build.log').read_text()=='retained interrupted build\n'
+    assert not any(call[1]=='rm' for call in engine.calls)
+
+
 def test_failed_container_is_not_exported_even_when_attach_exits_zero(inputs):
     kwargs, engine = inputs
     def finished(*args, **options):

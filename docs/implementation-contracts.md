@@ -380,13 +380,16 @@ Upload ownership is recorded before partial bytes. Pending/resumable or complete
 unacknowledged uploads protect their attempt and CAS content; exact evidence
 acknowledgements permit count-based expiry. Definitive failures/explicitly abandoned
 uploads use failed-staging grace. Legacy unidentified bytes remain protected and
-visible until explicit `maintenance abandon-upload ID`, with active/unresolved
+visible until explicit `admin storage abandon-upload ID`, with active/unresolved
 attempt checks. Retirement commits before associated-file deletion. Terminal upload,
 attempt completion and recovery return persist an idle-owner housekeeping request,
 processed after target responses without a timer or additional service.
 
-`build`/`compose` submit fixed durable jobs by default; `--wait` is query-only.
-Manual configured controller service readiness is required for admission. Input
+`experiment submit` coordinates fixed durable preparation jobs; explicit
+`investigation build kernel/system` actions remain available for diagnostics.
+Follow recorded progress with `experiment status`, `experiment logs` or `monitor`;
+these queries do not advance work. Configured foreground controller readiness is
+required for admission. Input
 capture/hashing happens privately in the first worker stage and is adopted before
 compilation. Cache hints are read-only; writable work/proposals are private. Only
 the current owner validates stopped output, signs composition and publishes shared

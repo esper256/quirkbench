@@ -150,7 +150,7 @@ def plan(services, record, phase):
         mounts += [(stage,stage,'rw,z'),(root/'intermediate-cache',root/'intermediate-cache','ro,z')]
     elif phase in ('recovery','candidate'):
         if services.engine!='podman':
-            raise Conflict('managed installroot stages require rootless Podman ownership mapping; use recovery-image-build for Docker artifact generation')
+            raise Conflict('managed installroot stages require rootless Podman ownership mapping; use quirkbench dev recovery build-recipe for Docker artifact generation')
         if services.recorded_backend(record).invoke('info','--format','{{.Host.Security.Rootless}}').strip()!='true':
             raise Conflict('managed installroot stages require a rootless Podman engine')
         spec['user']='0'

@@ -180,9 +180,9 @@ def operation(args):
         if args.action == 'watch':
             import math
             if not math.isfinite(args.interval) or not 0.5 <= args.interval <= 60:
-                raise ContractError('operation watch interval must be 0.5..60 seconds')
+                raise ContractError('watch interval must be 0.5..60 seconds')
             if not (args.state / 'controller.sqlite').is_file():
-                raise ContractError('operation watch requires existing controller state')
+                raise ContractError('watch requires existing controller state')
         from .state_reader import StateReader
         controller = StateReader(args.state.expanduser().absolute())
         if args.action == 'watch':
@@ -226,7 +226,7 @@ def operation(args):
     except Exception as exc:
         code = 'CONFLICT' if isinstance(exc, Conflict) else 'INVALID_INPUT' if isinstance(exc, ContractError) else 'INFRASTRUCTURE'
         status = 3 if code == 'CONFLICT' else 2 if code == 'INVALID_INPUT' else 5
-        message = str(exc)[:512] if code != 'INFRASTRUCTURE' else 'operation status unavailable'
+        message = str(exc)[:512] if code != 'INFRASTRUCTURE' else 'Operation data unavailable'
         if args.json:
             print(json.dumps(operation_response(error={'code': code, 'message': message,
                                                        'retryable': code == 'INFRASTRUCTURE'}), sort_keys=True))

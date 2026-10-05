@@ -110,7 +110,7 @@ branches or pull updates. Running it creates no home-bin link, selects no instal
 runtime and starts no controller service. Ordinary commands use the existing state
 selection rules. The older `environments/quirkbench` entry point remains compatible.
 
-`version` (also `--version` for human output) reports the running CLI's package path,
+`--version` (or `--version --json` for structured output) reports the running CLI's package path,
 Python version and checkout commit plus local-change status when Git is available.
 An extracted archive reports its manifest hash, and an installed archive also reports
 the archive hash from its installation record. Unknown source revisions remain
@@ -239,10 +239,12 @@ firewall or power policy is changed. Build toolchains stay in the isolated build
 
 For M1b bootstrap, controller service configuration can select
 `"credential_registry": true` instead of `tokens_file`. These modes are mutually
-exclusive. `serve --credential-registry` starts with zero credentials and denies
-all target routes until a complete credential generation exists. Repository
-`serve-repository --credential-registry` requires both mutual TLS and a live exact
-leaf-certificate fingerprint in the same database. Static manually provisioned
+exclusive. The configured controller's registry mode starts with zero credentials
+and denies target execution routes until a complete credential generation exists.
+The configured repository listener requires both mutual TLS and a live exact
+leaf-certificate fingerprint in the same database. Start the configured controller
+with `quirkbench admin controller run`; raw listener commands are private process
+entry points. Static manually provisioned
 authentication remains supported. Both registry channels inspect revocation for
 each request; admitted requests/physical attempts are not cancelled by revocation.
 Local record/revoke helpers are administrative foundations, not pairing/retargeting

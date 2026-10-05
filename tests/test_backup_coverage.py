@@ -186,6 +186,13 @@ def test_legacy_positional_and_guided_aliases_preserve_restore_checks_and_show_u
         command=['--state', str(c.root), 'admin', 'backup', '--reserve-gib', '0']+(['--output'] if guided else [])+[str(destination)]
         assert cli.main(command)==0;answer=json.loads(capsys.readouterr().out)
         assert answer['backup']==str(destination) and (('coverage' in answer)==guided)
+        if guided:
+            import shlex
+            commands=answer['next_steps'][1].split('run ',1)[1].split('; inspect ')
+            capture=cli.parser().parse_args(shlex.split(commands[0])[1:])
+            show=cli.parser().parse_args(shlex.split(commands[1].split(', then ',1)[0])[1:])
+            assert capture.route=='investigation source capture' and capture.state==c.root
+            assert show.route=='admin operation show' and show.state==c.root
         assert (coverage.verify_if_present(destination) is not None)==guided
     with pytest.raises(SystemExit):cli.parser().parse_args(['admin', 'backup', str(legacy), '--output', str(tmp_path / 'bad')])
     with pytest.raises(SystemExit):cli.parser().parse_args(['admin', 'restore'])

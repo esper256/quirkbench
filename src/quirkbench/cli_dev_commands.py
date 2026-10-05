@@ -4,6 +4,10 @@ from .cli_parser import action
 
 
 def build(root):
+    p = action(root, 'dev monitor', 'Watch a recorded development build', command='monitor', internal_action=None)
+    p.add_argument('run_id', help='Exact development run ID printed by the bounded build helper')
+    p.set_defaults(investigation=None)
+    p.add_argument('--once', action='store_true', help='Print one progress snapshot and exit')
     p = action(root, 'dev install', 'Install an unsigned development archive; activation requires stopped work', command='controller-install', internal_action=None)
     p.add_argument('archive', nargs='?', type=Path, help='Path to the original unsigned controller archive')
     p.add_argument('--activate', action='store_true', help='Switch CLI and worker paths together after stopped-work checks')

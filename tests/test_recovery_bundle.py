@@ -110,9 +110,10 @@ def test_plan_uses_pinned_repositories_and_missing_inputs_have_next_action(tmp_p
     selected=spec();source=tmp_path/'spec.json';source.write_bytes(canonical(selected))
     result=bundle.plan(source,tmp_path/'acquisition')
     assert not result['download_started']
+    assert result['next_step']=='Run download_argv, then quirkbench dev recovery prepare.'
     assert '--setopt=reposdir='+str(tmp_path/'acquisition/repositories') in result['download_argv']
     assert 'kernel-core-'+selected['kernel_release'] in result['download_argv']
-    with pytest.raises(BuildError,match='recovery-bundle plan'):
+    with pytest.raises(BuildError,match='quirkbench dev recovery plan'):
         bundle.prepare(packages=result['packages'],public_key=tmp_path/'key',spec=source,output=tmp_path/'bundle',
                        builder_image='sha256:'+'a'*64,epoch=0,reserve_bytes=0)
     assert not (tmp_path/'bundle').exists()

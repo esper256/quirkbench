@@ -49,7 +49,7 @@ image boot or release-qualification run.
 
 Initial registry-mode installations can explicitly run `admin repository configure --repository
 ALIAS --url HTTPS_URL --signing-home EXISTING_PRIVATE_HOME --fingerprint FULL_FINGERPRINT
---request-id ID [--unit PATH] [--json]` with the existing native controller service
+--request-id ID [--json]` with the existing foreground controller
 stopped and no issued target trust. It initializes a fresh state-owned repository
 using existing operator signing trust and preserves an exact private, versioned setup
 continuation. It never creates keys, starts services or rotates existing publication.
@@ -225,7 +225,8 @@ archive and manifest digests), resource/connection/logout choices and ordered co
 steps. Runtime validation additionally checks canonical paths/IPs and digest relationships.
 Readiness retains existing service fields and separately reports database, resources,
 runtime, release, builder, enrollment and target count. Accepted setup is still partial:
-native service startup is available with explicit `--configure-controller`. Signed release
+controller configuration is published with explicit `--configure-controller`; start
+the foreground controller separately with `admin controller run`. Signed release
 readiness rechecks retained authenticated archives. `setup --builder-archive` admits
 capture/import through the existing worker; read-only builder readiness requires
 retained exact OCI inputs and current native image availability. A separately
@@ -328,8 +329,9 @@ assert current trust. Missing or inconsistent retained objects are unavailable.
 | `target qualify TARGET` | M7 separately authorized qualification; bounded unattended authority remains C6, not a consequence of pairing or managed mode. |
 
 The CLI redesign plan owns current spelling and help fixtures; unsupported
-commands must not pretend to work. Keep frozen wire names such as `device_id`,
-`session_id` and existing `--device` options. No bulk database vocabulary migration.
+commands must not pretend to work. Public target-selection options use `--target`;
+keep frozen wire and stored names such as `device_id` and `session_id`.
+No bulk database vocabulary migration.
 
 ## New records and compatibility
 
