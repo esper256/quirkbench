@@ -13,6 +13,7 @@ from .boot import BootError, RecoveryConfig, _canonical, _fsync_dir
 RECOVERY_ENABLED_LINKS = {
     "multi-user.target.wants/quirkbench-recovery.service": "../quirkbench-recovery.service",
     "multi-user.target.wants/quirkbench-console.service": "../quirkbench-console.service",
+    "multi-user.target.wants/quirkbench-terminal.service": "../quirkbench-terminal.service",
     "multi-user.target.wants/quirkbench-supervisor.service": "../quirkbench-supervisor.service",
     "multi-user.target.wants/NetworkManager.service": "/usr/lib/systemd/system/NetworkManager.service",
     "local-fs.target.wants/var.mount": "../var.mount",
@@ -24,7 +25,7 @@ RECOVERY_MASKED_UNITS = frozenset({
     "udisks2.service", "systemd-pstore.service", "systemd-hibernate.service",
     "systemd-suspend.service", "systemd-hybrid-sleep.service",
     "systemd-suspend-then-hibernate.service", "systemd-zram-setup@.service",
-    "systemd-remount-fs.service", "getty@tty1.service",
+    "systemd-remount-fs.service", "getty@tty1.service", "getty@tty2.service", "getty@tty3.service",
     "systemd-repart.service", "systemd-repart.socket",
     "systemd-factory-reset-request.service", "systemd-factory-reset.socket",
     "systemd-bootctl.socket", "systemd-boot-random-seed.service",
@@ -251,7 +252,7 @@ def _check_recovery_unit_links(rootfs: Path, *, strict_direct_links: bool = Fals
         if strict_direct_links:
             raise BootError("required recovery systemd units missing")
         return
-    for name in ("quirkbench-recovery.service", "quirkbench-console.service",
+    for name in ("quirkbench-recovery.service", "quirkbench-console.service", "quirkbench-terminal.service",
                  "quirkbench-supervisor.service", "quirkbench-supervisor-failure.service",
                  "quirkbench-network-state.service", "var.mount", "tmp.mount"):
         if (units / name).is_symlink():
@@ -418,9 +419,9 @@ def _install_runtime_files(rootfs: Path, assets_dir: Path | None = None, *, cand
     settings.mkdir(parents=True, exist_ok=True)
     units = rootfs / "etc/systemd/system"
     units.mkdir(parents=True, exist_ok=True)
-    for name in (("quirkbench-candidate.service",) if candidate else ("quirkbench-recovery.service", "quirkbench-console.service", "var.mount", "tmp.mount")):
+    for name in (("quirkbench-candidate.service",) if candidate else ("quirkbench-recovery.service", "quirkbench-console.service", "quirkbench-terminal.service", "var.mount", "tmp.mount")):
         shutil.copyfile(assets / name, units / name)
-    unit_links = (("multi-user.target", "quirkbench-candidate.service"),) if candidate else (("multi-user.target", "quirkbench-recovery.service"), ("multi-user.target", "quirkbench-console.service"), ("local-fs.target", "var.mount"), ("local-fs.target", "tmp.mount"))
+    unit_links = (("multi-user.target", "quirkbench-candidate.service"),) if candidate else (("multi-user.target", "quirkbench-recovery.service"), ("multi-user.target", "quirkbench-console.service"), ("multi-user.target", "quirkbench-terminal.service"), ("local-fs.target", "var.mount"), ("local-fs.target", "tmp.mount"))
     for target, unit in unit_links:
         wants = units / (target + ".wants")
         wants.mkdir(parents=True, exist_ok=True)
@@ -443,32 +444,43 @@ def _install_runtime_files(rootfs: Path, assets_dir: Path | None = None, *, cand
         old_network_link.unlink()
     network_mount = "quirkbench-network-state.service"
     (units / network_mount).write_text(
-        "[Unit]\nDescription=Quirkbench transient network profiles\nBefore=NetworkManager.service\n"
-        f"After={prerequisite}\nRequires={prerequisite}\n"
+        "[Unit]\nDescription=Quirkbench transient network profiles\nBefore=NetworkManager.service\n" +
+        (f"After={prerequisite}\nRequires={prerequisite}\n" if candidate else "") +
         "[Service]\nType=oneshot\nRemainAfterExit=yes\n"
         "Environment=PYTHONPATH=/usr/lib/quirkbench\n"
         "ExecStartPre=/usr/bin/mkdir -p -m 0700 /etc/NetworkManager/system-connections\n"
-        "ExecStart=/usr/bin/mount -t tmpfs -o mode=0700,nosuid,nodev,noexec,size=1M tmpfs /etc/NetworkManager/system-connections\n"
-        "ExecStartPost=/usr/bin/python3 -m quirkbench.network_profiles\n"
+        "ExecStart=/usr/bin/mount -t tmpfs -o mode=0700,nosuid,nodev,noexec,size=1M tmpfs /etc/NetworkManager/system-connections\n" +
+        ("ExecStartPost=/usr/bin/python3 -m quirkbench.network_profiles\n" if candidate else "") +
         "ExecStop=/usr/bin/umount /etc/NetworkManager/system-connections\n")
     network_dropin = units / "NetworkManager.service.d"
     network_dropin.mkdir(exist_ok=True)
     (network_dropin / "quirkbench.conf").write_text(
-        f"[Unit]\nRequires={network_mount}\nAfter={network_mount}\n")
+        f"[Unit]\nRequires={network_mount}\nAfter={network_mount}\n" +
+        ("" if candidate else "[Service]\nEnvironment=PYTHONPATH=/usr/lib/quirkbench\nExecStartPre=/usr/bin/python3 -m quirkbench.network_profiles --recovery\n"))
     network_link = units / "multi-user.target.wants/NetworkManager.service"
     if network_link.exists() or network_link.is_symlink():
         network_link.unlink()
     network_link.symlink_to("/usr/lib/systemd/system/NetworkManager.service")
-    for name in sorted(RECOVERY_MASKED_UNITS - {"getty@tty1.service"}):
+    getties = {"getty@tty1.service", "getty@tty2.service", "getty@tty3.service"}
+    for name in sorted(RECOVERY_MASKED_UNITS - getties):
         link = units / name
         if link.exists() or link.is_symlink():
             link.unlink()
         link.symlink_to("/dev/null")
     if not candidate:
-        getty = units / "getty@tty1.service"
-        if getty.exists() or getty.is_symlink():
-            getty.unlink()
-        getty.symlink_to("/dev/null")
+        for name in sorted(getties):
+            getty = units / name
+            if getty.exists() or getty.is_symlink():
+                getty.unlink()
+            getty.symlink_to("/dev/null")
+        journal = rootfs / "etc/systemd/journald.conf.d"
+        if journal.is_symlink() or (journal.exists() and not journal.is_dir()):
+            raise BootError("staged journal settings escape target rootfs")
+        journal.mkdir(exist_ok=True)
+        setting = journal / "quirkbench-console.conf"
+        if setting.is_symlink() or (setting.exists() and not setting.is_file()):
+            raise BootError("invalid staged journal settings")
+        setting.write_text("[Journal]\nTTYPath=/dev/tty1\nForwardToConsole=no\n")
         default = units / "default.target"
         if default.exists() or default.is_symlink():
             default.unlink()

@@ -48,8 +48,10 @@ class Runner:
         else: pytest.fail('unexpected compiler or stage: '+phase)
 
 
-def prepared(tmp_path):
+def prepared(tmp_path, *, version=2):
     recipe,lock,store,_=stock_fixture(tmp_path)
+    if version==3:
+        recipe={**recipe,'schema_version':3,'layout':{'factory_size_mib':4096,'root_mib':2048,'library_payload_bytes':0}}
     runner=Runner(); stage=tmp_path/'stock-stage'
     result=prepare_recovery_image_stage(recipe,None,store,stage,tmp_path/'stock.img',runner=runner,
         limits=LIMITS,rootfs_installer=installer)
@@ -177,3 +179,26 @@ def test_runtime_mutation_during_dracut_cannot_produce_image_inputs(tmp_path):
         prepare_recovery_image_stage(recipe,None,store,stage,tmp_path/'image.raw',
             runner=ChangingRunner(),limits=LIMITS,rootfs_installer=installer)
     assert not (tmp_path/'image.raw').exists()
+
+
+def test_v3_stock_stages_select_existing_prepared_assembler_without_image_build(tmp_path):
+    recipe,lock,store,stage,result,runner=prepared(tmp_path,version=3)
+    inputs=result['image_inputs'];inputs.validate()
+    assert inputs.controller_prepared and inputs.experiment_mib==inputs.library_mib==inputs.log_budget_mib==0
+    assert runner.phases==['initramfs-stock-recovery','audit-recovery-initramfs']
+    from quirkbench.image import partition_layout,EMPTY_DATA_MIB,MIB,SECTOR
+    parts=partition_layout(inputs.size_mib,inputs.root_mib,controller_prepared=inputs.controller_prepared)
+    assert (parts[3]['end']-parts[3]['start']+1)*SECTOR==EMPTY_DATA_MIB*MIB
+    assert not inputs.output.exists()
+    assert (stage/'rootfs/etc/systemd/system/quirkbench-terminal.service').is_file()
+    assert not (stage/'rootfs/usr/lib/quirkbench/quirkbench/capacity_setup.py').exists()
+
+
+@pytest.mark.parametrize('missing',['usr/bin/bash','usr/bin/nmtui','_curses','fcntl'])
+def test_actual_staged_console_dependency_audit_rejects_missing_payload(tmp_path,missing):
+    from quirkbench.recovery_stock_pipeline import audit_console_dependencies
+    _,_,_,stage,_,_=prepared(tmp_path,version=3)
+    root=stage/'rootfs';audit_console_dependencies(root)
+    path=root/missing if '/' in missing else next(root.glob('usr/lib*/python3.*/lib-dynload/'+missing+'.*.so'))
+    path.unlink()
+    with pytest.raises(BuildError,match='stock console'):audit_console_dependencies(root)

@@ -12,8 +12,7 @@ from .recovery_rootfs import CASReader
 from .store import ArtifactStore, atomic_write
 
 MAX_MANIFEST=1024**2
-DEFAULT_LAYOUT={'root_mib':2048,'factory_size_mib':4096,'experiment_mib':32768,
-                'library_mib':32768,'log_budget_mib':4096}
+DEFAULT_LAYOUT={'root_mib':2048,'factory_size_mib':4096,'library_payload_bytes':0}
 
 
 def load(raw):

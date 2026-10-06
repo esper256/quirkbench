@@ -23,7 +23,7 @@ read-through. Superseded plans, run logs and investigation histories live in Git
 | Backup coverage and paused restore | [Backup and restore](backup-and-restore.md) |
 | Architecture and target interfaces | [Architecture/storage policy](architecture.md), [protocol](protocol.md), [image layout](debug-image.md) |
 | Recovery design and limitations | [Recovery synthesis](recovery-base.md), [evidence coverage](recovery-and-evidence.md), [watchdog qualification](watchdog-qualification.md) |
-| Planned recovery dashboard and local troubleshooting | [Recovery console UX plan](recovery-console-ux-plan.md); intended behavior, not current capabilities |
+| Recovery dashboard and local troubleshooting | [Recovery operations](recovery-operations.md); [approved UX plan and software acceptance](recovery-console-ux-plan.md) |
 | Proposed experimental kernel tailoring | [Kernel design](targeted-experiment-kernels.md), an M3 input |
 | Vocabulary and validation | [Terminology](terminology.md), [testing policy](testing-policy.md), [release gates](../acceptance/README.md) |
 

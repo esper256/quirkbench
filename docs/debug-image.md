@@ -20,14 +20,28 @@ dracut and the existing image adapter. Recovery runs without SELinux enforcement
 bounded RAM runtime state and NetworkManager/nmtui. Stock synthesis is implemented; actual image and hardware qualification must be
 recorded for the selected bytes.
 
-## Layout revision 2
+## Current prepared layout (revision 3)
 
-The standard image writer receives a compact GPT `.img` plus checksum. The factory
-image contains four partitions and six preassigned partition identities. Attended
-first-boot setup will commission the final layout on the positively identified USB
-after local capacity confirmation. The screen and larger supported sizing choices
-exist in the software runtime; assembled-boot validation remains open. Factory boot
-blocks until a completed commissioning journal matches the observed layout:
+Fresh stock recipes produce a compact factory artifact with an empty experiment
+filesystem. `quirkbench recovery prepare` plans and writes the final six-partition
+USB on the controller, preserves the exact fixed recovery bytes, and stages public
+trust plus a single-use initial invitation on mutable control storage. The library
+payload budget is zero; only minimum filesystem overhead is reserved. Remaining
+aligned capacity is split equally between experiments and evidence, with no RAM
+admission rule. The target validates completion and geometry without partitioning,
+formatting or repairing media. Incomplete media must be prepared again on the
+controller. See [controller preparation](recovery-operations.md#controller-usb-preparation).
+
+Mount roles, candidate one-shot authorization and automated internal-disk protection
+are unchanged. Space is checked and failures handled by the affected operation;
+small media does not promise that every candidate or dump fits.
+
+## Historical layout revision 2
+
+Retained revision-2 images and commissioning records keep their original meaning.
+Their four-partition factory artifacts required a completed commissioning journal
+for the final six-partition layout. The capacities and RAM policy below describe
+those historical records; they are not fresh-media defaults or a target setup path.
 
 | Partition | Default capacity | Access and contents |
 | --- | --- | --- |
@@ -45,27 +59,17 @@ Recovery mounts experiments at `/var/lib/quirkbench/experiments`. Candidates use
 execution. OSTree `/usr` remains read-only. Recovery uses `ro,noload` and no fsck
 writes. No code searches for installed operating systems or internal data disks.
 
-Commissioning records geometry before modifying GPT, preserves existing p4 data,
+Historical commissioning recorded geometry before modifying GPT, preserves existing p4 data,
 grows its filesystem and creates only the expected new library/evidence partitions.
 It uses standard tools, rechecks identity before mutations and observes completed
 steps on retry. An ambiguous interrupted format with no recognizable expected
-filesystem stops for human investigation; it never blindly reformats. The required
-evidence allocation includes the configured log budget, twice detected RAM and
-20% capacity headroom. Defaults target a 250/256 GB or larger external SSD.
+filesystem stops for human investigation; it never blindly reformats. The historical required
+evidence allocation included the configured log budget, twice detected RAM and
+20% capacity headroom. Those defaults targeted a 250/256 GB or larger external SSD.
 
-Before any partition mutation, a local RAM-backed screen shows positively identified
-media, RAM/capacity requirements and proposed sizing. Confirmed geometry is durably
-journaled on boot state before expansion; credentials and evidence storage are not
-prerequisites. A retry uses the same plan. Moving media to a higher-RAM target rechecks
-capacity eligibility and never triggers automatic repartitioning. See the
-[product contract](product-interface.md#endpoint-changes-and-media-capacity).
-Sizing is chosen at commissioning; later layout changes require rebuilding media.
-Version 1 prototype images require rebuilding, not in-place conversion. Existing controller records retain their original interpretation.
-
-Recovery mounts evidence before optional filesystems. An unavailable experiment or
-library filesystem blocks new work but does not prevent recovery evidence upload.
-All partitions share one physical USB failure domain, so continuous controller
-uploads remain necessary.
+The old commissioning journal remains readable for retained evidence. Moving media
+never authorizes repartitioning or resizing; new media uses the controller-prepared
+policy above. Reprepare old unsupported media explicitly, after retaining its data.
 
 ## Live evidence and physical handoff
 

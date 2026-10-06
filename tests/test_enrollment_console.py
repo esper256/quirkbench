@@ -24,9 +24,10 @@ UUID='12345678-1234-1234-1234-123456789abc'
 
 
 @pytest.fixture
-def pairing(publication,tmp_path):
-    c,_,_,kwargs=publication;code=create_code(c,'console','console-code',**kwargs)
-    config=json.loads((c.root/'private/controller-service.json').read_bytes())
+def pairing(publication,tmp_path,request):
+    c,_,_,kwargs=publication;code=create_code(c,'console','console-code',ttl_seconds=getattr(request,'param',None),**kwargs)
+    from quirkbench.controller_service import configuration
+    config=configuration(c.root)
     identity=inspect_identity(Path(config['cert']).parent,run=Commands())
     observation={'certificate_sha256':identity['certificate_sha256'],'certificate_pem':Path(identity['certificate']).read_text()}
     control=tmp_path/'console-control';control.mkdir(mode=0o700)
@@ -82,6 +83,7 @@ def test_lost_redemption_reply_resumes_same_key_request_and_activates_one_genera
     with pytest.raises(Conflict):console.run_initial_enrollment(control,input_stream=input_for(code,observation),**options)
 
 
+@pytest.mark.parametrize('pairing',[300],indirect=True)
 def test_expired_unredeemed_invitation_is_explicitly_replaced_without_losing_key(pairing):
     import time
     from quirkbench.enrollment_target import prepare_request

@@ -245,11 +245,13 @@ advertised current-owner publication capability reports enrollment availability;
 it requires explicit repository publication and verified current TLS identity.
 Full setup acceptance and native commissioning remain pending.
 
-Target pairing uses target pair NAME with an optional request ID and invitation
-lifetime. Human and JSON calls retain the same name-derived retry identity when it
-is omitted; expired or redeemed invitations require a new explicit ID. The full
-controller fingerprint must be compared on the recovery console before transmitting
-the one-use code. Target show resolves an unambiguous recorded name or exact target
+Target pairing uses target pair NAME with an optional request ID. New initial
+invitations do not expire; they are single-use and explicitly cancellable/revocable.
+Human and JSON calls retain the same name-derived retry identity when it is omitted;
+redeemed/cancelled invitations and expired historical v1 invitations require a new
+explicit ID. Manual pairing compares the full controller fingerprint on the recovery
+console before transmitting the one-use code; explicit controller preparation stages
+that trust for the normal USB journey. Target show resolves an unambiguous recorded name or exact target
 ID and exposes the current v2 status in both presentation modes. Historical v1
 record readers remain internal. The status includes a 30-second advisory contact
 window, separate from readiness or execution permission.
@@ -279,7 +281,7 @@ Only two explicit registry routes accept this separate credential: upload and
 evidence acknowledgment. No register/claim/start/heartbeat/handoff/completion,
 repository access or physical-state claim is permitted. Fresh owner/scope/time
 checks fence I/O and ACK replay; original attempt tokens and attribution remain.
-Recovery console choice 7 exports an exact original plan with `plan REQUEST_ID`
+Recovery **Connection details → Review original evidence** exports an exact original plan with `plan REQUEST_ID`
 and drains its selected records with `drain REQUEST_ID GRANT_ID` after private grant
 staging. Original binding/media/runtime/trust and immutable source checks precede
 requests and selected ACK saves; retries never widen the plan or complete the attempt.
@@ -472,10 +474,11 @@ local shutdown sequence without requiring a controller acknowledgment of uploads
 
 ## Endpoint changes and media capacity
 
-**M2 guided setup and maintenance.** Reuse implemented capacity choices and journaled
-geometry; do not reimplement them or remove them as premature features. Integrate
-the fresh-user screens and explicit paused endpoint maintenance. Local full
-boot-device confirmation and capacity refusal remain mandatory before mutation.
+**M2 guided setup and maintenance.** New media uses controller-prepared geometry;
+retain historical record readers without offering target-side partitioning as a
+normal setup action. Integrate fresh-user screens and explicit paused endpoint
+maintenance. Controller preparation requires exact selected-device confirmation;
+individual operations handle capacity shortages without silently losing evidence.
 
 Endpoint migration is an operator-guided controller/target setup transaction. A changed
 IP may require a new certificate SAN, even when the CA is retained. Validate endpoint
@@ -485,14 +488,38 @@ when controller trust identity changes. Never bypass TLS or silently replace tru
 Recommend a stable DHCP reservation where available; address changes do not require
 reflashing media.
 
-Before the first partition mutation, recovery shows a read-only external-device identity,
-capacity/RAM check, proposed geometry and supported advanced sizing choices. Run this
-screen from recovery/RAM before evidence exists. Persist the confirmed geometry in the
-existing boot-state commissioning journal before changes; retry the same plan, observe
-completed steps and never reformat an existing filesystem on a missing acknowledgement.
-No credentials are needed for this step. Recheck evidence/log/dump capacity when moved
-to a target with different RAM; insufficient capacity blocks affected operations, never
-automatically repartitions enrolled media. Later resizing is not a v1 repair shortcut.
+New USB preparation is controller-side: read-only planning binds the explicitly
+selected whole USB, artifact, observed capacity/layout and attachment identity.
+Apply requires that exact plan and erase acknowledgement, with revalidation before
+every destructive phase. Stage the selected LAN endpoint/public fingerprint and
+single-use initial invitation outside the fixed recovery root; never copy controller
+private keys or bind the USB to controller hardware. Only verified completion reports
+prepared media. Retain historical records without automatic target-side partitioning.
+Budget actual recovery/library content and split remaining aligned capacity equally
+between experiments/evidence, without target RAM admission. Space failure blocks the
+affected operation and preserves unuploaded evidence, with no implicit resize/eviction.
+
+The recovery dashboard reads independent facts. Its recommendation follows this
+table; logs, offline report collection/export, the local terminal and power remain
+accessible in every row. A recommendation never grants execution authority.
+
+| Observed fact | Recommended action | Stateful actions and prerequisites |
+| --- | --- | --- |
+| Missing/malformed/incomplete prepared media | View error and controller re-preparation instructions | Retry checks; no target partition/format operation |
+| Evidence or experiment space exhausted | Upload/export or explicit eligible cleanup for that operation | Preserve unuploaded evidence; retry only the affected operation |
+| Evidence storage unavailable | View storage failure and retry checks | Pairing, saving connections and evidence maintenance unavailable |
+| Hardware binding unavailable or media moved | View binding failure / explicit retarget workflow | No saved-profile restoration or implicit re-enrollment |
+| Network service or private RAM profile storage failed | View network failure and retry local networking | No profile writes until private RAM storage and service checks pass |
+| Network disconnected, including missing Wi-Fi/radio blocked | Wi-Fi & Ethernet with the specific hardware/radio explanation | Temporary connections independent of recovery storage and pairing |
+| Prepared trust present, network available, unpaired | Connect using prepared controller trust | One retained initial request; storage/binding and trust checks required |
+| Paired but no current authenticated contact | Retry connection / connection details | Show paired and disconnected separately; no readiness inference |
+| Live authenticated contact and usable prepared recovery | Connection details; continue on controller | Exact run approval remains mandatory |
+
+Remembering selected network connections requires verified writable control storage
+and binding. Debug sending requires normal paired authentication and explicit
+confirmation of the frozen report. Retargeting, endpoint maintenance, evidence
+draining and coordinated power retain their own reviewed confirmations. These are
+interface requirements; the new dashboard and joined preparation flow are pending.
 
 ## Backup completeness
 
@@ -593,3 +620,26 @@ parent completion commit atomically after final CAS/native-retention fences.
 actions retain their decision and pause without build or experiment. Parent success
 means submission; attempt approval, evidence acknowledgement, recovery and problem
 reproduction remain separate. No managed invocation or unattended grant is implied.
+
+
+### Recovery presentation and reported diagnostics
+
+The recovery dashboard is a read-only status reader plus serialized attended action
+adapters. Current authenticated contact is distinct from durable pairing. Temporary
+networking, offline diagnostics and the local VT3 root terminal remain independent
+of persistent USB verification. `T` opens that terminal; manual commands are
+unrestricted. Automated actions retain exact-run approval and storage protection.
+
+`admin diagnostics list/show/export/delete` manages reported recovery debug snapshots.
+A versioned manifest identifies opaque bounded attachments and an immutable transfer
+request. Existing paired target authentication authorizes upload; no experiment,
+attempt, recovery-arrival acknowledgement or execution permission is fabricated.
+Collection/export is offline; sending requires explicit review and confirmation.
+Only the controller's durable receipt permits a received message. Same-request
+replay returns the same receipt; changed content conflicts. Selected deletion
+preserves other diagnostic and ordinary retained artifacts, with restartable tombstones.
+
+Local **Power → Prepare safe restart** retains a v2 local restart record and performs
+the same verified evidence preparation as shutdown before ordinary OS reboot. It
+never arms a candidate or certifies physical power completion. Broken recovery offers
+explicitly unconfirmed local OS power actions without clearing durable records.

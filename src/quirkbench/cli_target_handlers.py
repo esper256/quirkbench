@@ -19,7 +19,8 @@ def target(args):
     try:
         root=discover_state_root(args.state).expanduser().absolute()
         if args.action=='add':
-
+            if args.ttl_seconds is not None:
+                raise ContractError('Initial pairing does not expire; omit --ttl-seconds. Cancel explicitly with target pairing cancel.')
             answer=add_target(root,args.name,request_id,ttl_seconds=args.ttl_seconds)
             request_id=answer['record']['request_id']
         elif args.action=='show':answer=show_target(root,args.name,version=args.status_version or (1 if args.json else 2))
@@ -62,7 +63,8 @@ def target(args):
             print('Compare this full certificate SHA-256 on the recovery console: '+record['certificate_sha256'])
             print('One-use code: '+answer['code'])
             print('Code ID: '+record['code_id'])
-            print('Expires at Unix time: '+str(record['expires_at']))
+            print('Valid until redeemed or cancelled.' if record['expires_at'] is None
+                  else 'Expires at Unix time: '+str(record['expires_at']))
             print('Pairing is pending. Exact candidate and attempt approval is still required.')
             if args.action=='retarget-code':
                 print('Retarget invitation only. Local one-shot clearance, original evidence preservation and stopped activation remain required.')

@@ -259,6 +259,30 @@ def closure(root,roots):
     return live
 
 
+def live_artifacts(root,db,retiring=(),*,legacy_uploads=None,include_reset=True,include_reports=True,include_unidentified=True):
+    """One complete reachability calculation for GC and selected deletion."""
+    from .upload_retention import recover_legacy
+    from .recovery_report_service import opaque_roots
+    legacy_uploads=legacy_uploads if legacy_uploads is not None else recover_legacy(root,db)
+    configured=set();blocked=[]
+    service=Path(root)/'private/controller-service.json'
+    if service.exists() or service.is_symlink():
+        from .controller_service import configuration
+        value=configuration(root).get('builder_archive_sha256')
+        if value is not None:
+            configured.add(sha256(value))
+            if not (Path(root)/'artifacts/objects'/value).is_file():
+                blocked.append('configured builder archive unavailable: '+value+'; retain the exact archive or explicitly reconfigure the builder')
+    live=closure(root,_roots(db,retiring)|legacy_uploads['roots']|configured)
+    if include_reports:live.update(opaque_roots(db))
+    from .controller_reset import archived_artifacts
+    if include_reset:live.update(archived_artifacts(root))
+    if legacy_uploads['unidentified_bytes']:
+        if include_unidentified:live.update(p.name for p in (Path(root)/'artifacts/objects').iterdir() if HASH.fullmatch(p.name))
+        blocked.append('CAS deletion deferred: unidentified legacy upload bytes; explicitly abandon their IDs')
+    return live,blocked
+
+
 def collect(root,*,dry_run=False):
     """Caller holds exclusive publication, coordinator and build locks."""
     from .filesystem import private_lock
@@ -268,18 +292,6 @@ def collect(root,*,dry_run=False):
         db.execute('BEGIN IMMEDIATE')
         from .upload_retention import recover_legacy,collect as collect_uploads
         legacy_uploads=recover_legacy(root,db,dry_run=dry_run)
-        # Manual service configuration is a live input binding, independent of
-        # count-based history. Activation preserves it; explicit unbinding ends
-        # its reachability without creating a permanent operator pin.
-        configured=set()
-        service=Path(root)/'private/controller-service.json'
-        if service.exists() or service.is_symlink():
-            from .controller_service import configuration
-            value=configuration(root).get('builder_archive_sha256')
-            if value is not None:
-                configured.add(sha256(value))
-                if not (Path(root)/'artifacts/objects'/value).is_file():
-                    blocked.append('configured builder archive unavailable: '+value+'; retain the exact archive or explicitly reconfigure the builder')
         candidates=_retire_candidates(db,config,root)
         retiring=[]
         for owner in candidates:
@@ -294,14 +306,17 @@ def collect(root,*,dry_run=False):
                     if path.exists(): disposable(path,Path(root))
             retiring.append(owner)
         # Eligibility precedes reachability. A blocked group remains a live root.
-        live=closure(root,_roots(db,retiring)|legacy_uploads['roots']|configured)
+        live,protection=live_artifacts(root,db,retiring,legacy_uploads=legacy_uploads,include_reset=False,include_reports=False,include_unidentified=False)
+        blocked.extend(protection)
         from .controller_reset import archived_artifacts
-        ordinary_live = set(live)
         archived = archived_artifacts(root)
+        ordinary_live = set(live)
         live.update(archived)
+        from .recovery_report_service import opaque_roots
+        report_objects=opaque_roots(db)
+        live.update(report_objects)
         if legacy_uploads['unidentified_bytes']:
             live.update(p.name for p in (Path(root)/'artifacts/objects').iterdir() if HASH.fullmatch(p.name))
-            blocked.append('CAS deletion deferred: unidentified legacy upload bytes; explicitly abandon their IDs')
         retired_roots={r['digest'] for r in db.execute('SELECT owner,digest FROM refs') if r['owner'] in retiring}
         garbage=closure(root,retired_roots)-live
         if not dry_run:
@@ -370,7 +385,7 @@ def collect(root,*,dry_run=False):
             sync_directory(objects)
             db.executemany('DELETE FROM storage_garbage WHERE digest=?',[(v,) for v in queued if v in live or not (objects/v).exists()]); db.commit()
         references=[dict(r) for r in db.execute('SELECT repository,revision FROM deployment_refs')]
-        for value in live - (archived - ordinary_live):
+        for value in ordinary_live:
             path=objects/value
             if path.is_file() and path.stat().st_size<=1024**2:
                 try:

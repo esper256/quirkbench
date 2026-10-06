@@ -123,6 +123,38 @@ the controller, not public internet. Clock plausibility is checked before TLS; a
 operator-supplied system time or a configured reachable time source, never a certificate
 verification bypass or an implicit firmware-clock write.
 
+Prepared enrollment uses the existing retained request/key, challenge, redemption
+and generation activation. It retains the inspected controller certificate against
+the staged fingerprint before activation. After interrupted activation, cleanup
+revalidates native trust, exact media/binding and the complete active generation
+before deleting the bootstrap secret. A request timeout preserves the same
+invitation and request; pairing never authorizes a run. These adapters are software
+foundations; the controller preparation command and automatic console handoff
+are not yet delivered.
+
+The explicit factory layout v3 carries fixed partition identity and source data
+extent without RAM or speculative library budgets. A completed prepared-media
+record describes the final six-role layout. Boot and paired runtime recheck it
+against current geometry; the target does not format or resize v3 media. The
+unversioned historical RAM assessment and factory v2 readers remain separate.
+Fresh stock recipes/candidates explicitly select v3 through the existing image
+pipeline. Retained stock v2 layouts remain unchanged. Software reader/component
+tests alone do not make a USB usable or qualify a produced image.
+
+The v3 assembler uses a minimal empty 16 MiB factory experiment filesystem;
+controller preparation grows a copy, never the signed artifact. Earlier larger
+v3 source extents remain explicit and cannot be shrunk. Regular-file preparation
+adapters verify the complete selected artifact and each copied extent, use the
+existing filesystem/GPT tools, and retain failed scratch components. Scratch
+completion is not device-write authorization or durable USB completion.
+
+Prepared-media v2 retains an equal-length `PREPARING`/`COMPLETED` value; v1's
+boolean completion retains its original meaning. The scratch FAT adapter proves
+that its proposed completion sector backs the actual file by patch/read/revert/read.
+Final publication requires prior durable device verification. A final write, sync
+or readback failure means completion is **unconfirmed**, not guaranteed incomplete.
+These primitives do not yet deliver the controller write command.
+
 Restore only the selected private network profile into RAM after target binding is
 checked. Recovery mounts evidence before optional experiment/library storage; failure
 of those optional mounts must not prevent setup, credential access or uploads.
@@ -149,7 +181,8 @@ report retained evidence and unavailable paths explicitly.
 
 ## How the image is synthesized
 
-`RecoveryRecipe` v2 implements the stock successor to v1. The fixed recovery-image
+`RecoveryRecipe` v2 implements the historical stock successor to v1; v3 selects
+controller-prepared geometry with zero shipped library payload. The fixed recovery-image
 coordinator now joins the stages over
 existing adapters. The recipe names the platform, Fedora release, builder digest,
 RPM snapshot/lock, stock kernel/module package identities and hashes, runtime revision,
@@ -187,17 +220,22 @@ The synthesis stages are:
 6. **Assemble regular-file media.** Feed the validated root tree, kernel, initramfs and
    provenance to the existing `quirkbench image` adapter. It uses sgdisk, filesystem
    tools and grub-mkimage for the compact GPT image, fixed recovery and SMBIOS-bound
-   one-shot loader. The established commissioning code creates the final six roles
-   on first boot after explicit local device/geometry confirmation is journaled.
-   The implemented capacity screen offers reviewed sizing choices and records the
-   confirmed geometry. Confirmation runs from RAM before evidence exists;
-   retries preserve the same plan and existing filesystems. No installer resize service
-   or automatic enrolled-media repartition is introduced.
+   one-shot loader. New media preparation creates the final six roles on the
+   controller after explicit selected-device/geometry confirmation, and publishes
+   a versioned completion record outside the fixed recovery root. The target
+   validates this geometry without partitioning or formatting. Retain historical
+   commissioning readers without making first-boot partitioning a normal setup
+   path. Zero shipped library payload reserves only filesystem overhead; remaining
+   aligned capacity is split equally between experiments and evidence. No RAM-based
+   admission limit applies to prepared media. Shortage blocks the affected write
+   and retains unuploaded evidence; neither resize nor silent eviction is a remedy.
 7. **Publish.** Verify complete staged output and provenance, synchronize, then publish
    `.img` (optionally `.img.xz`), checksum and release manifest. Sign distribution
    metadata with a release key kept on the controller. Factory media has no controller
    trust pin, enrollment authorization, device credentials or experimental deployment
-   requirement. Etcher performs physical writing/verification.
+   requirement. Controller preparation writes/verifies the selected USB and stages
+   public trust and a single-use initial enrollment secret in mutable control
+   storage. Generic flashing alone does not provide a prepared enrollment handoff.
 
 The release manifest binds recipe/schema revision, architecture, source/RPM/toolchain
 identities, SELinux/protection policy, runtime and firmware packages, kernel/initramfs
@@ -237,9 +275,9 @@ release. This contract does not qualify any image bytes.
 
 ## Recipe execution compatibility
 
-Recovery image generation executes only stock Fedora schema-v2 recipes. The old
+Recovery image generation executes stock Fedora schema-v2/v3 recipes. The old
 custom-kernel recovery compiler, its introspection-based cache and interrupted-v1
-resume machinery have been retired. Select a new v2 recipe and fresh workspace;
+resume machinery have been retired. Select a new v3 recipe and fresh workspace;
 an old recipe is never silently converted or given new hashes. Historical v1
 recipe/release readers remain available for evidence inspection. Candidate and
 experiment kernel compilation, including Fedora SRPM preparation, is unchanged.
@@ -272,3 +310,14 @@ probing; new enabled behavior must satisfy the same boot/storage contract.
 The build stages the selected inventory and verifies its hash and Fedora release.
 Installation and the final factory-root audit reject changed generators or unknown
 enablement. No inventory update establishes native boot or hardware qualification.
+
+Controller preparation admission now binds the current source bytes and derived
+factory identity, selected USB attachment, bounded old-layout metadata and controller
+trust in an explicit erase confirmation. Layout inspection uses the existing native
+GPT reader on a regular metadata view; ambiguous physical-tail GPTs and repair or
+conversion are refused. Signed source admission uses the existing signature readers;
+unsigned development must be selected explicitly. The controller's `recovery prepare` command now joins these admission foundations
+to final regular components and the bounded descriptor-only privileged writer.
+Native verification proofs bind component bytes through the privilege handoff;
+STATE completion is published only after durable partition/GPT readback. Software
+fixtures establish neither actual device writing nor physical boot qualification.

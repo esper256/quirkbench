@@ -1,12 +1,12 @@
 # Make recovery feel like a finished Quirkbench product
 
-Status: implementation plan; this document describes intended behavior, not current capabilities.
+Status: software implementation is complete in [PR #147](https://github.com/esper256/quirkbench/pull/147), including reconciliation with the path-portable controller. Independent boundary review and local focused acceptance passed. Actual USB preparation/boot and production release acceptance remain separate gates. Existing images do not acquire these changes automatically.
 
 Owner-approved direction: prepare the final USB layout and controller connection on the controller; never repartition on the target. Reserve library space only for actual shipped contents (currently zero), split remaining capacity between experiments and evidence, and handle space shortages at the affected operation rather than imposing a RAM-based admission limit. Debug uploads require normal pairing; collection and local export do not. A selectable terminal action must work without function keys.
 
 Product acceptance: an operator prepares one USB on the controller, boots a target, configures networking if necessary and reaches the existing investigation workflow without partition management or copied fingerprints. A failure always leaves an understandable explanation and accessible diagnostics/terminal. This plan includes controller preparation because it removes target-side work; it is not permission for a general installer, UI framework or pairing redesign.
 
-Implementation guidance: follow the [current location and identity contract](implementation-contracts.md#local-locations-and-durable-identity). Prepared-media identity comes from the selected device and immutable content, not a saved controller root. Derive managed trust/enrollment files from existing IDs and layout; retain external input selections once in ordinary local configuration. Use fresh current-format state for software checks. This changes no boot-device protection, pairing or exact-run authorization guarantee.
+Implementation guidance: follow the [current location and identity contract](implementation-contracts.md#local-locations-and-durable-identity). Prepared-media identity comes from the selected device and immutable content, not a saved controller root. Derive managed trust/enrollment and staging files from existing IDs and layout. Preparation uses current explicit image/device selections, compares content/trust and physical attachment identities, and never persists their paths in plans or handoffs. Necessary external configuration remains once in ordinary local configuration. Use fresh current-format state for software checks. This changes no boot-device protection, pairing or exact-run authorization guarantee.
 
 ## 1. Experience: a guided dashboard
 
@@ -105,7 +105,7 @@ Preparation reports usable experiment and evidence capacities, not a maximum sup
 
 1. **Automatic local initialization:** check prepared media and create private temporary network storage without asking the user to approve routine service startup. Show concrete failures, not “verifying recovery.”
 2. **Wi-Fi & Ethernet:** open `nmtui`, then return to a refreshed dashboard. Ethernet may already be connected. Temporary networking does not depend on writable evidence storage.
-3. **Connect to controller:** use the prepared endpoint and trust to complete normal pairing through existing authenticated enrollment. Controller preparation is the explicit authorization to use that staged endpoint/trust for initial enrollment; connect automatically when its prerequisites become available. No manual fingerprint transcription in the normal prepared-USB journey. Permit only one enrollment attempt at a time and use bounded retry backoff; authentication/trust failures require repair rather than endless retries. Show connecting, paired and currently connected as distinct states. Expired enrollment credentials or changed controller trust require explicit repair, never a verification bypass.
+3. **Connect to controller:** use the prepared endpoint and trust to complete normal pairing through existing authenticated enrollment. Controller preparation is the explicit authorization to use that staged endpoint/trust for initial enrollment; connect automatically when its prerequisites become available. No manual fingerprint transcription in the normal prepared-USB journey. Permit only one enrollment attempt at a time and use bounded retry backoff; authentication/trust failures require repair rather than endless retries. Show connecting, paired and currently connected as distinct states. Expired historical credentials or changed controller trust require explicit repair, never a verification bypass.
 4. **Remember this connection:** offer explicit saving of selected connections when verified writable control storage and binding are available. Otherwise say “Connected for this session. USB storage must be available to remember this connection.”
 5. **Ready:** direct the user back to their controller and coding agent.
 
@@ -263,3 +263,66 @@ Use existing focused suites and cached integration infrastructure. Aim for 30 se
 Select these gates when console code, controller preparation/layout policy, action adapters, network/boot services, diagnostic transport, payload packaging, pinned dependency identities or console boot arguments change. Run the matching gate once per relevant revision; reuse matching evidence. No image builds, flashing, QEMU or kernel compilation for these checks. A report records the source revision and dependency identities tested, so passing checkout tests are not confused with checks of different image contents.
 
 At the next separately requested physical boot, use a short acceptance checklist: the dashboard appears without Enter; late boot logs stay off VT2; Wi-Fi works even when persistent USB storage is unavailable; the menu opens the real terminal and `exit` returns without function keys; a recovery report reaches the controller and can be exported; prepared media connects normally and reaches truthful readiness without partition changes. Pseudo-terminals and staged-unit checks cannot prove real VT switching, graphics-driver behavior, Wi-Fi drivers or actual PID 1 startup ordering. Software tests alone must not be presented as physical-console qualification. Feed failures back into the narrowest fast regression that can faithfully detect them.
+
+
+Completed software acceptance:
+
+| Acceptance group | Implemented and checked |
+| --- | --- |
+| Preparation/layout | Exact device-bound plan/erase/apply; v3 final geometry; zero library payload plus minimum filesystem overhead; equal remainder split; nominal 32 GB actual-byte case; no RAM gate or target startup partitioning; signed fixed-byte preservation, replacement/interruption/mutation rejection and completion-last publication. Native GPT/filesystem adapters use disposable regular files. |
+| Enrollment/trust | Controller-staged public trust and USB-specific invitation; normal non-expiring single-use initial pairing with revocation, long-delay, duplicate/lost-reply and interrupted activation coverage; bootstrap secret erased after durable activation; historical readers preserved; no new execution authority. |
+| Networking/terminal | Private RAM networking independent of persistent storage; saved-profile restoration requires current verified binding; uncertain cleanup fails closed; candidate semantics unchanged. Actual packaged root shell exits to UI/fallback; VT2 UI, VT1/serial logs and independent VT3 terminal. |
+| Dashboard/actions | Independent complete state/action table including storage, moved media, missing identity, radio/hardware/service failures and disconnected pairing. Real PTY tests cover first paint without Enter, keyboard/help, resize, refresh/focus, slow/late completion, tool return, fallback/monochrome, EOF/signals and restart. Setup-file activation repeats storage/mount/binding/maintenance checks around existing supervisor ownership; power actions retain existing confirmations and evidence fences. Journal activity is explicitly recorded/pending, never inferred active execution. |
+| Reports | Offline bounded collection/preview/export and packaged terminal entry point; reviewed sanitized sources, secret canaries, truncation/control characters, deadline and descendant cleanup. Real paired HTTPS round trip, exact consent, durable receipt and replay across actual server restart; malformed/oversized/changed input, static/expired/revoked authorization, wrong certificate, disconnect/lost reply, collection and upload deadlines, ENOSPC and quota failures. Existing DB/CAS retention, selected deletion and completed-report backup/restore; no fabricated experiment/attempt or readiness. |
+| Joined/packaged journey | Production staged enrollment handoff → real status/action dispatch → temporary networking → normal pairing → collect/review → authenticated TLS upload → controller export, plus unpaired offline refusal/export. Fresh stock v3 recipe/foreground/durable worker and candidate joins; historical v2 readers retained; superseded target partition entry point omitted. Actual pinned Fedora units, generator consumers, extensions and payload entry points checked. |
+| Sensitivity | Targeted fixture mutations detect missing executables/extensions, masked native prerequisite, erroneous evidence-network dependency, active-VT log routing, withheld first paint and lost upload acknowledgement. No global mutation framework. |
+
+Final evidence (dependencies acquired separately; no image/physical operations):
+
+- Portable selected gate: `python -m ci.run run --suite recovery-console-reports
+  --output /tmp/quirkbench-final-console-report-gate --timeout 60`, **88 passed in
+  41.88s** (42.24s including evidence capture). This is above the 30s target and
+  within the unchanged 60s hard limit. The later setup eligibility correction
+  passed all 30 affected portable state tests; its unchanged TLS check passed in
+  the selected gate. Evidence: `/tmp/quirkbench-final-setup-eligibility-portable.log`.
+- Cached native gate: `QB_NATIVE_RECOVERY_CACHE=/tmp/quirkbench-console-native-cache-v6
+  python -m ci.run run --suite recovery-native --output /tmp/quirkbench-final-native-gate
+  --timeout 60`, **10 passed in 15.37s** (15.82s including evidence capture).
+  The preceding native integration evidence remains in
+  `/tmp/quirkbench-final-console-preparation-native.log`.
+- Additional dependency/routing/terminal sensitivity: 13 passed in 0.81s
+  (`/tmp/quirkbench-final-packaging-mutations.log`); CI selection and storage checks:
+  39 passed in 0.47s (`/tmp/quirkbench-final-selection-storage.log`).
+- Prior matching bounded-slice evidence remains at the paths recorded in the
+  preceding commits: preparation, invitation and native prefix checks; stock-v3
+  compatibility and durable-worker checks; report retention/backup and shutdown.
+  First-failure diagnostics are retained; they were not overwritten.
+- Source/dependency hashes: `/tmp/quirkbench-console-final-source-identities.json`.
+  CI evidence records base commit, dirty checkout, runtime/dependency versions,
+  exact selection, JUnit and bounded diagnostics. These source checks must not be
+  confused with a built image's identities.
+- Independent review: `prepared_media_design_review`, **gpt-6-astra/high**,
+  all bounded slices including final integration over
+  `7eb173e2520c218a7b6702818e365d90e9aecc8b`. Storage mount fences, recorded activity
+  labels and upload recovery-mode admission findings were corrected and reviewed;
+  final setup eligibility correction approved. No remaining source blockers.
+
+Physical acceptance remains the separately requested checklist above: actual USB
+preparation/interruption, boot readiness without Enter or partition changes, late
+logs staying off VT2, Wi-Fi with unavailable persistent storage, real VT3 shell/exit,
+normal prepared pairing and controller receipt/export. No software result proves
+physical VT switching, graphics/Wi-Fi drivers or PID 1 ordering. Production publisher
+provisioning/publication remains an independent release gate. RAM reports survive
+UI restart but disappear on reboot; full filesystems may prevent durable failure
+metadata. No automatic eviction, repartitioning or diagnostic authentication bypass.
+
+
+Path-portable integration evidence (PR #147): source `dba707b487f295a614747c8d5ed1cf38469a2eaf`. Preparation plans contain content/trust and physical attachment identities, without image/device/sysfs paths. Apply accepts current `--image` and `--device`, verifies them against the confirmed plan, and derives managed components from current staging. External source/device/certificate locations are transient helper arguments; certificate and device fences remain. Report export accepts Unix aliases. Diagnostic/reset-retained artifacts remain opaque during GC; selected report deletion preserves reset archival roots.
+
+- `make smoke`: 90 passed. Focused prepared-media/enrollment/copy/completion/stock-worker/runtime selection: 813 passed in 29.02s (`/tmp/quirkbench-reconcile-final-foundations.log`).
+- `python -m ci.run run --suite recovery-console-reports --output /tmp/quirkbench-reconcile-final-console --timeout 60`: 91 passed, 31.42s including evidence capture.
+- `QB_NATIVE_RECOVERY_CACHE=/tmp/quirkbench-console-integration-native python -m ci.run run --suite recovery-native --output /tmp/quirkbench-reconcile-final-native --timeout 60`: 10 passed, 14.59s including evidence capture. Cache prepared separately from already retained hash-pinned RPMs; no download during tests.
+- Diagnostic opacity/reset retention/device observation: 20 passed in 11.79s. Joined prepared enrollment, controller reset and shutdown: 139 passed; corrected fixture-only device failures are covered by the final foundation selection. First failures remain in `/tmp/quirkbench-reconcile-first.log`, `/tmp/quirkbench-reconcile-second.log` and the initial gate directories.
+- 110 local documentation links, changed JSON schemas and `git diff --check` passed. Required independent `console_path_review` (GPT-6-astra/high) approved exact source commit for paths, trust/device fencing, GC opacity/retention and shutdown. No installed state or physical target was changed.
+
+Follow-up integration checks: joined setup/startup/reset/shutdown selection passed 100 tests in 27.83s. Cold native CI exposed #148 (binary/source RPM version mismatch); corrected source NVR is proven by the retained RPM's SOURCERPM and an actual signed download matching the unchanged package hash. Manual console fixtures use current materialized TLS locations without writing them into configuration; historical expiry coverage explicitly injects v1 invitations. No product trust or package pin was changed.

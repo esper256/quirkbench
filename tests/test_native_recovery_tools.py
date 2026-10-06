@@ -17,6 +17,10 @@ def test_native_package_locations_follow_source_builds_and_pins():
     assert '/packages/systemd/' in native_recovery.rpm_location(systemd)[1]
     gcc = next(p for p in packages if p['name'] == 'libgcc')
     assert '/packages/gcc/' in native_recovery.rpm_location(gcc)[1]
+    mapper = next(p for p in packages if p['name'] == 'device-mapper-libs')
+    filename, url = native_recovery.rpm_location(mapper)
+    assert filename == 'device-mapper-libs-1.02.212-2.fc44.x86_64.rpm'
+    assert '/packages/lvm2/2.03.38/2.fc44/data/signed/' in url
     python = next(p for p in packages if p['name'] == 'python3-libs')
     assert '/packages/python3.14/' in native_recovery.rpm_location(python)[1]
 
@@ -50,6 +54,16 @@ def test_pin_changes_select_real_consumer():
     result = select(['src/quirkbench/profiles/stock-fedora44-rpm-candidate.v1.json'])
     assert 'recovery-native' in result['selected']
     assert 'integration/test_recovery_native.py' in result['tests']
+
+
+@pytest.mark.parametrize('path',['src/quirkbench/preparation_completion.py',
+    'src/quirkbench/preparation_components.py','src/quirkbench/prepared_media.py'])
+def test_prepared_media_changes_select_portable_and_actual_native_adapters(path):
+    result=select([path])
+    assert {'recovery-integration','recovery-native'}<=set(result['selected'])
+    assert 'tests/test_preparation_completion.py' in result['tests']
+    assert 'integration/test_preparation_native.py' in result['tests']
+    assert not result['unmapped']
 
 
 @pytest.mark.parametrize('wrong_bytes', [False, True])

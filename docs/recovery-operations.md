@@ -15,15 +15,34 @@ that interval to stop the countdown. Select **Quirkbench recovery - verbose boot
 diagnostics** when investigating a failed boot; no kernel command editing is needed.
 This starts the same fixed recovery kernel and initramfs, with verbose kernel,
 dracut, systemd and udev logging. Both recovery entries keep serial output and
-prefer the local screen for console diagnostics. An already armed, identity-checked
+route local boot diagnostics to VT1 rather than the active console. An already armed, identity-checked
 candidate retains its existing one-shot default; selecting diagnostics boots recovery.
 
-The expected destination is the **Quirkbench target recovery** console menu.
-Before first-boot capacity setup, **pending or blocked** is expected there. If boot
+The expected destination is the **Quirkbench recovery dashboard**, painted without pressing Enter.
+Use arrows/Enter, `?` for help, `L` for logs and `T` for the terminal.
+Status keeps current boot checks, USB storage, networking, pairing and authenticated
+controller contact separate. Disabled actions explain the reason and next step.
+Leaving an action screen does not cancel or duplicate its operation.
+New USB layouts are prepared on the controller; the target menu cannot partition
+or format them. If boot
 stops earlier, photograph the last errors and any dracut timeout/root-device messages;
 kernel USB-event messages alone do not establish successful recovery startup.
 The diagnostic entry grants no experiment approval and changes no storage protections,
 mounts, firmware settings or emergency-shell policy.
+
+The recovery UI owns VT2. The independent local root terminal owns VT3: choose
+**Open terminal** / press **T**, or use Ctrl+Alt+F3. `exit` returns to the running
+UI; if the UI is unavailable, the terminal explains the failure and stays usable.
+This terminal has no password or pairing requirement and commands can modify
+internal disks. Quirkbench's automated actions retain their storage protections;
+opening a shell grants no experiment approval. Boot logs remain on VT1 and serial.
+These are staged-software behaviors; actual VT switching requires physical acceptance.
+
+Temporary **Network** setup requires private RAM profile storage and NetworkManager,
+independently of evidence storage, boot verification or pairing. Saved connections
+remain gated by verified media and target binding. Incomplete secret cleanup blocks
+NetworkManager. If boot checks finish later, no saved secrets are automatically
+replayed into the running manager; explicitly retry saved-profile restoration.
 
 Dracut diagnostic reports, when produced, are in `/run/initramfs/rdsosreport.txt`;
 the boot journal and early reports are held in RAM and may disappear on reboot.
@@ -31,13 +50,12 @@ Do not expect persistent logs before evidence storage is verified. Retain photog
 or a VM serial log before restarting, and review verbose logs for private details
 before sharing them. Keep the boot USB connected while recovery is running.
 
-The factory image file is smaller than the required commissioned USB. Check the
-recipe's experiment/library sizes plus the target-RAM-dependent evidence requirement;
-the current 32 GiB experiment and 32 GiB library defaults cannot fit a 32 GB stick.
-Capacity rejection should not be mistaken for a successful commissioned boot.
-These diagnostics improve observability; they do not establish physical boot,
-storage protection or release qualification. Existing images require rebuilding
-from freshly prepared inputs to receive this menu.
+Controller preparation reports actual usable experiment/evidence capacities. The
+new prepared layout reserves no hypothetical library payload and splits remaining
+space equally, after fixed recovery and filesystem overhead. There is no RAM
+admission limit or promise that every experiment/dump fits. Historical v2 media
+retains its original commissioned geometry; reprepare rather than resize on-target.
+Existing images require rebuilding from fresh inputs to receive changed software.
 
 If a keyboard combination reports **this sysrq is disabled**, the kernel received
 the request but its current SysRq policy disallows that operation. Where permitted,
@@ -49,36 +67,74 @@ immediately resets without syncing/unmounting and is not attended safe shutdown;
 do not treat generic reboot or crash-key sequences as evidence-preserving recovery.
 See the [kernel SysRq reference](https://docs.kernel.org/admin-guide/sysrq.html).
 
-For initial pairing on verified recovery, configure temporary networking with
-**Network**, then choose **Connect to controller**. Supply the endpoint from
-controller `target pair NAME`; compare and type the full displayed certificate SHA-256
-before entering its code ID and one-use code. The console retains its own private
-key/request before exchange, stops the existing supervisor for activation and
-restarts it afterward. Pairing grants no candidate or attempt approval. Missing
-native `openssl`/`gpg`, unknown clock, mismatched trust or an active configuration
-block this initial path. Select `fedora44-pairing-v1` with `candidate-spec` below
-for the reviewed OpenSSL executable input. Stock staging/publication checks both
-executables; this does not establish native pairing acceptance. Staged manual setup
-remains available. After pairing/manual activation, **Save selected network connections**
-lists only RAM connection filenames; choose the numbered connections to retain
-privately. Only supported Ethernet/Wi-Fi profiles are saved. Passwords stay outside
-public artifacts. Later recovery/candidate boots check actual target/media/binding
-and active configuration before replay into private RAM. Changed or invalid selections
-stay blocked; uncertain replay cleanup blocks NetworkManager. Local Network setup
-remains available for clean pre-write rejection or complete rollback. Lifecycle
-maintenance for active enrollments remains unfinished. A lost COMPLETE reply can
-retry the same request/key. For an expired unredeemed invitation, obtain a new
-controller invitation and enter its code ID in **Connect to controller**. Confirm
-replacement of the displayed pending request; its original key stays in private
-history. Entering an archived invitation ID offers explicit original-request resume.
-An already completed controller redemption blocks a second identity; recover the
-original request or use explicit controller lifecycle maintenance. These initial-only
-choices refuse prior activation evidence, target work and changed trust/binding.
+Prepared media contains the controller's public trust and a USB-specific initial
+invitation. Once verified writable storage, target identity and networking are
+available, the dashboard automatically attempts normal pairing. A bounded network
+request timeout retains the same request/key; limited transient retries do not
+expire the invitation. Authentication/trust failures require explicit repair.
+Initial v2 invitations are single-use, non-expiring and explicitly revocable;
+historical v1 expiry and exceptional retarget invitations retain their meanings.
+Successful activation erases the staged bootstrap secret. Pairing never approves
+an experiment. Prepared trust does not authorize evidence removal or retargeting.
+
+**Connection details** contains existing binding/address/evidence maintenance.
+**Remember selected connections** saves only explicitly selected supported profiles
+in verified control storage. Temporary networking works independently. Uncertain
+secret replay cleanup leaves NetworkManager stopped; **Troubleshooting → Reset
+temporary connections** explicitly forgets this session after whole-manager
+shutdown and removes its RAM copies. Saved USB selections remain intact.
+
+## Recovery debug reports
+
+**Troubleshooting → Collect recovery report** captures reviewed current-boot sources
+in private RAM, bounded by ten seconds, 16 MiB payload and a 1 MiB manifest. Missing
+boot records, pairing, hardware identity or evidence storage do not prevent collection
+or explicit local export. Four RAM report directories bound retained snapshots;
+export/remove an old snapshot explicitly before another collection. RAM reports
+survive a UI restart, but disappear on reboot. Collection never scans/mounts internal
+disks or recursively copies configuration, evidence, home directories or history.
+
+Review the reported identities, omitted/truncated sources and escaped preview.
+Known credentials/private-key material are excluded before hashing or transmission;
+free-form logs can still identify machines or networks. **Review and send recovery
+report** requires normal pairing/current binding and explicit `SEND REPORT_SHA256`.
+A failed send retains local files. Only a durable controller receipt means received;
+a lost reply retries the same frozen report/request without duplication. Contents
+are reported diagnostics, never proof of healthy recovery or experiment approval.
+
+If the dashboard fails, the root terminal uses the same implementation:
+
+```sh
+python3 -m quirkbench.recovery_reports collect
+python3 -m quirkbench.recovery_reports list
+python3 -m quirkbench.recovery_reports show REPORT_SHA256
+python3 -m quirkbench.recovery_reports export REPORT_SHA256 --output /absolute/new-export
+python3 -m quirkbench.recovery_reports send REPORT_SHA256
+```
+
+Sending still requires interactive review/confirmation. On the controller:
+
+```sh
+quirkbench admin diagnostics list
+quirkbench admin diagnostics show REPORT_SHA256
+quirkbench admin diagnostics export REPORT_SHA256 --output /absolute/new-export
+quirkbench admin diagnostics delete REPORT_SHA256
+```
+
+Reports use existing managed storage with independent retention. Deletion requires
+an idle stopped controller and tombstones only the selected report, removes its
+partial uploads and unreferenced attachments, and preserves all ordinary CAS roots.
+Completed reports are included in controller backup/restore; partial uploads are
+not completion evidence and can require retry. No command posts reports publicly.
+A full controller rejects writes without receipt; export or retry after explicit cleanup.
 
 ## Recovery inputs and preparation
 
-New recovery input generation uses `RecoveryRecipe` v2, rootfs-lock v2 and
-release-candidate v2. The installed `stock-x86_64-uefi-usb-v1` policy has a separate
+New recovery input generation uses `RecoveryRecipe` v3, rootfs-lock v2 and
+release-candidate v3. V3 selects the existing prepared factory assembler: its layout
+contains only recovery root/factory sizes and zero shipped library payload. Final
+experiment/evidence capacities come from the actual USB selected by `recovery prepare`.
+Retained stock v2 recipes/candidates keep their original five-field geometry. The installed `stock-x86_64-uefi-usb-v1` policy has a separate
 identity from candidate profiles. Existing v1 records retain their original
 custom-kernel interpretation.
 
@@ -149,11 +205,12 @@ key and matching TLS client certificate/key. Recovery-only configuration can hav
 an empty repository mapping; experiments require a usable repository.
 
 For first setup without a shell, record the target system UUID shown on the
-recovery console and use it in the bundle's `target_binding`. After commissioning,
+recovery console and use it in the bundle's `target_binding`. After controller preparation,
 shut down the target and
 stage the complete bundle under `control/setup` on its explicitly selected evidence
 partition using the controller. Keep files private. Safely unmount that medium,
-boot recovery, configure networking with menu item 1, then select menu item 4.
+boot recovery, open **Wi-Fi & Ethernet**, then **Troubleshooting → Apply controller setup from USB file**.
+Confirm `APPLY SETUP`; cancellation performs no service stop.
 That action stops the existing supervisor, runs the same validated activation
 against `/var/lib/quirkbench/evidence/control/setup`, and restarts recovery-only
 reporting. It rejects a changed generation requiring maintenance; it is not an
@@ -337,7 +394,7 @@ remain acceptance requirements.
 
 ## Attended original evidence drain
 
-Recovery console choice 7 requires verified recovery/evidence storage and the original
+**Connection details → Review original evidence** requires verified recovery/evidence storage and the original
 hardware binding. Enter `plan REQUEST_ID` to freeze at most 128 unacknowledged
 original records/1 GiB. The public plan is retained under
 `evidence/control/evidence-drain/plans/REQUEST_ID_SHA256/plan.json`; the console
@@ -350,7 +407,7 @@ commands. Then `quirkbench target evidence approve TARGET --file PLAN --request-
 produces a private credential file. Stage that exact file privately as
 `evidence/control/setup/GRANT_ID.json` (a credential: use a private file or
 its enclosing secret store). Enter
-`drain REQUEST_ID GRANT_ID` in choice 7 to use only its selected manifest and original
+`drain REQUEST_ID GRANT_ID` in **Connection details → Review original evidence** to use only its selected manifest and original
 attribution. Each invocation has a 120-second batch deadline; interruptions retry
 the same selection/grant without widening or extending authorization.
 
@@ -373,8 +430,8 @@ certificate fingerprint through the independently attended path. Retarget-only
 exchange returns an authenticated v2 reply carrying exact old/new scope; initial
 console pairing/activation refuses that reply. This controller prerequisite alone
 does not implement local retarget activation, clear one-shot state, move old evidence
-or transfer reset/watchdog/attempt approval. The full paused local transaction remains
-unavailable pending its implementation and native commissioning.
+or transfer reset/watchdog/attempt approval. The paused local transaction below is implemented in software; physical commissioning
+remains a separate acceptance check.
 
 The implemented attended recovery menu now offers **Explicitly retarget enrolled
 media to this hardware**. Confirm the exact old target and actual new UUID, then
@@ -424,7 +481,7 @@ sealed local evidence and upload backlog separately. PREPARED means the controll
 accepted preparation; physical poweroff and safe removal remain unverified.
 A disconnected or stopped controller cannot prove either outcome.
 
-Verified recovery console choice **10 — Prepare attended safe shutdown** supplies
+**Power → Prepare safe shutdown** supplies
 independent local authority when offline. Type `poweroff FULL_BOOT_DISK_GUID` to
 confirm the displayed boot device. A failed remote exchange never supplies that
 confirmation implicitly. Local shutdown needs no controller acknowledgment of
@@ -452,7 +509,7 @@ Self-owned native calls have ten-second timeouts and feed the existing service
 heartbeat between calls, within the installed thirty-second watchdog interval.
 Original ordered result declarations must exactly match the verified sealed inventory.
 An interrupted preparation never automatically executes after reboot. On the same boot,
-choose console 10 and explicitly retry the exact request. A changed boot requires
+choose **Power → Prepare safe shutdown** and explicitly retry the exact request. A changed boot requires
 explicit local cancellation/reconciliation first. Type `cancel REQUEST_ID` at that
 console to remove only the local fence, retaining its history and evidence. Same-boot
 cancellation refuses a poweroff request that may already be queued. The supervisor
@@ -551,3 +608,67 @@ export may leave completed files for inspection; select a new destination to ret
 For the controller-free prepare/verify/build workflow and portable input snapshots,
 see [recovery input bundles](recovery-input-bundles.md). Existing low-level commands
 remain available for diagnosis.
+
+
+## Controller USB preparation
+
+`quirkbench recovery prepare` plans and applies the final layout of an explicitly
+selected whole USB. It requires a compatible controller-prepared v3 artifact;
+older images return an actionable fresh-build requirement and remain readable by
+the historical boot path. Fresh stock recipes now select v3 through the existing
+foreground and durable worker paths. Prepared-media software tests do not qualify
+a produced image or prove physical USB preparation/boot.
+
+Configure and run the controller first. Select its reachable LAN endpoint, then
+plan without writing USB bytes:
+
+```sh
+quirkbench --state /absolute/controller-state recovery prepare \
+  --image /absolute/recovery.img --device /dev/SELECTED_USB \
+  --target ACTUAL_TARGET_NAME --plan-out /absolute/new-usb-plan.json \
+  --public-key /absolute/publisher.asc --fingerprint FULL_VERIFIED_FINGERPRINT
+```
+
+An unsigned local development build uses `--unsigned-development` explicitly
+instead of publisher arguments. Production publisher trust is never synthesized.
+Review the exact device bytes, capacities, old-layout description and confirmation
+reference. Apply the returned command with `--plan`, current `--image` and
+`--device` selections, `--confirm` and `--erase`. Plans retain artifact/trust and
+physical attachment identities, never image/device pathnames. Managed staging
+locations derive from the current handoff directory. Unix path aliases are accepted;
+changed bytes, device incarnation or controller trust require a fresh plan.
+The erase acknowledgement covers **all existing USB data, evidence and credentials**.
+Both invocations need access to the narrow sudo device helper; the controller itself
+runs as the user. No prompt selects or approves a device.
+
+Remaining capacity is split equally between experiments and evidence after fixed
+artifact extents, alignment/GPT and the empty library's filesystem overhead. No
+RAM sizing requirement is imposed. Preparation stages the configured controller's
+public trust and a non-expiring, single-use invitation for the selected target name;
+it copies no controller private key. Supported trust maintenance is fenced while
+final staging/writing is active. Explicit invitation cancellation remains available;
+a cancelled invitation prevents a successful final preparation response.
+
+A fresh staging directory retains components, handoff, invitation ID and failure
+information outside the checkout by default; `--output` selects a new directory.
+Preserve it after failure. Completion is unconfirmed after a short write, sync,
+readback, deadline or attachment failure, even if a final marker is readable. Retry
+by observing a fresh plan and explicitly acknowledging erasure again. Staged
+invitations are never silently renewed; cancel unwanted ones using the existing
+`target pairing cancel` action. Preparation is not a secure erase or physical boot
+qualification. The software gates use regular-file destinations and explicit test
+trust; actual USB writing/boot remains separately authorized acceptance.
+
+
+Connection details show the computer's public hardware UUID, configured controller
+address and the public trust fingerprint staged during preparation. The welcome
+screen does not expose raw record identities. Recorded target-journal activity is
+shown separately from live authenticated controller contact; neither proves run
+completion or grants approval.
+
+Space errors name the affected operation. Existing unuploaded evidence stays on
+USB, and an incomplete candidate or diagnostic upload is never reported complete.
+Upload/export retained data or use existing explicit eligible cleanup before a
+retry. A full control filesystem may also prevent durable error metadata; retain
+RAM diagnostics or a photograph before reboot. No automatic eviction or target
+partition repair is performed.

@@ -24,6 +24,14 @@ from .product_contracts import _depth,_pairs
 
 UNIT='quirkbench-supervisor.service'
 STAGES=('retained','one_shot_cleared','evidence_sealed','poweroff_requested')
+RESTART_STAGES=(*STAGES[:-1],'reboot_requested')
+
+
+def _preparation_intent(saved):
+    if saved['controller_intent'] is not None:return saved['controller_intent']
+    value={key:saved[key] for key in ('request_id','boot_id','boot_config_sha256')}
+    if saved['schema_version']==2:value['power_action']=saved['power_action']
+    return value
 
 
 def boot_id():return identifier(Path('/proc/sys/kernel/random/boot_id').read_text().strip())
@@ -81,9 +89,13 @@ def _source(control,binding_reader):
 def validate_record(value):
     fields={'schema_version','record_type','request_id','boot_id','boot_config_sha256',
         'source_sha256','controller_intent','local_attended','completed_steps','preparation'}
-    if (not isinstance(value,dict) or set(value)!=fields or type(value['schema_version']) is not int
-            or value['schema_version']!=1 or value['record_type']!='recovery-shutdown'):
+    version=value.get('schema_version') if isinstance(value,dict) else None
+    if version==2:fields|={'power_action'}
+    if (not isinstance(value,dict) or set(value)!=fields or type(version) is not int
+            or version not in (1,2) or value['record_type']!='recovery-shutdown'):
         raise ContractError('invalid recovery shutdown continuation')
+    if version==2 and (value['power_action']!='reboot' or value['controller_intent'] is not None or value['local_attended'] is not True):
+        raise ContractError('restart requires its exact local attended authority')
     identifier(value['request_id']);identifier(value['boot_id'])
     if type(value['local_attended']) is not bool:raise ContractError('invalid attended shutdown decision')
     sha256(value['boot_config_sha256'])
@@ -95,12 +107,13 @@ def validate_record(value):
         intent=validate_intent(value['controller_intent'])
         if intent['request_id']!=value['request_id'] or intent['boot_id']!=value['boot_id']:raise Conflict('local shutdown differs from delivered request/boot')
     elif value['local_attended'] is not True:raise ContractError('local shutdown requires explicit attended authority')
-    if value['completed_steps'] not in [list(STAGES[:n]) for n in range(1,len(STAGES)+1)]:raise ContractError('invalid shutdown progress')
+    stages=RESTART_STAGES if version==2 else STAGES
+    if value['completed_steps'] not in [list(stages[:n]) for n in range(1,len(stages)+1)]:raise ContractError('invalid shutdown progress')
     if value['preparation'] is not None:
         preparation=validate_preparation(value['preparation'])
         if preparation['request_id']!=value['request_id'] or preparation['boot_id']!=value['boot_id']:raise Conflict('shutdown preparation binding differs')
-        expected=value['controller_intent'] or {'request_id':value['request_id'],'boot_id':value['boot_id'],'boot_config_sha256':value['boot_config_sha256']}
-        if preparation['intent_sha256']!=digest(canonical(expected)):raise Conflict('shutdown preparation intent differs')
+        if preparation['intent_sha256']!=digest(canonical(_preparation_intent(value))):
+            raise Conflict('power preparation differs from its exact action/intent')
     if (len(value['completed_steps'])>=3)!=(value['preparation'] is not None):raise ContractError('shutdown preparation progress differs')
     return value
 
@@ -140,8 +153,10 @@ def _lock_identity(control,config_fd,agent_fd):
         if (held.st_dev,held.st_ino)!=(named.st_dev,named.st_ino):raise Conflict('shutdown ownership lock identity changed')
 
 
-def retain(control,config,request, *,verify_target,binding_reader=read_system_uuid,boot_reader=boot_id,controller_intent=None):
+def retain(control,config,request, *,verify_target,binding_reader=read_system_uuid,boot_reader=boot_id,controller_intent=None,power_action='poweroff'):
     """Caller owns configuration/agent exclusion; this only latches admission."""
+    if power_action not in ('poweroff','reboot') or (power_action=='reboot' and controller_intent is not None):
+        raise ContractError('invalid local power action or controller restart authority')
     identifier(request);control,verify=_storage(Path(control),verify_target);verify()
     captured,runtime,media=_source(control,binding_reader)
     current_boot=boot_reader();identifier(current_boot)
@@ -155,6 +170,7 @@ def retain(control,config,request, *,verify_target,binding_reader=read_system_uu
         'boot_id':current_boot,'boot_config_sha256':digest(canonical(asdict(config))),
         'source_sha256':{name:digest(raw) for name,raw in captured.items()},'controller_intent':controller_intent,
         'local_attended':controller_intent is None,'completed_steps':['retained'],'preparation':None}
+    if power_action=='reboot':value.update(schema_version=2,power_action='reboot')
     previous=pending(control)
     if previous:
         if any(previous[key]!=value[key] for key in value if key not in ('completed_steps','preparation','local_attended')):
@@ -259,9 +275,14 @@ def _sealed(control,verify,deadline,clock):
 
 def execute(control,config,request, *,verify_target,binding_reader=read_system_uuid,boot_reader=boot_id,
             run=subprocess.run,clearer=clear_once,self_owned=False,acknowledge=None,fault_hook=None,clock=time.monotonic,
-            cgroup_root=Path('/sys/fs/cgroup'),pulse=None):
+            cgroup_root=Path('/sys/fs/cgroup'),pulse=None,power_action='poweroff'):
     """Caller selects stopped-external or verified-self owner; no automatic boot replay."""
+    if power_action not in ('poweroff','reboot') or (power_action=='reboot' and self_owned):
+        raise ContractError('restart is an attended local power action')
     control,verify=_storage(Path(control),verify_target);fault=fault_hook or (lambda _:None)
+    selected=pending(control)
+    if selected is not None and selected.get('power_action','poweroff')!=power_action:
+        raise Conflict('retained power action differs; explicitly reconcile it before another action')
     if not self_owned:
         _stop(run,cgroup_root)
     elif pulse is None:raise Conflict('self-owned shutdown needs the existing supervisor heartbeat')
@@ -279,7 +300,8 @@ def execute(control,config,request, *,verify_target,binding_reader=read_system_u
     agent=_managed_path(control/'agent');_durable_directory(agent)
     with private_lock(control/'runtime-config.lock') as config_fd,private_lock(agent/'agent.lock') as agent_fd:
         saved=pending(control)
-        if saved is None:saved=retain(control,config,request,verify_target=verify,binding_reader=binding_reader,boot_reader=boot_reader)
+        if saved is None:saved=retain(control,config,request,verify_target=verify,binding_reader=binding_reader,boot_reader=boot_reader,power_action=power_action)
+        if saved.get('power_action','poweroff')!=power_action:raise Conflict('retained power action changed')
         if saved['request_id']!=request:raise Conflict('another exact shutdown request owns local preparation')
         evidence_identities={}
         def fence():
@@ -312,7 +334,7 @@ def execute(control,config,request, *,verify_target,binding_reader=read_system_u
         else:clearer(config)
         fence();completed('one_shot_cleared')
         journal_sha,sealed,backlog,backlog_bytes,evidence_identities=_sealed(control,fence,clock()+120,clock);fence()
-        intent=saved['controller_intent'] or {'request_id':request,'boot_id':saved['boot_id'],'boot_config_sha256':saved['boot_config_sha256']}
+        intent=_preparation_intent(saved)
         preparation=validate_preparation({'schema_version':1,'record_type':'target-shutdown-preparation','request_id':request,
             'intent_sha256':digest(canonical(intent)),'boot_id':saved['boot_id'],'journal_sha256':journal_sha,
             'one_shot_cleared':True,'local_evidence_durable':True,'sealed_records':sealed,'pending_upload_records':backlog,
@@ -326,33 +348,36 @@ def execute(control,config,request, *,verify_target,binding_reader=read_system_u
                 raise Conflict('controller preparation acknowledgment differs')
         synced=native(['sync'],check=False,capture_output=True,timeout=45);fence()
         if synced.returncode:raise Conflict('orderly shutdown sync failed; evidence remains retained')
-        completed('poweroff_requested');fence()
-        result=native(['systemctl','poweroff'],check=False,capture_output=True,timeout=45)
+        completed('reboot_requested' if power_action=='reboot' else 'poweroff_requested');fence()
+        result=native(['systemctl',power_action],check=False,capture_output=True,timeout=45)
         if result.returncode:raise Conflict('native poweroff request failed; explicit same-boot retry required')
-        return {'preparation':preparation,'poweroff_requested':True,'physical_poweroff_verified':False,'safe_removal_verified':False}
+        return {'preparation':preparation,power_action+'_requested':True,'physical_poweroff_verified':False,'safe_removal_verified':False}
 
 
 def attended(*,control=None,config=None,verify_target=None,input_stream=None,output_stream=None,
-             run=subprocess.run,clearer=clear_once,binding_reader=read_system_uuid,boot_reader=boot_id,cgroup_root=Path('/sys/fs/cgroup')):
+             run=subprocess.run,clearer=clear_once,binding_reader=read_system_uuid,boot_reader=boot_id,cgroup_root=Path('/sys/fs/cgroup'),power_action='poweroff'):
     """Separate explicit local authority works offline; never infer it from contact loss."""
     import sys
     from .runtime import CONTROL,boot_context
     source=input_stream or sys.stdin;output=output_stream or sys.stdout
     control=Path(control or CONTROL)
+    if power_action not in ('poweroff','reboot'):raise ContractError('invalid attended power action')
     if verify_target is None:
         config,boot,verify_target=boot_context()
         if boot['quirkbench.mode']!='recovery':raise ContractError('shutdown requires verified recovery')
     if config is None:raise ContractError('shutdown requires the verified boot-device configuration')
     saved=pending(control)
-    request=saved['request_id'] if saved else 'local-shutdown-'+boot_reader()
-    print('Local shutdown preserves sealed evidence and any upload backlog. Physical poweroff must be confirmed locally.',file=output)
+    if saved is not None and saved.get('power_action','poweroff')!=power_action:
+        raise Conflict('Resume or cancel the exact retained power action before choosing another')
+    request=saved['request_id'] if saved else ('local-shutdown-' if power_action=='poweroff' else 'local-reboot-')+boot_reader()
+    print('Local '+power_action+' preserves sealed evidence and any upload backlog. Physical completion must be confirmed locally.',file=output)
     print('Boot device GUID: '+config.disk_guid+'; request: '+request,file=output)
-    print('Type poweroff '+config.disk_guid+' to authorize this local shutdown, or cancel '+request+' to remove an interrupted local fence.',file=output)
+    print('Type '+power_action+' '+config.disk_guid+' to authorize this local action, or cancel '+request+' to remove an interrupted local fence.',file=output)
     choice=source.readline().strip()
     if choice=='cancel '+request:
         if saved is None:raise Conflict('no local shutdown fence to cancel')
         return cancel(control,config,request,verify_target=verify_target,run=run,clearer=clearer,boot_reader=boot_reader,cgroup_root=cgroup_root)
-    if choice!='poweroff '+config.disk_guid:return {'cancelled':True,'poweroff_requested':False}
+    if choice!=power_action+' '+config.disk_guid:return {'cancelled':True,power_action+'_requested':False}
     if saved is not None and not saved['local_attended']:
         # The local operator is supplying independent authority, rather than
         # interpreting a failed controller exchange as approval.
@@ -367,7 +392,7 @@ def attended(*,control=None,config=None,verify_target=None,input_stream=None,out
             atomic_write(_path(control,request)/'journal.json',raw)
             _lock_identity(control,config_fd,agent_fd)
     return execute(control,config,request,verify_target=verify_target,run=run,clearer=clearer,
-        binding_reader=binding_reader,boot_reader=boot_reader,cgroup_root=cgroup_root)
+        binding_reader=binding_reader,boot_reader=boot_reader,cgroup_root=cgroup_root,power_action=power_action)
 
 
 def cancel(control,config,request, *,verify_target,run=subprocess.run,clearer=clear_once,boot_reader=boot_id,cgroup_root=Path('/sys/fs/cgroup')):
@@ -379,7 +404,7 @@ def cancel(control,config,request, *,verify_target,run=subprocess.run,clearer=cl
         saved=pending(control)
         if saved is None or saved['request_id']!=request:raise Conflict('exact current local shutdown fence required')
         current=boot_reader();identifier(current)
-        if current==saved['boot_id'] and 'poweroff_requested' in saved['completed_steps']:
+        if current==saved['boot_id'] and any(stage in saved['completed_steps'] for stage in ('poweroff_requested','reboot_requested')):
             raise Conflict('poweroff may already be queued on this boot; confirm locally, never resume automatically')
         verify();clearer(config);verify()
         _lock_identity(control,config_fd,agent_fd)

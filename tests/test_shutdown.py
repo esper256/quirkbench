@@ -67,6 +67,49 @@ def test_ordinary_shutdown_state_preserves_permissions_and_blocks_writers(tmp_pa
     assert {p:p.stat().st_mode for p in modes}==modes
 
 
+def test_attended_restart_reuses_real_evidence_preparation_and_keeps_fence(spool):
+    c,control,_,_,agent=spool;native=NativeCommands()
+    answer=execute(control,request='restart',run=native,power_action='reboot')
+    saved=local.pending(control)
+    assert saved['schema_version']==2 and saved['power_action']=='reboot'
+    assert saved['completed_steps']==list(local.RESTART_STAGES)
+    assert answer['reboot_requested'] and 'poweroff_requested' not in answer
+    assert not native.powered and ['systemctl','reboot'] in native.calls
+    assert saved['preparation']['intent_sha256']==digest(canonical(local._preparation_intent(saved)))
+    assert saved['preparation']['local_evidence_durable']
+    with pytest.raises(Conflict,match='latched'):local.require_available(control)
+    with pytest.raises(Conflict,match='queued'):
+        local.cancel(control,CONFIG,'restart',verify_target=lambda:True,run=native,clearer=lambda _:None,boot_reader=lambda:'original-boot')
+    native.calls.clear()
+    with pytest.raises(Conflict):execute(control,'restart',run=native,power_action='reboot',boot_reader=lambda:'later-boot')
+    assert ['systemctl','reboot'] not in native.calls and not native.powered
+
+
+@pytest.mark.parametrize('original,selected',[('poweroff','reboot'),('reboot','poweroff')])
+def test_retained_power_action_cannot_be_reinterpreted(spool,original,selected):
+    control=spool[1];native=NativeCommands()
+    local.retain(control,CONFIG,'power',verify_target=lambda:True,binding_reader=lambda:UUID,
+                 boot_reader=lambda:'original-boot',power_action=original)
+    before=(control/'shutdown/active.json').read_bytes()
+    with pytest.raises(Conflict,match='differs'):
+        execute(control,'power',run=native,power_action=selected)
+    assert not native.calls and (control/'shutdown/active.json').read_bytes()==before
+
+
+def test_restart_preparation_cannot_be_converted_into_old_poweroff(spool):
+    control=spool[1];execute(control,'restart',run=NativeCommands(),power_action='reboot')
+    saved=local.pending(control)
+    saved['schema_version']=1;saved.pop('power_action');saved['completed_steps']=list(local.STAGES)
+    with pytest.raises(Conflict,match='exact action/intent'):local.validate_record(saved)
+
+
+def test_attended_restart_cancelled_prompt_never_stops_work(spool):
+    native=NativeCommands()
+    answer=local.attended(control=spool[1],config=CONFIG,verify_target=lambda:True,
+        input_stream=io.StringIO('\n'),output_stream=io.StringIO(),run=native,power_action='reboot')
+    assert answer=={'cancelled':True,'reboot_requested':False} and not native.calls
+
+
 @pytest.mark.parametrize('change',['symlink','directory-link','oversized','invalid','obsolete-root'])
 def test_shutdown_lookup_rejects_unusable_or_misattributed_fence(tmp_path,change):
     control=tmp_path/'control';control.mkdir()

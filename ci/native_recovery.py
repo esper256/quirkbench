@@ -21,13 +21,26 @@ SNAPSHOT = ACQUISITION.parent/ACQUISITION_SPEC['package_snapshot']
 PACKAGES = ('bash', 'glibc', 'libgcc', 'libxcrypt', 'openssl-libs', 'python3',
             'python3-libs', 'systemd', 'systemd-libs', 'systemd-shared', 'systemd-udev',
             'util-linux-core', 'zlib-ng-compat', 'libmount', 'libblkid', 'libcap',
-            'libselinux', 'pcre2', 'ncurses-libs', 'libseccomp')
+            'libselinux', 'pcre2', 'ncurses-libs', 'libseccomp', 'mtools', 'gdisk',
+            'e2fsprogs', 'e2fsprogs-libs', 'libcom_err', 'libss', 'libstdc++', 'popt',
+            'libuuid','glibc-gconv-extra','grub2-tools-minimal','xz-libs','device-mapper-libs',
+            'NetworkManager', 'NetworkManager-tui', 'dbus-broker', 'dbus-common')
 
 # Fedora subpackages are published under their source build, not their RPM name.
 SOURCE_BUILDS = {'libgcc': 'gcc', 'openssl-libs': 'openssl', 'python3': 'python3.14', 'python3-libs': 'python3.14',
                  'systemd-libs': 'systemd', 'systemd-shared': 'systemd', 'systemd-udev': 'systemd',
                  'util-linux-core': 'util-linux', 'libmount': 'util-linux', 'libblkid': 'util-linux',
-                 'zlib-ng-compat': 'zlib-ng', 'ncurses-libs': 'ncurses'}
+                 'zlib-ng-compat': 'zlib-ng', 'ncurses-libs': 'ncurses',
+                 'e2fsprogs-libs':'e2fsprogs','libcom_err':'e2fsprogs',
+                 'libss':'e2fsprogs','libstdc++':'gcc','libuuid':'util-linux',
+                 'glibc-gconv-extra':'glibc','grub2-tools-minimal':'grub2','xz-libs':'xz','device-mapper-libs':'lvm2',
+                 'NetworkManager-tui':'NetworkManager', 'dbus-common':'dbus'}
+
+
+# This subpackage has its own version; use the source NVR from the hash-pinned
+# RPM's SOURCERPM metadata, not its binary NEVRA version.
+SOURCE_BUILD_NVR = {'device-mapper-libs-0:1.02.212-2.fc44.x86_64':
+                    ('lvm2', '2.03.38', '2.fc44')}
 
 
 def rpm_location(package):
@@ -35,11 +48,12 @@ def rpm_location(package):
     version, release_arch = package['nevra'][len(name)+1:].split(':', 1)[1].rsplit('-', 1)
     release, arch = release_arch.rsplit('.', 1)
     filename = f'{name}-{version}-{release}.{arch}.rpm'
-    source = SOURCE_BUILDS.get(name, name)
+    source, source_version, source_release = SOURCE_BUILD_NVR.get(
+        package['nevra'], (SOURCE_BUILDS.get(name, name), version, release))
     # The snapshot hashes signed RPMs. Koji's ordinary build path is unsigned,
     # even when its NEVRA is identical; never relax hashes or fall back to it.
     key = ACQUISITION_SPEC['rpm_key_fingerprint'][-8:].lower()
-    return filename, f'https://kojipkgs.fedoraproject.org/packages/{source}/{version}/{release}/data/signed/{key}/{arch}/{filename}'
+    return filename, f'https://kojipkgs.fedoraproject.org/packages/{source}/{source_version}/{source_release}/data/signed/{key}/{arch}/{filename}'
 
 
 def digest(path):

@@ -60,7 +60,7 @@ def execute(output, suite, tests=None, timeout=720):
     saved = json.loads((output / 'metadata.json').read_text())
     if saved['command']:
         raise ValueError('An attempt already ran here; use a new output directory')
-    if suite == 'recovery-native':
+    if suite in ('recovery-native', 'recovery-console-reports'):
         timeout = min(timeout, 60)
     start = time.monotonic()
     record = metadata(suite)

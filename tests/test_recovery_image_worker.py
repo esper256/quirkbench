@@ -19,10 +19,12 @@ class Stopped:
 
 
 @contextmanager
-def completed_image(tmp_path,monkeypatch):
+def completed_image(tmp_path,monkeypatch,*,version=2):
     import quirkbench.recovery_distribution as distribution
-    _,_,_,_,_,template=assembled_stock(tmp_path/'template',monkeypatch)
+    from test_recovery_release import assembled
+    _,_,_,_,_,template=assembled(tmp_path/'template',monkeypatch,version=version)
     recipe,lock,_,store=stock_fixture(tmp_path/'inputs')
+    if version==3:recipe={**recipe,'schema_version':3,'layout':{'root_mib':2048,'factory_size_mib':4096,'library_payload_bytes':0}}
     lock={**lock,'builder_image_digest':IMAGE}
     recipe={**recipe,'builder_image_digest':IMAGE,'rootfs_lock_sha256':store.put(canonical(lock)).sha256}
     recipe_sha=store.put(canonical(recipe)).sha256
@@ -201,3 +203,17 @@ def test_coordinator_leaves_prior_owner_queue_visible_without_crashing(tmp_path)
         assert coordinator.tick() is None
         assert controller.operation_status(queued['id'])['data']['state']=='QUEUED'
         assert not (controller.root/'workers').exists()
+
+
+def test_v3_uses_actual_durable_worker_admission_validation_and_publication(tmp_path,monkeypatch):
+    with completed_image(tmp_path,monkeypatch,version=3) as (controller,owner,claim,closure,home):
+        result=owner.consume_recovery_image(claim['id'],services=Stopped(),query=lambda *args:closure,
+            signing_home=home,trusted_public_key=trusted_key(tmp_path),fingerprint=FINGERPRINT,
+            signing_run=fake_gpg,verification_run=fake_public_gpg)
+        assert result['operation']['state']=='SUCCEEDED'
+        # The retained worker candidate remains explicitly unqualified.
+        candidates=list(controller.store.objects.iterdir())
+        matching=[json.loads(p.read_bytes()) for p in candidates if p.stat().st_size<65536 and p.read_bytes().startswith(b'{')]
+        candidate=next(v for v in matching if v.get('record_type')=='recovery-release-candidate')
+        assert candidate['schema_version']==3 and candidate['layout']['library_payload_bytes']==0
+        assert candidate['qualified_capabilities']==[]

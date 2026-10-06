@@ -11,7 +11,7 @@ from ci.evidence import FILE_LIMIT, ATTACHMENT_LIMIT, capture_stage, redact
     (['src/quirkbench/distribution_source_worker.py'], {'source-workers'}),
     (['src/quirkbench/endpoint_probe.py'], {'endpoint-control', 'endpoint-retarget'}),
     (['tests/test_retarget_evidence.py'], {'endpoint-retarget', 'evidence'}),
-    (['src/quirkbench/recovery_initramfs_audit.py'], {'release-preparation', 'recovery-integration', 'recovery-native'}),
+    (['src/quirkbench/recovery_initramfs_audit.py'], {'release-preparation', 'recovery-integration', 'recovery-native', 'recovery-console-reports'}),
     (['tests/conftest.py'], set(SUITES)),
     (['schemas/operation.schema.json'], set(SUITES)),
     (['src/quirkbench/new_shared_module.py'], set(SUITES)),
@@ -38,7 +38,7 @@ def test_recovery_boot_change_selects_direct_and_joined_regressions():
     value=select(['src/quirkbench/recovery_initramfs_audit.py',
                   'src/quirkbench/recovery_storage.py', 'tests/test_stock_recovery_flow.py'])
     assert not value['unmapped']
-    assert set(value['selected'])=={'filesystem','release-preparation','recovery-integration','recovery-native'}
+    assert set(value['selected'])=={'filesystem','release-preparation','recovery-integration','recovery-native','recovery-console-reports'}
     assert {'tests/test_recovery_storage.py','tests/test_recovery_initramfs_audit.py',
             'tests/test_recovery_image_plan.py','tests/test_stock_recovery_flow.py'}<=set(value['tests'])
 
@@ -94,3 +94,13 @@ def test_redaction_across_lines_and_truncated_private_keys():
     result = redact(text)
     assert all(s not in result for s in ['secret bytes', 'ABC', 'long secret', 'user:password'])
     assert 'unfinished' not in redact('-----BEGIN RSA PRIVATE KEY-----\nunfinished')
+
+
+@pytest.mark.parametrize('path',['src/quirkbench/console.py','src/quirkbench/local_terminal.py',
+    'tests/test_recovery_console_journey.py','src/quirkbench/preparation_payload.py',
+    'src/quirkbench/recovery_reports.py','target-assets/quirkbench-console.service','development/constraints.txt'])
+def test_console_changes_select_joined_journey_and_native_gate(path):
+    value=select([path]);assert 'recovery-console-reports' in value['selected']
+    if not path.startswith('tests/'):
+        assert 'recovery-native' in value['selected']
+    assert 'tests/test_recovery_console_journey.py' in value['tests']

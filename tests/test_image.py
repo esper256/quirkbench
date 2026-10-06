@@ -37,6 +37,15 @@ def test_image_requires_independent_recovery_and_new_regular_output(tmp_path: Pa
         inputs.validate()
 
 
+def test_prepared_format_uses_actual_factory_size_not_unused_legacy_budgets(tmp_path):
+    from dataclasses import replace
+    inputs = _inputs(tmp_path)
+    prepared = replace(inputs, controller_prepared=True, experiment_mib=0, library_mib=0, log_budget_mib=0)
+    prepared.validate()
+    with pytest.raises(ImageError, match='capacities'):
+        replace(prepared, controller_prepared=False).validate()
+
+
 def test_factory_image_rejects_private_gpg_home(tmp_path: Path) -> None:
     inputs = _inputs(tmp_path)
     private = inputs.rootfs_dir / 'root/.gnupg'
@@ -97,7 +106,7 @@ def test_recovery_diagnostics_preserve_boot_roles_and_candidate_selection(smoke)
     for arguments in lines:
         assert boot_roles(arguments) == roles
         assert [word for word in arguments.split() if word.startswith('console=')] == [
-            'console=ttyS0,115200', 'console=tty0']
+            'console=ttyS0,115200', 'console=tty1']
         assert ('quirkbench.smoke=1' in arguments) == smoke
     assert cfg.count('initrd $esp/initramfs-recovery.img') == 3
     diagnostic_entry = cfg[cfg.index('menuentry \'Quirkbench recovery - verbose'):]
@@ -275,3 +284,12 @@ def test_old_rootfs_cannot_publish_an_image_without_new_network_stack(tmp_path, 
     (inputs.rootfs_dir/missing).unlink()
     with pytest.raises(ImageError,match='networking prerequisite missing'):
         inputs.validate()
+
+
+def test_prepared_factory_carries_only_empty_mutable_filesystem_overhead():
+    from quirkbench.image import partition_layout, EMPTY_DATA_MIB
+    old = partition_layout(4096, 2048)
+    prepared = partition_layout(4096, 2048, controller_prepared=True)
+    assert old[:3] == prepared[:3]
+    assert (prepared[3]['end']-prepared[3]['start']+1)*512 == EMPTY_DATA_MIB*1024**2
+    assert prepared[3]['end'] < old[3]['end']

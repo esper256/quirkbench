@@ -25,7 +25,7 @@ def validate_code(value):
     fields = {'schema_version', 'record_type', 'code_id', 'request_id', 'request_digest',
               'name', 'controller_url', 'certificate_sha256', 'created_at', 'expires_at'}
     if (not isinstance(value, dict) or set(value) != fields or type(value['schema_version']) is not int
-            or value['schema_version'] != 1 or value['record_type'] != 'enrollment-code'):
+            or value['schema_version'] not in (1, 2) or value['record_type'] != 'enrollment-code'):
         raise ContractError('invalid enrollment code record')
     for name in ('code_id', 'request_id', 'name'):
         identifier(value[name])
@@ -39,12 +39,21 @@ def validate_code(value):
     if (parts.scheme != 'https' or not parts.hostname or parts.username or parts.password
             or parts.path or parts.query or parts.fragment or not parts.port):
         raise ContractError('enrollment requires an exact HTTPS controller endpoint')
-    for key in ('created_at', 'expires_at'):
+    for key in (('created_at', 'expires_at') if value['schema_version'] == 1 else ('created_at',)):
         if type(value[key]) is not int or not 0 < value[key] <= 4102444800:
             raise ContractError('invalid enrollment code time')
-    if not 60 <= value['expires_at'] - value['created_at'] <= 900:
+    if value['schema_version'] == 2:
+        if value['expires_at'] is not None:
+            raise ContractError('non-expiring enrollment requires a null expiry')
+    elif not 60 <= value['expires_at'] - value['created_at'] <= 900:
         raise ContractError('enrollment code lifetime must be 60 to 900 seconds')
     return value
+
+
+def invitation_live(record, now):
+    """Historical deadlines apply only to v1 invitations, never v2 handshakes."""
+    record = validate_code(record)
+    return record['created_at'] <= now and (record['expires_at'] is None or now < record['expires_at'])
 
 
 

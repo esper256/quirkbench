@@ -358,3 +358,32 @@ def test_candidate_result_runtime_and_schema_agree():
                     {**value,'target_tree_sha256':'wrong'}):
         assert list(Draft202012Validator(schema).iter_errors(changed))
         with pytest.raises(ContractError):validate_result(changed)
+
+
+def test_actual_candidate_cas_enospc_never_publishes_completion(setup,monkeypatch):
+    import errno
+    from quirkbench import store
+    c=setup[0];prior=c.store.put(b'previous unrelated retained evidence')
+    with c.transaction() as db:db.execute('INSERT INTO refs VALUES(?,?)',('unuploaded-original',prior.sha256))
+    with c.lifecycle() as owner:
+        response,claim,coordinator,services=dispatch(setup,owner,monkeypatch)
+        assert work(setup,claim)==0
+        import os
+        original=os.fdopen
+        class Writer:
+            def __init__(self,handle):self.handle=handle
+            def __enter__(self):return self
+            def __exit__(self,*args):self.handle.close()
+            def __getattr__(self,name):return getattr(self.handle,name)
+            def write(self,raw):
+                actual=Path('/proc/self/fd/'+str(self.handle.fileno())).readlink()
+                if actual.is_relative_to(c.store.objects):raise OSError(errno.ENOSPC,'injected candidate CAS full')
+                return self.handle.write(raw)
+        monkeypatch.setattr(os,'fdopen',lambda *a,**kw:Writer(original(*a,**kw)))
+        services.done=True
+        try:coordinator.tick()
+        except OSError:pass
+        row=c.operation_status(claim['id'])['data']
+        assert row['state']!='SUCCEEDED' and row['final_output_digest'] is None
+        assert row['references']['output']==[]
+        assert c.store.get(prior.sha256)==b'previous unrelated retained evidence'

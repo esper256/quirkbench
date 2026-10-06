@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "architecture",
+    "builder_image_digest",
+    "dracut_config_sha256",
+    "esp_payload_bytes",
+    "esp_required_bytes",
+    "fedora_release",
+    "final_kernel_config_sha256",
+    "image_builder_identity",
+    "image_input_identity",
+    "image_manifest_sha256",
+    "image_sha256",
+    "image_size_bytes",
+    "initramfs_sha256",
+    "kernel_origin",
+    "kernel_release",
+    "kernel_sha256",
+    "layout",
+    "module_files_digest",
+    "policy",
+    "profile_digest",
+    "qualification_status",
+    "qualified_capabilities",
+    "recipe_digest",
+    "recipe_id",
+    "record_type",
+    "rootfs_entry_count",
+    "rootfs_file_bytes",
+    "rootfs_lock_sha256",
+    "rootfs_required_bytes",
+    "rpm_key_sha256",
+    "rpm_snapshot_sha256",
+    "runtime_revision_sha256",
+    "schema_version",
+    "storage_policy_sha256",
+    "target_rpm_lock_sha256",
+    "unit_allowlist_sha256"
+  ],
+  "properties": {
+    "runtime_revision_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "image_size_bytes": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "fedora_release": {
+      "type": "string",
+      "pattern": "^[0-9]{2}$"
+    },
+    "kernel_origin": {
+      "const": "stock-rpm"
+    },
+    "record_type": {
+      "const": "recovery-release-candidate"
+    },
+    "unit_allowlist_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "initramfs_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "esp_required_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "recipe_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "final_kernel_config_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "image_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "target_rpm_lock_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "qualified_capabilities": {
+      "const": []
+    },
+    "rootfs_required_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "image_builder_identity": {
+      "$ref": "#/$defs/sha256"
+    },
+    "dracut_config_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "policy": {
+      "const": {
+        "policy_id": "recovery-boot-device-v1",
+        "passive_kernel_metadata": true,
+        "userspace_internal_block_access": false,
+        "root_read_only": true,
+        "automount": false,
+        "swap_resume": false,
+        "firmware_writes": false,
+        "recovery_selinux": "disabled",
+        "secure_boot": "disabled"
+      }
+    },
+    "image_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "image_input_identity": {
+      "$ref": "#/$defs/sha256"
+    },
+    "module_files_digest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "rpm_snapshot_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "esp_payload_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "qualification_status": {
+      "const": "unqualified"
+    },
+    "rootfs_file_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root_mib",
+        "factory_size_mib",
+        "library_payload_bytes"
+      ],
+      "properties": {
+        "root_mib": {
+          "type": "integer",
+          "minimum": 256
+        },
+        "factory_size_mib": {
+          "type": "integer",
+          "minimum": 1024
+        },
+        "library_payload_bytes": {
+          "type": "integer",
+          "const": 0
+        }
+      }
+    },
+    "storage_policy_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "recipe_digest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "builder_image_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "architecture": {
+      "const": "x86_64"
+    },
+    "profile_digest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "schema_version": {
+      "const": 3
+    },
+    "rootfs_lock_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "rootfs_entry_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "rpm_key_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "kernel_release": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$"
+    },
+    "kernel_sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "title": "recovery-release-candidate v3"
+}

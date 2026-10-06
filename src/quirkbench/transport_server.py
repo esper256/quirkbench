@@ -166,7 +166,11 @@ def make_server(
                 device_id = self._authorize()
                 data = self._read()
                 path = self.path
-                if path == "/v1/endpoint-check":
+                if path in {'/v1/recovery-reports/begin','/v1/recovery-reports/chunk','/v1/recovery-reports/finish'}:
+                    if credential_registry is None:raise PermissionError('normal registry pairing required for diagnostics')
+                    from .recovery_report_service import handle
+                    answer=handle(controller,credential_registry,device_id,self.headers['Authorization'][7:],path.rsplit('/',1)[-1],data)
+                elif path == "/v1/endpoint-check":
                     _body(data, set())
                     # Read-only credential acceptance; never register/contact,
                     # claim/reconcile work or imply physical readiness.

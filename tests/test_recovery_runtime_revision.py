@@ -25,6 +25,23 @@ def test_runtime_revision_schema_and_exact_source_capture():
     assert any(item["path"] == "quirkbench/runtime.py" for item in manifest["files"])
 
 
+def test_historical_absent_terminal_is_distinct_from_dangling_extra(tmp_path):
+    from quirkbench.boot import install_runtime
+    from quirkbench.recovery_runtime_revision import audit_installed_runtime
+    from test_boot import CONFIG
+    root=tmp_path/'root';(root/'etc').mkdir(parents=True)
+    (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1')
+    install_runtime(root,CONFIG)
+    manifest=capture_runtime_revision(ROOT/'src/quirkbench',ROOT/'target-assets')
+    manifest['files']=[row for row in manifest['files'] if row['path']!='target-assets/quirkbench-terminal.service']
+    terminal=root/'etc/systemd/system/quirkbench-terminal.service'
+    terminal.unlink()
+    audit_installed_runtime(root,manifest)
+    terminal.symlink_to('/missing-terminal')
+    with pytest.raises(BuildError,match='files differ'):
+        audit_installed_runtime(root,manifest)
+
+
 def test_duplicate_or_missing_runtime_source_manifest_fails():
     manifest = capture_runtime_revision(ROOT / "src/quirkbench", ROOT / "target-assets")
     manifest["files"].append(manifest["files"][-1])

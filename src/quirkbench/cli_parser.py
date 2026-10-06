@@ -6,7 +6,7 @@ from pathlib import Path
 
 FAMILIES={
  'setup':'Configure this controller', 'doctor':'Check requirements and explain problems',
- 'status':'Show controller readiness and work needing attention', 'recovery':'Download and inspect target recovery images',
+ 'status':'Show controller readiness and work needing attention', 'recovery':'Download recovery images and prepare a target USB',
  'target':'Pair and manage target computers',
  'investigation':'Manage a problem, its source workspace and findings',
  'experiment':'Prepare tests and follow their progress and results',
