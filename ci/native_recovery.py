@@ -37,16 +37,23 @@ SOURCE_BUILDS = {'libgcc': 'gcc', 'openssl-libs': 'openssl', 'python3': 'python3
                  'NetworkManager-tui':'NetworkManager', 'dbus-common':'dbus'}
 
 
+# This subpackage has its own version; use the source NVR from the hash-pinned
+# RPM's SOURCERPM metadata, not its binary NEVRA version.
+SOURCE_BUILD_NVR = {'device-mapper-libs-0:1.02.212-2.fc44.x86_64':
+                    ('lvm2', '2.03.38', '2.fc44')}
+
+
 def rpm_location(package):
     name = package['name']
     version, release_arch = package['nevra'][len(name)+1:].split(':', 1)[1].rsplit('-', 1)
     release, arch = release_arch.rsplit('.', 1)
     filename = f'{name}-{version}-{release}.{arch}.rpm'
-    source = SOURCE_BUILDS.get(name, name)
+    source, source_version, source_release = SOURCE_BUILD_NVR.get(
+        package['nevra'], (SOURCE_BUILDS.get(name, name), version, release))
     # The snapshot hashes signed RPMs. Koji's ordinary build path is unsigned,
     # even when its NEVRA is identical; never relax hashes or fall back to it.
     key = ACQUISITION_SPEC['rpm_key_fingerprint'][-8:].lower()
-    return filename, f'https://kojipkgs.fedoraproject.org/packages/{source}/{version}/{release}/data/signed/{key}/{arch}/{filename}'
+    return filename, f'https://kojipkgs.fedoraproject.org/packages/{source}/{source_version}/{source_release}/data/signed/{key}/{arch}/{filename}'
 
 
 def digest(path):

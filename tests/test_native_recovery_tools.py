@@ -17,6 +17,10 @@ def test_native_package_locations_follow_source_builds_and_pins():
     assert '/packages/systemd/' in native_recovery.rpm_location(systemd)[1]
     gcc = next(p for p in packages if p['name'] == 'libgcc')
     assert '/packages/gcc/' in native_recovery.rpm_location(gcc)[1]
+    mapper = next(p for p in packages if p['name'] == 'device-mapper-libs')
+    filename, url = native_recovery.rpm_location(mapper)
+    assert filename == 'device-mapper-libs-1.02.212-2.fc44.x86_64.rpm'
+    assert '/packages/lvm2/2.03.38/2.fc44/data/signed/' in url
     python = next(p for p in packages if p['name'] == 'python3-libs')
     assert '/packages/python3.14/' in native_recovery.rpm_location(python)[1]
 

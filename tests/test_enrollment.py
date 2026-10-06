@@ -183,7 +183,8 @@ def test_missing_ready_owner_and_static_authentication_block_guided_issuance(iss
     with pytest.raises(ContractError,match='service unavailable'):
         historical_code(c,'target','pair',**{**kwargs,'ready':unavailable})
     from quirkbench.controller_service import configuration
-    config=configuration(c.root);config.pop('credential_registry');config['tokens_file']=config['cert']
+    config=json.loads((c.root/'private/controller-service.json').read_bytes())
+    config.pop('credential_registry');config['tokens_file']=configuration(c.root)['cert']
     atomic=c.root/'private/controller-service.json';atomic.write_bytes(canonical(config))
     with pytest.raises(ContractError,match='registry authentication'):
         historical_code(c,'target','pair',**{**kwargs,'ready':lambda _:None})
