@@ -1,4 +1,4 @@
-from quirkbench.controller_service import configuration as controller_configuration
+from quirkbench.controller_service import configuration as controller_configuration,configuration_document
 """Moved media preserves explicit completed endpoint history and original evidence."""
 import json
 from pathlib import Path
@@ -26,7 +26,7 @@ def moved(spool,publication):
     # Later evidence is ordinary original-target work, never copied to NEW.
     atomic_write(control/'agent/journal.json',journal)
     configuration['port']=8445;configuration['repository_endpoint']['url']='https://127.0.0.1:8446'
-    atomic_write(c.root/'private/controller-service.json',canonical(configuration))
+    atomic_write(c.root/'private/controller-service.json',canonical(configuration_document(configuration)))
     return spool,view,dict(publication[3])
 
 
@@ -240,7 +240,7 @@ def test_repeated_retarget_after_completed_retarget_endpoint_keeps_both_origins(
         binding_reader=lambda:third,clearer=lambda _:None,recovery_verifier=lambda _:True)
     intent=retarget_local.pending_intent(control);assert intent['schema_version']==3 and intent['previous_selection_sha256'] is not None
     configuration=controller_configuration(c.root);configuration['port']=8447;configuration['repository_endpoint']['url']='https://127.0.0.1:8448'
-    atomic_write(c.root/'private/controller-service.json',canonical(configuration))
+    atomic_write(c.root/'private/controller-service.json',canonical(configuration_document(configuration)))
     revoke_target(c.root,new_result['device_id'],'revoke-new',generation=new_result['credential_generation']['generation'])
     code=retarget_invitation.create_invitation(c,new_result['device_id'],new_result['credential_generation']['generation'],
         'third-target',third,'third-invitation',ready=lambda _:True,tls_inspector=moved[2]['tls_inspector'])
