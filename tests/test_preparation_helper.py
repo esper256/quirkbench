@@ -12,6 +12,22 @@ from quirkbench.commission import CommissionError
 from quirkbench.contracts import canonical
 
 
+def test_helper_failure_reports_reason_without_progress_json(tmp_path,monkeypatch):
+    from quirkbench import preparation,process_ownership
+    from quirkbench.contracts import ContractError
+    launch=process_ownership.launch
+    def child(argv,**kwargs):
+        assert argv[:3]==['sudo','-n','--']
+        script='import sys;print(\'{"phase":"Running dumpe2fs"}\',file=sys.stderr);print("USB preparation failed: filesystem mismatch",file=sys.stderr);sys.exit(1)'
+        return launch([sys.executable,'-c',script],**kwargs)
+    monkeypatch.setattr(process_ownership,'launch',child)
+    with pytest.raises(ContractError,match='filesystem mismatch') as failure:
+        preparation.helper('apply','--handoff',str(tmp_path/'handoff'),timeout_s=10)
+    assert 'Running dumpe2fs' not in str(failure.value)
+    assert 'authorize sudo' not in str(failure.value)
+    assert 'Running dumpe2fs' in (tmp_path/'helper.log').read_text()
+
+
 def test_owned_regular_input_has_no_blanket_permission_rule(tmp_path):
     path=tmp_path/'record';path.write_bytes(canonical({'schema_version':1}));path.chmod(0o644)
     with ExitStack() as stack:

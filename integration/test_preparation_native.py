@@ -39,7 +39,7 @@ run('mformat','-i',str(state),'-v','QBSTATE','::');run('mmd','-i',str(state),'::
 marker=work/'marker';marker.write_text(factory.partition_uuids[2]+'\n')
 run('mcopy','-i',str(state),str(marker),'::/quirkbench-'+factory.partition_uuids[2])
 env=work/'next.env';run('grub2-editenv',str(env),'create');run('mcopy','-i',str(state),str(env),'::/quirkbench/next.env')
-data=work/'data';create_ext4_component(data,16*1024**2,'QBEXPERIMENTS',factory.partition_uuids[3],runner=run)
+data=work/'data';create_ext4_component(data,16*1024**2,'QBEXPERIMENTS',str(uuid.uuid4()),runner=run)
 source=work/'source'
 with source.open('xb') as stream:stream.truncate(25*1024**2)
 _copy_slice(state,source,4*1024**2);_copy_slice(data,source,8*1024**2)
