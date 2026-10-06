@@ -46,6 +46,17 @@ Do not anticipate them with extra architecture or permission enforcement. Compon
 and concurrent workers act for the same user; process coordination and authenticated
 target communication remain necessary. See the [single-user contract](docs/implementation-contracts.md#single-user-installation).
 
+## Paths and local configuration
+
+Derive managed paths from the current root and existing IDs; do not persist redundant
+absolute or relative paths. Store necessary external locations once in local configuration.
+Paths are locations, not durable identities. Accept ordinary Unix aliases; retain
+operation-specific containment and live ownership checks.
+
+For the owner-approved [path refactor](docs/path-portability-plan.md), replace affected
+formats directly: no schema migrations, backwards-compatibility machinery or new
+relocation test suite. Update existing focused tests using fresh development state.
+
 ## File permissions
 
 Apply the owner-approved [file-access policy](docs/implementation-contracts.md#file-access-and-permission-policy)
