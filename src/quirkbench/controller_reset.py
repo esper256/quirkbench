@@ -11,6 +11,7 @@ import re
 import sqlite3
 import stat
 import tempfile
+import time
 
 from .contracts import Conflict, ContractError, canonical, digest, identifier
 from .filesystem import _managed_path, _durable_directory, held_parent, private_lock, nested_mounts
@@ -174,10 +175,39 @@ def reset(root, *, request_id, confirm_reset=False, config_home=None, fault_hook
     paths.update({'config/' + p: config / p for p in CONFIG_FILES})
     with ExitStack() as locks:
         lock_records = []
-        for lock in (config / '.setup-progress.lock', config / '.installation.lock', config / '.setup.lock',
-                     root / 'command.lock', root / 'coordinator.lock', root / 'build.lock', root / 'migration.lock'):
-            fd = locks.enter_context(private_lock(lock))
+        def acquire(lock, description):
+            try:
+                fd = locks.enter_context(private_lock(lock))
+            except Conflict as exc:
+                raise Conflict(description + '; reset has not removed database files') from exc
             lock_records.append((lock, fd, os.fstat(fd)))
+        for lock in (config / '.setup-progress.lock', config / '.installation.lock', config / '.setup.lock'):
+            acquire(lock, 'Another setup or installation command is running; wait for it to finish')
+        if (config / 'controller.json').exists():
+            selected = discover_state_root(config_home=config.parent)
+            if not os.path.samefile(selected, root): raise Conflict('reset state differs from selected controller')
+        # Completed receipts never stop or erase a later fresh controller.
+        journal = archive / 'record.json'
+        prior = _validate(_json(journal), root, config) if journal.exists() else None
+        if prior and prior['request_id'] != request_id: raise Conflict('reset request differs')
+        complete = prior is not None and prior['complete']
+        if complete and not (root / FENCE).exists() and not (root / FENCE).is_symlink():
+            for index, name in enumerate(paths):
+                expected = prior['files'][name]
+                retained = _snapshot(archive / str(index))
+                if expected and (not retained or retained[0]['sha256'] != expected['sha256']):
+                    raise Conflict('completed reset archive unavailable')
+            return {'reset': True, 'archive': str(archive), 'replayed': True, 'invitations_invalidated': True}
+        stopped = False
+        if not complete:
+            from .foreground_owner import stop_for_reset
+            stopped = stop_for_reset(root, deadline=time.monotonic() + 30)
+        for lock, description in (
+                (root / 'command.lock', 'Another command is using controller state; wait for it to finish'),
+                (root / 'coordinator.lock', 'A controller still owns this state; stop it or retry reset'),
+                (root / 'build.lock', 'A build still owns this state; stop and reconcile it'),
+                (root / 'migration.lock', 'A database upgrade is running; wait for it to finish')):
+            acquire(lock, description)
         if (config / 'controller.json').exists():
             selected = discover_state_root(config_home=config.parent)
             if not os.path.samefile(selected, root): raise Conflict('reset state differs from selected controller')
@@ -242,7 +272,11 @@ def reset(root, *, request_id, confirm_reset=False, config_home=None, fault_hook
                 return {'reset': True, 'archive': str(archive), 'replayed': True, 'invitations_invalidated': True}
         else:
             captured = {name: _snapshot(path) for name, path in paths.items()}
-            _admit(captured)
+            try:
+                _admit(captured)
+            except Conflict as exc:
+                if stopped: raise Conflict('Controller stopped, but reset is blocked: ' + str(exc)) from exc
+                raise
             for name in CONFIG_FILES:
                 saved = captured['config/' + name]
                 if saved:

@@ -218,7 +218,8 @@ Omitted retry choices retain the recorded values. The single initial setup journ
 refuses a different request or changed intent; later maintenance uses its own APIs.
 `status [--json]` does not initialize/migrate state or acquire execution ownership.
 
-`admin controller reset --request-id ID --confirm-reset` explicitly archives an
+`admin controller reset --request-id ID --confirm-reset` explicitly stops the verified
+foreground controller gracefully (bounded to 30 seconds), then archives an
 unused controller's known-schema database, SQLite sidecars, settings, service
 configuration and matching setup journals. It refuses enrolled/attempted/bound
 state, outstanding workers and installation/publication transactions. Images,

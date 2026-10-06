@@ -458,9 +458,8 @@ and qualification separate.
 
 ### Start over after unsuccessful setup
 
-Stop the foreground controller and any workers first. For an **unused controller**
-(no enrolled targets, attempts, credentials or bound enrollment), explicitly archive
-its database and setup records:
+For an **unused controller** (no enrolled targets, attempts, credentials or bound
+enrollment), explicitly stop its controller and archive its database/setup records:
 
 ```sh
 ./quirkbench --state /absolute/controller-state admin controller reset \
@@ -468,6 +467,13 @@ its database and setup records:
 ```
 
 Use a CLI containing this command; an older installed runtime will not have it.
+Confirmation also authorizes graceful shutdown of the verified running controller.
+The command waits at most 30 seconds for process exit, then checks the existing
+locks and worker shutdown proofs. It never force-kills an unknown process. If work
+remains unreconciled, the controller may be stopped while reset is still refused;
+the database remains available for reconciliation. Other commands/builds holding
+locks are named separately.
+
 The result prints the exact archive directory beneath
 `STATE/private/controller-resets/`. SQLite and present sidecars, settings, controller
 configuration and matching setup journals are retained there. Issued invitations

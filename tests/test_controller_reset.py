@@ -33,11 +33,13 @@ def test_confirmation_and_actual_cli(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv('XDG_CONFIG_HOME', str(config))
     before = (root / 'controller.sqlite').read_bytes()
     args = ['--state', str(root), '--json', 'admin', 'controller', 'reset', '--request-id', 'fresh-start']
-    assert cli._main(args) == 2
+    assert cli.main(args) == 2
     assert (root / 'controller.sqlite').read_bytes() == before
     capsys.readouterr()
-    assert cli._main(args + ['--confirm-reset']) == 0
-    data = json.loads(capsys.readouterr().out)['data']
+    assert cli.main(args + ['--confirm-reset']) == 0
+    captured = capsys.readouterr()
+    assert 'Housekeeping' not in captured.err
+    data = json.loads(captured.out)['data']
     assert data['reset'] and Path(data['archive']).is_dir()
     assert not (root / 'controller.sqlite').exists()
 
@@ -279,3 +281,169 @@ def test_reset_record_schemas_and_strict_reader(tmp_path):
         with pytest.raises(ContractError): _json(path)
     path.write_text(json.dumps({'schema_version': True, 'request_id': 'fresh', 'archive': '/archive'}))
     assert not _matching_fence(path, 'fresh', Path('/archive'))
+
+
+@pytest.fixture
+def published_owner(tmp_path):
+    """Disposable real lifecycle owner; Linux pidfd+signals, no service manager."""
+    import subprocess
+    import sys
+    from contextlib import contextmanager
+    @contextmanager
+    def start(root, *, ignore=False, failed=False):
+        program = '''import os,signal,sys
+from quirkbench.controller import Controller
+from quirkbench.controller_service import advertise
+from quirkbench.filesystem import private_lock
+from quirkbench.retention import register
+root=sys.argv[1]
+c=Controller(root,reserve_bytes=0)
+def stop(*_): raise KeyboardInterrupt
+signal.signal(signal.SIGTERM,signal.SIG_IGN if sys.argv[2]=='ignore' else stop)
+try:
+ with private_lock(c.root/'command.lock',shared=True), c.lifecycle() as owner:
+  advertise(owner,sys.executable)
+  print('ready',flush=True)
+  while True: signal.pause()
+except KeyboardInterrupt:
+ if sys.argv[3]=='failed':
+  path=c.root/'development-runs/failed/work';path.mkdir(parents=True)
+  register(c.root,'development',owner='failed-worker',paths=(path,),state='FAILED',stop_proof=None)
+ print('stopped',flush=True)
+'''
+        process = subprocess.Popen([sys.executable, '-c', program, str(root),
+                                    'ignore' if ignore else 'stop', 'failed' if failed else 'clean'],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            assert process.stdout.readline() == 'ready\n'
+            yield process
+        finally:
+            if process.poll() is None: process.kill()
+            process.communicate(timeout=5)
+    return start
+
+
+def test_public_cli_stops_verified_controller_then_resets(tmp_path, monkeypatch, capsys, published_owner):
+    root, config = fixture(tmp_path)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(config))
+    with published_owner(root) as owner:
+        assert cli.main(['--state', str(root), '--json', 'admin', 'controller', 'reset',
+                         '--request-id', 'fresh-start', '--confirm-reset']) == 0
+        assert owner.wait(timeout=3) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)['data']['reset']
+    assert captured.err == ''
+    assert not (root / 'controller.sqlite').exists()
+
+
+def test_changed_owner_identity_never_signaled(tmp_path, monkeypatch, published_owner):
+    from quirkbench.foreground_owner import stop_for_reset
+    import signal
+    import time
+    root, config = fixture(tmp_path)
+    with published_owner(root) as owner:
+        with sqlite3.connect(root / 'controller.sqlite') as db:
+            db.execute("UPDATE controller_job_service SET unit='foreground-v1:0'")
+        def forbidden(*args): pytest.fail('an unverified process must not be signaled')
+        monkeypatch.setattr(signal, 'pidfd_send_signal', forbidden)
+        with pytest.raises(Conflict, match='could not be stopped safely'):
+            stop_for_reset(root, deadline=time.monotonic() + 1)
+        assert owner.poll() is None
+        assert (root / 'controller.sqlite').exists()
+
+
+def test_shutdown_timeout_retains_database_and_no_repeat_signal(tmp_path, monkeypatch, published_owner):
+    from quirkbench.foreground_owner import stop_for_reset
+    import signal
+    root, config = fixture(tmp_path)
+    with published_owner(root, ignore=True) as owner:
+        original = signal.pidfd_send_signal; calls = []
+        def observed(fd, sig): calls.append(sig); return original(fd, sig)
+        monkeypatch.setattr(signal, 'pidfd_send_signal', observed)
+        times = iter([0, 31])
+        with pytest.raises(Conflict, match='did not exit within 30 seconds'):
+            stop_for_reset(root, deadline=30, clock=lambda: next(times))
+        assert calls == [signal.SIGTERM]
+        assert owner.poll() is None
+        assert (root / 'controller.sqlite').exists()
+
+
+def test_shutdown_exit_does_not_prove_worker_shutdown(tmp_path, published_owner):
+    root, config = fixture(tmp_path)
+    with published_owner(root, failed=True) as owner:
+        with pytest.raises(Conflict, match='reconcile outstanding work'): run(root, config)
+        assert owner.wait(timeout=3) == 0
+    assert (root / 'controller.sqlite').exists()
+    assert not (root / FENCE).exists()
+
+
+def test_completed_reset_replay_does_not_stop_fresh_controller(tmp_path, published_owner):
+    root, config = fixture(tmp_path)
+    run(root, config); Controller(root, reserve_bytes=0)
+    with published_owner(root) as owner:
+        assert run(root, config)['replayed']
+        assert owner.poll() is None
+        assert (root / 'controller.sqlite').exists()
+
+
+def test_exited_controller_row_does_not_block_reset_or_signal_reused_pid(tmp_path, monkeypatch, published_owner):
+    import signal
+    root, config = fixture(tmp_path)
+    with published_owner(root) as owner:
+        owner.terminate(); assert owner.wait(timeout=3) == 0
+        def forbidden(*args): pytest.fail('an exited owner must not be signaled')
+        monkeypatch.setattr(signal, 'pidfd_send_signal', forbidden)
+        assert run(root, config)['reset']
+
+
+def test_changed_shutdown_lock_binding_never_signals_or_resets(tmp_path, monkeypatch, published_owner):
+    from contextlib import contextmanager
+    from quirkbench.foreground_owner import stop_for_reset
+    from quirkbench.state_reader import StateReader
+    import signal
+    import time
+    root, config = fixture(tmp_path)
+    with published_owner(root) as owner:
+        connect = StateReader.connection; reads = []
+        @contextmanager
+        def changed(reader):
+            with connect(reader) as db:
+                reads.append(True)
+                if len(reads) == 2:
+                    (root / 'coordinator.lock').rename(root / 'old-coordinator.lock')
+                    (root / 'coordinator.lock').touch()
+                yield db
+        monkeypatch.setattr(StateReader, 'connection', changed)
+        def forbidden(*args): pytest.fail('substituted ownership must not be signaled')
+        monkeypatch.setattr(signal, 'pidfd_send_signal', forbidden)
+        with pytest.raises(Conflict, match='could not be stopped safely'):
+            stop_for_reset(root, deadline=time.monotonic() + 1)
+        assert owner.poll() is None
+        assert (root / 'controller.sqlite').exists()
+
+
+def test_late_ready_poll_cannot_extend_shutdown_deadline(tmp_path, monkeypatch, published_owner):
+    from quirkbench import foreground_owner
+    import select
+    import signal
+    root, config = fixture(tmp_path)
+    with published_owner(root, ignore=True) as owner:
+        native = select.poll; instances = []
+        class LateReady:
+            def register(self, descriptor, mask): self.descriptor = descriptor
+            def poll(self, timeout): return [(self.descriptor, select.POLLIN)]
+        def factory():
+            instances.append(True)
+            # Two process-identity verifications precede the exit wait.
+            return LateReady() if len(instances) == 3 else native()
+        monkeypatch.setattr(select, 'poll', factory)
+        original = signal.pidfd_send_signal; calls = []
+        def observed(fd, sig): calls.append(sig); return original(fd, sig)
+        monkeypatch.setattr(signal, 'pidfd_send_signal', observed)
+        times = iter([0, 0, 31])
+        with pytest.raises(Conflict, match='not confirmed within 30 seconds'):
+            foreground_owner.stop_for_reset(root, deadline=30, clock=lambda: next(times))
+        assert calls == [signal.SIGTERM]
+        assert owner.poll() is None
+        assert (root / 'controller.sqlite').exists()
+        assert not (root / FENCE).exists()

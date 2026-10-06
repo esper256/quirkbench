@@ -253,6 +253,12 @@ boolean. New command exit codes: 0 accepted/query successful, 2 invalid input,
 current behavior until explicitly adapted. Acceptance of background work is not
 completion. Status returns operation state even when that operation failed.
 
+Confirmed unused-controller reset may request SIGTERM from the exact published
+foreground owner using a verified held pidfd and bounded exit wait. It never treats
+process exit as whole-worker shutdown proof. The public CLI bypasses generic command
+locking/housekeeping; reset owns those boundaries itself. Historical completed replay
+does not stop a freshly initialized controller.
+
 An explicit unused-controller reset is synchronous maintenance under the existing
 setup, installation, command, coordinator, build, migration and CAS locks. It reads
 known schemas without migration, refuses enrolled targets, all attempts, credential
