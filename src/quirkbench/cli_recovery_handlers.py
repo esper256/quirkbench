@@ -107,7 +107,7 @@ def prepare(args):
             print('All existing USB data, evidence and credentials will be erased on apply.')
             import shlex
             print('Next: review the selected device, then run this command to erase and configure it.')
-            print('Apply: quirkbench recovery prepare --plan '+shlex.quote(answer['plan'])+' --image '+shlex.quote(str(args.image))+' --device '+shlex.quote(str(args.device))+' --confirm '+answer['confirmation']+' --erase'+
+            print('Apply: sudo -v && quirkbench recovery prepare --plan '+shlex.quote(answer['plan'])+' --image '+shlex.quote(str(args.image))+' --device '+shlex.quote(str(args.device))+' --confirm '+answer['confirmation']+' --erase'+
                 (' --unsigned-development' if args.unsigned_development else ' --public-key '+shlex.quote(str(args.public_key))+' --fingerprint '+shlex.quote(args.fingerprint)))
         else:
             print('USB preparation completed and verified. Target: '+answer['target'])
