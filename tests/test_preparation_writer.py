@@ -19,6 +19,10 @@ def fixture(tmp_path):
         [{'start':2048,'end':4095},{'start':4096,'end':8191},
          {'start':8192,'end':16383},{'start':16384,'end':32767}])
     source=tmp_path/'source';source.write_bytes(b'factory-content!'*(1024**2+32768))
+    filesystem_uuid=uuid.uuid4()
+    with source.open('r+b') as stream:
+        stream.seek(factory['partition_starts'][3]*512+1024+104)
+        stream.write(filesystem_uuid.bytes)
     disk=tmp_path/'disk'
     with disk.open('xb') as stream:stream.truncate(size)
     device={'major_minor':[65,144],'device_bytes':size,'logical_sector_bytes':512,
@@ -57,7 +61,8 @@ def fixture(tmp_path):
             if argv[0]=='dumpe2fs':
                 offset,length=next(c[1:] for c in reversed(calls) if c[0]=='view')
                 n=next(n for n,(start,end) in enumerate(plan['prepared_media']['geometry']) if start*512==offset)
-                return f'Filesystem UUID: {identity.partition_uuids[n]}\nBlock count: {length//4096}\nBlock size: 4096\n'
+                fs_uuid=str(filesystem_uuid) if n==3 else identity.partition_uuids[n]
+                return f'Filesystem UUID: {fs_uuid}\nBlock count: {length//4096}\nBlock size: 4096\n'
             if argv[0]=='debugfs' and argv[2].startswith('cat '):return files[argv[2].split('/')[-1]].decode()
             return ''
         yield {'plan':plan,'device_fd':destination,'source_fd':source_fd,'state_fd':state_fd,
@@ -120,6 +125,25 @@ def test_native_failure_preserves_incomplete_marker_and_can_replan(fixture,phase
     assert not completed(f)
     # Interrupted blank metadata remains observable for a new explicit erase plan.
     assert plans.observe_layout(f['device_fd'],f['plan']['device']['device_bytes'])
+
+
+@pytest.mark.parametrize('fault',['uuid','capacity'])
+def test_grown_filesystem_must_preserve_its_own_identity_and_capacity(fixture,fault):
+    f,calls=fixture;original=f['tool']
+    def changed(argv,fd,verify):
+        header=original(argv,fd,verify)
+        if argv[0]=='dumpe2fs':
+            import re
+            if fault=='uuid':
+                # The enclosing GPT UUID is not a substitute for the original FS.
+                header=re.sub(r'Filesystem UUID: .*',
+                    'Filesystem UUID: '+f['plan']['factory']['partition_uuids'][3],header)
+            else:header=re.sub(r'Block count: .*','Block count: 1',header)
+        return header
+    f['tool']=changed
+    with pytest.raises(CommissionError,match='partition 4 filesystem'):
+        writer.write(**f)
+    assert not completed(f)
 
 
 def test_short_write_and_owner_loss_do_not_publish(fixture,monkeypatch):

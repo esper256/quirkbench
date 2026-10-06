@@ -880,6 +880,9 @@ and create empty library/evidence filesystems directly. Stage only small STATE,
 GPT metadata and pairing files; never bulk-copy or hash unused partition capacity.
 Each copied payload has one durable readback. Verify small layout/configuration
 records and filesystem identity/capacity; no second full-device scan.
+The grown factory experiment filesystem retains its source ext4 UUID, which is
+independent of its enclosing GPT partition UUID. Verify it against source content,
+not the partition identifier; newly formatted library/evidence UUIDs remain as planned.
 The helper receives public controller trust and initial enrollment data, never
 controller private keys or DB access. Materialize its small filesystem population
 source in owned temporary scratch, avoiding mutable user-directory traversal by

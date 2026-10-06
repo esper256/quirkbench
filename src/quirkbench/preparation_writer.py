@@ -3,6 +3,7 @@ import hashlib
 import os
 import re
 import time
+import uuid
 
 from .commission import CommissionError
 from .contracts import canonical,digest
@@ -39,6 +40,9 @@ def write(plan,device_fd,source_fd,state_fd,geometry_fd,completion,*,source_chec
     extents=list(zip(factory.partition_starts[:3],factory.fixed_ends))+[(factory.partition_starts[3],factory.factory_data_end)]
     hashes=capture_extents(source_fd,extents,expected_sha256=plan['source']['sha256'],deadline=deadline,guard=check)
     if hashes!=source_checksums:raise CommissionError('factory content changed before preparation')
+    # ext4's superblock UUID is independent of its enclosing GPT PARTUUID.
+    # Bind preservation to the admitted source bytes, not the layout's IDs.
+    source_fs_uuid=str(uuid.UUID(bytes=os.pread(source_fd,16,extents[3][0]*512+1024+104)))
     state_size=(geometry[2][1]-geometry[2][0]+1)*512
     if os.fstat(state_fd).st_size!=state_size or state_size>64*1024**2:
         raise CommissionError('prepared STATE size differs')
@@ -108,10 +112,14 @@ def write(plan,device_fd,source_fd,state_fd,geometry_fd,completion,*,source_chec
             for key in ('Filesystem UUID','Block count','Block size'):
                 match=re.search(r'^'+key+r':\s+(\S+)',header,re.M)
                 if match:fields[key]=match.group(1)
-            if (fields.get('Filesystem UUID')!=factory.partition_uuids[number-1]
+            expected_uuid=source_fs_uuid if number==4 else factory.partition_uuids[number-1]
+            if (fields.get('Filesystem UUID')!=expected_uuid
                     or not fields.get('Block count','').isdigit() or not fields.get('Block size','').isdigit()
                     or int(fields['Block count'])*int(fields['Block size'])!=length):
-                raise CommissionError('prepared filesystem identity/capacity differs')
+                raise CommissionError(f'partition {number} filesystem identity/capacity differs; '
+                    f'expected filesystem UUID {expected_uuid} and {length} bytes; '
+                    f'observed UUID {fields.get("Filesystem UUID","missing")}, '
+                    f'blocks {fields.get("Block count","missing")}, block size {fields.get("Block size","missing")}')
             if number==6:
                 event('Configuring pairing')
                 # Source files have controller ownership; target control files belong to root.

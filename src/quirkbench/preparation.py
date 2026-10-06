@@ -41,10 +41,14 @@ def helper(*argv,timeout_s):
         if '--handoff' in argv:
             log=Path(argv[argv.index('--handoff')+1]).parent/'helper.log'
             log.write_bytes(bytes(errors))
-        return raw.decode(errors='replace')[-4096:]
+        # Progress remains in the retained log, not in the final error message.
+        lines=raw.decode(errors='replace').splitlines()
+        return next((line[-4096:] for line in reversed(lines)
+            if line.strip() and not line.lstrip().startswith('{')),
+            'helper exited without an error message; inspect retained helper.log')
     result=CommandRunner(lambda *_:None,lambda:None,timeout_s=timeout_s,
         operation='USB preparation helper',phase='preparation-helper',stderr_event=diagnostics,diagnostic=failure,cooperative_stdin=True,preserve_session=True,
-        failure_guidance='authorize sudo with sudo -v; preserve staging and request a fresh plan')(argv)
+        failure_guidance='preserve staging and request a fresh plan')(argv)
     try:return json.loads(result)
     except (ValueError,TypeError) as exc:raise CommissionError('invalid preparation helper response') from exc
 

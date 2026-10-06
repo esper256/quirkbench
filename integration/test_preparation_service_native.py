@@ -5,6 +5,7 @@ filesystem tools populate small regular components; the destination is a file.
 """
 from contextlib import contextmanager
 import json
+import uuid
 import os
 from pathlib import Path
 import subprocess
@@ -51,7 +52,7 @@ def test_real_preparation_application_handoff(tmp_path,artifact,selected,issuer,
     native('mcopy','-i',str(state),str(marker),'::/quirkbench-'+parts[2]['partuuid'])
     env=tmp_path/'next.env';native('grub-editenv',str(env),'create')
     native('mcopy','-i',str(state),str(env),'::/quirkbench/next.env')
-    create_ext4_component(data,(parts[3]['end']-parts[3]['start']+1)*512,'QBEXPERIMENTS',parts[3]['partuuid'],runner=native)
+    create_ext4_component(data,(parts[3]['end']-parts[3]['start']+1)*512,'QBEXPERIMENTS',str(uuid.uuid4()),runner=native)
     with image.open('r+b') as destination:
         for number,path in ((2,state),(3,data)):
             destination.seek(parts[number]['start']*512)
