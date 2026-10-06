@@ -74,10 +74,42 @@ def test_conflicting_request_preserves_original(tmp_path, change):
     assert (tmp_path / 'state/private/setup-progress.json').read_bytes() == before
 
 
+def test_fresh_lan_setup_needs_only_the_selected_address_and_replays(tmp_path):
+    first=setup(tmp_path,request_id='lan-default',host='192.0.2.10')
+    assert first['setup_progress']['intent']['host']=='192.0.2.10'
+    assert first['setup_progress']['intent']['allow_lan'] is True
+    assert setup(tmp_path,request_id='lan-default')==first
+    assert not first['readiness']['service_ready']
+    assert not first['readiness']['enrollment_available']
+
+
+def test_retry_preserves_existing_local_only_intent(tmp_path):
+    first=setup(tmp_path,request_id='local-only',allow_lan=False)
+    assert setup(tmp_path,request_id='local-only')==first
+    before=(tmp_path/'state/private/setup-progress.json').read_bytes()
+    with pytest.raises(Conflict,match='different intent'):
+        setup(tmp_path,request_id='local-only',allow_lan=True)
+    assert (tmp_path/'state/private/setup-progress.json').read_bytes()==before
+
+
+@pytest.mark.parametrize('host,local_only', [('127.0.0.1',True),('192.0.2.10',False),('2001:db8::10',False)])
+def test_cli_setup_explains_recorded_address_without_starting_listener(tmp_path,monkeypatch,capsys,host,local_only):
+    monkeypatch.setenv('XDG_CONFIG_HOME',str(tmp_path/'config'))
+    monkeypatch.setattr(controller_setup,'inspect_user_manager',observations()['service_inspector'])
+    args=['setup','--request-id','human-address','--host',host]
+    assert cli.main(args, state_root=str(tmp_path/'state'))==0
+    output=capsys.readouterr().out
+    address='['+host+']' if ':' in host else host
+    assert 'Recorded setup address: https://'+address+':8443' in output
+    assert ('separate recovery target cannot reach it' in output) is local_only
+    assert not (tmp_path/'state/private/controller-service.json').exists()
+
+
 def test_state_switch_never_creates_second_root(tmp_path):
     setup(tmp_path, request_id='first')
-    second=setup_controller(tmp_path / 'other', config_home=tmp_path / 'config', **observations())
-    assert second['readiness']['database_available']
+    with pytest.raises(ContractError,match='already selected'):
+        setup_controller(tmp_path / 'other', config_home=tmp_path / 'config', **observations())
+    assert not (tmp_path/'other/controller.sqlite').exists()
     assert (tmp_path/'state/controller.sqlite').exists()
 
 
@@ -267,7 +299,9 @@ def test_runtime_pinned_and_different_runtime_refused(tmp_path):
 def test_configured_state_conflict_does_not_poison_initial_journal(tmp_path):
     from quirkbench.state_config import configure_state_root
     configure_state_root(tmp_path / 'selected', config_home=tmp_path / 'config')
-    assert setup(tmp_path)['readiness']['database_available']
+    with pytest.raises(Conflict,match='already selected'):
+        setup(tmp_path)
+    assert not (tmp_path/'state').exists()
     assert (tmp_path/'selected').is_dir()
 
 
@@ -278,7 +312,7 @@ def test_setup_retains_id_on_infrastructure_failure(tmp_path, monkeypatch, capsy
         return original(root, fault_hook=lambda stage: (_ for _ in ()).throw(OSError('disk unavailable'))
                         if stage == 'intent_recorded' else None, **kwargs)
     monkeypatch.setattr(controller_setup, 'setup_controller', failing)
-    assert cli.main(['--state', str(tmp_path / 'state'), 'setup', '--request-id', 'lost', '--json']) == 5
+    assert cli.main(['setup', '--request-id', 'lost', '--json'], state_root=str(tmp_path / 'state')) == 5
     response = json.loads(capsys.readouterr().out)
     assert response['error']['code'] == 'INFRASTRUCTURE'
     assert response['data']['request_id'] == 'lost' and response['operation_id']

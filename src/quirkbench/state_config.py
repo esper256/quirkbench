@@ -81,7 +81,7 @@ def discover_state_root(explicit: Path | None = None, *, config_home: Path | Non
         raise StateConfigurationError("configured state must be absolute or home-relative ~/")
     root = canonical_user_path(choice)
     if root == Path("/") or not root.is_dir():
-        raise StateConfigurationError("configured controller state is unavailable; edit controller.json or select --state explicitly")
+        raise StateConfigurationError("configured controller state is unavailable; restore its location or correct the one selection in controller.json")
     return root
 
 
@@ -102,7 +102,7 @@ def configure_state_root(explicit: Path | None = None, *, config_home: Path | No
             raise StateConfigurationError("controller setup lock must be a regular file")
         fcntl.flock(lock, fcntl.LOCK_EX)
         already_selected = selection.exists() or selection.is_symlink()
-        current = discover_state_root(config_home=config) if already_selected and explicit is None else None
+        current = discover_state_root(config_home=config) if already_selected else None
         if explicit is None and current is not None:
             root = current
         else:
@@ -120,7 +120,7 @@ def configure_state_root(explicit: Path | None = None, *, config_home: Path | No
             if root.exists() and not root.is_dir():
                 raise StateConfigurationError("controller state root is not a directory")
             if root.exists() and current is None and explicit is None and any(root.iterdir()):
-                raise StateConfigurationError("existing default state root requires explicit --state selection")
+                raise StateConfigurationError("existing default state root requires explicit local configuration; preserve existing files")
             root.mkdir(parents=True, exist_ok=True, mode=0o700)
         info = root.stat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():

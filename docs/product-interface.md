@@ -68,8 +68,9 @@ resolution uses `$XDG_STATE_HOME/quirkbench` (default `~/.local/state/quirkbench
 never a checkout-local fallback. Setup creates state; queries never initialize it.
 Default persistent state lives outside Git checkouts. Explicit user-selected state,
 build and output directories may be checkout-local; resolve ordinary ancestor aliases
-at admission. Only recorded managed staging is automatically disposable. Preserve
-explicit `--state` and low-level commands for development and existing data. Do not
+at admission. Only recorded managed staging is automatically disposable. One selected controller is resolved from local configuration; public `--state`
+overrides are removed. Internal service APIs may receive explicit roots and tests
+isolate their local configuration. Do not
 silently migrate or merge an existing `.quirkbench` directory into another identity.
 Run the controller in an attended foreground session. Terminal exit ends controller
 availability; daemon packaging is deferred. Sleep interrupts availability, and the
@@ -98,8 +99,7 @@ records remain, with expired payloads unavailable. See [current settings and cov
 The owner-approved [CLI redesign](cli-redesign-plan.md) replaces former public
 commands without aliases. Public families are setup, doctor, status, recovery,
 target, investigation, experiment, run, monitor, admin and dev. Parsing and help
-never create controller state. `--state` and `--json` are accepted along the command
-path. No public action prompts. Normal progress uses investigation names, submission
+never create controller state. `--json` is accepted along the command path; there is no public state override. No public action prompts. Normal progress uses investigation names, submission
 request IDs, immutable experiment IDs and exact run IDs. Internal operation inspection
 belongs to `admin operation`; the packaged controller process has its own private
 entry point, independent of the public parser.
@@ -213,7 +213,12 @@ M1a implements additive `setup`/`status` syntax in the executable parser; the ea
 product CLI v1 fixture stays unchanged. `setup --json` requires `--request-id`;
 human setup generates and prints one and reuses the existing intent on retry.
 Optional `--runtime`, `--cache-gib`, `--reserve-gib`, `--host`, `--port`, `--allow-lan`
-and `--logout-policy session` choices are normalized before publication.
+and `--logout-policy session` choices are normalized before publication. Fresh setup
+allows LAN binding by default; selecting a reachable literal `--host` is sufficient
+and `--allow-lan` is optional. Fresh `--configure-controller` requires an explicit
+`--host`; deliberate local-only setup selects `127.0.0.1`. Metadata-only setup
+still defaults to loopback; the human
+acknowledgment displays the recorded address and labels loopback as local-only.
 Omitted retry choices retain the recorded values. The single initial setup journal
 refuses a different request or changed intent; later maintenance uses its own APIs.
 `status [--json]` does not initialize/migrate state or acquire execution ownership.

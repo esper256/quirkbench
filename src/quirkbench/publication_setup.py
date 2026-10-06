@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 
 from .contracts import Conflict,ContractError,canonical,digest,identifier
-from .filesystem import _managed_path, _durable_directory
+from .filesystem import _managed_path, _durable_directory, canonical_user_path
 from .controller_setup import _database_present
 from .filesystem import _strict_read
 from .controller_service import configuration,validate_configuration,configuration_document,materialize_configuration
@@ -87,7 +87,7 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
     """Configure only a stopped, idle initial service; no keys, start or target grant."""
     from .controller_install import _idle
     identifier(request_id);identifier(alias)
-    root=_managed_path(Path(root).expanduser().resolve());signing_home=_managed_path(signing_home)
+    root=_managed_path(Path(root).expanduser().resolve());signing_home=canonical_user_path(signing_home)
     if not signing_home.is_dir():raise SetupUnavailable('provision an existing private composition signing home first')
     if not _database_present(root):raise SetupUnavailable('complete initial controller setup first')
     fault=fault_hook or (lambda _:None)

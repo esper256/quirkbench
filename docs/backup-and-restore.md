@@ -6,7 +6,7 @@ backup and restore commands; they do not start another service or background job
 
 ```sh
 quirkbench admin backup --output /backup/quirkbench-cut
-quirkbench --state /new/controller/state admin restore --input /backup/quirkbench-cut
+quirkbench admin restore --input /backup/quirkbench-cut --output /backup/restored-controller
 ```
 
 `backup DESTINATION` and `restore BACKUP` preserve their answer formats. New CLI
@@ -67,6 +67,11 @@ a companion retain existing validation and report coverage as unknown. All suppo
 backup versions reject unmanifested SQLite journals before opening the stopped cut;
 unchecked WAL bytes cannot enter restored state. A present
 invalid companion is an error, not a reason to fall back to legacy unknown coverage.
+
+The output is an offline restored artifact; it does not change the one selected
+controller, start another owner or initialize the current controller. Keep the
+current owner stopped before explicitly selecting restored state in the ordinary
+local configuration. Preserve the original state.
 
 The restored controller stays paused; running operations become interrupted and
 unresolved attempts retain uncertainty. Restore private identity/configuration

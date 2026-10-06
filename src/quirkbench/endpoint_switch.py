@@ -96,6 +96,7 @@ def _switch(root,request_id,expected_identity,approved_pin, *,unit,repository_ur
                     or digest(current_raw)!=intent['configuration_sha256']):
                 raise Conflict('endpoint stage belongs to another currently configured source')
             new=old|{'host':identity['host'],'cert':str(directory/'controller.crt'),'key':str(directory/'controller.key'),'tls_identity':{'kind':'endpoint','request_id':request_id}}
+            if not ipaddress.ip_address(identity['host']).is_loopback:new['allow_lan']=True
             if 'repository_endpoint' in old:
                 host,port=endpoint(repository_url)
                 if host!=identity['host'] or port==old.get('port',8443):raise ContractError('explicit repository URL must match successor SAN and use a separate port')
@@ -109,6 +110,7 @@ def _switch(root,request_id,expected_identity,approved_pin, *,unit,repository_ur
         old,new=(materialize_configuration(root,saved[key]) for key in ('source_configuration','destination_configuration'))
         # Recompute every permitted configuration delta rather than trusting a journal.
         expected_new=old|{'host':identity['host'],'cert':str(directory/'controller.crt'),'key':str(directory/'controller.key'),'tls_identity':{'kind':'endpoint','request_id':request_id}}
+        if not ipaddress.ip_address(identity['host']).is_loopback:expected_new['allow_lan']=True
         if 'repository_endpoint' in old:
             repo=new.get('repository_endpoint')
             if not isinstance(repo,dict) or set(repo)!={'url'}:raise ContractError('invalid successor repository endpoint')
@@ -121,8 +123,6 @@ def _switch(root,request_id,expected_identity,approved_pin, *,unit,repository_ur
                 or old['key']!=str(previous/'controller.key') or new!=expected_new):
             raise Conflict('endpoint switch differs from exact staged source or permitted delta')
         for config in (old,new):validate_configuration(root,config)
-        if not ipaddress.ip_address(new['host']).is_loopback and new.get('allow_lan') is not True:
-            raise Conflict('successor LAN endpoint requires existing explicit LAN publication authorization')
         if rollback:
             if digest(saved_raw)!=expected_switch_sha256:raise Conflict('confirm the exact endpoint switch before rollback')
         elif (saved['destination_identity_sha256']!=expected_identity or saved['approved_certificate_sha256']!=approved_pin

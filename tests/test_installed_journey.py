@@ -94,7 +94,9 @@ def test_complete_installed_attended_journey(tmp_path,case):
     assert evidence['case']==case and not evidence['native_qualification']
     assert evidence['same_controller_state'] and evidence['enrolled_target_id'].startswith('target-')
     # Exercise the distributed launcher on this same completed state, outside Git.
-    launcher=[sys.executable,'-I',str(runtime/'bin/quirkbench'),'--state',str(tmp_path/'fresh/state')]
+    launcher=[sys.executable,'-I',str(runtime/'bin/quirkbench')]
+    env={**env,'XDG_CONFIG_HOME':str(tmp_path/'fresh/config'),
+         'XDG_STATE_HOME':str(tmp_path/'fresh/state-home')}
     for args in [['investigation','brief','investigation','--json'],
                  ['investigation','results','show','investigation','--comparison',str(tmp_path/'fresh/comparison.json'),'--json'],
                  ['target','shutdown','status',evidence['enrolled_target_id'],'--json'],

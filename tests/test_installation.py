@@ -74,12 +74,13 @@ def test_setup_requires_explicit_selection_for_legacy_state(tmp_path):
     # Explicit legacy selection remains supported in an independent configuration;
     # an established home-state selection cannot silently switch to it.
     config = tmp_path / 'legacy-config'
-    chosen = _command(config, cwd, "--state", str(legacy), "setup", "--json", state_home=tmp_path / "state-home")
+    _selection(config, json.dumps({"schema_version":1,"state_root":str(legacy)}).encode())
+    chosen = _command(config, cwd, "setup", "--json", state_home=tmp_path / "state-home")
     assert chosen.returncode == 0, chosen.stderr
     assert json.loads(chosen.stdout)["data"]["state_root"] == str(legacy)
 
 
-def test_setup_accepts_explicit_state_switch_and_protects_unrelated_default_directory(tmp_path):
+def test_setup_preserves_single_selection_and_unrelated_default_directory(tmp_path):
     config = tmp_path / "config"
     first = tmp_path / "first"
     first.mkdir(mode=0o700)
@@ -87,15 +88,16 @@ def test_setup_accepts_explicit_state_switch_and_protects_unrelated_default_dire
     selection = config / "quirkbench/controller.json"
     original = selection.read_bytes()
     second = tmp_path / "second"
-    assert configure_state_root(second, config_home=config)["state_root"] == str(second)
-    assert second.is_dir() and first.is_dir()
+    with pytest.raises(StateConfigurationError,match="already selected"):
+        configure_state_root(second, config_home=config)
+    assert not second.exists() and first.is_dir()
     assert json.loads(original)["state_root"] == str(first)
-    assert json.loads(selection.read_bytes())["state_root"] == str(second)
+    assert selection.read_bytes() == original
     other_config = tmp_path / "other-config"
     unrelated = tmp_path / "state-home/quirkbench"
     unrelated.mkdir(parents=True, mode=0o700)
     (unrelated / "unrelated.txt").write_text("keep")
-    with pytest.raises(StateConfigurationError, match="explicit --state"):
+    with pytest.raises(StateConfigurationError, match="explicit local configuration"):
         configure_state_root(config_home=other_config, state_home=tmp_path / "state-home",
                              cwd=tmp_path)
     assert not (other_config / "quirkbench/controller.json").exists()
@@ -124,35 +126,16 @@ def test_configured_state_resolves_from_other_directory_without_creating_local_s
     assert not (elsewhere / ".quirkbench").exists()
 
 
-def test_explicit_state_overrides_invalid_config_and_preserves_legacy_path(tmp_path):
-    controller = Controller(tmp_path / "explicit", reserve_bytes=0)
-    row = controller.admit_operation("req", "image_prepare", {})
-    config = tmp_path / "config"
-    _selection(config, b"not JSON")
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    result = _command(config, elsewhere, "--state", str(controller.root),
-                      "admin", "operation", "show", row["id"], "--json")
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout)["data"]["id"] == row["id"]
-    assert not (elsewhere / ".quirkbench").exists()
-    from quirkbench.state_config import default_state_root
-    assert discover_state_root(config_home=tmp_path / "absent") == default_state_root()
-
-
-@pytest.mark.parametrize("raw", [
-    b'{"schema_version":1,"state_root":"/tmp/a","state_root":"/tmp/b"}',
-    b'{"schema_version":2,"state_root":"/tmp/a"}',
-    b'{"schema_version":1,"state_root":"relative"}',
-    b'{"schema_version":1,"state_root":"/"}',
-    b'{"schema_version":1,"state_root":"/tmp/a","extra":true}',
-    b" " * 4097,
-])
-def test_invalid_selection_fails_closed(tmp_path, raw):
-    config = tmp_path / "config"
-    _selection(config, raw)
-    with pytest.raises(StateConfigurationError):
-        discover_state_root(config_home=config)
+def test_invalid_selection_is_not_bypassed_or_replaced(tmp_path):
+    controller=Controller(tmp_path/'explicit',reserve_bytes=0)
+    row=controller.admit_operation('req','image_prepare',{})
+    config=tmp_path/'config';_selection(config,b'not JSON')
+    elsewhere=tmp_path/'elsewhere';elsewhere.mkdir()
+    before=(controller.root/'controller.sqlite').read_bytes()
+    result=_command(config,elsewhere,'admin','operation','show',row['id'],'--json')
+    assert result.returncode!=0
+    assert (config/'quirkbench/controller.json').read_bytes()==b'not JSON'
+    assert (controller.root/'controller.sqlite').read_bytes()==before
 
 
 def test_missing_selected_root_and_symlink_selection_fail_closed(tmp_path):

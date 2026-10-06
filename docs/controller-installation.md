@@ -222,8 +222,8 @@ revision identities. A stored advertisement alone is not live readiness.
 not copied into configuration. A custom state location is selected once in
 `$XDG_CONFIG_HOME/quirkbench/controller.json` (default `~/.config/quirkbench`):
 `{"schema_version":1,"state_root":"~/work/quirkbench-state"}`. Absolute selections
-are also supported. Explicit `--state` takes precedence over a missing configured
-location; a missing configured directory otherwise reports an error.
+are also supported. Commands use this one selection; there is no public `--state`
+override. A missing configured directory reports an error and preserves the selection.
 
 Selected symlinks resolve through ordinary Unix pathname resolution before work
 begins. Files inside state follow the managed layout; their locations are derived
@@ -265,7 +265,7 @@ firewall or power policy is changed. Build toolchains stay in the isolated build
 ## First local prepared recovery USB
 
 This walkthrough joins development installation, controller pairing readiness and
-USB preparation. Use one selected controller state throughout. Run commands in the
+USB preparation. Commands reuse the one selected controller state throughout. Run commands in the
 same host shell/environment that will own the controller; installing an RPM in a
 Distrobox does not install its executable on the host, or vice versa.
 
@@ -297,12 +297,11 @@ Distrobox does not install its executable on the host, or vice versa.
    invocation or switch between host and container environments mid-setup.
 
    ```sh
-   STATE="$HOME/.local/state/quirkbench"
    CONTROLLER_IP="192.168.1.20"  # replace with your controller's LAN address
    SETUP_ID="first-local-controller"
    PUBLICATION_ID="first-local-repository"
-   quirkbench --state "$STATE" setup --request-id "$SETUP_ID" \
-     --host "$CONTROLLER_IP" --port 8443 --allow-lan --configure-controller
+   quirkbench setup --request-id "$SETUP_ID" \
+     --host "$CONTROLLER_IP" --port 8443 --configure-controller
    ```
 
    An acknowledgment with `Setup complete: no` and `Background work ready: false`
@@ -334,7 +333,7 @@ Distrobox does not install its executable on the host, or vice versa.
 
    ```sh
    SIGNING_FINGERPRINT="REPLACE_WITH_FULL_UPPERCASE_FINGERPRINT"
-   quirkbench --state "$STATE" admin repository configure \
+   quirkbench admin repository configure \
      --repository local --url "https://$CONTROLLER_IP:8444" \
      --signing-home "$SIGNING_HOME" --fingerprint "$SIGNING_FINGERPRINT" \
      --request-id "$PUBLICATION_ID" --json
@@ -354,15 +353,15 @@ Distrobox does not install its executable on the host, or vice versa.
 
    ```sh
    BUILDER="sha256:REPLACE_WITH_EXACT_FINISHED_BUILDER_CONFIG_ID"
-   quirkbench --state "$STATE" admin controller run \
+   quirkbench admin controller run \
      --engine podman --worker-image "$BUILDER"
    ```
 
-   In a second terminal, set the same `STATE` and run:
+   In a second terminal, run:
 
    ```sh
-   quirkbench --state "$STATE" status --json
-   quirkbench --state "$STATE" doctor
+   quirkbench status --json
+   quirkbench doctor
    ```
 
    Inspect `data.readiness.service_ready` and
@@ -386,7 +385,7 @@ Distrobox does not install its executable on the host, or vice versa.
    IMAGE="/absolute/new-output/recovery.img"
    USB="/dev/SELECTED_WHOLE_USB"
    PLAN="$HOME/.local/state/quirkbench-first-usb-plan.json"  # new file
-   quirkbench --state "$STATE" recovery prepare \
+   quirkbench recovery prepare \
      --image "$IMAGE" --device "$USB" --target my-target \
      --plan-out "$PLAN" --unsigned-development
    ```
@@ -498,7 +497,8 @@ local selection instead of `credential_registry: true`.
 Optional recovery configuration uses `recovery_enabled: true`,
 `recovery_signing_home`, `recovery_public_key` and `recovery_fingerprint`.
 The worker executable is derived from the selected verified installation.
-Resource policy and LAN `allow_lan` authorization remain separate.
+Resource policy and bind-address selection remain separate. Fresh setup allows
+LAN binding by default; choose the reachable IP with `--host`.
 
 Installation defaults use current XDG directories. Necessary overrides live once
 in `installation-settings.json` beside `controller.json`: `data_home`, `cache_home`
@@ -627,8 +627,12 @@ bind IP and publishes the configuration. It leaves PATH commands unchanged, star
 no process and requires no service manager. `--configure-controller` remains a compatibility alias for
 this configuration step. Use the returned `next_command` to start the controller,
 selecting a pinned worker image as described above. OpenSSL 3 is required for TLS.
-LAN binding still requires `--allow-lan`. No target credentials or execution approval
-are created.
+Fresh setup allows LAN binding by default; `--allow-lan` is unnecessary. Select
+the reachable LAN IP with `--host`; fresh `--configure-controller` requires this
+choice (use `127.0.0.1` explicitly for local-only operation), and human
+output labels that address as local-only. Saved retry choices are preserved,
+including older explicit LAN restrictions. No target credentials or execution
+approval are created.
 
 Setup preserves exact intent and existing TLS keys across interruption. Differing
 or missing committed inputs require explicit maintenance. Version-1 setup histories
@@ -643,7 +647,7 @@ For an **unused controller** (no enrolled targets, attempts, credentials or boun
 enrollment), explicitly stop its controller and archive its database/setup records:
 
 ```sh
-./quirkbench --state /absolute/controller-state admin controller reset \
+./quirkbench admin controller reset \
   --request-id fresh-start-1 --confirm-reset
 ```
 
@@ -749,3 +753,23 @@ pairing or a completed capacity journal establishes none of the other facts. The
 installed software journey is tested with disposable trust, synthetic media and native
 adapters; real publication, native service survival, recovery boot and hardware behavior
 remain [attended commissioning work](https://github.com/esper256/quirkbench/issues/43).
+
+### Change an initially local-only controller to LAN
+
+Stop the controller, then run `quirkbench admin connection show --json`. Use its
+`identity_sha256` as the source when staging the selected LAN IP:
+
+```sh
+quirkbench admin connection stage --request-id first-lan-address \
+  --host CONTROLLER_LAN_IP --source-sha256 ORIGINAL_IDENTITY_SHA256 --json
+quirkbench admin connection apply --request-id first-lan-address \
+  --identity-sha256 STAGED_IDENTITY_SHA256 --fingerprint STAGED_CERTIFICATE_SHA256 --json
+```
+
+Use the full staged identity and certificate hashes returned by stage. This explicit
+address change allows LAN binding and retains the CA, evidence and credentials;
+it grants no target execution approval. An existing repository also requires the
+explicit successor `--repository-url https://CONTROLLER_LAN_IP:REPOSITORY_PORT`.
+Keep the same request and hashes for interrupted replay. Rollback uses the returned
+switch hash and restores the exact original configuration, including any old LAN
+restriction. No database reset is needed.

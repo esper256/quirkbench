@@ -37,17 +37,17 @@ def test_cli_show_json_and_selected_public_certificate_are_read_only(prepared,ca
     before=snapshot()
     monkeypatch.setattr(maintenance,'prune',lambda *a,**kw:pytest.fail('read-only endpoint must not prune'))
     monkeypatch.setattr(cli,'Controller',lambda *a,**kw:pytest.fail('read-only endpoint must not initialize controller'))
-    assert cli.main(['--state', str(root), 'admin', 'connection', 'show', '--request-id', 'endpoint-1', '--json'])==0
+    assert cli.main(['admin', 'connection', 'show', '--request-id', 'endpoint-1', '--json'], state_root=str(root))==0
     answer=json.loads(capsys.readouterr().out)['data'];assert answer['identity_sha256']==staged['identity_sha256'] and not answer['reachability_verified']
     assert 'PRIVATE KEY' not in json.dumps(answer)
-    assert cli.main(['--state', str(root), 'admin', 'connection', 'show', '--request-id', 'endpoint-1', '--public-certificate'])==0
+    assert cli.main(['admin', 'connection', 'show', '--request-id', 'endpoint-1', '--public-certificate'], state_root=str(root))==0
     assert capsys.readouterr().out==answer['certificate_pem']
     assert snapshot()==before and path.read_bytes()==raw
 
 
 def test_missing_setup_reports_unavailable_without_initializing_state(tmp_path,capsys):
     root=tmp_path/'absent'
-    assert cli.main(['--state', str(root), 'admin', 'connection', 'show', '--json'])==4
+    assert cli.main(['admin', 'connection', 'show', '--json'], state_root=str(root))==4
     assert json.loads(capsys.readouterr().out)['error']['code']=='UNAVAILABLE' and not root.exists()
 
 
@@ -63,7 +63,7 @@ def test_cli_rejects_missing_or_incompatible_maintenance_options(argv):
 def test_cli_dispatches_to_same_existing_stopped_stage_service(configured,monkeypatch,capsys):
     root,source,native=configured;actual=facade.stage_identity
     monkeypatch.setattr(facade,'stage_identity',lambda *a,**kw:actual(*a,run=native,**kw))
-    assert cli.main(['--state', str(root), 'admin', 'connection', 'stage', '--request-id', 'new-endpoint', '--host', '127.0.0.2', '--source-sha256', source['identity_sha256'], '--json'])==0
+    assert cli.main(['admin', 'connection', 'stage', '--request-id', 'new-endpoint', '--host', '127.0.0.2', '--source-sha256', source['identity_sha256'], '--json'], state_root=str(root))==0
     answer=json.loads(capsys.readouterr().out)['data'];assert answer['ca_retained'] and not answer['activated']
     assert facade.show(root,'new-endpoint')['identity_sha256']==answer['identity_sha256']
 

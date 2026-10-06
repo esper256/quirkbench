@@ -134,7 +134,7 @@ def test_response_command_ids_share_operation_namespace_and_answer_cannot_predat
 def test_removed_session_cli_fails_without_mutation(lab, tmp_path, capsys):
     controller, now=lab
     before=controller.list_observations('session')
-    assert main(['--state',str(controller.root),'session','respond','session','--request','readiness','--file',str(tmp_path/'missing'),'--request-id','command','--json'])==2
+    assert main(['session','respond','session','--request','readiness','--file',str(tmp_path/'missing'),'--request-id','command','--json'], state_root=str(controller.root))==2
     assert json.loads(capsys.readouterr().out)['error']['code']=='INVALID_INPUT'
     assert controller.list_observations('session')==before
 

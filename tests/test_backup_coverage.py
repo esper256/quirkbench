@@ -178,21 +178,21 @@ def test_legacy_positional_and_guided_aliases_preserve_restore_checks_and_show_u
     c=Controller(tmp_path/'controller',reserve_bytes=0)
     legacy=tmp_path/'legacy';c.backup(legacy)
     assert coverage.verify_if_present(legacy) is None
-    assert cli.main(['--state', str(tmp_path / 'restored'), 'admin', 'restore', '--input', str(legacy), '--reserve-gib', '0'])==0
+    assert cli.main(['admin', 'restore', '--input', str(legacy), '--output', str(tmp_path/'restored'), '--reserve-gib', '0'])==0
     answer=json.loads(capsys.readouterr().out)
     assert answer['scheduling']=='paused' and answer['historical_backup_coverage']['coverage']=='unknown-legacy'
     for guided in (False,True):
         destination=tmp_path/('guided' if guided else 'positional')
-        command=['--state', str(c.root), 'admin', 'backup', '--reserve-gib', '0']+(['--output'] if guided else [])+[str(destination)]
-        assert cli.main(command)==0;answer=json.loads(capsys.readouterr().out)
+        command=['admin', 'backup', '--reserve-gib', '0']+(['--output'] if guided else [])+[str(destination)]
+        assert cli.main(command, state_root=str(c.root))==0;answer=json.loads(capsys.readouterr().out)
         assert answer['backup']==str(destination) and (('coverage' in answer)==guided)
         if guided:
             import shlex
             commands=answer['next_steps'][1].split('run ',1)[1].split('; inspect ')
             capture=cli.parser().parse_args(shlex.split(commands[0])[1:])
             show=cli.parser().parse_args(shlex.split(commands[1].split(', then ',1)[0])[1:])
-            assert capture.route=='investigation source capture' and capture.state==c.root
-            assert show.route=='admin operation show' and show.state==c.root
+            assert capture.route=='investigation source capture' and capture.state is None
+            assert show.route=='admin operation show' and show.state is None
         assert (coverage.verify_if_present(destination) is not None)==guided
     with pytest.raises(SystemExit):cli.parser().parse_args(['admin', 'backup', str(legacy), '--output', str(tmp_path / 'bad')])
     with pytest.raises(SystemExit):cli.parser().parse_args(['admin', 'restore'])
@@ -208,3 +208,24 @@ def test_legacy_backup_rejects_unmanifested_journals_before_native_restoration(t
     with pytest.raises(ContractError,match='journal'):
         Controller.restore(backup,tmp_path/'restored',reserve_bytes=0,deployment_repository=repository)
     assert not (tmp_path/'restored').exists()
+
+
+@pytest.mark.parametrize('selected_available',[True,False])
+def test_offline_restore_preserves_selection_and_original_controller(tmp_path,monkeypatch,capsys,selected_available):
+    original=Controller(tmp_path/'original',reserve_bytes=0)
+    backup=tmp_path/'backup';original.backup(backup)
+    database=original.root/'controller.sqlite'
+    before=database.read_bytes()
+    config_home=tmp_path/'config';selection=config_home/'quirkbench/controller.json'
+    selection.parent.mkdir(parents=True)
+    selected=original.root if selected_available else tmp_path/'unavailable'
+    raw=canonical({'schema_version':1,'state_root':str(selected)})
+    selection.write_bytes(raw)
+    monkeypatch.setenv('XDG_CONFIG_HOME',str(config_home))
+    output=tmp_path/'offline'
+    assert cli.main(['admin','restore','--input',str(backup),'--output',str(output),'--reserve-gib','0'])==0
+    answer=json.loads(capsys.readouterr().out)
+    assert answer['scheduling']=='paused' and not answer['controller_selection_changed']
+    assert (output/'controller.sqlite').is_file()
+    assert selection.read_bytes()==raw and database.read_bytes()==before
+    assert selected_available or not selected.exists()

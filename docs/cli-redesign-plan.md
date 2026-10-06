@@ -72,7 +72,6 @@ Specialist tools
   dev             Build recovery images and maintain releases
 
 Options
-  --state PATH    Use controller data at PATH
   --json          Return structured output
   --version       Show the running version and source
   -h, --help      Show help
@@ -331,7 +330,7 @@ it belongs to a specific action. Inspect root command-name checks carefully: nam
 currently select readiness, read-only treatment and maintenance locking, so renaming
 without transferring those policies is unsafe.
 
-Support `--state` and `--json` before or after the command path without child-parser
+Support `--json` before or after the command path without child-parser
 defaults overwriting already supplied values. Put resource/repository overrides on
 the relevant actions or configured settings, not the short root help. Use `--target`
 for public target selection; retain network `--host` where it really means an address.
@@ -537,3 +536,6 @@ Completion means a new human or agent can discover and follow the supported jour
 including interruption and log inspection, without learning internal operation IDs
 or choosing among obsolete interfaces. Report unfinished acceptance honestly rather
 than presenting parser renaming alone as completion of this plan.
+
+Owner follow-up #157 removes public state overrides: use the one controller selection
+in local configuration; offline restore accepts an artifact `--output` destination.

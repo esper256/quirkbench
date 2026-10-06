@@ -212,7 +212,7 @@ def test_cli_scope_arguments_and_no_missing_state_initialization(tmp_path,monkey
         with pytest.raises(SystemExit):cli.parser().parse_args(argv[:index]+argv[index+2:])
     for command in ('add','show','revoke','drain-revoke'):
         with pytest.raises(SystemExit):cli.parser().parse_args(['target',command,'target','--new-uuid',NEW_UUID])
-    root=tmp_path/'missing';assert cli.main(['--state',str(root),*argv])==4
+    root=tmp_path/'missing';assert cli.main([*argv], state_root=str(root))==4
     assert not root.exists()
 
 

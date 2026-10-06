@@ -208,3 +208,16 @@ def test_staged_switch_reader_and_schema_are_strict(prepared):
     with pytest.raises(ContractError):switch.validate_switch(legacy|{'schema_version':1,'unit':'/old/controller.service'})
     assert switch.validate_switch(value)==value
     with pytest.raises(ContractError):switch.validate_switch(value|{'unexpected':True})
+
+
+def test_local_only_controller_can_explicitly_select_lan_and_rollback(configured):
+    root,source,native=configured
+    from quirkbench.controller_endpoint import stage_identity
+    before=(root/'private/controller-service.json').read_bytes()
+    staged=stage_identity(root,'192.0.2.10','lan-endpoint',source['identity_sha256'],run=native)
+    applied=switch.switch_stopped(root,'lan-endpoint',staged['identity_sha256'],staged['certificate_sha256'],run=native)
+    assert configuration(root)['host']=='192.0.2.10'
+    assert configuration(root)['allow_lan'] is True
+    assert switch.switch_stopped(root,'lan-endpoint',staged['identity_sha256'],staged['certificate_sha256'],run=native)==applied
+    switch.rollback_stopped(root,'lan-endpoint',applied['switch_sha256'],run=native)
+    assert (root/'private/controller-service.json').read_bytes()==before

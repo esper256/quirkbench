@@ -70,7 +70,7 @@ def test_development_updater_preserves_incompatible_state_and_names_reset(tmp_pa
     assert (root/'controller.sqlite').read_bytes() == before
     assert not (tmp_path/'home/.local/bin/quirkbench').exists()
     command = shlex.split(updater['reset_command'](root))
-    assert command[1:6] == ['--state', str(root), 'admin', 'controller', 'reset']
+    assert command[1:4] == ['admin', 'controller', 'reset']
     assert command[-1] == '--confirm-reset' and 'dev-reset-' in command[-2]
 
 
@@ -111,7 +111,7 @@ def test_development_updater_error_prints_copyable_reset_command(tmp_path, archi
     output = capsys.readouterr()
     command = next(line for line in output.err.splitlines() if '--confirm-reset' in line)
     argv = shlex.split(command)
-    assert argv[1:6] == ['--state', str(root), 'admin', 'controller', 'reset']
+    assert argv[1:4] == ['admin', 'controller', 'reset']
     assert argv[-1] == '--confirm-reset' and 'dev-reset-' in argv[-2]
     assert 'CHOOSE_NEW_RESET_ID' not in command
     assert (root/'controller.sqlite').read_bytes() == before
@@ -362,7 +362,7 @@ def test_cli_activation_does_not_take_outer_shared_lock(tmp_path,archive,monkeyp
     original=controller_install.activate
     monkeypatch.setattr(controller_install,'activate',lambda record,root:original(record,root,config_home=conf,
         bin_home=binary,runner=Services(root,record),ready=ready))
-    assert cli.main(['--state', str(root), 'dev', 'install', str(archive), '--activate', '--json'])==0
+    assert cli.main(['dev', 'install', str(archive), '--activate', '--json'], state_root=str(root))==0
     assert json.loads(capsys.readouterr().out)['data']['activated']
 
 

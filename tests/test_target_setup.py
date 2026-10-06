@@ -145,9 +145,9 @@ def test_cli_mutation_requires_id_and_show_has_stable_readonly_envelope(publicat
     c,req,code,kwargs=publication;complete(c,req,kwargs)
     before=(c.root/'controller.sqlite').read_bytes()
     monkeypatch.setattr(cli,'Controller',lambda *a,**kw:(_ for _ in ()).throw(AssertionError('readonly status initialized a writer')))
-    assert cli.main(['--state',str(c.root),'target','show','target','--json'])==0
+    assert cli.main(['target','show','target','--json'], state_root=str(c.root))==0
     answer=json.loads(capsys.readouterr().out)
     assert answer['ok'] and answer['data']['enrollment']['state']=='COMPLETE'
     assert (c.root/'controller.sqlite').read_bytes()==before
-    assert cli.main(['--state',str(c.root),'target','show','unknown','--json'])==2
+    assert cli.main(['target','show','unknown','--json'], state_root=str(c.root))==2
     assert json.loads(capsys.readouterr().out)['error']['code']=='INVALID_INPUT'

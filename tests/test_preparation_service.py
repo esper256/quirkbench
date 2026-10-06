@@ -54,6 +54,6 @@ def test_apply_revalidates_before_native_staging_or_invitation(selected,tmp_path
 def test_missing_public_choices_never_prompt_or_create_state(tmp_path,monkeypatch,capsys,arguments):
     monkeypatch.setattr('builtins.input',lambda *_:pytest.fail('controller commands never prompt'))
     root=tmp_path/'absent'
-    assert cli.main(['recovery','prepare','--state',str(root),'--json',*arguments])==2
+    assert cli.main(['recovery','prepare','--json',*arguments], state_root=str(root))==2
     assert 'requires' in json.loads(capsys.readouterr().out)['error']['message']
     assert not root.exists()

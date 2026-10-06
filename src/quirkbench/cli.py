@@ -17,8 +17,8 @@ from .cli_parser import parser
 from .cli_output import emit, error
 
 
-def _main(argv=None):
-    args = argv if isinstance(argv,argparse.Namespace) else parser().parse_args(argv)
+def _main(argv=None, *, state_root=None):
+    args = argv if isinstance(argv,argparse.Namespace) else parser(state_root=state_root).parse_args(argv)
     if args.command=='controller-reset':
         from .cli_admin_handlers import controller_reset
         return controller_reset(args)
@@ -150,15 +150,6 @@ def _main(argv=None):
                 artifact=controller.store.put_file(report)
                 published(controller.root,run_owner,[artifact.sha256])
                 answer={'qualification':str(report)}
-        elif args.command == 'restore':
-            restored = Controller.restore(args.backup, args.state, **controller_options)
-            answer = {'restored': str(restored.root), 'scheduling': 'paused'}
-            if args.input:
-                from .backup_coverage import load_summary
-                answer['historical_backup_coverage']=load_summary(args.backup)
-                answer['next_steps']=['Restore private identity and operator configuration separately.',
-                    'Restore editable Git separately; reconcile original source ownership before capture.',
-                    'Reconcile target execution, recovery return and pending evidence before explicit resume.']
         else:
             if read_only:
                 from .state_reader import StateReader
@@ -256,7 +247,7 @@ def _main(argv=None):
                 if args.output:
                     from .backup_coverage import load_summary
                     answer['coverage']=load_summary(args.destination)
-                    prefix=shlex.join(['quirkbench','--state',str(controller.root)])
+                    prefix=shlex.join(['quirkbench'])
                     answer['next_steps']=['Keep private identity and operator configuration in a separate protected backup.',
                         f'For incomplete sources: stop writers, run {prefix} investigation source capture NAME --workspace ID --quiesced --request-id ID; inspect {prefix} admin operation show OPERATION_ID, then back up to a new destination.',
                         'Reconcile offline targets and pending evidence; target-only backlog is unknown.']
@@ -333,16 +324,21 @@ def _main(argv=None):
                 print('Inventory query failed; no work queued.', file=sys.stderr)
             return status
         # Avoid accidentally echoing provider credentials or subprocess output.
-        error(args, str(exc) if isinstance(exc,(ValueError,FileNotFoundError)) or type(exc).__name__ in ('BuildError','ImageError','QemuError','BootError','CommissionError') else 'Operation failed; progress retained.', code='INVALID_INPUT' if isinstance(exc,ValueError) else 'INFRASTRUCTURE')
-        return 1
+        from .contracts import Conflict
+        code='CONFLICT' if isinstance(exc,Conflict) else 'INVALID_INPUT' if isinstance(exc,ValueError) else 'INFRASTRUCTURE'
+        error(args, str(exc) if isinstance(exc,(ValueError,FileNotFoundError)) or type(exc).__name__ in ('BuildError','ImageError','QemuError','BootError','CommissionError') else 'Operation failed; progress retained.', code=code)
+        return 3 if isinstance(exc,Conflict) else 1
 
 
-def main(argv=None):
+def main(argv=None, *, state_root=None):
     """A publication barrier, not a scheduler; read-only commands do no housekeeping."""
     try:
-        args=argv if isinstance(argv,argparse.Namespace) else parser().parse_args(argv)
+        args=argv if isinstance(argv,argparse.Namespace) else parser(state_root=state_root).parse_args(argv)
     except SystemExit as exc:
         return exc.code
+    if args.command == 'restore':
+        from .cli_admin_handlers import restore
+        return restore(args)
     if args.command in ('product','submission'):
         from .cli_product import execute
         return execute(args)

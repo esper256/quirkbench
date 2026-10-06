@@ -216,12 +216,12 @@ def test_admin_diagnostics_commands_use_real_readers_and_explicit_delete(snapsho
     from quirkbench import cli
     _,_,_,manifest,files=snapshot;c,control,result,report,_=tls
     receipt=send(manifest,files,control=control,verify_target=lambda:True,binding_reader=lambda:UUID)
-    base=['--state',str(c.root),'--json','admin','diagnostics']
+    base=['--json','admin','diagnostics']
     for argv in (['list'],['show',receipt['report_id']],['export',receipt['report_id'],'--output',str(tmp_path/'admin-export')]):
-        assert cli.main(base+argv)==0
+        assert cli.main(base+argv, state_root=str(c.root))==0
         assert json.loads(capsys.readouterr().out)['error'] is None
     assert (tmp_path/'admin-export'/'manifest.json').is_file()
-    assert cli.main(base+['delete',receipt['report_id']])==0
+    assert cli.main(base+['delete',receipt['report_id']], state_root=str(c.root))==0
     assert json.loads(capsys.readouterr().out)['error'] is None
 
 

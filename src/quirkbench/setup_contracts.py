@@ -41,8 +41,10 @@ def validate_intent(value):
         address = ipaddress.ip_address(value['host'])
     except (ValueError, TypeError) as exc:
         raise ContractError('setup --host requires a literal IP address') from exc
-    if str(address) != value['host'] or (not address.is_loopback and not value['allow_lan']):
-        raise ContractError('non-loopback setup requires --allow-lan; use a normalized IP')
+    if str(address) != value['host']:
+        raise ContractError('setup --host requires a normalized IP')
+    if not address.is_loopback and not value['allow_lan']:
+        raise ContractError('recorded setup intent does not permit LAN binding')
     canonical(value)
     return value
 

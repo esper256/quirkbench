@@ -271,7 +271,7 @@ def test_terminal_copy_requires_current_claim_and_exact_receipt(signed_factory,t
 def test_cli_missing_production_trust_is_unavailable_before_any_state(tmp_path,capsys):
     from quirkbench.cli import main,parser
     assert parser().parse_args(['recovery','download','--request-id','fixture','--json']).action=='download'
-    assert main(['--state',str(tmp_path/'absent'),'recovery','download','--request-id','first','--json'])==4
+    assert main(['recovery','download','--request-id','first','--json'], state_root=str(tmp_path/'absent'))==4
     assert json.loads(capsys.readouterr().out)['error']['code']=='UNAVAILABLE'
     assert not list(tmp_path.iterdir())
 

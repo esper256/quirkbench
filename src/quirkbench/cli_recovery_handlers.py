@@ -83,7 +83,7 @@ def prepare(args):
             print('Experiments: '+str(answer['experiment_bytes'])+' bytes; evidence: '+str(answer['evidence_bytes'])+' bytes; library payload: 0')
             print('All existing USB data, evidence and credentials will be erased on apply.')
             import shlex
-            print('Apply: quirkbench --state '+shlex.quote(str(root))+' recovery prepare --plan '+shlex.quote(answer['plan'])+' --image '+shlex.quote(str(args.image))+' --device '+shlex.quote(str(args.device))+' --confirm '+answer['confirmation']+' --erase'+
+            print('Apply: quirkbench recovery prepare --plan '+shlex.quote(answer['plan'])+' --image '+shlex.quote(str(args.image))+' --device '+shlex.quote(str(args.device))+' --confirm '+answer['confirmation']+' --erase'+
                 (' --unsigned-development' if args.unsigned_development else ' --public-key '+shlex.quote(str(args.public_key))+' --fingerprint '+shlex.quote(args.fingerprint)))
         else:
             print('USB preparation completed and verified. Target: '+answer['target'])

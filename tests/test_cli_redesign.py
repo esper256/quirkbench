@@ -32,7 +32,7 @@ def test_root_and_every_action_help_are_complete_and_stateless(tmp_path,monkeypa
  ['target','--url','https://example.test'],['admin','connection','wizard'],['experiment','review','x']])
 def test_removed_names_fail_without_state(words,tmp_path,capsys):
     state=tmp_path/'absent'
-    assert cli.main(['--state',str(state),'--json',*words])==2
+    assert cli.main(['--json',*words], state_root=str(state))==2
     output=capsys.readouterr()
     assert json.loads(output.out)['error']['code']=='INVALID_INPUT'
     assert not state.exists()
@@ -40,18 +40,20 @@ def test_removed_names_fail_without_state(words,tmp_path,capsys):
 
 def test_shared_options_before_and_after_path(tmp_path):
     p=parser()
-    for argv in [['--state',str(tmp_path),'--json','investigation','status','test'],
-                 ['investigation','--state',str(tmp_path),'status','test','--json'],
-                 ['investigation','status','--json','test','--state',str(tmp_path)]]:
+    for argv in [['--json','investigation','status','test'],
+                 ['investigation','--json','status','test'],
+                 ['investigation','status','test','--json']]:
         args=p.parse_args(argv)
-        assert args.state==tmp_path and args.json and args.name=='test'
+        assert args.state is None and args.json and args.name=='test'
+    for argv in [['--state',str(tmp_path),'status'],['status','--state',str(tmp_path)]]:
+        with pytest.raises(SystemExit):p.parse_args(argv)
     args=p.parse_args(['--json','--version'])
     assert args.command=='version' and args.json
 
 
 def test_missing_observation_does_not_prompt_or_open_state(tmp_path,monkeypatch,capsys):
     monkeypatch.setattr('builtins.input',lambda *_:pytest.fail('prompt'))
-    assert cli.main(['--state',str(tmp_path/'absent'),'investigation','observation','answer','test','--request-id','answer'])==2
+    assert cli.main(['investigation','observation','answer','test','--request-id','answer'], state_root=str(tmp_path/'absent'))==2
     assert not (tmp_path/'absent').exists()
 
 
@@ -62,7 +64,7 @@ def test_development_monitor_uses_existing_readonly_view(tmp_path,monkeypatch,ca
         return 0
     monkeypatch.setattr('quirkbench.tui.monitor',monitor)
     state=tmp_path/'absent'
-    assert cli.main(['dev','monitor','quirkbench-build-test','--state',str(state),'--once','--json'])==0
+    assert cli.main(['dev','monitor','quirkbench-build-test','--once','--json'], state_root=str(state))==0
     assert calls==[(state,{'run_id':'quirkbench-build-test','investigation':None,'once':True,'json_output':True})]
     assert not state.exists()
     with pytest.raises(SystemExit):
@@ -82,7 +84,7 @@ def test_checkout_and_manual_symlink_have_identical_offline_interface(tmp_path):
     link=tmp_path/'quirkbench';link.symlink_to(root/'quirkbench')
     outputs=[]
     for command in (root/'quirkbench',link):
-        run=subprocess.run([str(command),'--state',str(tmp_path/'absent'),'--help'],capture_output=True,text=True,timeout=10)
+        run=subprocess.run([str(command),'--help'],capture_output=True,text=True,timeout=10)
         assert run.returncode==0,run.stderr
         outputs.append(run.stdout)
     assert outputs[0]==outputs[1] and not (tmp_path/'absent').exists()

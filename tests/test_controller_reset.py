@@ -32,8 +32,8 @@ def test_confirmation_and_actual_cli(tmp_path, monkeypatch, capsys):
     root, config = fixture(tmp_path)
     monkeypatch.setenv('XDG_CONFIG_HOME', str(config))
     before = (root / 'controller.sqlite').read_bytes()
-    args = ['--state', str(root), '--json', 'admin', 'controller', 'reset', '--request-id', 'fresh-start']
-    assert cli.main(args) == 2
+    args = ['--json', 'admin', 'controller', 'reset', '--request-id', 'fresh-start']
+    assert cli.main(args, state_root=str(root)) == 2
     assert (root / 'controller.sqlite').read_bytes() == before
     capsys.readouterr()
     assert cli.main(args + ['--confirm-reset']) == 0
@@ -188,7 +188,7 @@ def test_incompatible_cli_names_database_and_reset_without_housekeeping(tmp_path
         db.execute('PRAGMA user_version=35')
     before = (root / 'controller.sqlite').read_bytes()
     monkeypatch.setattr(maintenance, 'prune', lambda _: pytest.fail('failed admission must not run housekeeping'))
-    assert cli.main(['--state', str(root), 'run', 'approve', 'unused-attempt']) != 0
+    assert cli.main(['run', 'approve', 'unused-attempt'], state_root=str(root)) != 0
     output = capsys.readouterr()
     assert str(root / 'controller.sqlite') in output.err
     assert 'schema 35, required '+str(len(MIGRATIONS)) in output.err
@@ -413,8 +413,8 @@ def test_public_cli_stops_verified_controller_then_resets(tmp_path, monkeypatch,
     root, config = fixture(tmp_path)
     monkeypatch.setenv('XDG_CONFIG_HOME', str(config))
     with published_owner(root) as owner:
-        assert cli.main(['--state', str(root), '--json', 'admin', 'controller', 'reset',
-                         '--request-id', 'fresh-start', '--confirm-reset']) == 0
+        assert cli.main(['--json', 'admin', 'controller', 'reset',
+                         '--request-id', 'fresh-start', '--confirm-reset'], state_root=str(root)) == 0
         assert owner.wait(timeout=3) == 0
     captured = capsys.readouterr()
     assert json.loads(captured.out)['data']['reset']

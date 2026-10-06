@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / 'src'))
 
 
 def reset_command(state):
-    return shlex.join([str(ROOT / 'quirkbench'), '--state', str(state),
+    return shlex.join([str(ROOT / 'quirkbench'),
                        'admin', 'controller', 'reset', '--request-id',
                        'dev-reset-' + uuid.uuid4().hex, '--confirm-reset'])
 

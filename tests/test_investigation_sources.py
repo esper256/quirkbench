@@ -63,11 +63,11 @@ def test_cli_acknowledges_operation_without_starting_worker(setup, monkeypatch, 
     from quirkbench import controller_service
     c, root, base = setup
     monkeypatch.setattr(controller_service, 'require_ready', lambda _: None)
-    command = ['--state', str(c.root), 'investigation', 'source', 'prepare', 'campaign', '--source', str(root), '--base-oid', base, '--request-id', 'cli-preparation', '--quiesced', '--json', '--reserve-gib', '0']
-    assert cli.main(command) == 0
+    command = ['investigation', 'source', 'prepare', 'campaign', '--source', str(root), '--base-oid', base, '--request-id', 'cli-preparation', '--quiesced', '--json', '--reserve-gib', '0']
+    assert cli.main(command, state_root=str(c.root)) == 0
     response = json.loads(capsys.readouterr().out)
     assert response['operation_id']
-    assert cli.main(command) == 0
+    assert cli.main(command, state_root=str(c.root)) == 0
     assert json.loads(capsys.readouterr().out)['operation_id'] == response['operation_id']
     with c.transaction() as db:
         assert db.execute('SELECT COUNT(*) FROM operations').fetchone()[0] == 1
@@ -81,7 +81,7 @@ def test_readonly_cli_never_initializes_or_prunes(setup, monkeypatch, capsys, ac
     def forbidden(*a, **kw): raise AssertionError('read-only command mutated state')
     monkeypatch.setattr(controller, 'Controller', forbidden)
     monkeypatch.setattr(maintenance, 'prune', forbidden)
-    assert cli.main(['--state', str(c.root), 'investigation', *(['source','show'] if action=='source' else [action]), 'campaign', '--json']) == 0
+    assert cli.main(['investigation', *(['source','show'] if action=='source' else [action]), 'campaign', '--json'], state_root=str(c.root)) == 0
     assert json.loads(capsys.readouterr().out)['data']
 
 

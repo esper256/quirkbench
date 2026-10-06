@@ -59,7 +59,7 @@ def test_ad_hoc_build_retains_output_after_verified_container_stop(tmp_path,monk
     assert json.loads((stage.parent/'stopped.json').read_bytes())['proof']=='stopped'
     from quirkbench.cli import main
     database=(c.root/'controller.sqlite').read_bytes()
-    assert main(['dev','monitor',run_id,'--state',str(c.root),'--once','--json'])==0
+    assert main(['dev','monitor',run_id,'--once','--json'], state_root=str(c.root))==0
     viewed=json.loads(capsys.readouterr().out)['data']['run']
     assert viewed['run_id']==run_id and viewed['state']=='SUCCEEDED'
     assert (c.root/'controller.sqlite').read_bytes()==database

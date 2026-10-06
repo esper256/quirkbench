@@ -103,13 +103,13 @@ def test_cli_versions_and_recent_contact_are_explicit(publication,capsys):
     from quirkbench.cli import main,parser
     c,result,report=registered(publication)
     assert observe_contact(c,result['device_id'],result['device_token'],report.boot_id)
-    argv=['--state',str(c.root),'target','show',result['device_id']]
+    argv=['target','show',result['device_id']]
     assert main(argv+['--json'])==0
     assert json.loads(capsys.readouterr().out)['data']['schema_version']==2
     assert main(argv+['--json'])==0
     answer=json.loads(capsys.readouterr().out)['data']
     assert answer['schema_version']==2 and answer['recovery']['contact_current']
-    assert main(argv)==0
+    assert main(argv, state_root=str(c.root))==0
     assert 'Recent authenticated contact: within 30 seconds' in capsys.readouterr().out
     for args in (['target', 'pair', 'name', '--status-version', '2'],
                  ['target','show','name','--status-version','3'],

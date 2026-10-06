@@ -181,12 +181,12 @@ def test_cli_service_facade_uses_same_setup_and_zero_target_services(tmp_path,in
     monkeypatch.setattr(setup_service,'install_service',lambda:start(tmp_path,services))
     monkeypatch.setattr(controller_setup,'inspect_user_manager',observations()['service_inspector'])
     monkeypatch.setattr(controller_service,'require_ready',lambda root:services.ready(root) if services.active else observations()['ready'](root))
-    args=['--state', str(tmp_path / 'state'), 'setup', '--request-id', 'initial', '--configure-controller', '--json']
-    assert cli.main(args)==0
+    args=['setup', '--request-id', 'initial', '--configure-controller', '--json']
+    assert cli.main(args, state_root=str(tmp_path / 'state'))==0
     response=json.loads(capsys.readouterr().out)['data']
     assert response['service_setup_result']['background_work_ready']
     assert response['readiness']['target_count']==0 and not response['readiness']['setup_complete']
-    assert cli.main(args)==0
+    assert cli.main(args, state_root=str(tmp_path / 'state'))==0
     assert json.loads(capsys.readouterr().out)['data']['service_setup_result']==response['service_setup_result']
 
 
@@ -195,8 +195,8 @@ def test_cli_missing_native_dependency_is_typed_unavailable(tmp_path,initialized
     monkeypatch.setenv('XDG_CONFIG_HOME',str(tmp_path/'config'))
     def missing(): raise SetupUnavailable('native fixture dependency unavailable')
     monkeypatch.setattr(setup_service,'install_service',missing)
-    args=['--state', str(tmp_path / 'state'), 'setup', '--request-id', 'initial', '--configure-controller', '--json']
-    assert cli.main(args)==4
+    args=['setup', '--request-id', 'initial', '--configure-controller', '--json']
+    assert cli.main(args, state_root=str(tmp_path / 'state'))==4
     response=json.loads(capsys.readouterr().out)
     assert response['error']['code']=='UNAVAILABLE' and response['operation_id']
     assert response['data']['request_id']=='initial'
@@ -218,13 +218,13 @@ def test_cli_native_failure_preserves_setup_and_resumes_same_request(tmp_path, i
             tls_run=run,ready=observations()['ready'])
     monkeypatch.setattr(setup_service,'install_service',configure)
     monkeypatch.setattr(controller_setup,'inspect_user_manager',observations()['service_inspector'])
-    args=['--state',str(tmp_path/'state'),'setup','--request-id','initial','--configure-controller','--json']
-    assert cli.main(args)==4
+    args=['setup','--request-id','initial','--configure-controller','--json']
+    assert cli.main(args, state_root=str(tmp_path/'state'))==4
     error=json.loads(capsys.readouterr().out)
     assert error['error']['code']=='UNAVAILABLE' and message in error['error']['message']
     assert error['data']['request_id']=='initial'
     assert not (tmp_path/'state/private/controller-service.json').exists()
-    assert cli.main(args)==0
+    assert cli.main(args, state_root=str(tmp_path/'state'))==0
     result=json.loads(capsys.readouterr().out)['data']
     assert result['setup_progress']['request_id']=='initial'
     assert result['service_setup_result']['controller_start_required']
@@ -261,3 +261,11 @@ def test_reset_fence_blocks_service_configuration_under_owner_lock(tmp_path, ini
     (tmp_path / 'state' / FENCE).write_text('{}')
     with pytest.raises(Conflict, match='reset unfinished'): start(tmp_path, Services())
     assert not (tmp_path / 'state/private/controller-service.json').exists()
+
+
+def test_fresh_controller_configuration_requires_explicit_bind_address(tmp_path,monkeypatch,capsys):
+    monkeypatch.setenv('XDG_CONFIG_HOME',str(tmp_path/'config'))
+    root=tmp_path/'state'
+    assert cli.main(['setup','--configure-controller'], state_root=str(root))==2
+    assert 'Choose the controller LAN IP' in capsys.readouterr().err
+    assert not root.exists()

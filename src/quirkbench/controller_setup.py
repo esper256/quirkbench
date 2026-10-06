@@ -358,6 +358,9 @@ def setup_controller(root=None, *, request_id=None, runtime_root=None, cache_gib
     filesystem = filesystem or SetupFilesystem()
     fault_hook = fault_hook or (lambda _: None)
     state = _managed_path(discover_state_root(root, config_home=config_home))
+    selection = _config_home(config_home) / 'quirkbench/controller.json'
+    if selection.exists() and discover_state_root(config_home=config_home) != state:
+        raise Conflict('controller state is already selected; no implicit switch')
     journal = _journal(config_home, state)
     _durable_directory(journal.parent)
     with private_lock(journal.parent / '.setup-progress.lock'):
@@ -378,7 +381,7 @@ def setup_controller(root=None, *, request_id=None, runtime_root=None, cache_gib
         values = {'cache_gib': cache_gib, 'reserve_gib': reserve_gib, 'host': host,
                   'port': port, 'allow_lan': allow_lan, 'logout_policy': logout_policy}
         defaults = {'cache_gib': 50, 'reserve_gib': 20.0, 'host': '127.0.0.1',
-                    'port': 8443, 'allow_lan': False, 'logout_policy': 'session'}
+                    'port': 8443, 'allow_lan': True, 'logout_policy': 'session'}
         intent = validate_intent({
             'runtime_version': runtime_record['version'] if runtime_record else None,
             'runtime_archive_sha256': runtime_record['archive_sha256'] if runtime_record else None,

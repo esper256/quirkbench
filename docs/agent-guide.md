@@ -140,7 +140,8 @@ activate a live installation implicitly.
 
 ## Machine calls
 
-`--state PATH` and `--json` work before or after the command path. Human and machine
+`--json` works before or after the command path. Commands use the one locally
+configured controller; no public `--state` override exists. Human and machine
 calls use the same validation and authority. Retain returned request IDs and cursors;
 never infer success from missing errors, recent contact or a completed build. Help,
 version, malformed inputs and removed commands do not create controller state.

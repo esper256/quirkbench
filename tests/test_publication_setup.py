@@ -259,7 +259,7 @@ def test_installed_setup_publication_pairing_lost_reply_and_private_reboot_state
     c=Controller(root,reserve_bytes=0);config=configuration(root)
     with c.lifecycle() as owner:
         with runtime.publication_runtime(c,registry=CredentialRegistry(root),service_runtime=config['runtime'],
-                host=config['host'],port=config['port'],certfile=config['cert'],keyfile=config['key'],allow_lan=False,
+                host=config['host'],port=config['port'],certfile=config['cert'],keyfile=config['key'],allow_lan=config.get('allow_lan',False),
                 run=options['run'],tls_inspector=options['tls_inspector'],repository_factory=Repository) as published:
             advertise(monkeypatch,owner,published)
             ready=lambda value:runtime.require_enrollment(value,ready=lambda _:True)
@@ -417,10 +417,10 @@ def test_missing_public_key_cannot_initialize_repository(installed):
 def test_exact_cli_success_calls_same_service(installed,monkeypatch,capsys):
     root,services,signing,options,calls=installed;original=publication.configure
     monkeypatch.setattr(publication,'configure',lambda *a,**kw:original(*a,**(kw|options)))
-    args=['--state', str(root), 'admin', 'repository', 'configure', '--repository', 'lab', '--url', 'https://127.0.0.1:8444', '--signing-home', str(signing), '--fingerprint', FPR, '--request-id', 'publication-1', '--json']
-    assert cli.main(args)==0
+    args=['admin', 'repository', 'configure', '--repository', 'lab', '--url', 'https://127.0.0.1:8444', '--signing-home', str(signing), '--fingerprint', FPR, '--request-id', 'publication-1', '--json']
+    assert cli.main(args, state_root=str(root))==0
     result=json.loads(capsys.readouterr().out)['data'];assert result['configured'] and result['service_start_required']
-    assert cli.main(args)==0 and json.loads(capsys.readouterr().out)['data']==result
+    assert cli.main(args, state_root=str(root))==0 and json.loads(capsys.readouterr().out)['data']==result
 
 
 @pytest.mark.parametrize('stage',['configuration_written','configuration_published'])
@@ -470,6 +470,16 @@ def test_setup_replay_cannot_accept_unjournaled_additional_settings(installed,tm
 
 def test_actual_cli_reports_missing_signing_home_as_unavailable(installed,monkeypatch,capsys):
     root,services,signing,options,calls=installed
-    argv=['--state', str(root), 'admin', 'repository', 'configure', '--repository', 'lab', '--url', 'https://127.0.0.1:8444', '--signing-home', str(root / 'missing'), '--fingerprint', FPR, '--request-id', 'publication-1', '--json']
-    assert cli.main(argv)==4
+    argv=['admin', 'repository', 'configure', '--repository', 'lab', '--url', 'https://127.0.0.1:8444', '--signing-home', str(root / 'missing'), '--fingerprint', FPR, '--request-id', 'publication-1', '--json']
+    assert cli.main(argv, state_root=str(root))==4
     assert json.loads(capsys.readouterr().out)['error']['code']=='UNAVAILABLE'
+
+
+def test_external_signing_home_alias_uses_same_verified_key_and_exact_replay(installed,tmp_path):
+    root,services,signing,options,calls=installed
+    ancestor=tmp_path/'operator-alias';ancestor.symlink_to(signing.parent,target_is_directory=True)
+    alias=ancestor/signing.name
+    first=publication.configure(root,'lab','https://127.0.0.1:8444',alias,FPR,'publication-1',**options)
+    assert configuration(root)['composition_signing']['home']==str(signing.resolve())
+    assert publication.configure(root,'lab','https://127.0.0.1:8444',signing,FPR,'publication-1',**options)==first
+    assert sum(call[0]=='ostree' and call[2]=='init' for call in calls)==1

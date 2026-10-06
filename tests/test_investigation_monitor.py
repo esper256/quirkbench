@@ -19,7 +19,7 @@ def test_filter_precedes_global_limit_and_reports_pending_human_waits(setup,monk
     def forbidden(*a,**kw):raise AssertionError('query acquired writer/service ownership')
     monkeypatch.setattr(Controller,'__init__',forbidden)
     monkeypatch.setattr('quirkbench.maintenance.prune',forbidden)
-    assert cli.main(['--state',str(c.root),'monitor','investigation','--json'])==0
+    assert cli.main(['monitor','investigation','--json'], state_root=str(c.root))==0
     data=json.loads(capsys.readouterr().out)['data']
     assert [r['id'] for r in data['operations']]==['0']
     assert [r['id'] for r in data['investigations']]==['investigation']
@@ -27,7 +27,7 @@ def test_filter_precedes_global_limit_and_reports_pending_human_waits(setup,monk
     assert facts['admission_stopped'] and facts['pending_observations'][0]['state']=='overdue'
     assert not facts['physical_poweroff_verified'] and facts['local_evidence_durable'] is None
     assert (c.root/'controller.sqlite').read_bytes()==before
-    assert cli.main(['--state',str(c.root),'monitor','investigation','--once'])==0
+    assert cli.main(['monitor','investigation','--once'], state_root=str(c.root))==0
     assert 'Human request question' in capsys.readouterr().out
 
 
