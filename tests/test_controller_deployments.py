@@ -164,23 +164,28 @@ def test_restore_rejects_missing_os_content_or_false_backup_manifest(tmp_path, d
     assert not (tmp_path / 'restored').exists()
 
 
-def test_old_database_and_schema_one_backup_remain_readable(tmp_path):
+def test_incompatible_database_and_backup_are_rejected_without_conversion(tmp_path):
     old = tmp_path / 'old'
     old.mkdir()
     db = sqlite3.connect(old / 'controller.sqlite')
     for number, migration in enumerate(MIGRATIONS[:-1], start=1):
         db.executescript(migration + f'\nPRAGMA user_version={number};')
     db.close()
-    controller = Controller(old, reserve_bytes=0)
-    assert controller.deployment_references() == []
+    before = (old / 'controller.sqlite').read_bytes()
+    with pytest.raises(ContractError, match='incompatible development state'):
+        Controller(old, reserve_bytes=0)
+    assert (old / 'controller.sqlite').read_bytes() == before
+    assert not (old / 'artifacts').exists()
+    controller = Controller(tmp_path / 'fresh', reserve_bytes=0)
     backup = tmp_path / 'backup'
     controller.backup(backup)
     manifest = json.loads((backup / 'manifest.json').read_bytes())
     manifest['schema_version'] = 1
     del manifest['deployments']
     (backup / 'manifest.json').write_bytes(canonical(manifest))
-    restored = Controller.restore(backup, tmp_path / 'restored', reserve_bytes=0)
-    assert restored.deployment_references() == []
+    with pytest.raises(ContractError):
+        Controller.restore(backup, tmp_path / 'restored', reserve_bytes=0)
+    assert not (tmp_path / 'restored').exists()
 
 
 def test_checkpoint_retains_multiple_revisions_and_deduplicates_backup(tmp_path):
