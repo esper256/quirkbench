@@ -551,3 +551,48 @@ export may leave completed files for inspection; select a new destination to ret
 For the controller-free prepare/verify/build workflow and portable input snapshots,
 see [recovery input bundles](recovery-input-bundles.md). Existing low-level commands
 remain available for diagnosis.
+
+
+## Controller USB preparation
+
+`quirkbench recovery prepare` plans and applies the final layout of an explicitly
+selected whole USB. It requires a compatible controller-prepared v3 artifact;
+older images return an actionable fresh-build requirement and remain readable by
+the historical boot path. Stock image generation has not yet switched to v3 while
+the new console journey is being integrated.
+
+Configure and run the controller first. Select its reachable LAN endpoint, then
+plan without writing USB bytes:
+
+```sh
+quirkbench --state /absolute/controller-state recovery prepare \
+  --image /absolute/recovery.img --device /dev/SELECTED_USB \
+  --target ACTUAL_TARGET_NAME --plan-out /absolute/new-usb-plan.json \
+  --public-key /absolute/publisher.asc --fingerprint FULL_VERIFIED_FINGERPRINT
+```
+
+An unsigned local development build uses `--unsigned-development` explicitly
+instead of publisher arguments. Production publisher trust is never synthesized.
+Review the exact device bytes, capacities, old-layout description and confirmation
+reference. Apply the returned command with `--plan`, `--confirm` and `--erase`.
+The erase acknowledgement covers **all existing USB data, evidence and credentials**.
+Both invocations need access to the narrow sudo device helper; the controller itself
+runs as the user. No prompt selects or approves a device.
+
+Remaining capacity is split equally between experiments and evidence after fixed
+artifact extents, alignment/GPT and the empty library's filesystem overhead. No
+RAM sizing requirement is imposed. Preparation stages the configured controller's
+public trust and a non-expiring, single-use invitation for the selected target name;
+it copies no controller private key. Supported trust maintenance is fenced while
+final staging/writing is active. Explicit invitation cancellation remains available;
+a cancelled invitation prevents a successful final preparation response.
+
+A fresh staging directory retains components, handoff, invitation ID and failure
+information outside the checkout by default; `--output` selects a new directory.
+Preserve it after failure. Completion is unconfirmed after a short write, sync,
+readback, deadline or attachment failure, even if a final marker is readable. Retry
+by observing a fresh plan and explicitly acknowledging erasure again. Staged
+invitations are never silently renewed; cancel unwanted ones using the existing
+`target pairing cancel` action. Preparation is not a secure erase or physical boot
+qualification. The software gates use regular-file destinations and explicit test
+trust; actual USB writing/boot remains separately authorized acceptance.

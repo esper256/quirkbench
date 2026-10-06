@@ -93,7 +93,7 @@ def test_actual_copy_failure_keeps_partial_components_and_source(source,monkeypa
         return original(*a,**kw,write=write)
     monkeypatch.setattr(components,'copy_extent',fail)
     with pytest.raises((CommissionError,OSError)):
-        components.copy_factory_components(fd,identity,record,work,
+        _,checksums=components.copy_factory_components(fd,identity,record,work,
             expected_artifact_sha256=record["artifact_sha256"], deadline=time.monotonic()+10,guard=lambda:None)
     assert (work/'partition-1').is_file()
     assert not (work/'partition-2').exists()
@@ -105,7 +105,7 @@ def test_actual_copy_failure_keeps_partial_components_and_source(source,monkeypa
 def test_invalid_deadline_cannot_begin_copy(source,deadline):
     fd,raw,identity,record,work=source
     with pytest.raises(CommissionError,match='deadline'):
-        components.copy_factory_components(fd,identity,record,work,expected_artifact_sha256=record["artifact_sha256"], deadline=deadline,guard=lambda:None)
+        _,checksums=components.copy_factory_components(fd,identity,record,work,expected_artifact_sha256=record["artifact_sha256"], deadline=deadline,guard=lambda:None)
     assert list(work.iterdir())==[]
 
 
@@ -115,26 +115,26 @@ def test_wrong_experiment_extent_refuses_tools(source):
     calls=[]
     with pytest.raises(CommissionError,match='size differs'):
         components.finish_filesystems(identity,record,work,
-            expected_artifact_sha256=record['artifact_sha256'],deadline=time.monotonic()+10,
+            expected_artifact_sha256=record['artifact_sha256'],source_checksums=[],deadline=time.monotonic()+10,
             runner=lambda *a,**kw:calls.append(a))
     assert not calls
 
 
 def test_native_tool_failure_cannot_report_prepared(source):
     fd,raw,identity,record,work=source
-    components.copy_factory_components(fd,identity,record,work,
+    _,checksums=components.copy_factory_components(fd,identity,record,work,
         expected_artifact_sha256=record['artifact_sha256'],deadline=time.monotonic()+10,guard=lambda:None)
     def fail(*a,**kw):raise CommissionError('native filesystem failed')
     with pytest.raises(CommissionError,match='native filesystem failed'):
         components.finish_filesystems(identity,record,work,
-            expected_artifact_sha256=record['artifact_sha256'],deadline=time.monotonic()+10,runner=fail)
+            expected_artifact_sha256=record['artifact_sha256'],source_checksums=checksums,deadline=time.monotonic()+10,runner=fail)
     assert (work/'partition-4').exists()
     assert not (work/'geometry').exists()
 
 
 def test_final_deadline_expiry_cannot_report_prepared(source,monkeypatch):
     fd,raw,identity,record,work=source
-    components.copy_factory_components(fd,identity,record,work,
+    _,checksums=components.copy_factory_components(fd,identity,record,work,
         expected_artifact_sha256=record['artifact_sha256'],deadline=time.monotonic()+10,guard=lambda:None)
     now=time.monotonic(); deadline=now+10
     monkeypatch.setattr(components.time,'monotonic',lambda:now)
@@ -148,4 +148,25 @@ def test_final_deadline_expiry_cannot_report_prepared(source,monkeypatch):
     monkeypatch.setattr(components,'sync_directory',expire)
     with pytest.raises(CommissionError,match='deadline'):
         components.finish_filesystems(identity,record,work,
-            expected_artifact_sha256=record['artifact_sha256'],deadline=deadline,runner=tool)
+            expected_artifact_sha256=record['artifact_sha256'],source_checksums=checksums,deadline=deadline,runner=tool)
+
+
+
+def test_native_verification_cannot_accept_contents_changed_during_tool(tmp_path):
+    path=tmp_path/'regular-component';path.write_bytes(b'a'*4096)
+    def changed():
+        with path.open('r+b') as stream:stream.write(b'new-content')
+    with pytest.raises(CommissionError,match='changed during native verification'):
+        components.verify_component(path,changed,deadline=time.monotonic()+2)
+
+
+
+def test_changed_copied_source_is_rejected_before_growth(source):
+    fd,raw,identity,record,work=source
+    _,checksums=components.copy_factory_components(fd,identity,record,work,
+        expected_artifact_sha256=record['artifact_sha256'],deadline=time.monotonic()+10,guard=lambda:None)
+    with (work/'partition-4').open('r+b') as stream:stream.write(b'changed')
+    with pytest.raises(CommissionError,match='changed before filesystem growth'):
+        components.finish_filesystems(identity,record,work,source_checksums=checksums,
+            expected_artifact_sha256=record['artifact_sha256'],deadline=time.monotonic()+10,
+            runner=lambda *a,**kw:pytest.fail('substituted source reached native tools'))

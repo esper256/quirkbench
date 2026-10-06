@@ -41,8 +41,8 @@ def _main(argv=None):
         from .cli_investigation_handlers import investigation
         return investigation(args)
     if args.command=='recovery':
-        from .cli_recovery_handlers import download
-        return download(args)
+        from .cli_recovery_handlers import download,prepare
+        return prepare(args) if args.action=='prepare' else download(args)
     if args.command=='endpoint':
         from .cli_admin_handlers import connection
         return connection(args)
@@ -360,7 +360,7 @@ def main(argv=None):
             emit(args,answer);return 0
         except (BuildError,WorkerServiceError,OSError,ValueError,KeyError,subprocess.TimeoutExpired) as exc:
             error(args,'Recovery image unavailable: '+str(exc));return 2
-    readonly=((args.command=='recovery-inputs' and args.action in ('replay-check','candidate-spec')) or args.command in ('storage','experiment','build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
+    readonly=((args.command=='recovery' and args.action=='prepare') or (args.command=='recovery-inputs' and args.action in ('replay-check','candidate-spec')) or args.command in ('storage','experiment','build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
                                'target','endpoint','target-service','serve-repository','release-check') or
               (args.command=='campaign' and args.action=='status') or
               (args.command=='attempt' and args.action in ('status','show')) or

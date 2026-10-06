@@ -314,5 +314,8 @@ factory identity, selected USB attachment, bounded old-layout metadata and contr
 trust in an explicit erase confirmation. Layout inspection uses the existing native
 GPT reader on a regular metadata view; ambiguous physical-tail GPTs and repair or
 conversion are refused. Signed source admission uses the existing signature readers;
-unsigned development must be selected explicitly. These are tested preparation
-foundations, not yet an available device-writing command.
+unsigned development must be selected explicitly. The controller's `recovery prepare` command now joins these admission foundations
+to final regular components and the bounded descriptor-only privileged writer.
+Native verification proofs bind component bytes through the privilege handoff;
+STATE completion is published only after durable partition/GPT readback. Software
+fixtures establish neither actual device writing nor physical boot qualification.

@@ -89,7 +89,8 @@ def prove_component(path, preparing, *, deadline, runner=_run):
         check()
         return {'offset':offset,'before':before,'after':after,
                 'before_sha256':hashlib.sha256(before).hexdigest(),
-                'after_sha256':hashlib.sha256(after).hexdigest()}
+                'after_sha256':hashlib.sha256(after).hexdigest(),
+                'component_sha256':hashlib.sha256(raw).hexdigest()}
     finally:os.close(fd)
 
 

@@ -90,7 +90,7 @@ def copy_factory_components(source_fd, factory, record, work, *, expected_artifa
     return paths, hashes
 
 
-def finish_filesystems(factory, record, work, *, expected_artifact_sha256, deadline, runner=_run):
+def finish_filesystems(factory, record, work, *, expected_artifact_sha256, source_checksums, deadline, runner=_run):
     """Grow copied experiments, create empty library/evidence, and assemble GPT.
 
     Enrollment population is a separate finalization step after these tools pass.
@@ -118,6 +118,16 @@ def finish_filesystems(factory, record, work, *, expected_artifact_sha256, deadl
     start,end = record['geometry'][3]
     if experiments.stat().st_size != (end-start+1)*512:
         raise CommissionError('experiment component size differs from planned extent')
+    if not isinstance(source_checksums,(list,tuple)) or len(source_checksums)!=4:
+        raise CommissionError('retained source-copy digest proof required')
+    for checksum in source_checksums:sha256(checksum)
+    from .preparation_writer import _hash
+    descriptor=os.open(experiments,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+    try:
+        length=(factory.factory_data_end-factory.partition_starts[3]+1)*512
+        if _hash(descriptor,0,length,deadline,lambda:None)!=source_checksums[3]:
+            raise CommissionError('copied experiment source changed before filesystem growth')
+    finally:os.close(descriptor)
     runner('e2fsck','-f','-p',str(experiments))
     runner('resize2fs',str(experiments))
     runner('e2fsck','-f','-n',str(experiments))
@@ -132,8 +142,32 @@ def finish_filesystems(factory, record, work, *, expected_artifact_sha256, deadl
               'partuuid':factory.partition_uuids[number-1]}
              for number,(role,(start,end)) in enumerate(zip(roles,record['geometry']),1)]
     create_gpt(geometry, parts, factory.disk_guid, runner=runner)
-    runner('sgdisk','--verify',str(geometry))
+    verified={str(n):verify_component(work/f'partition-{n}',
+        lambda n=n:runner('e2fsck','-f','-n',str(work/f'partition-{n}')),deadline=deadline) for n in (4,5,6)}
+    verified['geometry']=verify_component(geometry,lambda:runner('sgdisk','--verify',str(geometry)),
+        deadline=deadline,metadata_only=True)
     sync_directory(work)
     if time.monotonic() >= deadline:
         raise CommissionError('preparation filesystem deadline exceeded')
-    return {'filesystems_prepared':True, 'device_written':False, 'complete':False}
+    return {'filesystems_prepared':True, 'device_written':False, 'complete':False,'verified':verified}
+
+
+def verify_component(path,verify,*,deadline,metadata_only=False):
+    """Join native read-only validation to current descriptor bytes, not mtime."""
+    from .preparation_writer import _hash
+    path=Path(path);fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+    try:
+        info=os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):raise CommissionError('native verification requires regular component')
+        def guard():
+            current=path.lstat()
+            if (current.st_dev,current.st_ino,current.st_size)!=(info.st_dev,info.st_ino,info.st_size):
+                raise CommissionError('native verified component pathname changed')
+        def capture():
+            if not metadata_only:return _hash(fd,0,info.st_size,deadline,guard)
+            return {'size_bytes':info.st_size,'sha256':_hash(fd,0,34*512,deadline,guard),
+                    'backup_sha256':_hash(fd,info.st_size-33*512,33*512,deadline,guard)}
+        before=capture();guard();verify();guard();after=capture()
+        if before!=after:raise CommissionError('component changed during native verification')
+        return before
+    finally:os.close(fd)

@@ -1,6 +1,7 @@
 """Parsed command handlers over existing application services."""
 from __future__ import annotations
 import json
+import subprocess
 import sqlite3
 import sys
 import time
@@ -46,4 +47,52 @@ def list_images(args):
             from .operations import operation_response
             print(json.dumps(operation_response(error={'code':'UNAVAILABLE','message':('Recovery image listing unavailable: '+str(exc))[:512],'retryable':False}),sort_keys=True))
         else: print('Recovery image listing unavailable: '+str(exc),file=sys.stderr)
+        return 2
+
+
+def prepare(args):
+    from . import preparation
+    from .contracts import ContractError
+    try:
+        if args.plan is None:
+            if any(value is None for value in (args.image,args.device,args.target,args.plan_out)):
+                raise ContractError('planning requires --image, --device, --target and --plan-out; apply uses --plan, --confirm and --erase')
+            if args.confirm is not None or args.erase or args.output is not None:
+                raise ContractError('planning does not write USB bytes; use the returned confirmation with --plan to apply')
+        else:
+            if args.confirm is None or not args.erase:
+                raise ContractError('apply requires the exact --confirm reference and explicit --erase acknowledgement')
+            if any(value is not None for value in (args.image,args.device,args.target,args.plan_out)):
+                raise ContractError('apply uses the exact image, device and target retained in --plan')
+        root=discover_state_root(args.state).expanduser().absolute()
+        if not root.is_dir():raise ContractError('configure the controller first; preparation needs its existing enrollment trust')
+        common={'public_key':args.public_key,'fingerprint':args.fingerprint,'unsigned_development':args.unsigned_development}
+        if args.plan is None:
+            answer=preparation.plan(root,image=args.image,device=args.device,target=args.target,output=args.plan_out,**common)
+        else:
+            output=args.output or root/'private/preparation'/('apply-'+str(time.time_ns()))
+            output.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+            answer=preparation.apply(root,plan_path=args.plan,confirmation=args.confirm,erase=args.erase,output=output,**common)
+        if args.json:print(json.dumps(answer,sort_keys=True))
+        elif args.plan is None:
+            print('USB preparation plan: '+answer['plan'])
+            print('Device: '+answer['device']['path']+' ('+str(answer['device']['device_bytes'])+' bytes)')
+            for number,(role,(start,end)) in enumerate(zip(('Boot','Recovery','State','Experiments','Library','Evidence'),answer['geometry']),1):
+                print(str(number)+'. '+role+': '+str((end-start+1)*512)+' bytes (sectors '+str(start)+'–'+str(end)+')')
+            print('Library payload: 0 bytes; filesystem overhead: '+str(answer['library_overhead_bytes'])+' bytes')
+            print('Experiments: '+str(answer['experiment_bytes'])+' bytes; evidence: '+str(answer['evidence_bytes'])+' bytes; library payload: 0')
+            print('All existing USB data, evidence and credentials will be erased on apply.')
+            import shlex
+            print('Apply: quirkbench --state '+shlex.quote(str(root))+' recovery prepare --plan '+shlex.quote(answer['plan'])+' --confirm '+answer['confirmation']+' --erase'+
+                (' --unsigned-development' if args.unsigned_development else ' --public-key '+shlex.quote(str(args.public_key))+' --fingerprint '+shlex.quote(args.fingerprint)))
+        else:
+            print('USB preparation completed and verified. Target: '+answer['target'])
+            print('Retained staging: '+answer['output'])
+        return 0
+    except (OSError,ValueError,RuntimeError,subprocess.SubprocessError,sqlite3.Error) as exc:
+        if args.json:
+            from .operations import operation_response
+            print(json.dumps(operation_response(error={'code':'INVALID_INPUT' if isinstance(exc,ContractError) else 'UNAVAILABLE',
+                'message':str(exc)[:4096],'retryable':False}),sort_keys=True))
+        else:print('USB preparation blocked: '+str(exc),file=sys.stderr)
         return 2

@@ -9,11 +9,24 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def test_actual_fat_completion_and_filesystem_gpt_adapters(tmp_path,dependency_root):
+    # Explicit disposable test trust, unrelated to publisher/controller defaults.
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes,serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+    import datetime
+    key=rsa.generate_private_key(public_exponent=65537,key_size=2048)
+    name=x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,'explicit-native-test')])
+    now=datetime.datetime.now(datetime.timezone.utc)
+    cert=(x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+        .serial_number(x509.random_serial_number()).not_valid_before(now-datetime.timedelta(minutes=1))
+        .not_valid_after(now+datetime.timedelta(days=1)).sign(key,hashes.SHA256()))
+    (tmp_path/'test-controller.crt').write_bytes(cert.public_bytes(serialization.Encoding.PEM))
     script=r'''
 import hashlib,os,pathlib,time,uuid
 from quirkbench.image import _run,partition_layout,create_ext4_component,_copy_slice
 from quirkbench import prepared_factory,prepared_media,preparation_components,preparation_completion
-from quirkbench.contracts import canonical
+from quirkbench.contracts import canonical,digest
 work=pathlib.Path('/run');deadline=time.monotonic()+20
 def run(*a,timeout_s=5):return _run(*a,timeout_s=min(timeout_s,5))
 state=work/'state';doc=work/'record'
@@ -36,13 +49,62 @@ with source.open('xb') as stream:stream.truncate(25*1024**2)
 _copy_slice(data,source,8*1024**2)
 with source.open('rb') as stream:checksum=hashlib.file_digest(stream,'sha256').hexdigest()
 record=prepared_media.record(factory,checksum,256*1024**2,factory_data_end=factory.factory_data_end,version=2)
-components=work/'components';components.mkdir()
+components=work/'components with spaces';components.mkdir()
 fd=os.open(source,os.O_RDONLY)
-try:preparation_components.copy_factory_components(fd,factory,record,components,expected_artifact_sha256=checksum,deadline=deadline,guard=lambda:None)
+try:_,source_checksums=preparation_components.copy_factory_components(fd,factory,record,components,expected_artifact_sha256=checksum,deadline=deadline,guard=lambda:None)
 finally:os.close(fd)
-answer=preparation_components.finish_filesystems(factory,record,components,expected_artifact_sha256=checksum,deadline=deadline,runner=run)
-assert answer=={'filesystems_prepared':True,'device_written':False,'complete':False}
+answer=preparation_components.finish_filesystems(factory,record,components,expected_artifact_sha256=checksum,source_checksums=source_checksums,deadline=deadline,runner=run)
+assert answer['filesystems_prepared'] is True and answer['device_written'] is False and answer['complete'] is False
 for number in (4,5,6):run('e2fsck','-f','-n',str(components/f'partition-{number}'))
+# Join actual FAT/GPT components to the descriptor-only writer on a disposable
+# regular destination. It is not a bootable image or a physical-device test.
+from quirkbench import preparation_writer,preparation_plan
+state=components/'partition-3'
+run('mformat','-i',str(state),'-v','QBSTATE','::')
+run('mmd','-i',str(state),'::/quirkbench')
+destination=work/'writer-destination'
+with destination.open('xb') as stream:stream.truncate(record['device_bytes'])
+devfd=os.open(destination,os.O_RDWR);srcfd=os.open(source,os.O_RDONLY)
+component_fds={n:os.open(components/f'partition-{n}',os.O_RDONLY) for n in range(1,7)}
+gptfd=os.open(components/'geometry',os.O_RDONLY)
+try:
+    device={'path':str(destination),'sysfs_path':'/sys/devices/usb1/block/sdz',
+        'major_minor':[65,144],'device_bytes':record['device_bytes'],'logical_sector_bytes':512,
+        'controller_boot_id':str(uuid.uuid4()),'diskseq':51,'attachment_path':'/sys/devices/usb1','usb_busnum':1,'usb_devnum':2}
+    source_record={'path':str(source),'sha256':checksum,'size_bytes':source.stat().st_size,'manifest_sha256':'b'*64,
+        'authentication':{'mode':'unsigned-development','trust_sha256':None,'fingerprint':None}}
+    plan=preparation_plan.make(preparation_id='native-writer',target='fixture-machine',source=source_record,
+        factory=prepared_factory.record(factory.disk_guid,factory.partition_uuids,parts),device=device,
+        observed_layout=preparation_plan.observe_layout(devfd,record['device_bytes']),
+        controller={'controller_url':'https://192.0.2.44:8443','certificate_sha256':'c'*64})
+    # Populate through the real controller enrollment handoff adapter. Preserve
+    # factory boot marker and the one-shot block, and prove ext4 uid/content.
+    marker=work/'state-marker';marker.write_text(factory.partition_uuids[2]+'\n')
+    run('mcopy','-i',str(state),str(marker),'::/quirkbench-'+factory.partition_uuids[2])
+    env=work/'one-shot.env';run('grub-editenv',str(env),'create')
+    run('mcopy','-i',str(state),str(env),'::/quirkbench/next.env')
+    cert=work/'test-controller.crt'
+    import ssl
+    plan['controller']['certificate_sha256']=digest(ssl.PEM_cert_to_DER_cert(cert.read_text()))
+    invitation={'record':{'schema_version':2,'record_type':'enrollment-code','code_id':'code-native',
+        'request_id':'prepare-native','request_digest':'e'*64,'name':plan['target'],**plan['controller'],
+        'created_at':1,'expires_at':None},'code':'a'*43,'enrolled':False,'boot_authorized':False}
+    from quirkbench import preparation_payload
+    metadata,proof,evidence_sha256=preparation_payload.populate(plan,components,invitation,cert.read_text(),deadline=deadline,runner=run)
+    assert metadata['prepared_media_sha256']==digest(canonical(prepared_media.completed(record)))
+    # Reopen evidence after normal-user component replacement.
+    os.close(component_fds[6]);component_fds[6]=os.open(components/'partition-6',os.O_RDONLY)
+    final=preparation_writer.freeze(plan,component_fds,gptfd,proof,verification={**answer['verified'],'6':evidence_sha256},deadline=deadline,guard=lambda:None)
+    from quirkbench.contracts import digest
+    result=preparation_writer.write(plan,devfd,srcfd,component_fds,gptfd,proof,
+        finalization=final,finalization_sha256=digest(canonical(final)),confirmation=preparation_plan.reference(plan),
+        erase=True,deadline=deadline,guard=lambda:None)
+    assert result['prepared'] is True
+    extracted=work/'written-state'
+    with extracted.open('xb') as stream:stream.write(os.pread(devfd,state.stat().st_size,record['geometry'][2][0]*512))
+    assert run('mtype','-i',str(extracted),'::/quirkbench/prepared-media.json').encode()==canonical(prepared_media.completed(record))
+finally:
+    for descriptor in [devfd,srcfd,gptfd,*component_fds.values()]:os.close(descriptor)
 from quirkbench import preparation_layout
 from quirkbench.commission import CommissionError
 from quirkbench.contracts import ContractError

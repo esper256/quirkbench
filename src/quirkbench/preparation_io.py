@@ -86,12 +86,16 @@ def copy_extent(source_fd, destination_fd, *, source_offset, destination_offset,
         if not block:
             raise CommissionError('preparation source ended before expected extent')
         guard()
+        if monotonic() >= deadline:
+            raise CommissionError('USB preparation copy deadline exceeded before write')
         if write(destination_fd, block, destination_offset+position) != len(block):
             raise CommissionError('USB preparation short write; media remains incomplete')
         checksum.update(block); position += len(block)
     if checksum.hexdigest() != expected_sha256:
         raise CommissionError('preparation source changed during copy; media remains incomplete')
-    guard(); sync(destination_fd)
+    guard()
+    if monotonic() >= deadline:raise CommissionError('USB preparation copy deadline exceeded before sync')
+    sync(destination_fd)
     checksum = hashlib.sha256(); position = 0
     while position < length:
         if monotonic() >= deadline:
@@ -101,6 +105,7 @@ def copy_extent(source_fd, destination_fd, *, source_offset, destination_offset,
             raise CommissionError('USB preparation verification short read')
         checksum.update(block); position += len(block)
     guard()
+    if monotonic() >= deadline:raise CommissionError('USB preparation verification deadline exceeded')
     if checksum.hexdigest() != expected_sha256:
         raise CommissionError('USB preparation readback differs; media remains incomplete')
 

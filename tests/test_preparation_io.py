@@ -165,3 +165,24 @@ else:
         runner([sys.executable, '-c', program, str(marker)])
     pid = int(marker.read_text())
     assert not (Path('/proc')/str(pid)/'fd'/str(files[1])).exists()
+
+
+
+@pytest.mark.parametrize('late_phase',['source','readback'])
+def test_late_read_cannot_write_or_report_success(tmp_path,late_phase):
+    import hashlib
+    from quirkbench import preparation_io
+    source=tmp_path/'source';source.write_bytes(b'a'*512)
+    destination=tmp_path/'destination';destination.write_bytes(b'b'*512)
+    src=os.open(source,os.O_RDONLY);dst=os.open(destination,os.O_RDWR);clock=[1.0]
+    def read(fd,length,offset):
+        raw=os.pread(fd,length,offset)
+        if fd==(src if late_phase=='source' else dst):clock[0]=3.0
+        return raw
+    try:
+        with pytest.raises(CommissionError,match='deadline exceeded'):
+            preparation_io.copy_extent(src,dst,source_offset=0,destination_offset=0,length=512,
+                expected_sha256=hashlib.sha256(b'a'*512).hexdigest(),deadline=2.0,guard=lambda:None,
+                monotonic=lambda:clock[0],read=read)
+        if late_phase=='source':assert destination.read_bytes()==b'b'*512
+    finally:os.close(src);os.close(dst)
