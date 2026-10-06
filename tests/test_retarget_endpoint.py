@@ -1,3 +1,4 @@
+from quirkbench.controller_service import configuration as controller_configuration
 """Moved media preserves explicit completed endpoint history and original evidence."""
 import json
 from pathlib import Path
@@ -17,7 +18,7 @@ from test_enrollment_credentials import Commands
 
 @pytest.fixture
 def moved(spool,publication):
-    c,control,result,attempt,agent=spool;configuration=json.loads((c.root/'private/controller-service.json').read_bytes());pem=Path(configuration['cert']).read_text()
+    c,control,result,attempt,agent=spool;configuration=controller_configuration(c.root);pem=Path(configuration['cert']).read_text()
     journal=(control/'agent/journal.json').read_bytes()
     atomic_write(control/'agent/journal.json',canonical({'schema_version':1,'device_id':result['device_id'],'pending':None,'claim_request_id':None}))
     view=(control,result,pem,{})
@@ -238,7 +239,7 @@ def test_repeated_retarget_after_completed_retarget_endpoint_keeps_both_origins(
     retarget_local.prepare_retarget(control,CONFIG,'retarget-2',new_result['device_id'],third,verify_target=lambda:True,
         binding_reader=lambda:third,clearer=lambda _:None,recovery_verifier=lambda _:True)
     intent=retarget_local.pending_intent(control);assert intent['schema_version']==3 and intent['previous_selection_sha256'] is not None
-    configuration=json.loads((c.root/'private/controller-service.json').read_bytes());configuration['port']=8447;configuration['repository_endpoint']['url']='https://127.0.0.1:8448'
+    configuration=controller_configuration(c.root);configuration['port']=8447;configuration['repository_endpoint']['url']='https://127.0.0.1:8448'
     atomic_write(c.root/'private/controller-service.json',canonical(configuration))
     revoke_target(c.root,new_result['device_id'],'revoke-new',generation=new_result['credential_generation']['generation'])
     code=retarget_invitation.create_invitation(c,new_result['device_id'],new_result['credential_generation']['generation'],

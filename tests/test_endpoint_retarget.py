@@ -1,3 +1,4 @@
+from quirkbench.controller_service import configuration as controller_configuration
 """Endpoint URL generations associate with immutable completed-retarget evidence."""
 import json
 from pathlib import Path
@@ -18,7 +19,7 @@ from test_evidence_drain_target import spool,received,publication,bound,args,iss
 def retargeted(paused):
     receipt=retarget_select(paused);control=paused[0][1];controller=paused[0][0]
     result=json.loads((control/'enrollment/pending/result.json').read_bytes())
-    config=json.loads((controller.root/'private/controller-service.json').read_bytes())
+    config=controller_configuration(controller.root)
     pem=Path(config['cert']).read_text()
     return (control,result,pem,{}),receipt
 

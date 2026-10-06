@@ -31,7 +31,7 @@ def prepared(tmp_path):
     (inputs/'SOURCES/upstream.tar.xz').write_bytes(b'fixture upstream archive')
     from quirkbench.build import sha256_file
     record = {'schema_version':1, 'kernel_srpm_sha256':package.sha256, 'kernel_source_nevra':entry['kernel_source_nevra'],
-              'spec_sha256':sha256_file(spec), 'source':str(source), 'source_tree_sha256':_tree_hash(source, excluded_paths=frozenset()),
+              'spec_sha256':sha256_file(spec), 'source_tree_sha256':_tree_hash(source, excluded_paths=frozenset()),
               'source_date_epoch':1700000000}
     return entry, record, stage, tmp_path/'import', store
 
@@ -67,7 +67,6 @@ def test_import_base_is_reproducible_from_same_prepared_inputs(prepared, tmp_pat
     entry, record, source_stage, stage, store = prepared
     copy = tmp_path/'second-prepared'; shutil.copytree(source_stage, copy, symlinks=True); copy.chmod(0o700)
     result = run(prepared)
-    record = {**record,'source':str(copy/'source')}
     other = distro.import_prepared(entry, record, copy, tmp_path/'second-import', store, 'second', verify=lambda:None)
     assert other['base_oid'] == result['base_oid']
     assert other['capture_sha256'] == result['capture_sha256']

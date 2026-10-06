@@ -1,3 +1,4 @@
+from quirkbench.controller_service import configuration as controller_configuration
 """Repeated stopped retarget preserves bounded history and original attribution."""
 import json
 from pathlib import Path
@@ -34,7 +35,7 @@ def second(completed,**kw):
     revoke_target(c.root,receipt['device_id'],'revoke-second',generation=receipt['credential_generation'])
     code=retarget_invitation.create_invitation(c,receipt['device_id'],receipt['credential_generation'],
         'third-target',THIRD,'third-invitation',ready=lambda _:True,tls_inspector=server['tls_inspector'])
-    conf=json.loads((c.root/'private/controller-service.json').read_bytes());pem=Path(conf['cert']).read_text()
+    conf=controller_configuration(c.root);pem=Path(conf['cert']).read_text()
     app=EnrollmentService(c,run=Commands(),tls_inspector=server['tls_inspector'])
     class Client:
         def __init__(self,url,leaf,pin,**kwargs):assert leaf==pem and pin==code['record']['certificate_sha256']

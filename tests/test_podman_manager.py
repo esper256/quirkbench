@@ -94,7 +94,8 @@ def test_manager_replays_record_after_configuration_change_and_checks_descendant
         assert record['schema_version']==4 and record['cgroup_manager']=='systemd'
         from jsonschema import Draft202012Validator
         schema=json.loads((Path(__file__).resolve().parents[1]/'schemas/worker-execution.v4.schema.json').read_bytes())
-        Draft202012Validator(schema).validate(record)
+        from quirkbench.worker_execution import document
+        Draft202012Validator(schema).validate(document(record))
         assert record['executions'][0]['payload_released']
         assert (service._handshake(record,'prepare')/'release').exists()
         selected[0]='cgroupfs';service.cgroup_manager='cgroupfs';calls.clear()

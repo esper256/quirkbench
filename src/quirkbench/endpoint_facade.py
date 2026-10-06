@@ -7,7 +7,7 @@ from .filesystem import _managed_path
 from .controller_setup import _database_present
 from .filesystem import _strict_read
 from .controller_endpoint import stage_identity, renew_expired_identity
-from .controller_service import configuration
+from .controller_service import configuration,materialize_configuration
 from .controller_tls import load_identity
 from .enrollment_records import _document
 from .endpoint_switch import switch_stopped,rollback_stopped,validate_switch
@@ -18,7 +18,7 @@ def show(root,request_id=None):
     root=_managed_path(root)
     if not _database_present(root):raise SetupUnavailable('run controller setup before endpoint maintenance')
     config_raw=_strict_read(root/'private','controller-service.json');config=configuration(root)
-    if config!=_document(config_raw):raise Conflict('controller endpoint configuration changed during observation')
+    if config!=materialize_configuration(root,_document(config_raw)):raise Conflict('controller endpoint configuration changed during observation')
     if request_id is not None:
         identifier(request_id);directory=_managed_path(root/'private/controller-tls'/('endpoint-'+digest(request_id.encode())[:32]))
     else:

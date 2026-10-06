@@ -19,8 +19,16 @@ def test_public_identity_show_stage_apply_and_exact_rollback(prepared):
     assert all(call[:4]==['systemctl','--user','show','quirkbench-controller.service'] for call in manager.calls)
 
 
-def test_cli_show_json_and_selected_public_certificate_are_read_only(prepared,capsys,monkeypatch):
+@pytest.mark.parametrize('setting',['ordinary','recovery_disabled','explicit_default_signing_home'])
+def test_cli_show_json_and_selected_public_certificate_are_read_only(prepared,capsys,monkeypatch,setting):
     (root,source,native),staged,unit,manager=prepared
+    path=root/'private/controller-service.json'
+    config=json.loads(path.read_bytes())
+    if setting=='recovery_disabled':config['recovery_enabled']=False
+    if setting=='explicit_default_signing_home':
+        config['composition_signing']={'home':str(root/'private/gnupg'),'fingerprint':'A'*40}
+    from quirkbench.store import atomic_write
+    atomic_write(path,canonical(config));raw=path.read_bytes()
     import sqlite3
     from quirkbench import maintenance
     def snapshot():
@@ -34,7 +42,7 @@ def test_cli_show_json_and_selected_public_certificate_are_read_only(prepared,ca
     assert 'PRIVATE KEY' not in json.dumps(answer)
     assert cli.main(['--state', str(root), 'admin', 'connection', 'show', '--request-id', 'endpoint-1', '--public-certificate'])==0
     assert capsys.readouterr().out==answer['certificate_pem']
-    assert snapshot()==before
+    assert snapshot()==before and path.read_bytes()==raw
 
 
 def test_missing_setup_reports_unavailable_without_initializing_state(tmp_path,capsys):

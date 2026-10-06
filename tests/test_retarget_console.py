@@ -1,3 +1,4 @@
+from quirkbench.controller_service import configuration as controller_configuration
 """Explicit attended retarget confirmation, pinned pairing and native owner reuse."""
 from io import StringIO
 import json
@@ -18,7 +19,7 @@ from test_evidence_drain_target import local as evidence
 
 def setup(paused,*,failure=None,read_secret=None):
     spool,code,server=paused;c,control,old,*_=spool
-    conf=json.loads((c.root/'private/controller-service.json').read_bytes());pem=Path(conf['cert']).read_text()
+    conf=controller_configuration(c.root);pem=Path(conf['cert']).read_text()
     app=EnrollmentService(c,run=Commands(),tls_inspector=server['tls_inspector']);posts=[];fail=[failure]
     class Client:
         def __init__(self,url,certificate,pin,**kwargs):

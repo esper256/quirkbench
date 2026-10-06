@@ -1,3 +1,4 @@
+from quirkbench.controller_service import configuration as controller_configuration
 """Stopped atomic retarget and exact partial replay; injected native fixtures only."""
 import json
 from pathlib import Path
@@ -168,7 +169,7 @@ def test_completed_replay_preserves_later_journal_and_armed_one_shot(paused):
     receipt=select(paused);control=paused[0][1];path=control/'agent/journal.json'
     journal=json.loads(path.read_bytes());journal['pending']={'attempt_id':'later-exact-attempt'}
     path.write_bytes(canonical(journal));before=path.read_bytes();cleared=[]
-    code=paused[1]['record'];c=paused[0][0];pem=Path(json.loads((c.root/'private/controller-service.json').read_bytes())['cert']).read_text()
+    code=paused[1]['record'];c=paused[0][0];pem=Path(controller_configuration(c.root)['cert']).read_text()
     result=activation.activate(control,CONFIG,'retarget-1',code['controller_url'],pem,code['certificate_sha256'],code['code_id'],'x'*43,
         verify_target=lambda:True,binding_reader=lambda:NEW,recovery_verifier=lambda _:True,clearer=lambda _:cleared.append(True))
     assert result==receipt and path.read_bytes()==before and not cleared
