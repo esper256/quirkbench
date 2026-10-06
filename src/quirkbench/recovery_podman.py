@@ -237,7 +237,7 @@ def stage_rootfs_inputs(*, catalog_sha256: str | None, lock_sha256: str, cas_roo
         from .recovery_recipe import load_recipe
         from .recovery_stock import preflight_recipe
         recipe=load_recipe(_metadata_object(cas_root,recipe_sha256,MAX_DOCUMENT))
-        if recipe['schema_version']!=2 or recipe['rootfs_lock_sha256']!=lock_sha256:
+        if recipe['schema_version'] not in (2,3) or recipe['rootfs_lock_sha256']!=lock_sha256:
             raise BuildError('full image recipe differs from staged stock rootfs lock')
         preflight_recipe(recipe,store)
         digests.add(recipe_sha256)

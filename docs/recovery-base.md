@@ -137,8 +137,9 @@ extent without RAM or speculative library budgets. A completed prepared-media
 record describes the final six-role layout. Boot and paired runtime recheck it
 against current geometry; the target does not format or resize v3 media. The
 unversioned historical RAM assessment and factory v2 readers remain separate.
-Stock image production still selects v2 until the controller writer is joined;
-v3 software reader/component tests alone do not make a USB usable.
+Fresh stock recipes/candidates explicitly select v3 through the existing image
+pipeline. Retained stock v2 layouts remain unchanged. Software reader/component
+tests alone do not make a USB usable or qualify a produced image.
 
 The v3 assembler uses a minimal empty 16 MiB factory experiment filesystem;
 controller preparation grows a copy, never the signed artifact. Earlier larger
@@ -180,7 +181,8 @@ report retained evidence and unavailable paths explicitly.
 
 ## How the image is synthesized
 
-`RecoveryRecipe` v2 implements the stock successor to v1. The fixed recovery-image
+`RecoveryRecipe` v2 implements the historical stock successor to v1; v3 selects
+controller-prepared geometry with zero shipped library payload. The fixed recovery-image
 coordinator now joins the stages over
 existing adapters. The recipe names the platform, Fedora release, builder digest,
 RPM snapshot/lock, stock kernel/module package identities and hashes, runtime revision,
@@ -273,9 +275,9 @@ release. This contract does not qualify any image bytes.
 
 ## Recipe execution compatibility
 
-Recovery image generation executes only stock Fedora schema-v2 recipes. The old
+Recovery image generation executes stock Fedora schema-v2/v3 recipes. The old
 custom-kernel recovery compiler, its introspection-based cache and interrupted-v1
-resume machinery have been retired. Select a new v2 recipe and fresh workspace;
+resume machinery have been retired. Select a new v3 recipe and fresh workspace;
 an old recipe is never silently converted or given new hashes. Historical v1
 recipe/release readers remain available for evidence inspection. Candidate and
 experiment kernel compilation, including Fedora SRPM preparation, is unchanged.

@@ -14,7 +14,7 @@ FIELDS_V2 = (FIELDS - REMOVED) | {"recipe_id", "kernel_origin", "rpm_key_sha256"
 
 def validate_candidate(value):
     if (not isinstance(value, dict) or set(value) != FIELDS_V2
-            or type(value["schema_version"]) is not int or value["schema_version"] != 2
+            or type(value["schema_version"]) is not int or value["schema_version"] not in (2,3)
             or value["record_type"] != "recovery-release-candidate"
             or value["kernel_origin"] != "stock-rpm" or value["qualification_status"] != "unqualified"
             or value["qualified_capabilities"] != []):
@@ -32,10 +32,13 @@ def validate_candidate(value):
             or value["policy"] != POLICY
             or any(type(value["policy"].get(k)) is not type(v) for k,v in POLICY.items())):
         raise BuildError("invalid stock recovery release identity/policy")
-    from .recovery_recipe import LAYOUT_FIELDS
-    if (not isinstance(value["layout"], dict) or set(value["layout"]) != LAYOUT_FIELDS
-            or any(type(v) is not int or v < 1 for v in value["layout"].values())):
-        raise BuildError("invalid stock release layout")
+    from .recovery_stock import validate_layout
+    if value['schema_version']==3:validate_layout(value['layout'],3)
+    else:
+        from .recovery_recipe import LAYOUT_FIELDS
+        if (not isinstance(value['layout'],dict) or set(value['layout'])!=LAYOUT_FIELDS
+                or any(type(v) is not int or v<1 for v in value['layout'].values())):
+            raise BuildError('invalid historical stock release layout')
     for name in ("image_size_bytes", "rootfs_file_bytes", "rootfs_entry_count", "rootfs_required_bytes",
                  "esp_payload_bytes", "esp_required_bytes"):
         if type(value[name]) is not int or value[name] < 0:
@@ -59,7 +62,8 @@ def create_candidate(recipe, store, stage_record, inputs):
     checked = verify_base(recipe, store, stage, stage_record)
     lock = checked["rootfs_lock"]
     kernel, ir = stage_record["kernel_stage"], stage_record.get("initramfs_stage", {})
-    if (inputs.smoke or inputs.prepared_data_tree is not None
+    if (inputs.controller_prepared != (recipe["schema_version"]==3)
+            or inputs.smoke or inputs.prepared_data_tree is not None
             or inputs.recovery_storage_policy is None
             or stage_record.get("runtime_revision_sha256") != recipe["runtime_revision_sha256"]
             or ir.get("schema_version") != 2
@@ -110,14 +114,16 @@ def create_candidate(recipe, store, stage_record, inputs):
             or ir.get('source_date_epoch')!=recipe['source_date_epoch']
             or any(getattr(inputs,field)!=recipe['layout'][key] for field,key in
                    [('size_mib','factory_size_mib'),('root_mib','root_mib'),('experiment_mib','experiment_mib'),
-                    ('library_mib','library_mib'),('log_budget_mib','log_budget_mib')])):
+                    ('library_mib','library_mib'),('log_budget_mib','log_budget_mib')]
+                   if recipe['schema_version']==2 or key in ('factory_size_mib','root_mib'))
+            or (recipe['schema_version']==3 and any(getattr(inputs,key)!=0 for key in ('experiment_mib','library_mib','log_budget_mib')))):
         raise BuildError('stock release stage audit or layout differs from recipe')
     capacity = validate_recovery_capacity(inputs.rootfs_dir, inputs.recovery_kernel, inputs.recovery_initramfs, inputs.root_mib)
     if prov.get("capacity_preflight") != capacity:
         raise BuildError("stock image payload changed after capacity audit")
     from .recovery_runtime_revision import audit_installed_runtime
     audit_installed_runtime(inputs.rootfs_dir, checked["runtime_revision"])
-    value = {"schema_version": 2, "record_type": "recovery-release-candidate",
+    value = {"schema_version": recipe["schema_version"], "record_type": "recovery-release-candidate",
         "qualification_status": "unqualified", "qualified_capabilities": [], "kernel_origin": "stock-rpm",
         "recipe_id": recipe["recipe_id"], "recipe_digest": checked["recipe_digest"],
         "profile_digest": recipe["storage_policy_sha256"], "architecture": lock["architecture"],

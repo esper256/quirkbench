@@ -66,7 +66,8 @@ def _validate_factory_manifest(manifest: dict, candidate: dict) -> None:
     commissioning = manifest.get("commissioning")
     partitions = manifest.get("partitions")
     prepared = type(manifest.get('schema_version')) is int and manifest['schema_version'] == 3
-    if (set(manifest) != FACTORY_IMAGE_FIELDS
+    if ((candidate["schema_version"]==3 and not prepared)
+            or set(manifest) != FACTORY_IMAGE_FIELDS
             or type(manifest.get('schema_version')) is not int
             or manifest.get("schema_version") not in (2,3)
             or type(manifest.get('layout_version')) is not int

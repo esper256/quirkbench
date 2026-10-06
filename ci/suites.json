@@ -368,7 +368,14 @@
       "src/quirkbench/network_profiles.py",
       "tests/test_console.py",
       "tests/test_local_terminal.py",
-      "tests/test_network_profiles.py"
+      "tests/test_network_profiles.py",
+      "src/quirkbench/recovery_recipe.py",
+      "src/quirkbench/recovery_inputs.py",
+      "src/quirkbench/recovery_stock.py",
+      "src/quirkbench/recovery_stock_release.py",
+      "src/quirkbench/recovery_image_worker.py",
+      "schemas/recovery-recipe.v3.schema.json",
+      "schemas/recovery-release-candidate.v3.schema.json"
     ],
     "tests": [
       "tests/test_recovery_storage.py",

@@ -234,7 +234,8 @@ def _main(argv=None):
                     release_acquisition(controller.root,args.directory.resolve(),value)
                     answer={'lock':lock,'sha256':value}
                 else:
-                    layout={name:getattr(args,name) for name in ('root_mib','factory_size_mib','experiment_mib','library_mib','log_budget_mib')}
+                    layout={name:getattr(args,name) for name in ('root_mib','factory_size_mib')}
+                    layout['library_payload_bytes']=0
                     recipe=generate_recipe(args.lock,controller.store,recipe_id=args.id,
                         builder_image_digest=args.builder_image_digest,source_date_epoch=args.epoch,layout=layout)
                     from .retention import register

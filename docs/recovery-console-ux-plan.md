@@ -1,6 +1,6 @@
 # Make recovery feel like a finished Quirkbench product
 
-Status: implementation in progress on `codex/recovery-console-ux` (#137). Controller preparation, non-expiring initial invitations, independent networking/VTs, dashboard, local restart and paired diagnostic collection/receipt/retention are implemented in software. Fresh stock-input selection and final joined acceptance remain in progress; physical acceptance remains outstanding.
+Status: implementation in progress on `codex/recovery-console-ux` (#137). Controller preparation, non-expiring initial invitations, independent networking/VTs, dashboard, local restart and paired diagnostic collection/receipt/retention are implemented in software. Fresh stock-input selection is implemented; final joined acceptance remains in progress; physical acceptance remains outstanding.
 
 Owner-approved direction: prepare the final USB layout and controller connection on the controller; never repartition on the target. Reserve library space only for actual shipped contents (currently zero), split remaining capacity between experiments and evidence, and handle space shortages at the affected operation rather than imposing a RAM-based admission limit. Debug uploads require normal pairing; collection and local export do not. A selectable terminal action must work without function keys.
 
@@ -276,3 +276,17 @@ portable/native gates will record matching evidence before completion. No image,
 USB, QEMU, physical networking/VT or release qualification was performed.
 
 Reviewed console/report gate: `timeout 60s .venv/bin/python -m pytest -q tests/test_recovery_dashboard.py tests/test_recovery_status.py tests/test_recovery_actions.py tests/test_recovery_reports.py`, 58 passed in 29.18s (`/tmp/quirkbench-console-reports-reviewed-gate.log`). Help/CI selection: 49 passed in 0.97s after adding diagnostic pagination help (`/tmp/quirkbench-console-gate-selection-help-corrected.log`). Manifest schema assertion passed (`/tmp/quirkbench-report-manifest-schema.log`).
+
+
+Stock-v3 software slice: strict new three-field layout and zero shipped payload,
+existing foreground/durable worker dispatch, v3 candidate/factory joins and preserved
+v2 readers. Native partitioning entry point `capacity_setup` is absent from fresh
+target payloads. Evidence: 102 passed in 14.19s
+(`/tmp/quirkbench-stock-v3-unit-inventory.log`); 182 passed, one optional GPG socket
+test skipped, in 13.49s (`/tmp/quirkbench-stock-v3-compatibility-first.log`); 37 worker/
+reader tests passed (two staged tests corrected separately), then two isolated
+staged checks passed (`/tmp/quirkbench-staged-payload-no-editable-leak.log`). Independent
+review gpt-6-astra/high approved corrections over 49f3f5b after fixing missed worker
+v3 checks and excluding editable-install module leakage from the staged test.
+No image was built. Remaining work: final joined preparation-to-report software
+journey and directly affected UX/packaging acceptance; physical checks still pending.

@@ -757,7 +757,7 @@ class Controller(OperatorApprovals):
                 from .recovery_recipe import load_recipe
                 from .recovery_stock import preflight_recipe
                 recipe=load_recipe(self.store.get(fixed['recipe_sha256']))
-                if (recipe['schema_version']!=2 or recipe['rootfs_lock_sha256']!=fixed['rootfs_lock_sha256']
+                if (recipe['schema_version'] not in (2,3) or recipe['rootfs_lock_sha256']!=fixed['rootfs_lock_sha256']
                         or recipe['builder_image_digest']!=fixed['builder_config_digest']):
                     raise ContractError('recovery image recipe differs from immutable worker inputs')
                 preflight_recipe(recipe,self.store)
@@ -807,7 +807,7 @@ class Controller(OperatorApprovals):
         """Admit the complete stock image with immutable recipe, using existing intent."""
         from .recovery_recipe import load_recipe
         recipe=load_recipe(self.store.get(sha256(recipe_sha256)))
-        if recipe['schema_version']!=2: raise ContractError('new recovery image admission requires v2')
+        if recipe['schema_version'] not in (2,3): raise ContractError('new recovery image admission requires stock v2/v3')
         arguments={'schema_version':2,'recipe_sha256':recipe_sha256,
                    'rootfs_lock_sha256':recipe['rootfs_lock_sha256'],
                    'builder_config_digest':recipe['builder_image_digest'],

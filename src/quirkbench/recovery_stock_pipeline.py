@@ -255,7 +255,9 @@ def prepare_image(recipe, store, stage, record, output):
         recovery_profile_digest=digest(canonical(checked["profile"])),
         recovery_kernel_release=release, recovery_module_files_digest=ir["module_files_digest"],
         size_mib=layout["factory_size_mib"], root_mib=layout["root_mib"],
-        experiment_mib=layout["experiment_mib"], library_mib=layout["library_mib"],
-        log_budget_mib=layout["log_budget_mib"])
+        experiment_mib=layout["experiment_mib"] if recipe["schema_version"]==2 else 0,
+        library_mib=layout["library_mib"] if recipe["schema_version"]==2 else 0,
+        log_budget_mib=layout["log_budget_mib"] if recipe["schema_version"]==2 else 0,
+        controller_prepared=recipe["schema_version"]==3)
     inputs.validate()
     return inputs

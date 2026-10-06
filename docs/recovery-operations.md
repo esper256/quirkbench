@@ -130,8 +130,11 @@ A full controller rejects writes without receipt; export or retry after explicit
 
 ## Recovery inputs and preparation
 
-New recovery input generation uses `RecoveryRecipe` v2, rootfs-lock v2 and
-release-candidate v2. The installed `stock-x86_64-uefi-usb-v1` policy has a separate
+New recovery input generation uses `RecoveryRecipe` v3, rootfs-lock v2 and
+release-candidate v3. V3 selects the existing prepared factory assembler: its layout
+contains only recovery root/factory sizes and zero shipped library payload. Final
+experiment/evidence capacities come from the actual USB selected by `recovery prepare`.
+Retained stock v2 recipes/candidates keep their original five-field geometry. The installed `stock-x86_64-uefi-usb-v1` policy has a separate
 identity from candidate profiles. Existing v1 records retain their original
 custom-kernel interpretation.
 
@@ -611,8 +614,9 @@ remain available for diagnosis.
 `quirkbench recovery prepare` plans and applies the final layout of an explicitly
 selected whole USB. It requires a compatible controller-prepared v3 artifact;
 older images return an actionable fresh-build requirement and remain readable by
-the historical boot path. Stock image generation has not yet switched to v3 while
-the new console journey is being integrated.
+the historical boot path. Fresh stock recipes now select v3 through the existing
+foreground and durable worker paths. Prepared-media software tests do not qualify
+a produced image or prove physical USB preparation/boot.
 
 Configure and run the controller first. Select its reachable LAN endpoint, then
 plan without writing USB bytes:

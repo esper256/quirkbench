@@ -66,7 +66,7 @@ def run_recovery_runtime_stage(recipe: dict, catalog: dict, store, stage: Path,
         if preexisting_units - set(checked["unit_allowlist"]):
             raise BuildError("unreviewed recovery unit already present in rootfs")
     runtime_installer(rootfs, assets_dir)
-    if recipe.get("schema_version") == 2:
+    if recipe.get("schema_version") in (2,3):
         from .store import atomic_write
         atomic_write(rootfs / "usr/lib/quirkbench/recovery-storage-policy.json",
                      canonical(checked["profile"]))

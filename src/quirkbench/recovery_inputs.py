@@ -121,7 +121,7 @@ def retain_packages(directory,public_key,store,diagnostics,*,builder_image_diges
 
 
 def generate_recipe(lock_digest,store,*,recipe_id,builder_image_digest,source_date_epoch,layout,
-                    package_dir=None,assets_dir=None):
+                    package_dir=None,assets_dir=None,schema_version=3):
     from .package_resources import target_assets_dir
     from .recovery_rootfs import _json
     from .recovery_stock import validate_lock
@@ -131,7 +131,7 @@ def generate_recipe(lock_digest,store,*,recipe_id,builder_image_digest,source_da
         recipe_id = 'stock-recovery-' + lock_digest
     package_dir=Path(package_dir) if package_dir else Path(__file__).parent
     assets_dir=Path(assets_dir) if assets_dir else target_assets_dir()
-    recipe={'schema_version':2,'recipe_id':recipe_id,'rootfs_lock_sha256':lock_digest,
+    recipe={'schema_version':schema_version,'recipe_id':recipe_id,'rootfs_lock_sha256':lock_digest,
             'storage_policy_sha256':lock['storage_policy_sha256'],'builder_image_digest':builder_image_digest,
             'dracut_config_sha256':store.put(STOCK_DRACUT_CONFIG).sha256,
             'runtime_revision_sha256':store.put(canonical(capture_runtime_revision(package_dir,assets_dir))).sha256,

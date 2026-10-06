@@ -8,7 +8,6 @@ TARGET_MODULES = (
     'audio_recipe',
     'binding',
     'boot',
-    'capacity_setup',
     'commission',
     'console',
     'contracts',

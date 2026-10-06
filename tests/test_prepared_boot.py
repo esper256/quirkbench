@@ -106,7 +106,10 @@ def test_isolated_staged_payload_joins_boot_runtime_display_and_formatter_refusa
 from pathlib import Path
 from types import SimpleNamespace
 sys.path.insert(0, sys.argv[1])
-from quirkbench import boot,runtime,console,capacity_setup,commission
+sys.meta_path=[finder for finder in sys.meta_path if not getattr(finder,"__module__","").startswith("__editable__")]
+from quirkbench import boot,runtime,console,commission
+import importlib.util
+assert importlib.util.find_spec("quirkbench.capacity_setup") is None
 assert Path(boot.__file__).is_relative_to(Path(sys.argv[1]))
 v=json.loads(Path(sys.argv[2]).read_bytes()); config=boot.RecoveryConfig(**v['config'])
 state=Path(v['state_mount']); identity_path=Path(v['identity_path'])
@@ -137,9 +140,7 @@ for replacement in (None, {'eligible':True,'current_ram_mib':1,'evidence_mib':64
     except ValueError as exc:assert 'prepared capacity assessment' in str(exc)
     else:raise AssertionError('prepared format was downgraded by mutable boot marker')
 marker.write_text(json.dumps({'config':config.to_dict(),'boot':{**current,'quirkbench.capacity':assessment}}))
-try:capacity_setup.run_attended_commission(identity_path=identity_path,ram_reader=lambda:(_ for _ in ()).throw(AssertionError('RAM')))
-except commission.CommissionError as exc:assert 'cannot be partitioned' in str(exc)
-else:raise AssertionError('target formatter remained available')
+assert commission.main(['--identity',str(identity_path),'--apply'])==2
 layout.partitions[-1].end-=1
 try:verify()
 except boot.BootError:pass
