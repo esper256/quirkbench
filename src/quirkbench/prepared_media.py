@@ -15,6 +15,7 @@ MIN_MUTABLE_MIB = 64
 FIELDS = {'schema_version', 'record_type', 'artifact_sha256', 'disk_guid',
           'partition_uuids', 'device_bytes', 'geometry', 'library_payload_bytes',
           'library_overhead_bytes', 'factory_data_end', 'complete'}
+FIELDS_V2 = FIELDS - {'complete'} | {'completion'}
 
 
 def plan_layout(factory: CommissionIdentity, device_bytes: int, *, factory_data_end: int, library_payload_bytes=0):
@@ -46,7 +47,7 @@ def plan_layout(factory: CommissionIdentity, device_bytes: int, *, factory_data_
         [start + experiment + library, end - 1]]
 
 
-def record(factory, artifact_sha256, device_bytes, *, factory_data_end: int, library_payload_bytes=0, complete=False):
+def record(factory, artifact_sha256, device_bytes, *, factory_data_end: int, library_payload_bytes=0, complete=False, version=1):
     value = {'schema_version': 1, 'record_type': 'prepared-media',
              'artifact_sha256': sha256(artifact_sha256), 'disk_guid': factory.disk_guid,
              'partition_uuids': list(factory.partition_uuids), 'device_bytes': device_bytes,
@@ -55,6 +56,13 @@ def record(factory, artifact_sha256, device_bytes, *, factory_data_end: int, lib
              'factory_data_end':factory_data_end,
              'library_payload_bytes': library_payload_bytes,
              'library_overhead_bytes': LIBRARY_OVERHEAD_MIB * 1024**2, 'complete': complete}
+    if type(version) is not int or version not in (1,2):
+        raise CommissionError('unsupported prepared-media version')
+    if type(complete) is not bool:
+        raise CommissionError('invalid prepared-media completion')
+    if version == 2:
+        del value['complete']
+        value.update(schema_version=2, completion='COMPLETED' if complete else 'PREPARING')
     return validate(value, factory=factory, expected_artifact_sha256=artifact_sha256,
                     factory_data_end=factory_data_end)
 
@@ -74,9 +82,12 @@ def validate_geometry(value, *, factory, factory_data_end):
     This does not authenticate the reported artifact digest. Signed artifact
     acquisition and exact byte verification belong to controller preparation.
     """
-    if (not isinstance(value, dict) or set(value) != FIELDS
-            or type(value['schema_version']) is not int or value['schema_version'] != 1
-            or value['record_type'] != 'prepared-media' or type(value['complete']) is not bool):
+    if (not isinstance(value, dict) or type(value.get('schema_version')) is not int
+            or value['schema_version'] not in (1,2)
+            or set(value) != (FIELDS if value['schema_version']==1 else FIELDS_V2)
+            or value['record_type'] != 'prepared-media'
+            or (value['schema_version']==1 and type(value['complete']) is not bool)
+            or (value['schema_version']==2 and value['completion'] not in ('PREPARING','COMPLETED'))):
         raise CommissionError('invalid prepared-media record')
     sha256(value['artifact_sha256'])
     if (value['factory_data_end'] != factory_data_end
@@ -100,3 +111,14 @@ def validate_geometry(value, *, factory, factory_data_end):
 def confirmation(value):
     """Exact immutable plan reference; not sufficient alone to authorize writing."""
     return digest(canonical(value))
+
+
+def is_complete(value):
+    """Call only after strict version validation; historical bool stays frozen."""
+    return value['complete'] if value['schema_version']==1 else value['completion']=='COMPLETED'
+
+
+def completed(value):
+    if value.get('schema_version') != 2 or value.get('completion') != 'PREPARING':
+        raise CommissionError('completion publication requires preparing v2 media')
+    return {**value, 'completion':'COMPLETED'}

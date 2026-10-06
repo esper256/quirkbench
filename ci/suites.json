@@ -334,7 +334,21 @@
       "target-assets/*",
       "tests/test_recovery_storage.py",
       "tests/test_boot.py",
-      "tests/test_watchdog.py"
+      "tests/test_watchdog.py",
+      "src/quirkbench/prepared_media.py",
+      "src/quirkbench/prepared_factory.py",
+      "src/quirkbench/prepared_enrollment.py",
+      "src/quirkbench/preparation_device.py",
+      "src/quirkbench/preparation_io.py",
+      "src/quirkbench/preparation_components.py",
+      "src/quirkbench/preparation_completion.py",
+      "tests/test_prepared_media.py",
+      "tests/test_prepared_boot.py",
+      "tests/test_prepared_enrollment.py",
+      "tests/test_preparation_device.py",
+      "tests/test_preparation_io.py",
+      "tests/test_preparation_components.py",
+      "tests/test_preparation_completion.py"
     ],
     "tests": [
       "tests/test_recovery_storage.py",
@@ -342,7 +356,14 @@
       "tests/test_stock_recovery_flow.py",
       "tests/test_recovery_runtime_revision.py",
       "tests/test_boot.py",
-      "tests/test_watchdog.py"
+      "tests/test_watchdog.py",
+      "tests/test_prepared_media.py",
+      "tests/test_prepared_boot.py",
+      "tests/test_prepared_enrollment.py",
+      "tests/test_preparation_device.py",
+      "tests/test_preparation_io.py",
+      "tests/test_preparation_components.py",
+      "tests/test_preparation_completion.py"
     ]
   },
   "recovery-native": {
@@ -363,10 +384,25 @@
       "integration/*",
       "ci/native_recovery.py",
       "src/quirkbench/profiles/stock-fedora44-rpm-candidate.v1.json",
-      "src/quirkbench/profiles/legacy-stock-acquisition.v1.json"
+      "src/quirkbench/profiles/legacy-stock-acquisition.v1.json",
+      "src/quirkbench/prepared_media.py",
+      "src/quirkbench/prepared_factory.py",
+      "src/quirkbench/prepared_enrollment.py",
+      "src/quirkbench/preparation_device.py",
+      "src/quirkbench/preparation_io.py",
+      "src/quirkbench/preparation_components.py",
+      "src/quirkbench/preparation_completion.py",
+      "tests/test_prepared_media.py",
+      "tests/test_prepared_boot.py",
+      "tests/test_prepared_enrollment.py",
+      "tests/test_preparation_device.py",
+      "tests/test_preparation_io.py",
+      "tests/test_preparation_components.py",
+      "tests/test_preparation_completion.py"
     ],
     "tests": [
-      "integration/test_recovery_native.py"
+      "integration/test_recovery_native.py",
+      "integration/test_preparation_native.py"
     ]
   }
 }

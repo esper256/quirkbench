@@ -9,14 +9,14 @@ from quirkbench.contracts import canonical
 from test_boot import CONFIG, UUIDS
 
 
-@pytest.fixture
-def prepared(tmp_path):
+@pytest.fixture(params=[1,2])
+def prepared(tmp_path,request):
     parts = [{'start':2048, 'end':4095}, {'start':4096, 'end':8191},
              {'start':8192, 'end':16383}, {'start':16384, 'end':32767}]
     factory = prepared_factory.record(CONFIG.disk_guid, UUIDS, parts)
     identity = prepared_factory.validate(factory)
     record = prepared_media.record(identity, 'a'*64, 32_000_000_000,
-                                    factory_data_end=32767, complete=True)
+                                    factory_data_end=32767, complete=True,version=request.param)
     path = tmp_path/'identity.json'; path.write_bytes(canonical(factory))
     state = tmp_path/'state'; (state/'quirkbench').mkdir(parents=True)
     journal = state/'quirkbench/prepared-media.json'; journal.write_bytes(canonical(record))
@@ -50,14 +50,18 @@ def test_failed_preparation_never_becomes_ready(prepared, fault):
     options, record, journal, layout = prepared
     if fault == 'missing':journal.unlink()
     else:
-        if fault == 'incomplete':record['complete'] = False
+        if fault == 'incomplete':
+            if record['schema_version']==1:record['complete'] = False
+            else:record['completion']='PREPARING'
         elif fault == 'size':layout.disk_sectors += 2048
         elif fault == 'geometry':layout.partitions[5].end -= 1
         elif fault == 'uuid':record['partition_uuids'][0] = UUIDS[1]
         elif fault == 'library':record['library_payload_bytes'] = 1
         elif fault == 'source':record['factory_data_end'] += 1
         elif fault == 'backup':layout.backup_needs_relocation = True
-        else:record['schema_version'] = 2
+        else:
+            if record['schema_version']==1:record['schema_version'] = 2
+            else:record['schema_version']=1
         journal.write_bytes(canonical(record))
     with pytest.raises(boot.BootError, match='reprepare.*controller'):
         boot.require_commissioned_boot(CONFIG, **options)

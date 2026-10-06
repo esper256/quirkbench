@@ -147,6 +147,13 @@ adapters verify the complete selected artifact and each copied extent, use the
 existing filesystem/GPT tools, and retain failed scratch components. Scratch
 completion is not device-write authorization or durable USB completion.
 
+Prepared-media v2 retains an equal-length `PREPARING`/`COMPLETED` value; v1's
+boolean completion retains its original meaning. The scratch FAT adapter proves
+that its proposed completion sector backs the actual file by patch/read/revert/read.
+Final publication requires prior durable device verification. A final write, sync
+or readback failure means completion is **unconfirmed**, not guaranteed incomplete.
+These primitives do not yet deliver the controller write command.
+
 Restore only the selected private network profile into RAM after target binding is
 checked. Recovery mounts evidence before optional experiment/library storage; failure
 of those optional mounts must not prevent setup, credential access or uploads.

@@ -463,10 +463,11 @@ local shutdown sequence without requiring a controller acknowledgment of uploads
 
 ## Endpoint changes and media capacity
 
-**M2 guided setup and maintenance.** Reuse implemented capacity choices and journaled
-geometry; do not reimplement them or remove them as premature features. Integrate
-the fresh-user screens and explicit paused endpoint maintenance. Local full
-boot-device confirmation and capacity refusal remain mandatory before mutation.
+**M2 guided setup and maintenance.** New media uses controller-prepared geometry;
+retain historical record readers without offering target-side partitioning as a
+normal setup action. Integrate fresh-user screens and explicit paused endpoint
+maintenance. Controller preparation requires exact selected-device confirmation;
+individual operations handle capacity shortages without silently losing evidence.
 
 Endpoint migration is an operator-guided controller/target setup transaction. A changed
 IP may require a new certificate SAN, even when the CA is retained. Validate endpoint
@@ -486,6 +487,28 @@ prepared media. Retain historical records without automatic target-side partitio
 Budget actual recovery/library content and split remaining aligned capacity equally
 between experiments/evidence, without target RAM admission. Space failure blocks the
 affected operation and preserves unuploaded evidence, with no implicit resize/eviction.
+
+The recovery dashboard reads independent facts. Its recommendation follows this
+table; logs, offline report collection/export, the local terminal and power remain
+accessible in every row. A recommendation never grants execution authority.
+
+| Observed fact | Recommended action | Stateful actions and prerequisites |
+| --- | --- | --- |
+| Missing/malformed/incomplete prepared media | View error and controller re-preparation instructions | Retry checks; no target partition/format operation |
+| Evidence or experiment space exhausted | Upload/export or explicit eligible cleanup for that operation | Preserve unuploaded evidence; retry only the affected operation |
+| Evidence storage unavailable | View storage failure and retry checks | Pairing, saving connections and evidence maintenance unavailable |
+| Hardware binding unavailable or media moved | View binding failure / explicit retarget workflow | No saved-profile restoration or implicit re-enrollment |
+| Network service or private RAM profile storage failed | View network failure and retry local networking | No profile writes until private RAM storage and service checks pass |
+| Network disconnected, including missing Wi-Fi/radio blocked | Wi-Fi & Ethernet with the specific hardware/radio explanation | Temporary connections independent of recovery storage and pairing |
+| Prepared trust present, network available, unpaired | Connect using prepared controller trust | One retained initial request; storage/binding and trust checks required |
+| Paired but no current authenticated contact | Retry connection / connection details | Show paired and disconnected separately; no readiness inference |
+| Live authenticated contact and usable prepared recovery | Connection details; continue on controller | Exact run approval remains mandatory |
+
+Remembering selected network connections requires verified writable control storage
+and binding. Debug sending requires normal paired authentication and explicit
+confirmation of the frozen report. Retargeting, endpoint maintenance, evidence
+draining and coordinated power retain their own reviewed confirmations. These are
+interface requirements; the new dashboard and joined preparation flow are pending.
 
 ## Backup completeness
 

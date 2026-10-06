@@ -68,6 +68,15 @@ reported as ready. See [controller installation](controller-installation.md).
 
 ## Focused cloud checks: archived evidence
 
+Controller-prepared media regressions are selected by the existing
+`recovery-integration` and `recovery-native` gates. Native cache preparation includes
+hash-pinned mtools, e2fsprogs and gdisk (including their conversion/runtime libraries);
+test execution never downloads dependencies. `integration/test_preparation_native.py`
+exercises FAT completion and copied-filesystem/GPT adapters on disposable regular
+components, without assembling an image or accessing a device. It fails when the
+verified cache or Bubblewrap prerequisites are unavailable. Prepare a fresh cache
+when its package inventory changes; retain older evidence/cache identities.
+
 [Issue #7](https://github.com/esper256/quirkbench/issues/7) reported an endpoint
 archive case taking 219.26 seconds across export, drain and replay, each with its
 own unchanged absolute deadline. At checkout `83a364f`, individual `_source` reads

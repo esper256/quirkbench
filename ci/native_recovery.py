@@ -21,13 +21,18 @@ SNAPSHOT = ACQUISITION.parent/ACQUISITION_SPEC['package_snapshot']
 PACKAGES = ('bash', 'glibc', 'libgcc', 'libxcrypt', 'openssl-libs', 'python3',
             'python3-libs', 'systemd', 'systemd-libs', 'systemd-shared', 'systemd-udev',
             'util-linux-core', 'zlib-ng-compat', 'libmount', 'libblkid', 'libcap',
-            'libselinux', 'pcre2', 'ncurses-libs', 'libseccomp')
+            'libselinux', 'pcre2', 'ncurses-libs', 'libseccomp', 'mtools', 'gdisk',
+            'e2fsprogs', 'e2fsprogs-libs', 'libcom_err', 'libss', 'libstdc++', 'popt',
+            'libuuid','glibc-gconv-extra')
 
 # Fedora subpackages are published under their source build, not their RPM name.
 SOURCE_BUILDS = {'libgcc': 'gcc', 'openssl-libs': 'openssl', 'python3': 'python3.14', 'python3-libs': 'python3.14',
                  'systemd-libs': 'systemd', 'systemd-shared': 'systemd', 'systemd-udev': 'systemd',
                  'util-linux-core': 'util-linux', 'libmount': 'util-linux', 'libblkid': 'util-linux',
-                 'zlib-ng-compat': 'zlib-ng', 'ncurses-libs': 'ncurses'}
+                 'zlib-ng-compat': 'zlib-ng', 'ncurses-libs': 'ncurses',
+                 'e2fsprogs-libs':'e2fsprogs','libcom_err':'e2fsprogs',
+                 'libss':'e2fsprogs','libstdc++':'gcc','libuuid':'util-linux',
+                 'glibc-gconv-extra':'glibc'}
 
 
 def rpm_location(package):

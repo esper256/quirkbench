@@ -549,13 +549,13 @@ def prepared_capacity(identity, layout, state_mount):
     """Recheck selected prepared geometry without formatting or mounting media."""
     from .contracts import ContractError
     from .commission import CommissionError
-    from .prepared_media import validate_geometry, confirmation
+    from .prepared_media import validate_geometry, confirmation, is_complete
     from .enrollment_records import _document
     from .filesystem import read_file
     try:
         value = _document(read_file(state_mount/'quirkbench', 'prepared-media.json', limit=65536))
         validate_geometry(value, factory=identity, factory_data_end=identity.factory_data_end)
-        if (not value['complete'] or layout.logical_sector_size != 512
+        if (not is_complete(value) or layout.logical_sector_size != 512
                 or layout.backup_needs_relocation
                 or value['device_bytes'] != layout.disk_sectors*layout.logical_sector_size
                 or value['library_payload_bytes'] != identity.library_payload_bytes

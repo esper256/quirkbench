@@ -33,6 +33,21 @@ def test_actual_bytes_split_without_ram_gate(factory, size):
     assert confirmation(value) != confirmation({**value, 'complete': True})
 
 
+def test_v2_completion_is_equal_length_and_v1_stays_explicit(factory):
+    from quirkbench.prepared_media import completed,is_complete
+    from quirkbench.contracts import canonical
+    original=record(factory,'a'*64,32_000_000_000,factory_data_end=8388574,version=2)
+    final=completed(original)
+    assert not is_complete(original) and is_complete(final)
+    assert len(canonical(original))==len(canonical(final))
+    assert confirmation(original)!=confirmation(final)
+    validate(final,factory=factory,expected_artifact_sha256='a'*64,factory_data_end=8388574)
+    for bad in ({**original,'complete':True},{**original,'completion':'complete'},
+                {**original,'schema_version':1}):
+        with pytest.raises(CommissionError):
+            validate(bad,factory=factory,expected_artifact_sha256='a'*64,factory_data_end=8388574)
+
+
 def test_real_library_bytes_change_budget_only_by_payload(factory):
     empty = plan_layout(factory, 32_000_000_000, factory_data_end=8388574)
     loaded = plan_layout(factory, 32_000_000_000, factory_data_end=8388574, library_payload_bytes=20*1024**2)
