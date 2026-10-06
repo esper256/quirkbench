@@ -24,7 +24,7 @@ def helper(*argv,timeout_s):
     package=str(Path(__file__).resolve().parents[1])
     script='import sys;sys.path.insert(0,sys.argv.pop(1));from quirkbench.preparation_helper import main;raise SystemExit(main())'
     raw=Path('/proc/self/stat').read_text();start=raw[raw.rfind(')')+2:].split()[19]
-    result=subprocess.run(['sudo','-n','--',sys.executable,'-I','-c',script,package,
+    result=subprocess.run(['sudo','-n','--',sys.executable,'-B','-I','-c',script,package,
         '--owner-pid',str(os.getpid()),'--owner-start',start,'--deadline',str(time.monotonic()+timeout_s-5),*argv],
                           capture_output=True,text=True,timeout=timeout_s)
     if result.returncode:
