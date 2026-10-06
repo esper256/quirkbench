@@ -43,10 +43,16 @@ records and compatibility rules intact. Update installed help and user documenta
 when behavior becomes available. Open a linked draft PR early for substantial work.
 
 Use [C0–C7](docs/implementation-contracts.md), [C8](docs/product-interface.md) and
-the storage policy as durable constraints. Obtain the higher-reasoning review
-required by AGENTS.md for storage, trust/binding, source/worker ownership, durable
-execution, shutdown or watchdog boundaries. Record reviewer/scope/findings and the
-resolution in the PR; unavailable review is a blocker, not an implied approval.
+the storage policy as durable constraints. Follow AGENTS.md's campaign review policy:
+one independent **gpt-6-astra / medium** review of the accumulated changes at the
+end of a substantial refactoring or feature milestone, before merging the campaign.
+Include affected authority and execution boundaries in that review. Individual
+packets and routine fixes use implementer review and focused tests, without reviewer
+subagents. Resolve findings in the same review cycle; another review requires a
+material change to the reviewed design or guarantees. Record reviewer, scope,
+findings and resolutions in the PR. An unavailable campaign review blocks that
+campaign's merge, not independent development. Architectural decisions still
+require the owner's input as specified in AGENTS.md.
 
 Commit only intended paths, push the topic branch and open the draft:
 

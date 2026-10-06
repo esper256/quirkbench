@@ -315,8 +315,9 @@ unordered directory membership as such. Read-only SQLite allows its exact WAL/SH
 bookkeeping while forbidding application/schema/authority changes. Prefer stable
 error categories and actionable fragments to freezing entire diagnostic prose.
 See the [first assertion audit](test-assertion-audit.md) for reviewed examples and
-retained safety coverage; boundary-sensitive test changes still require AGENTS.md's
-higher-reasoning review.
+retained safety coverage. Include boundary-sensitive test changes in AGENTS.md's
+end-of-campaign independent review; they do not trigger a separate reviewer for
+each test change.
 
 ## Fast recovery integration (no boot or image build)
 

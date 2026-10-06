@@ -29,8 +29,14 @@ explicit; omit that paragraph if the worker should leave PRs for human merge.
 > Implement the complete bounded outcome on a topic branch using existing services.
 > Reuse working foundations, preserve compatibility and authority boundaries, and
 > update executable help/docs as needed. Run affected regressions and smoke as
-> appropriate; retain failures and record exact source/commands/results. Obtain and
-> record the higher-reasoning boundary review required by AGENTS.md.
+> appropriate; retain failures and record exact source/commands/results. Use
+> implementer review during development. At the end of a substantial refactoring
+> or feature milestone, obtain one independent gpt-6-astra review at medium
+> reasoning effort of the accumulated changes before merging the campaign.
+> Do not launch reviewer subagents for individual packets or routine fixes.
+> Resolve findings in the same review cycle; request another review only for a
+> material change to the reviewed design or guarantees. Record review evidence
+> under AGENTS.md's authoritative campaign review policy.
 >
 > Open/update a linked PR with the problem, resulting behavior, validation and
 > limitations. Close an issue only after merged work and evidence satisfy its scope.
