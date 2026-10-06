@@ -59,6 +59,11 @@ def prepare(args):
     def progress(event):
         if args.json:
             print(json.dumps(event,sort_keys=True),file=sys.stderr,flush=True)
+        elif event.get('status') is None:
+            text=event['phase']
+            if 'bytes_total' in event:
+                text+=f": {event['bytes_done']/1024**2:.0f} / {event['bytes_total']/1024**2:.0f} MiB"
+            print(text,file=sys.stderr,flush=True)
         elif event.get('status')=='failed':
             print('USB preparation tool failed: '+event['phase'].removeprefix('image-tool-'),file=sys.stderr,flush=True)
         elif event.get('activity') and time.monotonic()-last_activity[0]>=5:

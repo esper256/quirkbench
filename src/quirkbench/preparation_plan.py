@@ -34,24 +34,24 @@ def observe_layout(fd,size_bytes):
             raise CommissionError('GPT metadata address is outside selected USB')
         raw=os.pread(fd,512,lba*512)
         if len(raw)!=512 or raw[:8]!=b'EFI PART':
-            raise CommissionError('GPT metadata header is missing; repair requires a separate explicit operation')
+            return None
         size=struct.unpack_from('<I',raw,12)[0]
         current,alternate=struct.unpack_from('<QQ',raw,24)
         array,count,entry_size=struct.unpack_from('<QII',raw,72)
         if (not 92<=size<=512 or current!=lba or count<1 or entry_size<128
                 or entry_size%128 or count*entry_size>65536
                 or array<2 or array*512+count*entry_size>size_bytes):
-            raise CommissionError('unsupported or unbounded GPT metadata addresses')
+            return None
         ranges.extend([(lba*512,(lba+1)*512),
                        (array*512,array*512+((count*entry_size+511)//512)*512)])
         return alternate
     primary=os.pread(fd,512,512)
     if primary[:8]==b'EFI PART':
         alternate=header(1)
-        if header(alternate)!=1:
-            raise CommissionError('GPT headers disagree about metadata addresses')
+        if alternate is not None and 1<=alternate<size_bytes//512:
+            header(alternate)
     # Merge only metadata captures, so arbitrary data sectors never become an
-    # apparent layout proof. Capture must be followed by native validation.
+    # apparent layout proof. Old contents are observations for explicit erasure, not admission requirements.
     merged=[]
     for start,end in sorted(ranges):
         if merged and start<=merged[-1][1]:merged[-1]=(merged[-1][0],max(merged[-1][1],end))

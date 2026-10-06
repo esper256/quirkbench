@@ -62,7 +62,7 @@ class CommandRunner:
     """Bounded output and live activity for slow pulls and deployment commands."""
     def __init__(self, progress, guard, timeout_s=1800, diagnostic=None, *,
                  operation='OSTree command', phase='deployment-command',
-                 failure_guidance='deployment remains unarmed', pass_fds=()):
+                 failure_guidance='deployment remains unarmed', pass_fds=(), stderr_event=None, success_codes=(0,), cooperative_stdin=False):
         if (isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float))
                 or not math.isfinite(timeout_s) or timeout_s <= 0):
             raise ContractError('command timeout must be finite and positive')
@@ -71,17 +71,39 @@ class CommandRunner:
         self.operation, self.phase = operation, phase
         self.failure_guidance = failure_guidance
         self.pass_fds = tuple(pass_fds)
+        self.stderr_event = stderr_event
+        self.success_codes = tuple(success_codes)
+        self.cooperative_stdin = cooperative_stdin
 
     def __call__(self, argv):
         start = time.monotonic()
         from .process_ownership import launch, drain_group
         try:
             process = launch(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             start_new_session=True, pass_fds=self.pass_fds)
+                             start_new_session=True, pass_fds=self.pass_fds,
+                             **({'stdin':subprocess.PIPE} if self.cooperative_stdin else {}))
         except OSError as exc:
             log = self.diagnostic(str(exc).encode())
             raise OSError(f'{self.operation} could not start (errno={exc.errno}); '
                           f'{self.failure_guidance}; diagnostic={log}') from exc
+        def stop_group():
+            if not self.cooperative_stdin:
+                return drain_group(process)
+            # A privileged helper must perform its own cleanup. Closing its
+            # cancellation pipe lets it drain nested native groups as root.
+            if not process.stdin.closed:process.stdin.close()
+            end=time.monotonic()+20
+            while os.waitid(os.P_PID,process.pid,os.WEXITED|os.WNOWAIT|os.WNOHANG) is None:
+                if time.monotonic()>=end:
+                    raise ContractError('privileged helper shutdown unconfirmed; retain work and diagnostics')
+                # Continue draining bounded pipes during cooperative cleanup so
+                # a diagnostic burst cannot prevent the helper reaching finally.
+                for key,_ in selector.select(timeout=.05):
+                    block=os.read(key.fileobj.fileno(),65536)
+                    if not block:selector.unregister(key.fileobj)
+                    elif key.data=='stderr':
+                        errors.extend(block);del errors[:-65536]
+            drain_group(process,terminate=False)
         selector = selectors.DefaultSelector()
         selector.register(process.stdout, selectors.EVENT_READ, 'stdout')
         selector.register(process.stderr, selectors.EVENT_READ, 'stderr')
@@ -104,6 +126,7 @@ class CommandRunner:
                     count += len(block)
                     last_output = time.monotonic()
                     if key.data == 'stderr':
+                        if self.stderr_event is not None:self.stderr_event(block)
                         errors.extend(block)
                         del errors[:-65536]
                     if key.data == 'stdout':
@@ -129,10 +152,10 @@ class CommandRunner:
                     raise TimeoutError(f'{self.operation} deadline exceeded')
                 self.guard()
                 time.sleep(0.05)
-            drain_group(process)
+            stop_group()
             code = process.wait(timeout=10)
             reaped = True
-            if code:
+            if code not in self.success_codes:
                 log = self.diagnostic(bytes(errors))
                 raise ContractError(f'{self.operation} failed with exit status {code}; '
                                     f'{self.failure_guidance}; diagnostic={log}')
@@ -144,8 +167,8 @@ class CommandRunner:
         finally:
             try:
                 if not reaped:
-                    try:drain_group(process)
-                    finally:process.wait(timeout=10)
+                    stop_group()
+                    process.wait(timeout=10)
             finally:
                 selector.close()
                 process.stdout.close()

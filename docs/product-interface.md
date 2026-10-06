@@ -499,7 +499,8 @@ reflashing media.
 
 New USB preparation is controller-side: read-only planning binds the explicitly
 selected whole USB, artifact, observed capacity/layout and attachment identity.
-Apply requires that exact plan and erase acknowledgement, with revalidation before
+No initial flash is required. Copy shipped content, create empty filesystems directly,
+and report actual phases/transfer progress. Apply requires that exact plan and erase acknowledgement, with revalidation before
 every destructive phase. Stage the selected LAN endpoint/public fingerprint and
 single-use initial invitation outside the fixed recovery root; never copy controller
 private keys or bind the USB to controller hardware. Only verified completion reports

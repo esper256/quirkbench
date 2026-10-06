@@ -10,7 +10,7 @@ def build(root):
     p = action(root, 'recovery list', 'List published recovery images and their retained files', command='recovery-images', internal_action=None)
     p.add_argument('--limit', type=int, default=20, help='Maximum records to return')
     p.add_argument('--before', type=int, default=0, help='older image-operation cursor from the preceding page')
-    p = action(root, 'recovery prepare', 'Plan or explicitly write the final USB layout and controller enrollment', command='recovery', internal_action='prepare')
+    p = action(root, 'recovery prepare', 'Prepare a USB from a recovery image; no preliminary flash required', command='recovery', internal_action='prepare')
     p.add_argument('--image', type=Path, help='Current verified recovery image for planning or apply')
     p.add_argument('--device', type=Path, help='Explicit whole USB device; all existing contents will be erased on apply')
     p.add_argument('--target', help='Name for the computer that will first enroll from this USB')

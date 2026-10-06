@@ -186,3 +186,56 @@ def test_late_read_cannot_write_or_report_success(tmp_path,late_phase):
                 monotonic=lambda:clock[0],read=read)
         if late_phase=='source':assert destination.read_bytes()==b'b'*512
     finally:os.close(src);os.close(dst)
+
+
+def test_runner_streams_stderr_without_mixing_it_into_result():
+    import sys
+    from quirkbench.ostree import CommandRunner
+    events=[]
+    result=CommandRunner(lambda *_:None,lambda:None,timeout_s=2,stderr_event=events.append)(
+        [sys.executable,'-c','import sys;print("phase",file=sys.stderr,flush=True);print("result")'])
+    assert result=='result\n' and b''.join(events)==b'phase\n'
+
+
+@pytest.mark.parametrize('allowed',[False,True])
+def test_runner_accepts_corrected_filesystem_exit_only_when_requested(allowed):
+    import sys
+    from quirkbench.ostree import CommandRunner
+    from quirkbench.contracts import ContractError
+    runner=CommandRunner(lambda *_:None,lambda:None,timeout_s=2,success_codes=(0,1) if allowed else (0,))
+    argv=[sys.executable,'-c','raise SystemExit(1)']
+    if allowed:assert runner(argv)==''
+    else:
+        with pytest.raises(ContractError,match='exit status 1'):runner(argv)
+
+
+def test_cooperative_helper_cancellation_drains_nested_native_group(tmp_path):
+    import sys
+    from pathlib import Path
+    from quirkbench.ostree import CommandRunner
+    raw=Path('/proc/self/stat').read_text();start=int(raw[raw.rfind(')')+2:].split()[19])
+    pid_file=tmp_path/'native.pid';stopped=tmp_path/'helper-stopped'
+    child='import os,sys,time;from pathlib import Path;Path(sys.argv[1]).write_text(str(os.getpid()));print("native-ready",file=sys.stderr,flush=True);time.sleep(30)'
+    script='''
+import os,sys
+from contextlib import ExitStack
+from pathlib import Path
+from quirkbench.preparation_helper import owner_guard
+from quirkbench.ostree import CommandRunner
+with ExitStack() as stack:
+    guard=owner_guard(int(sys.argv[1]),int(sys.argv[2]),os.getuid(),stack,cancellation_fd=0)
+    try:
+        CommandRunner(lambda *_:None,guard,timeout_s=5,stderr_event=lambda raw:os.write(2,raw))(
+            [sys.executable,'-c',sys.argv[3],sys.argv[4]])
+    except Exception:
+        Path(sys.argv[5]).write_text('nested group drained')
+        raise
+'''
+    def cancel(raw):
+        if b'native-ready' in raw:raise KeyboardInterrupt
+    with pytest.raises(KeyboardInterrupt):
+        CommandRunner(lambda *_:None,lambda:None,timeout_s=5,stderr_event=cancel,cooperative_stdin=True)(
+            [sys.executable,'-c',script,str(os.getpid()),str(start),child,str(pid_file),str(stopped)])
+    assert stopped.read_text()=='nested group drained'
+    pid=int(pid_file.read_text());path=Path('/proc')/str(pid)/'stat'
+    if path.exists():assert path.read_text().split(') ')[1].split()[0] in ('Z','X')

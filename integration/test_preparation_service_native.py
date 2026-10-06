@@ -69,17 +69,36 @@ def test_real_preparation_application_handoff(tmp_path,artifact,selected,issuer,
         try:yield fd
         finally:os.close(fd)
     monkeypatch.setattr(helper,'claim',claim)
+    monkeypatch.setattr(helper,'preflight',lambda:None)  # privileged loop capability is the host adapter
     monkeypatch.setattr(helper,'observe',lambda path:device)
     monkeypatch.setattr(helper,'revalidate',lambda expected,path:None)
     def descriptor(fd,expected):assert os.fstat(fd).st_size==expected['device_bytes']
     monkeypatch.setattr(helper,'verify_descriptor',descriptor)
+    # Substitute only privileged loop attachment: native tools operate on exact
+    # regular extent views. Production direct writer and helper handoff are real.
+    from quirkbench import preparation_writer
+    @contextmanager
+    def view(fd,offset,length,*,guard):
+        guard();path=tmp_path/('native-view-'+str(offset))
+        with path.open('xb') as stream:stream.truncate(length)
+        extent=os.open(path,os.O_RDWR)
+        try:
+            # The factory experiment content must survive growth.
+            if offset==manifest['partitions'][3]['start']*512:
+                os.pwrite(extent,os.pread(fd,data.stat().st_size,offset),0)
+            yield path,extent,guard
+        finally:os.close(extent)
+    real_write=helper.write
+    monkeypatch.setattr(helper,'write',lambda *a,**kw:real_write(*a,**kw,partition_view=view,
+        tool=lambda argv,fd,verify:native(*argv)))
+    monkeypatch.setattr('tempfile.tempdir',str(tmp_path))
     snapshot=lambda root:__import__('quirkbench.enrollment',fromlist=['_snapshot'])._snapshot(root,tls_inspector=host['tls_inspector'])
     monkeypatch.setattr(preparation,'create_code',lambda c,name,request:create_code(c,name,request,**host))
     def access(*argv,timeout_s):
         if argv[0]=='observe':return helper.observation(argv[2],deadline=time.monotonic()+5)
         assert argv[0]=='apply' and argv[-1]=='--erase'
         handoff=json.loads(Path(argv[2]).read_bytes())
-        assert set(handoff)=={'schema_version','record_type','plan','finalization'}
+        assert set(handoff)=={'schema_version','record_type','plan','source_checksums','geometry_hashes','completion','payload_files'}
         # A supported trust-maintenance operation cannot acquire its existing
         # exclusive lock during the shared finalization/write section.
         with pytest.raises(Conflict):

@@ -14,7 +14,7 @@ from contextvars import ContextVar
 ACTIVE_WORK=ContextVar('quirkbench_storage_work',default=None)
 
 
-def drain_group(process, *, timeout_s=10):
+def drain_group(process, *, timeout_s=10, terminate=True):
     """Stop a launched group while its unreaped leader pins the group identity.
 
     Call before wait/poll reaps the leader. Linux zombies have released file
@@ -23,8 +23,9 @@ def drain_group(process, *, timeout_s=10):
     """
     import signal
     import time
-    try:os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:return
+    if terminate:
+        try:os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:return
     deadline = time.monotonic()+timeout_s
     while True:
         live = False

@@ -23,113 +23,68 @@ def test_actual_fat_completion_and_filesystem_gpt_adapters(tmp_path,dependency_r
         .not_valid_after(now+datetime.timedelta(days=1)).sign(key,hashes.SHA256()))
     (tmp_path/'test-controller.crt').write_bytes(cert.public_bytes(serialization.Encoding.PEM))
     script=r'''
-import hashlib,os,pathlib,time,uuid
-from quirkbench.image import _run,partition_layout,create_ext4_component,_copy_slice
-from quirkbench import prepared_factory,prepared_media,preparation_components,preparation_completion
+import hashlib,os,pathlib,time,uuid,ssl
+from contextlib import contextmanager
+from quirkbench.image import _run,create_ext4_component,_copy_slice
+from quirkbench import prepared_factory,prepared_media,preparation_components,preparation_payload,preparation_plan,preparation_writer
 from quirkbench.contracts import canonical,digest
 work=pathlib.Path('/run');deadline=time.monotonic()+20
 def run(*a,timeout_s=5):return _run(*a,timeout_s=min(timeout_s,5))
-state=work/'state';doc=work/'record'
-with state.open('xb') as stream:stream.truncate(32*1024**2)
-factory=prepared_factory.validate(prepared_factory.record(str(uuid.uuid4()),[str(uuid.uuid4()) for _ in range(6)],partition_layout(1024,256,controller_prepared=True)))
-record=prepared_media.record(factory,'a'*64,2*1024**3,factory_data_end=factory.factory_data_end,version=2)
-doc.write_bytes(canonical(record))
-run('mformat','-i',str(state),'-v','QBSTATE','::')
-run('mmd','-i',str(state),'::/quirkbench')
-run('mcopy','-i',str(state),str(doc),'::/quirkbench/prepared-media.json')
-sector=preparation_completion.prove_component(state,record,deadline=deadline,runner=run)
-assert sector['before']!=sector['after']
-# A sparse 25MiB source contains one real empty16MiB experiment filesystem;
-# fixed parts are fixture bytes, not bootable ESP/recovery contents.
 parts=[{'start':2048,'end':4095},{'start':4096,'end':8191},{'start':8192,'end':16383},{'start':16384,'end':49151}]
-factory=prepared_factory.validate(prepared_factory.record(str(uuid.uuid4()),[str(uuid.uuid4()) for _ in range(6)],parts))
-data=work/'data';create_ext4_component(data,16*1024**2,'QBEXPERIMENTS',str(uuid.uuid4()),runner=run)
+factory_doc=prepared_factory.record(str(uuid.uuid4()),[str(uuid.uuid4()) for _ in range(6)],parts)
+factory=prepared_factory.validate(factory_doc)
+state=work/'factory-state'
+with state.open('xb') as stream:stream.truncate(4*1024**2)
+run('mformat','-i',str(state),'-v','QBSTATE','::');run('mmd','-i',str(state),'::/quirkbench')
+marker=work/'marker';marker.write_text(factory.partition_uuids[2]+'\n')
+run('mcopy','-i',str(state),str(marker),'::/quirkbench-'+factory.partition_uuids[2])
+env=work/'next.env';run('grub2-editenv',str(env),'create');run('mcopy','-i',str(state),str(env),'::/quirkbench/next.env')
+data=work/'data';create_ext4_component(data,16*1024**2,'QBEXPERIMENTS',factory.partition_uuids[3],runner=run)
 source=work/'source'
 with source.open('xb') as stream:stream.truncate(25*1024**2)
-_copy_slice(data,source,8*1024**2)
-with source.open('rb') as stream:checksum=hashlib.file_digest(stream,'sha256').hexdigest()
-record=prepared_media.record(factory,checksum,256*1024**2,factory_data_end=factory.factory_data_end,version=2)
-components=work/'components with spaces';components.mkdir()
-fd=os.open(source,os.O_RDONLY)
-try:_,source_checksums=preparation_components.copy_factory_components(fd,factory,record,components,expected_artifact_sha256=checksum,deadline=deadline,guard=lambda:None)
-finally:os.close(fd)
-answer=preparation_components.finish_filesystems(factory,record,components,expected_artifact_sha256=checksum,source_checksums=source_checksums,deadline=deadline,runner=run)
-assert answer['filesystems_prepared'] is True and answer['device_written'] is False and answer['complete'] is False
-for number in (4,5,6):run('e2fsck','-f','-n',str(components/f'partition-{number}'))
-# Join actual FAT/GPT components to the descriptor-only writer on a disposable
-# regular destination. It is not a bootable image or a physical-device test.
-from quirkbench import preparation_writer,preparation_plan
-state=components/'partition-3'
-run('mformat','-i',str(state),'-v','QBSTATE','::')
-run('mmd','-i',str(state),'::/quirkbench')
-destination=work/'writer-destination'
-with destination.open('xb') as stream:stream.truncate(record['device_bytes'])
-devfd=os.open(destination,os.O_RDWR);srcfd=os.open(source,os.O_RDONLY)
-component_fds={n:os.open(components/f'partition-{n}',os.O_RDONLY) for n in range(1,7)}
-gptfd=os.open(components/'geometry',os.O_RDONLY)
+_copy_slice(state,source,4*1024**2);_copy_slice(data,source,8*1024**2)
+checksum=hashlib.file_digest(source.open('rb'),'sha256').hexdigest()
+disk=work/'destination'
+with disk.open('xb') as stream:stream.truncate(256*1024**2)
+source_fd=os.open(source,os.O_RDONLY);dest=os.open(disk,os.O_RDWR)
 try:
-    device={
-        'major_minor':[65,144],'device_bytes':record['device_bytes'],'logical_sector_bytes':512,
-        'controller_boot_id':str(uuid.uuid4()),'diskseq':51,'usb_busnum':1,'usb_devnum':2}
-    source_record={'sha256':checksum,'size_bytes':source.stat().st_size,'manifest_sha256':'b'*64,
-        'authentication':{'mode':'unsigned-development','trust_sha256':None,'fingerprint':None}}
-    plan=preparation_plan.make(preparation_id='native-writer',target='fixture-machine',source=source_record,
-        factory=prepared_factory.record(factory.disk_guid,factory.partition_uuids,parts),device=device,
-        observed_layout=preparation_plan.observe_layout(devfd,record['device_bytes']),
-        controller={'controller_url':'https://192.0.2.44:8443','certificate_sha256':'c'*64})
-    # Populate through the real controller enrollment handoff adapter. Preserve
-    # factory boot marker and the one-shot block, and prove ext4 uid/content.
-    marker=work/'state-marker';marker.write_text(factory.partition_uuids[2]+'\n')
-    run('mcopy','-i',str(state),str(marker),'::/quirkbench-'+factory.partition_uuids[2])
-    env=work/'one-shot.env';run('grub-editenv',str(env),'create')
-    run('mcopy','-i',str(state),str(env),'::/quirkbench/next.env')
-    cert=work/'test-controller.crt'
-    import ssl
-    plan['controller']['certificate_sha256']=digest(ssl.PEM_cert_to_DER_cert(cert.read_text()))
-    invitation={'record':{'schema_version':2,'record_type':'enrollment-code','code_id':'code-native',
-        'request_id':'prepare-native','request_digest':'e'*64,'name':plan['target'],**plan['controller'],
-        'created_at':1,'expires_at':None},'code':'a'*43,'enrolled':False,'boot_authorized':False}
-    from quirkbench import preparation_payload
-    metadata,proof,evidence_sha256=preparation_payload.populate(plan,components,invitation,cert.read_text(),deadline=deadline,runner=run)
-    assert metadata['prepared_media_sha256']==digest(canonical(prepared_media.completed(record)))
-    # Reopen evidence after normal-user component replacement.
-    os.close(component_fds[6]);component_fds[6]=os.open(components/'partition-6',os.O_RDONLY)
-    final=preparation_writer.freeze(plan,component_fds,gptfd,proof,verification={**answer['verified'],'6':evidence_sha256},deadline=deadline,guard=lambda:None)
-    from quirkbench.contracts import digest
-    result=preparation_writer.write(plan,devfd,srcfd,component_fds,gptfd,proof,
-        finalization=final,finalization_sha256=digest(canonical(final)),confirmation=preparation_plan.reference(plan),
-        erase=True,deadline=deadline,guard=lambda:None)
-    assert result['prepared'] is True
-    extracted=work/'written-state'
-    with extracted.open('xb') as stream:stream.write(os.pread(devfd,state.stat().st_size,record['geometry'][2][0]*512))
-    assert run('mtype','-i',str(extracted),'::/quirkbench/prepared-media.json').encode()==canonical(prepared_media.completed(record))
-finally:
-    for descriptor in [devfd,srcfd,gptfd,*component_fds.values()]:os.close(descriptor)
-from quirkbench import preparation_layout
-from quirkbench.commission import CommissionError
-from quirkbench.contracts import ContractError
-# A formerly flashed image has its valid backup at the old image end. Retain
-# actual-byte capacity separately and verify its original GPT without repair.
-geometry=components/'geometry'
-with geometry.open('r+b') as stream:stream.truncate(320*1024**2)
-fd=os.open(geometry,os.O_RDWR);view=work/'layout-view';view.mkdir()
-try:
-    observed=preparation_layout.inspect(fd,320*1024**2,view,deadline=deadline,guard=lambda:None,runner=run)
-    assert observed['description']=={'kind':'gpt','previous_quirkbench_labels':True,'gpt_source_bytes':256*1024**2,'stale_tail_gpt':False}
-    assert len(observed['observation'])==3
-    os.pwrite(fd,b'EFI PART',320*1024**2-512)
-    conflict=work/'conflicting-layout-view';conflict.mkdir()
-    try:preparation_layout.inspect(fd,320*1024**2,conflict,deadline=deadline,guard=lambda:None,runner=run)
-    except CommissionError as exc:assert 'conflicting GPT header' in str(exc)
-    else:raise AssertionError('competing physical-tail GPT was accepted')
-    os.pwrite(fd,b'\x00'*8,320*1024**2-512)
-    os.pwrite(fd,b'broken-crc',(256*1024**2)-512+16)
-    bad=work/'bad-layout-view';bad.mkdir()
-    try:preparation_layout.inspect(fd,320*1024**2,bad,deadline=deadline,guard=lambda:None,runner=run)
-    except (CommissionError,ContractError):pass
-    else:raise AssertionError('corrupted backup GPT was accepted')
-finally:os.close(fd)
-print('Actual FAT completion and copied-filesystem/GPT adapter checks passed; no image/device write')
+    controller={'controller_url':'https://192.0.2.44:8443','certificate_sha256':digest(ssl.PEM_cert_to_DER_cert((work/'test-controller.crt').read_text()))}
+    plan=preparation_plan.make(preparation_id='native-fixture',target='fixture',factory=factory_doc,
+        source={'size_bytes':source.stat().st_size,'sha256':checksum,'manifest_sha256':'b'*64,
+            'authentication':{'mode':'unsigned-development','trust_sha256':None,'fingerprint':None}},
+        device={'major_minor':[8,0],'device_bytes':disk.stat().st_size,'logical_sector_bytes':512,
+            'controller_boot_id':str(uuid.uuid4()),'diskseq':1,'usb_busnum':1,'usb_devnum':2},
+        observed_layout=preparation_plan.observe_layout(dest,disk.stat().st_size),controller=controller)
+    components=work/'components';components.mkdir()
+    sums=preparation_components.stage(source_fd,factory,plan['prepared_media'],components,deadline=deadline,guard=lambda:None,runner=run)
+    invitation={'record':{'schema_version':2,'record_type':'enrollment-code','code_id':'code-fixture','request_id':'native-fixture',
+        'request_digest':'d'*64,'name':'fixture',**controller,'created_at':1,'expires_at':None},'code':'a'*43}
+    def adapters(*a,**k):return run('grub2-editenv' if a[0]=='grub-editenv' else a[0],*a[1:],**k)
+    metadata,completion,files=preparation_payload.populate(plan,components,invitation,(work/'test-controller.crt').read_text(),deadline=deadline,runner=adapters)
+    @contextmanager
+    def view(fd,offset,length,*,guard):
+        guard();n=next(n for n,(start,end) in enumerate(plan['prepared_media']['geometry'],1) if start*512==offset)
+        path=work/('view-'+str(n))
+        with path.open('xb') as stream:stream.truncate(length)
+        extent=os.open(path,os.O_RDWR)
+        try:
+            if n==4:os.pwrite(extent,os.pread(fd,16*1024**2,offset),0)
+            yield path,extent,guard
+        finally:os.close(extent)
+    statefd=os.open(components/'partition-3',os.O_RDONLY);gptfd=os.open(components/'geometry',os.O_RDONLY)
+    try:
+        result=preparation_writer.write(plan,dest,source_fd,statefd,gptfd,completion,source_checksums=sums,
+            geometry_hashes=[digest(os.pread(gptfd,34*512,0)),digest(os.pread(gptfd,33*512,plan['device']['device_bytes']-33*512))],
+            payload=components/'payload',payload_files=files,confirmation=preparation_plan.reference(plan),erase=True,
+            deadline=deadline,guard=lambda:None,partition_view=view,tool=lambda argv,fd,verify:adapters(*argv))
+    finally:os.close(statefd);os.close(gptfd)
+    assert result['prepared']
+    extracted=work/'written-state';extracted.write_bytes(os.pread(dest,4*1024**2,4*1024**2))
+    assert run('mtype','-i',str(extracted),'::/quirkbench/prepared-media.json').encode()==canonical(prepared_media.completed(plan['prepared_media']))
+    assert run('debugfs','-R','cat /control/prepared-enrollment.json',str(work/'view-6')).encode()==canonical(metadata)
+    assert not (components/'partition-6').exists()
+finally:os.close(source_fd);os.close(dest)
+print('Actual FAT completion and direct-filesystem/GPT adapter checks passed; no image/device write')
 '''
     script_path=tmp_path/'exercise.py';script_path.write_text(script)
     command=['bwrap','--die-with-parent','--unshare-all','--ro-bind',str(dependency_root),'/',
