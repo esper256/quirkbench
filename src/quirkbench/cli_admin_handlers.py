@@ -233,3 +233,16 @@ def operation(args):
         else:
             print(f'{code}: {message}', file=sys.stderr)
         return status
+
+
+def controller_reset(args):
+    from .controller_reset import reset
+    from .contracts import Conflict, ContractError
+    try:
+        value = reset(discover_state_root(args.state), request_id=args.request_id, confirm_reset=args.confirm_reset)
+        emit(args, value)
+        return 0
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        code, status = ('CONFLICT', 3) if isinstance(exc, Conflict) else ('INVALID_INPUT', 2) if isinstance(exc, ContractError) else ('INFRASTRUCTURE', 5)
+        error(args, str(exc), code=code, retryable=status == 5)
+        return status

@@ -79,7 +79,7 @@ def test_setup_requires_explicit_selection_for_legacy_state(tmp_path):
     assert json.loads(chosen.stdout)["data"]["state_root"] == str(legacy)
 
 
-def test_setup_refuses_state_switch_and_unrelated_default_directory(tmp_path):
+def test_setup_accepts_explicit_state_switch_and_protects_unrelated_default_directory(tmp_path):
     config = tmp_path / "config"
     first = tmp_path / "first"
     first.mkdir(mode=0o700)
@@ -87,9 +87,10 @@ def test_setup_refuses_state_switch_and_unrelated_default_directory(tmp_path):
     selection = config / "quirkbench/controller.json"
     original = selection.read_bytes()
     second = tmp_path / "second"
-    with pytest.raises(StateConfigurationError, match="already selected"):
-        configure_state_root(second, config_home=config)
-    assert not second.exists() and selection.read_bytes() == original
+    assert configure_state_root(second, config_home=config)["state_root"] == str(second)
+    assert second.is_dir() and first.is_dir()
+    assert json.loads(original)["state_root"] == str(first)
+    assert json.loads(selection.read_bytes())["state_root"] == str(second)
     other_config = tmp_path / "other-config"
     unrelated = tmp_path / "state-home/quirkbench"
     unrelated.mkdir(parents=True, mode=0o700)
@@ -100,15 +101,14 @@ def test_setup_refuses_state_switch_and_unrelated_default_directory(tmp_path):
     assert not (other_config / "quirkbench/controller.json").exists()
 
 
-def test_setup_rejects_linked_state(tmp_path):
+def test_setup_accepts_selected_state_alias(tmp_path):
     config = tmp_path / "config"
     real = tmp_path / "real"
     real.mkdir(mode=0o700)
     linked = tmp_path / "linked"
     linked.symlink_to(real, target_is_directory=True)
-    with pytest.raises(StateConfigurationError, match="symlink"):
-        configure_state_root(linked, config_home=config)
-    assert not (config / "quirkbench/controller.json").exists()
+    assert configure_state_root(linked, config_home=config)["state_root"] == str(real)
+    assert discover_state_root(config_home=config) == real
 
 
 def test_configured_state_resolves_from_other_directory_without_creating_local_state(tmp_path):

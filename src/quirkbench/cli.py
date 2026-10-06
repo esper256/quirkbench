@@ -19,6 +19,9 @@ from .cli_output import emit, error
 
 def _main(argv=None):
     args = argv if isinstance(argv,argparse.Namespace) else parser().parse_args(argv)
+    if args.command=='controller-reset':
+        from .cli_admin_handlers import controller_reset
+        return controller_reset(args)
     if args.command=='controller-run':
         from .cli_admin_handlers import controller_run
         return controller_run(args)
@@ -104,9 +107,8 @@ def _main(argv=None):
         deployment_repository = None
         repository_config = args.repositories or (args.state / 'repositories.json')
         if repository_config.exists():
-            if repository_config.is_symlink(): raise ValueError('repository configuration cannot be a symlink')
-            repository_paths = json.loads(repository_config.read_bytes())
-            if not isinstance(repository_paths,dict) or any(not isinstance(v,str) or not Path(v).is_absolute() for v in repository_paths.values()): raise ValueError('repository configuration requires absolute directory paths')
+            from .ostree_repository import configured_repositories
+            repository_paths=configured_repositories(args.state,args.repositories)
             needs_repository = (args.command in {'compose','serve-repository','backup','restore','agent-step','snapshot'}
                                 or (args.command == 'campaign' and args.action == 'submit'))
             if needs_repository:
@@ -293,7 +295,7 @@ def _main(argv=None):
                                 try:
                                     from contextlib import nullcontext
                                     from .controller_service import readiness_heartbeat
-                                    heartbeat=(readiness_heartbeat(owner,args.service_runtime,capabilities=publication.capabilities)
+                                    heartbeat=(readiness_heartbeat(owner,args.service_runtime,capabilities=publication.capabilities,generation=getattr(args,'service_configuration_sha256',None))
                                                if jobs is not None and args.service_runtime is not None else nullcontext([]))
                                     with heartbeat as failures:
                                         while True:
@@ -369,7 +371,7 @@ def main(argv=None):
               (args.command=='maintenance' and args.action in ('status','prune')) or
               (args.command=='session' and args.action in ('observations','observation')) or
               (args.command=='build-cache' and args.action=='list'))
-    if readonly or args.command in ('setup-state','setup','publication','serve','controller-install','release-install'): return _main(args)
+    if readonly or args.command in ('setup-state','setup','publication','serve','controller-install','release-install','controller-reset'): return _main(args)
     try:
         root=discover_state_root(args.state).expanduser().absolute()
         if not (root/'controller.sqlite').is_file(): return _main(args)

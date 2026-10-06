@@ -17,7 +17,7 @@ def recovery_rootfs_arguments(intent):
     """Validate the immutable, replayable input binding for a rootfs worker."""
     if (not isinstance(intent, dict) or type(intent.get('schema_version')) is not int
             or intent['schema_version'] != 1 or intent.get('kind') != 'image_prepare'
-            or intent.get('local_paths') != {} or intent.get('source_refs') != []):
+            or 'local_paths' in intent or intent.get('source_refs') != []):
         raise ContractError('invalid immutable rootfs operation intent')
     arguments = intent.get('arguments')
     stock = isinstance(arguments,dict) and type(arguments.get('schema_version')) is int and arguments['schema_version']==2
@@ -60,7 +60,7 @@ def _bounded(value, depth=0):
 
 
 def operation_intent(kind, arguments, *, campaign_id=None, device_id=None,
-                     input_refs=(), source_refs=(), local_paths=None):
+                     input_refs=(), source_refs=()):
     identifier(kind)
     if campaign_id is not None:
         identifier(campaign_id)
@@ -71,14 +71,6 @@ def operation_intent(kind, arguments, *, campaign_id=None, device_id=None,
     if not isinstance(arguments, dict) or not all(isinstance(key, str) for key in arguments):
         raise ContractError('operation arguments must be an object')
     _bounded(arguments)
-    if not isinstance(local_paths, (dict, type(None))) or not all(isinstance(key, str) for key in (local_paths or {})):
-        raise ContractError('local paths must be an object')
-    paths = {}
-    for name, value in (local_paths or {}).items():
-        identifier(name)
-        if not isinstance(value, (str, Path)) or not str(value):
-            raise ContractError('invalid local path')
-        paths[name] = str(Path(value).expanduser().resolve())
     if not isinstance(input_refs, (list, tuple, set)) or not isinstance(source_refs, (list, tuple, set)):
         raise ContractError('references must be lists')
     inputs = sorted({sha256(value) for value in input_refs})
@@ -86,7 +78,7 @@ def operation_intent(kind, arguments, *, campaign_id=None, device_id=None,
     if len(inputs) > 256 or len(sources) > 256:
         raise ContractError('too many operation references')
     value = {'schema_version': 1, 'kind': kind, 'campaign_id': campaign_id,
-             'device_id': device_id, 'arguments': arguments, 'local_paths': paths,
+             'device_id': device_id, 'arguments': arguments,
              'input_refs': inputs, 'source_refs': sources}
     raw = canonical(value)
     if len(raw) > 1 << 20:

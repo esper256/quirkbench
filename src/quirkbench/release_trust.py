@@ -42,7 +42,7 @@ def validate_bundle(value):
 
 def load_bundle(path=None, *, clock=time.time):
     path = Path(path) if path is not None else target_assets_dir() / 'production-release-trust.json'
-    path = path.expanduser().absolute()
+    path = path.expanduser().resolve()
     try:
         raw = bounded_file(path, 16384)
     except FileNotFoundError as exc:

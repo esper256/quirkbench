@@ -42,9 +42,7 @@ def bounded_items(items, budget=QUERY_BYTES - 1024):
 
 class StateReader:
     def __init__(self, root):
-        self.root = Path(root).expanduser().absolute()
-        if self.root.resolve() != self.root or self.root.is_symlink():
-            raise ContractError('state must be an existing canonical directory')
+        self.root = Path(root).expanduser().resolve()
         self.clock = time.time
         self.store = ReadOnlyStore(self.root)
 
@@ -55,6 +53,9 @@ class StateReader:
         db = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=0.2)
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA query_only=ON')
+        from .controller import require_current_schema
+        try:require_current_schema(db)
+        except BaseException:db.close();raise
         return db
 
     @contextmanager
@@ -126,6 +127,8 @@ class StateReader:
             if row is None:
                 raise ContractError('unknown operation')
             data = dict(row)
+            from .worker_execution import stage_path
+            data['stage_dir']=str(stage_path(self.root,data)) if data['stage_nonce'] else None
             data['references'] = {role: [item[0] for item in db.execute(
                 'SELECT digest FROM operation_refs WHERE operation=? AND role=? ORDER BY digest LIMIT 256',
                 (operation_id, role))] for role in ('input', 'source', 'output')}
@@ -243,14 +246,10 @@ def development_run(root, run_id, *, logs=False):
     directory = Path(root) / 'development-runs' / run_id
     from .source_capture import load_document
     record = load_document(read_file(Path(root), directory.relative_to(root) / 'run.json', limit=8192),limit=8192)
-    if record.get('schema_version')==2:
-        from .development_run import validate_run
-        validate_run(record)
-    if record.get('run_id') != run_id:
-        raise ContractError('development run identity mismatch')
-    for field in ('log', 'status'):
-        if not re.fullmatch(r'[a-z][a-z0-9.-]+', record.get(field, '')):
-            raise ContractError('invalid development run record')
+    from .development_run import validate_run
+    validate_run(record)
+    if record['run_id']!=run_id:raise ContractError('development run identity mismatch')
+    record.update(log='build.log',status='build.status',work='work')
     status = read_file(Path(root), directory.relative_to(root) / record['status'], limit=64).decode().strip()
     record['exit_status'] = int(status) if status.isdecimal() else None
     record['state'] = ('SUCCEEDED' if status == '0' else 'INTERRUPTED' if int(status)>=128 else 'FAILED') if status.isdecimal() else ('QUEUED' if status=='queued' else 'RUNNING')

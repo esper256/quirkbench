@@ -25,19 +25,24 @@ FILES = ('ca.key', 'ca.crt', 'controller.key', 'controller.crt')
 LIMIT = 65536
 
 
+def tls_directory(identity):
+    if not isinstance(identity,dict) or set(identity)!={'kind','request_id'} or identity['kind'] not in ('setup','endpoint'):
+        raise ContractError('invalid managed TLS identity selection')
+    identifier(identity['request_id'])
+    return identity['kind']+'-'+digest(identity['request_id'].encode())[:32]
+
+
 def validate_identity(value):
     version=value.get('schema_version') if isinstance(value,dict) else None
     fields={'schema_version','record_type','request_id','host','files'}
-    if version==2:fields.update({'previous_directory','previous_identity_sha256'})
+    if version==2:fields.update({'previous_identity','previous_identity_sha256'})
     if (not isinstance(value, dict) or set(value) != fields
             or type(version) is not int or version not in (1,2)
             or value['record_type'] != 'controller-tls-identity'):
         raise ContractError('invalid controller TLS identity record')
     identifier(value['request_id'])
     if version==2:
-        import re
-        if not isinstance(value['previous_directory'],str) or not re.fullmatch(r'(?:setup|endpoint)-[0-9a-f]{32}',value['previous_directory']):
-            raise ContractError('invalid managed TLS predecessor directory')
+        tls_directory(value['previous_identity'])
         sha256(value['previous_identity_sha256'])
     try:
         host = ipaddress.ip_address(value['host'])
@@ -96,7 +101,7 @@ def _lineage(directory,value):
     seen={directory.name}
     for _ in range(32):
         if value['schema_version']==1:return
-        predecessor=_managed_path(directory.parent/value['previous_directory'])
+        predecessor=_managed_path(directory.parent/tls_directory(value['previous_identity']))
         if predecessor.name in seen:raise Conflict('cyclic controller TLS identity history')
         seen.add(predecessor.name);raw=_read(predecessor,'identity.json');parent=load_identity(raw)
         if digest(raw)!=value['previous_identity_sha256'] or any(value['files'][name]!=parent['files'][name] for name in ('ca.key','ca.crt')):

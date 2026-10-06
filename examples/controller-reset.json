@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "record_type": "unused-controller-reset",
+  "request_id": "fresh-start-1",
+  "files": {
+    "state/controller.sqlite": {
+      "identity": [
+        1,
+        2,
+        1000,
+        1,
+        4096
+      ],
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "size": 4096
+    },
+    "state/controller.sqlite-wal": null,
+    "state/controller.sqlite-shm": null,
+    "state/controller.sqlite-journal": null,
+    "state/settings.json": null,
+    "state/private/controller-service.json": null,
+    "state/private/setup-progress.json": null,
+    "state/private/setup-service.json": null,
+    "state/source-selections.json": null,
+    "state/builder-input.json": null,
+    "state/recovery-input.json": null
+  },
+  "objects": [],
+  "complete": false
+}

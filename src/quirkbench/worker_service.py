@@ -152,13 +152,14 @@ class ContainerWorkerServices:
         return record
 
     def _save(self, record):
+        from .worker_execution import document as execution_document
         from .worker_execution import validate
         validate(record,self.root)
         path=self._path(record['unit'])
         if path.parent.is_symlink() or path.parent.resolve()!=path.parent:
             raise WorkerServiceError('worker execution journal is linked')
         path.parent.mkdir(mode=0o700,exist_ok=True)
-        atomic_write(path,canonical(record))
+        atomic_write(path,canonical(execution_document(record)))
 
     def _handshake(self,record,phase):
         from .worker_execution import PHASES
@@ -172,7 +173,7 @@ class ContainerWorkerServices:
         with StateReader(self.root).connection() as db:
             epoch=db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
             row=db.execute('SELECT * FROM operations WHERE id=?',(record['claim']['id'],)).fetchone()
-        fields=('worker_epoch','worker_generation','worker_unit','worker_boot_id','stage','stage_dir','input_digest','deadline')
+        fields=('worker_epoch','worker_generation','worker_unit','worker_boot_id','stage','stage_nonce','input_digest','deadline')
         if (row is None or row['state']!='RUNNING' or epoch!=record['claim']['worker_epoch']
                 or any(row[k]!=record['claim'][k] for k in fields)
                 or self.clock()>=row['deadline'] or self.monotonic()>=record['monotonic_deadline']):
@@ -211,6 +212,7 @@ class ContainerWorkerServices:
         return backend.stop(execution['name'],execution['image'],LABEL,record['unit'],execution.get('id'))
 
     def _start(self, record, phase):
+        from .worker_execution import document as execution_document
         from .worker_container_plan import plan
         backend=self.recorded_backend(record)
         self._current(record)
@@ -262,7 +264,7 @@ class ContainerWorkerServices:
         # Workers observe a separate immutable dispatch copy, never the host's
         # authoritative stop/reconciliation journal. This also keeps privileged
         # rootless composition mounts away from controller execution records.
-        atomic_write(self._handshake(record,phase)/(record['unit']+'.json'),canonical(record))
+        atomic_write(self._handshake(record,phase)/(record['unit']+'.json'),canonical(execution_document(record)))
         backend.start(identity)
         if record['schema_version']==4:
             from .container_containment import capture
@@ -272,6 +274,7 @@ class ContainerWorkerServices:
             atomic_write(self._handshake(record,phase)/'release',canonical({'id':identity}))
 
     def launch(self, claim, state_root):
+        from .worker_execution import stage_path
         self.preflight_operation(state_root,claim['deadline'],claim['id'])
         unit=claim['worker_unit']; path=self._path(unit)
         if unit!=self.worker_identity(claim['id'],claim['worker_generation']) or path.exists():
@@ -293,6 +296,7 @@ class ContainerWorkerServices:
                           worker_image=intent['arguments']['builder_config_digest'])
         if self.engine=='podman':
             record.update(schema_version=4,cgroup_manager=self.cgroup_manager)
+        record['claim']['stage_dir']=str(stage_path(self.root,record['claim']))
         self._save(record)
         try:
             if bootstrap:
@@ -336,7 +340,8 @@ class ContainerWorkerServices:
             self._save(record)
 
     def _capture_log(self, record, execution):
-        log=Path(record['claim']['stage_dir'])/'diagnostics'/(execution['phase']+'.log')
+        from .worker_execution import stage_path
+        log=stage_path(self.root,record['claim'])/'diagnostics'/(execution['phase']+'.log')
         if log.parent.resolve()!=log.parent:
             raise WorkerServiceError('worker diagnostics path is linked')
         log.parent.mkdir(mode=0o700,exist_ok=True)
@@ -354,17 +359,19 @@ class ContainerWorkerServices:
         execution['log_sha256']=value;self._save(record)
 
     def finished(self, unit, boot_id):
+        from .worker_execution import stage_path
         if validate_boot_id(boot_id)!=validate_boot_id(self.boot_id_reader()):
             raise WorkerServiceError('worker boot changed; reconcile before consuming output')
         record=self._load(unit)
         if record.get('bootstrap'):
             from .retention import stop_proof
-            try: stop_proof(Path(record['claim']['stage_dir']))
+            try: stop_proof(stage_path(self.root,record['claim']))
             except (OSError, ValueError) as exc:
                 raise WorkerServiceError('bootstrap subprocess stop remains unresolved') from exc
         return record['complete']
 
     def stop_and_verify(self, unit, recorded_boot_id):
+        from .worker_execution import stage_path
         recorded=validate_boot_id(recorded_boot_id)
         if LEGACY_UNIT.fullmatch(unit or ''):
             if recorded!=validate_boot_id(self.boot_id_reader()): return 'previous_boot'
@@ -372,7 +379,7 @@ class ContainerWorkerServices:
         record=self._load(unit)
         if record.get('bootstrap'):
             from .retention import stop_proof
-            try: stop_proof(Path(record['claim']['stage_dir']))
+            try: stop_proof(stage_path(self.root,record['claim']))
             except (OSError, ValueError) as exc:
                 raise WorkerServiceError('bootstrap subprocess stop remains unresolved') from exc
         for execution in record['executions']:

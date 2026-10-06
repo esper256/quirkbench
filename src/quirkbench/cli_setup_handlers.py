@@ -11,6 +11,7 @@ from .controller import Controller
 from .state_config import configure_state_root, discover_state_root
 
 def setup_or_status(args):
+    from .controller_install import selected_runtime
     from .controller_setup import setup_controller, controller_status, setup_progress
     from .setup_contracts import SetupUnavailable
     from .contracts import Conflict, ContractError
@@ -28,7 +29,7 @@ def setup_or_status(args):
             if args.builder_archive:
                 from .builder_setup import prepare
                 answer['builder_preparation'] = prepare(Path(answer['state_root']),
-                    answer['setup_progress']['intent']['runtime_root'], args.builder_archive,
+                    selected_runtime(), args.builder_archive,
                     args.builder_request_id or answer['setup_progress']['request_id'] + '-builder')
             elif args.builder_request_id:
                 raise ContractError('--builder-request-id requires --builder-archive')
@@ -68,7 +69,7 @@ def setup_or_status(args):
                            ('CONFLICT', 3) if isinstance(exc, Conflict) else
                            ('INVALID_INPUT', 2) if isinstance(exc, ContractError) else ('INFRASTRUCTURE', 5))
         try:
-            progress = setup_progress()
+            progress = setup_progress(args.state)
             operation_id = progress['setup_id'] if progress else None
         except (OSError, ValueError):
             progress = None

@@ -134,7 +134,7 @@ def completed_spec(root, directory):
     from .retention import connection
     with connection(root) as db:
         for row in db.execute("SELECT * FROM storage_groups WHERE kind='input' AND state='WAITING'"):
-            if json.loads(row['paths']) == [str(Path(directory).parent)] and row['stop_proof'] and json.loads(row['stop_proof']).get('download_complete'):
+            if row['input_generation'] == Path(directory).parent.name and Path(directory).parent.parent == Path(root)/'inputs' and row['stop_proof'] and json.loads(row['stop_proof']).get('download_complete'):
                 return bound_spec(root,row['owner'],Path(directory).parent)
     raise BuildError('completed acquisition owner unavailable')
 

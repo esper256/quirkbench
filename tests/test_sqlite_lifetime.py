@@ -36,14 +36,14 @@ def test_initialization_closes_migration_connection(tmp_path,connections):
     assert_closed(connections)
 
 
-def test_rejected_newer_database_closes_migration_connection(tmp_path,connections):
+def test_rejected_newer_database_never_opens_writable_connection(tmp_path,connections):
     root=tmp_path/'state';root.mkdir(mode=0o700)
     db=sqlite3.connect(root/'controller.sqlite')
     try:db.execute('PRAGMA user_version='+str(len(MIGRATIONS)+1))
     finally:db.close()
-    with pytest.raises(ContractError,match='newer software'):
+    with pytest.raises(ContractError,match='incompatible development state'):
         Controller(root,reserve_bytes=0)
-    assert_closed(connections)
+    assert not connections  # Admission rejects before any writable connection.
 
 
 @pytest.mark.parametrize('failure',[False,True],ids=['success','exception'])

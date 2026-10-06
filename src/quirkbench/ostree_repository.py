@@ -17,13 +17,32 @@ from .contracts import ContractError, canonical, identifier, sha256
 from .store import atomic_write, sync_directory
 
 
+def configured_repositories(root,selection=None):
+    """Managed aliases follow layout; an explicit external config owns its choices."""
+    from .filesystem import read_file
+    root=Path(root).expanduser().resolve();default=root/'repositories.json'
+    file=Path(selection).expanduser().resolve() if selection is not None else default
+    value=json.loads(read_file(file.parent,file.name,limit=65536))
+    if file==default:
+        if not isinstance(value,list) or value!=sorted(set(value)) or len(value)>64:
+            raise ContractError('managed repository configuration requires sorted aliases')
+        return {identifier(alias):root/'repositories'/alias for alias in value}
+    if not isinstance(value,dict) or len(value)>64:raise ContractError('external repository configuration requires alias/location choices')
+    result={}
+    for alias,location in value.items():
+        if not isinstance(location,str) or not (Path(location).is_absolute() or location.startswith('~/')):
+            raise ContractError('external repository location must be absolute or home-relative')
+        result[identifier(alias)]=Path(location).expanduser().resolve()
+    return result
+
+
 def run(argv):
     return subprocess.run(argv, check=True, text=True, capture_output=True, timeout=1800).stdout
 
 
 class OstreeRepository:
     def __init__(self, repositories: dict[str, Path], *, runner=run):
-        self.repositories = {identifier(k): Path(v).absolute() for k, v in repositories.items()}
+        self.repositories = {identifier(k): Path(v).expanduser().resolve() for k, v in repositories.items()}
         self.runner = runner
         for path in self.repositories.values():
             if path.is_symlink() or not path.is_dir() or not (path / 'config').is_file():

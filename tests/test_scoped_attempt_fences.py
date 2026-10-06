@@ -60,8 +60,7 @@ def test_blocked_older_target_job_does_not_starve_independent_download(prepared,
         c.register(CapabilityReport('target','boot',['smoke'],mode='simulation'))
         attempt=c.claim('target','boot','target-attempt')
         download=c.admit_operation('download','recovery_download',
-            {'schema_version':1,'version':'1','controller_archive_sha256':'1'*64,'trust_bundle_sha256':'2'*64},
-            local_paths={'runtime':str(tmp_path/'runtime'),'trust_bundle':str(tmp_path/'trust'),'config_home':str(tmp_path/'config')})
+            {'schema_version':1,'version':'1','controller_archive_sha256':'1'*64,'trust_bundle_sha256':'2'*64})
         result=JobCoordinator(owner,Workers()).tick()
         assert result['id']==download['id'] and result['stage']=='recovery_download'
         assert c.operation_status(blocked['operation_id'])['data']['state']=='QUEUED'

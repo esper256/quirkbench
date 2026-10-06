@@ -17,6 +17,7 @@ def parser():
     p.add_argument('--worker-image')
     p.add_argument('--job-worker', type=Path)
     p.add_argument('--service-runtime', type=Path)
+    p.add_argument('--service-configuration-sha256')
     p.add_argument('--recovery-worker', type=Path)
     p.add_argument('--recovery-signing-home', type=Path)
     p.add_argument('--recovery-public-key', type=Path)

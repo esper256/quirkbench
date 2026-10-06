@@ -22,12 +22,12 @@ from .filesystem import read_file
 from .store import atomic_write
 
 
-def _journal(config_home):
-    return _managed_path(_config_home(config_home) / 'quirkbench') / 'setup-service.json'
+def _journal(config_home, root=None):
+    return discover_state_root(root, config_home=config_home) / 'private/setup-service.json'
 
 
-def service_progress(*, config_home=None):
-    path = _journal(config_home)
+def service_progress(root=None, *, config_home=None):
+    path = _journal(config_home, root)
     if not path.exists() and not path.is_symlink(): return None
     if path.is_symlink() or path.stat().st_uid != os.geteuid():
         raise ContractError('service setup journal must be owned and unlinked')
@@ -50,9 +50,7 @@ def _same_file(path, raw):
 
 
 def _public_directory(path):
-    path = Path(path).expanduser().absolute()
-    if any(part.is_symlink() for part in (path, *path.parents)):
-        raise ContractError('service publication paths cannot contain links')
+    path = Path(path).expanduser().resolve()
     if path.exists():
         info = path.stat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
@@ -62,29 +60,37 @@ def _public_directory(path):
 
 def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, tls_run=subprocess.run,
                     ready=require_ready, fault_hook=None):
-    initial = initial_progress(config_home=config_home)
+    root = discover_state_root(config_home=config_home)
+    initial = initial_progress(root, config_home=config_home)
     if initial is None or initial['completed_steps'] != list(INITIAL_STEPS):
-        raise Conflict('complete the recorded initial setup before installing its service')
-    choice = initial['intent']; root = _managed_path(choice['state_root'])
+        raise Conflict('complete initial setup for the selected state before configuring its controller')
+    choice = initial['intent']; root = _managed_path(root)
     if (not (_config_home(config_home) / 'quirkbench/controller.json').exists()
             or discover_state_root(config_home=config_home) != root or not _database_present(root)):
         raise Conflict('service setup state selection/database differs from committed initial setup')
     SetupFilesystem().database(root)
     SetupFilesystem().preferences(root, choice, completed=True)
-    if choice['runtime_root'] is None: raise ContractError('service setup requires --runtime')
-    runtime = Path(choice['runtime_root'])
+    if choice['runtime_version'] is None: raise ContractError('service setup requires --runtime')
+    from .controller_install import selected_runtime
+    runtime = selected_runtime(config_home=config_home)
     record = verify_installation(runtime)
     if (record['archive_sha256'] != choice['runtime_archive_sha256']
             or _manifest_digest(runtime) != choice['runtime_manifest_sha256']):
         raise Conflict('initial setup runtime identity differs')
     home = _config_home(config_home)
     launchers = _public_directory(bin_home or Path.home() / '.local/bin')
-    journal = _journal(home); _durable_directory(journal.parent)
-    intent = {'initial_intent': choice, 'setup_request_digest': initial['request_digest'],
-              'config_home': str(home), 'bin_home': str(launchers)}
+    journal = _journal(home, root); _durable_directory(journal.parent)
+    intent = {'initial_intent': choice, 'setup_request_digest': initial['request_digest']}
     fault_hook = fault_hook or (lambda _: None)
-    with private_lock(journal.parent / '.installation.lock'), private_lock(root / 'command.lock'):
-        progress = service_progress(config_home=home)
+    with private_lock(_managed_path(home/'quirkbench') / '.installation.lock'), private_lock(root / 'command.lock'):
+        from .controller_reset import require_no_reset
+        require_no_reset(root)
+        if selected_runtime(config_home=home)!=runtime:
+            raise Conflict('installation selection changed before configuration publication')
+        if initial_progress(root, config_home=home) != initial:
+            raise Conflict('initial setup changed before service configuration publication')
+        SetupFilesystem().database(root)
+        progress = service_progress(root, config_home=home)
         if progress:
             if progress['intent'] != intent or progress['request_id'] != initial['request_id']:
                 raise Conflict('service setup already has another intent/request')
@@ -100,15 +106,6 @@ def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, t
                 progress['completed_steps'].append(step)
                 validate_progress(progress); atomic_write(journal, canonical(progress))
             fault_hook(step)
-        if progress['schema_version']==1:
-            # Preserve the historical unit/start facts; do not reinterpret them
-            # as foreground readiness. Re-verify publications under the owner lock.
-            with private_lock(root/'coordinator.lock'):
-                _idle(root)
-                legacy=journal.with_name('setup-service.v1.json')
-                if not _same_file(legacy,canonical(progress)):atomic_write(legacy,canonical(progress))
-                progress={**progress,'schema_version':2,'completed_steps':[],'tls_identity_sha256':None}
-                validate_progress(progress);atomic_write(journal,canonical(progress))
         publishing=progress['completed_steps']!=list(STEPS)
         def published_inputs():
             tls = (create_identity(root, choice['host'], initial['request_id'], run=tls_run) if publishing else
@@ -117,9 +114,8 @@ def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, t
             if progress['tls_identity_sha256'] is not None and progress['tls_identity_sha256'] != tls['identity_sha256']:
                 raise Conflict('controller TLS identity differs from committed setup')
             progress['tls_identity_sha256'] = tls['identity_sha256']; completed('tls_ready')
-            config = {'runtime':str(runtime / 'bin/quirkbench-controller-service'),
-                'job_worker':str(runtime / 'bin/quirkbench-job-worker'),
-                'cert':tls['certificate'],'key':tls['key'],'credential_registry':True,
+            config = {'software': {key:record[key] for key in ('version','archive_sha256')},
+                'tls_identity':{'kind':'setup','request_id':initial['request_id']},'credential_registry':True,
                 'host':choice['host'],'port':choice['port'],'allow_lan':choice['allow_lan'],
                 'reserve_gib':choice['reserve_gib']}
             configuration = root / 'private/controller-service.json'
@@ -139,11 +135,6 @@ def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, t
                 if not publishing or 'launcher_published' in progress['completed_steps']:
                     raise Conflict('committed setup launcher is unavailable')
                 _durable_directory(launchers); _link(link, target)
-            selection = journal.parent / 'installation.json'
-            if not _same_file(selection, canonical(record)):
-                if not publishing or 'launcher_published' in progress['completed_steps']:
-                    raise Conflict('committed setup installation selection is unavailable')
-                atomic_write(selection, canonical(record))
             completed('launcher_published')
             return tls
         with private_lock(root/'coordinator.lock') if publishing else nullcontext():

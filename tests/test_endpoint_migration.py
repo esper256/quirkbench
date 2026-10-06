@@ -7,7 +7,7 @@ import pytest
 
 from quirkbench import endpoint_switch as switch
 from quirkbench.contracts import Conflict,ContractError,canonical,digest
-from quirkbench.controller_service import UNIT,configuration
+from quirkbench.controller_service import UNIT,configuration,configuration_document
 from quirkbench.maintenance import private_lock
 from quirkbench.store import atomic_write
 from test_controller_endpoint import configured,stage,expired_source,renew
@@ -53,7 +53,7 @@ def test_exact_successor_switch_and_rollback_preserve_ca_auth_workers_and_source
     (root,source,native),answer,unit,manager=prepared
     before=configuration(root);old_material={p:p.read_bytes() for p in Path(source['directory']).iterdir() if p.is_file()}
     result=activate(prepared);after=configuration(root)
-    assert after==before|{'host':answer['host'],'cert':answer['directory']+'/controller.crt','key':answer['directory']+'/controller.key'}
+    assert after==before|{'host':answer['host'],'cert':answer['directory']+'/controller.crt','key':answer['directory']+'/controller.key','tls_identity':{'kind':'endpoint','request_id':'endpoint-1'}}
     assert result['configured'] and not any(result[name] for name in ('service_started','reachability_verified','targets_migrated','rolled_back'))
     assert activate(prepared)==result
     rolled=restore(prepared,result);assert rolled['rolled_back'] and configuration(root)==before
@@ -97,7 +97,7 @@ def test_native_callback_mutations_fail_before_configuration_publication(prepare
     def changed(argv,**kw):
         result=native(argv,**kw)
         if not done[0]:
-            if change=='config':atomic_write(root/'private/controller-service.json',canonical(before|{'port':9443}))
+            if change=='config':atomic_write(root/'private/controller-service.json',canonical(configuration_document(before|{'port':9443})))
             elif change=='source-key':atomic_write(Path(source['directory'])/'ca.key',b'changed')
             elif change=='destination-key':atomic_write(directory/'controller.key',b'changed')
             elif change=='command-inode':(root/'command.lock').rename(root/'lost.lock');atomic_write(root/'command.lock',b'')
@@ -115,7 +115,7 @@ def test_full_pin_changed_retry_and_superseded_config_never_overwrite(prepared):
     assert configuration(root)==before and not Path(answer['directory'],'switch-intent.json').exists()
     result=activate(prepared)
     with pytest.raises(Conflict):switch.rollback_stopped(root,answer['request_id'],'e'*64,runner=manager)
-    replacement=configuration(root)|{'port':9443};atomic_write(root/'private/controller-service.json',canonical(replacement))
+    replacement=configuration(root)|{'port':9443};atomic_write(root/'private/controller-service.json',canonical(configuration_document(replacement)))
     with pytest.raises(Conflict,match='superseded'):restore(prepared,result)
     assert configuration(root)==replacement
 
@@ -130,7 +130,7 @@ def test_intent_deletion_after_publication_blocks_receipt(prepared,phase):
 
 def test_explicit_repository_url_is_required_and_bound_to_successor_san(configured):
     root,source,native=configured;value=configuration(root)|{'repository_endpoint':{'url':'https://127.0.0.1:8444'}}
-    atomic_write(root/'private/controller-service.json',canonical(value));answer=stage(configured)
+    atomic_write(root/'private/controller-service.json',canonical(configuration_document(value)));answer=stage(configured)
     unit=root.parent/UNIT;unit.write_text('unit');manager=Manager(root,unit,Path(value['runtime']).parent.parent)
     prepared=(configured,answer,unit,manager)
     for url in (None,'https://127.0.0.3:8444','https://127.0.0.2:8443'):
@@ -205,5 +205,6 @@ def test_staged_switch_reader_and_schema_are_strict(prepared):
     old_schema=json.loads((repo/'schemas/controller-endpoint-switch.v1.schema.json').read_bytes())
     Draft202012Validator(old_schema).validate(legacy)
     assert switch.validate_switch(legacy)==legacy
+    with pytest.raises(ContractError):switch.validate_switch(legacy|{'schema_version':1,'unit':'/old/controller.service'})
     assert switch.validate_switch(value)==value
     with pytest.raises(ContractError):switch.validate_switch(value|{'unexpected':True})

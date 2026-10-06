@@ -1,3 +1,4 @@
+from quirkbench.controller_service import configuration as controller_configuration
 """Owned endpoint preparation stays paused and preserves original attribution."""
 import json
 from pathlib import Path
@@ -139,7 +140,7 @@ def test_completed_retarget_secret_validation_follows_fresh_clearance(paused,mon
     from quirkbench import retarget_activation
     from test_retarget_local import NEW
     select(paused);control=paused[0][1];c=paused[0][0];result=json.loads((control/'enrollment/pending/result.json').read_bytes())
-    config=json.loads((c.root/'private/controller-service.json').read_bytes());pem=Path(config['cert']).read_text()
+    config=controller_configuration(c.root);pem=Path(config['cert']).read_text()
     cleared=[];reads=[];read=retarget_activation._read
     def tracked(directory,name):
         if name in ('key.pem','result.json','device.token','repository.key'):

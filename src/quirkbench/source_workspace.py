@@ -8,25 +8,23 @@ from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
 MIGRATION='''
 CREATE TABLE source_workspaces(id TEXT PRIMARY KEY,campaign TEXT NOT NULL REFERENCES campaigns(id),
  document_digest TEXT NOT NULL,writer_state TEXT NOT NULL CHECK(writer_state IN ('EDITING','QUIESCED')),
- capture_operation TEXT REFERENCES operations(id));
+ capture_operation TEXT REFERENCES operations(id),capture_device INTEGER,capture_inode INTEGER);
 '''
 
 PREPARATION_MIGRATION='''
 CREATE TABLE source_preparations(workspace_id TEXT PRIMARY KEY,campaign TEXT NOT NULL REFERENCES campaigns(id),
- operation TEXT NOT NULL UNIQUE REFERENCES operations(id),input_digest TEXT NOT NULL);
+ operation TEXT NOT NULL UNIQUE REFERENCES operations(id),input_digest TEXT NOT NULL,source_device INTEGER,source_inode INTEGER);
 '''
 
 
 def validate(value):
     from .source_capture import OID,_path
-    fields={'schema_version','record_type','workspace_id','campaign_id','base_oid','allowed_untracked','provenance','root_device','root_inode'}
+    fields={'schema_version','record_type','workspace_id','campaign_id','base_oid','allowed_untracked','provenance'}
     if (not isinstance(value,dict) or set(value)!=fields or type(value['schema_version']) is not int
             or value['schema_version']!=1 or value['record_type']!='source-workspace'):
         raise ContractError('invalid private source workspace')
     for name in ('workspace_id','campaign_id'):identifier(value[name])
     if not isinstance(value['base_oid'],str) or not OID.fullmatch(value['base_oid']):raise ContractError('actual Git base OID required')
-    for name in ('root_device','root_inode'):
-        if type(value[name]) is not int or not 0<=value[name]<2**64:raise ContractError('invalid source root inode identity')
     allowed=value['allowed_untracked']
     if not isinstance(allowed,list) or len(allowed)>4096 or not all(isinstance(name,str) for name in allowed) or allowed!=sorted(set(allowed)):
         raise ContractError('invalid approved untracked source list')
@@ -48,7 +46,6 @@ def owned_path(root,value):
     path=location(root,value['workspace_id'])
     if not path.is_dir() or path.is_symlink() or path.resolve()!=path:raise Conflict('registered source workspace is missing or linked')
     info=path.lstat()
-    if (info.st_dev,info.st_ino)!=(value['root_device'],value['root_inode']):raise Conflict('registered source workspace root changed')
     if info.st_uid!=os.geteuid():raise Conflict('source workspace must remain owned by its operator')
     _managed_path(path.parent);return path
 
@@ -58,7 +55,7 @@ def register(controller,campaign_id,workspace_id,base_oid, *,allowed_untracked=(
     path=location(controller.root,workspace_id);info=path.lstat()
     value=validate({'schema_version':1,'record_type':'source-workspace','workspace_id':workspace_id,
         'campaign_id':campaign_id,'base_oid':base_oid,'allowed_untracked':sorted(allowed_untracked),
-        'provenance':provenance or {},'root_device':info.st_dev,'root_inode':info.st_ino})
+        'provenance':provenance or {}})
     owned_path(controller.root,value)
     refs=[sha256(item) for key,item in value['provenance'].items() if key.endswith('_sha256')]
     for item in refs:controller.store.verify(item)
@@ -72,7 +69,7 @@ def register(controller,campaign_id,workspace_id,base_oid, *,allowed_untracked=(
         saved=db.execute('SELECT * FROM source_workspaces WHERE id=?',(workspace_id,)).fetchone()
         if saved:
             if saved['document_digest']!=artifact.sha256:raise Conflict('workspace registration has another immutable source scope')
-        else:db.execute("INSERT INTO source_workspaces VALUES(?,?,?,'EDITING',NULL)",(workspace_id,campaign_id,artifact.sha256))
+        else:db.execute("INSERT INTO source_workspaces(id,campaign,document_digest,writer_state,capture_operation) VALUES(?,?,?,'EDITING',NULL)",(workspace_id,campaign_id,artifact.sha256))
         for item in refs+[artifact.sha256]:db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)',('workspace:'+workspace_id,item))
     return value
 
@@ -104,7 +101,7 @@ def handoff_db(controller,db,workspace_id,request_id, *,quiesced):
     from .source_operation import binding
     if quiesced is not True:raise Conflict('stop source writers and explicitly hand off the workspace')
     identifier(request_id)
-    saved,value=record(controller,workspace_id,db);owned_path(controller.root,value)
+    saved,value=record(controller,workspace_id,db);path=owned_path(controller.root,value);info=path.lstat()
     device=controller._campaign(db,saved['campaign'])['device']
     refs=[saved['document_digest']]+[item for key,item in value['provenance'].items() if key.endswith('_sha256')]
     for item in refs:controller.store.verify(item)
@@ -123,7 +120,7 @@ def handoff_db(controller,db,workspace_id,request_id, *,quiesced):
     artifact=controller.store.put(raw)
     row=controller._admit_operation_db(db,request_id,'source_capture',intent,request_digest,artifact.sha256,set(refs),
         campaign_id=saved['campaign'],device_id=device)
-    db.execute("UPDATE source_workspaces SET writer_state='QUIESCED',capture_operation=? WHERE id=?",(row['id'],workspace_id))
+    db.execute("UPDATE source_workspaces SET writer_state='QUIESCED',capture_operation=?,capture_device=?,capture_inode=? WHERE id=?",(row['id'],info.st_dev,info.st_ino,workspace_id))
     return row
 
 
@@ -135,5 +132,5 @@ def release(controller,workspace_id):
             operation=db.execute('SELECT state,worker_unit FROM operations WHERE id=?',(saved['capture_operation'],)).fetchone()
             if operation['state'] not in ('SUCCEEDED','FAILED','INTERRUPTED') or operation['worker_unit'] is not None:
                 raise Conflict('source capture requires whole-worker reconciliation before editing')
-        db.execute("UPDATE source_workspaces SET writer_state='EDITING',capture_operation=NULL WHERE id=?",(workspace_id,))
+        db.execute("UPDATE source_workspaces SET writer_state='EDITING',capture_operation=NULL,capture_device=NULL,capture_inode=NULL WHERE id=?",(workspace_id,))
     return {'workspace_id':workspace_id,'writer_state':'EDITING'}

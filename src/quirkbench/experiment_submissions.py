@@ -389,7 +389,7 @@ def _source_ready(owner, db, row):
                 db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)',('submission-record:'+parent['id'],error))
             db.execute("UPDATE operations SET state='FAILED',error_digest=?,wait_event='source-inputs-unavailable; new-submission-required',updated=? WHERE id=?",
                        (error, c.clock(), parent['id']))
-            db.execute("INSERT OR REPLACE INTO storage_groups VALUES(?,'input',?,?,'FAILED','[]',?)",
+            db.execute("INSERT OR REPLACE INTO storage_groups VALUES(?,'input',?,?,'FAILED',NULL,NULL,0,?)",
                        (parent['id'], parent['created'], c.clock(), canonical({'kind': KIND, 'no_worker': True}).decode()))
             return {'id': parent['id'], 'state': 'FAILED'}
         for identity in refs:

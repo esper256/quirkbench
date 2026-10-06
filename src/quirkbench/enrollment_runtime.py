@@ -54,6 +54,20 @@ def _contexts(config, *, run,tls_inspector):
         'not_before':max(value[0] for value in validity),'expires_at':min(value[1] for value in validity)}
 
 
+def capability_identity(config, tls_identity_sha256):
+    """Authority depends on public trust and publication choices, not placement."""
+    return digest(canonical({
+        'host':config.get('host','127.0.0.1'),'port':config.get('port',8443),
+        'repository_endpoint':config.get('repository_endpoint'),
+        'credential_registry':config.get('credential_registry',False),
+        'allow_lan':config.get('allow_lan',False),
+        'repositories':sorted(config.get('repositories',{})),
+        'tls_identity_sha256':tls_identity_sha256,
+        'composition_fingerprint':config.get('composition_signing',{}).get('fingerprint'),
+        'recovery_fingerprint':config.get('recovery_fingerprint'),
+    }))
+
+
 def verify_listener_identity(config,value, *, clock=time.time):
     now=_now(clock);directory=Path(config['cert']).parent
     identity=load_identity(_read(directory,'identity.json'))
@@ -117,7 +131,7 @@ def publication_runtime(controller, *, registry,service_runtime,host,port,certfi
         def capabilities():
             available()
             return {'schema_version':1,'enrollment_available':True,'repository_url':repository_url,
-                    'configuration_sha256':original,**trust}
+                    'configuration_sha256':capability_identity(config,trust['tls_identity_sha256']),**trust}
         yield Publication(application,capabilities,protocol_context)
     finally:
         stopping.set()
@@ -140,13 +154,13 @@ def require_enrollment(root, *, ready=None,clock=time.time):
     from .process_identity import controller_boot_id
     if (owner is None or capability is None or owner['epoch']!=epoch or owner['boot']!=controller_boot_id()
             or not 0<=now-owner['heartbeat']<15 or not 0<=now-capability['heartbeat']<15
-            or any(capability[key]!=owner[key] for key in ('epoch','boot','pid'))
-            or capability['configuration_sha256']!=digest(canonical(config))):
+            or any(capability[key]!=owner[key] for key in ('epoch','boot','pid'))):
         raise Conflict('guided enrollment unavailable: configure and restart the native controller repository publication')
     value=_document(capability['document'].encode())
     validate_capabilities(value)
     verify_listener_identity(config,value,clock=lambda:now)
-    if (value['configuration_sha256']!=capability['configuration_sha256'] or value['enrollment_available'] is not True
+    if (value['configuration_sha256']!=capability_identity(config,value['tls_identity_sha256'])
+            or value['configuration_sha256']!=capability['configuration_sha256'] or value['enrollment_available'] is not True
             or value['repository_url']!=config.get('repository_endpoint',{}).get('url')):
         raise Conflict('guided enrollment capability differs from configured publication')
     return value

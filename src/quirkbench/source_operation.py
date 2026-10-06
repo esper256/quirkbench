@@ -17,7 +17,7 @@ STAGE='source_capture'
 def binding(intent):
     args=intent.get('arguments')
     if (intent.get('kind')!=KIND or not isinstance(args,dict) or set(args)!={'schema_version','workspace_sha256'}
-            or type(args['schema_version']) is not int or args['schema_version']!=1 or intent.get('local_paths')!={}
+            or type(args['schema_version']) is not int or args['schema_version']!=1 or 'local_paths' in intent
             or intent.get('source_refs')!=[] or intent.get('campaign_id') is None or intent.get('device_id') is None):
         raise ContractError('legacy or invalid source capture intent; resubmit an exact registered workspace handoff')
     sha256(args['workspace_sha256'])
@@ -41,7 +41,10 @@ def workspace(root,intent,operation_id):
                 or saved['writer_state']!='QUIESCED' or saved['capture_operation']!=operation_id
                 or campaign is None or campaign['device']!=intent['device_id']):
             raise Conflict('exclusive source writer handoff ended or belongs to another operation')
-    return value,owned_path(root,value)
+    path=owned_path(root,value);info=path.lstat()
+    if (info.st_dev,info.st_ino)!=(saved['capture_device'],saved['capture_inode']):
+        raise Conflict('source root substituted during active handoff')
+    return value,path
 
 
 def capture(intent,stage,verify,report, *,state_root,operation_id):
@@ -127,7 +130,7 @@ def consume(coordinator,claim,intent,data):
     refs=[result['archive_sha256'],result['manifest_sha256']]
     from .source_capture import _scope
     def guard():
-        coordinator.verify(claim);owned_path(c.root,value)
+        coordinator.verify(claim);workspace(c.root,intent,claim['id'])
     names,tree,index=_scope(path,value['base_oid'],value['allowed_untracked'],guard)
     verify_tree(c.store,result,expected_paths=names,verify=guard)
     receipt=c.store.put(canonical(result));refs.append(receipt.sha256)

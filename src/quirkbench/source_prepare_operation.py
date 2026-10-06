@@ -35,20 +35,42 @@ def validate_input(value):
     if isinstance(value,dict) and value.get('schema_version')==2:
         from .distribution_prepare_operation import validate_input as distribution_input
         return distribution_input(value)
-    fields={'schema_version','record_type','workspace_id','campaign_id','base_oid','allowed_untracked','provenance','root_device','root_inode','source_root'}
+    fields={'schema_version','record_type','workspace_id','campaign_id','base_oid','allowed_untracked','provenance'}
     if not isinstance(value,dict) or set(value)!=fields or value.get('record_type')!='source-preparation-input':raise ContractError('invalid source preparation input')
-    validate_workspace({key:item for key,item in value.items() if key!='source_root'}|{'record_type':'source-workspace'})
-    path=value['source_root']
-    if not isinstance(path,str) or len(path)>4096 or not Path(path).is_absolute() or str(Path(path))!=path:
-        raise ContractError('canonical approved local source required')
+    validate_workspace({**value,'record_type':'source-workspace'})
     if len(canonical(value))>1024**2:raise ContractError('source preparation input exceeds bounds')
     return value
+
+
+def source_selection(root,workspace_id):
+    """One ordinary local selection; immutable inputs contain source scope only."""
+    identifier(workspace_id)
+    choices=json.loads(read_file(Path(root),'source-selections.json',limit=1024**2))
+    raw=choices.get(workspace_id)
+    if not isinstance(raw,str) or not (raw.startswith('~/') or Path(raw).is_absolute()):
+        raise ContractError('configure the original source location for this workspace')
+    return Path(raw).expanduser().resolve()
+
+
+def select_source(root,workspace_id,repository):
+    from .store import atomic_write
+    file=Path(root)/'source-selections.json'
+    choices=json.loads(read_file(Path(root),file.relative_to(root),limit=1024**2)) if file.exists() else {}
+    choices[identifier(workspace_id)]=str(repository)
+    atomic_write(file,canonical(choices))
+
+
+def source_observation(root,workspace_id):
+    with StateReader(root).connection() as db:
+        row=db.execute('SELECT source_device,source_inode FROM source_preparations WHERE workspace_id=?',(workspace_id,)).fetchone()
+    if row is None or None in row:raise Conflict('original source handoff observation unavailable')
+    return tuple(row)
 
 
 def binding(intent):
     args=intent.get('arguments')
     if (intent.get('kind')!=KIND or not isinstance(args,dict) or set(args)!={'schema_version','preparation_sha256'}
-            or type(args['schema_version']) is not int or args['schema_version'] not in (1,2) or intent.get('local_paths')!={}
+            or type(args['schema_version']) is not int or args['schema_version'] not in (1,2) or 'local_paths' in intent
             or intent.get('source_refs')!=[] or intent.get('campaign_id') is None or intent.get('device_id') is None):
         raise ContractError('invalid fixed source preparation intent')
     sha256(args['preparation_sha256'])
@@ -63,8 +85,8 @@ def submit(controller,campaign_id,workspace_id,repository,base_oid,request_id, *
     from .job_operations import envelope
     if quiesced is not True:raise Conflict('stop original source writers and explicitly hand off preparation')
     identifier(request_id);identifier(workspace_id);identifier(campaign_id)
-    root=Path(repository)
-    if not root.is_absolute() or root.resolve()!=root or root.is_relative_to(controller.root) or controller.root.is_relative_to(root):
+    root=Path(repository).expanduser().resolve()
+    if not root.is_absolute() or root.is_relative_to(controller.root) or controller.root.is_relative_to(root):
         raise ContractError('approved user source must be canonical and separate from controller state')
     (ready or require_ready)(controller.root)
     with controller.transaction() as db:
@@ -74,16 +96,17 @@ def submit(controller,campaign_id,workspace_id,repository,base_oid,request_id, *
         if saved:
             value=validate_input(json.loads(controller.store.get(saved['input_digest'])))
             if value['schema_version']!=1:raise Conflict('workspace already has another preparation source kind')
-            proposed={**value,'campaign_id':campaign_id,'source_root':str(root),'base_oid':base_oid,
+            proposed={**value,'campaign_id':campaign_id,'base_oid':base_oid,
                 'allowed_untracked':sorted(allowed_untracked),'provenance':provenance or {}}
-            if proposed!=value:raise Conflict('workspace preparation already has another immutable source')
+            if proposed!=value or source_selection(controller.root,workspace_id)!=root:raise Conflict('workspace preparation already has another immutable source')
         else:
             if db.execute('SELECT 1 FROM source_workspaces WHERE id=?',(workspace_id,)).fetchone() or location(controller.root,workspace_id).exists():
                 raise Conflict('workspace identity already has source or retained files')
             with _source_owner(root) as guard:guard();info=root.lstat()
             value=validate_input({'schema_version':1,'record_type':'source-preparation-input','workspace_id':workspace_id,
-                'campaign_id':campaign_id,'source_root':str(root),'base_oid':base_oid,'allowed_untracked':sorted(allowed_untracked),
-                'provenance':provenance or {},'root_device':info.st_dev,'root_inode':info.st_ino})
+                'campaign_id':campaign_id,'base_oid':base_oid,'allowed_untracked':sorted(allowed_untracked),
+                'provenance':provenance or {}})
+            select_source(controller.root,workspace_id,repository if str(repository).startswith('~/') else root)
         artifact=controller.store.put(canonical(value))
         refs=[artifact.sha256]+[item for key,item in value['provenance'].items() if key.endswith('_sha256')]
         for item in refs:controller.store.verify(item)
@@ -96,7 +119,7 @@ def submit(controller,campaign_id,workspace_id,repository,base_oid,request_id, *
             if previous['request_id']!=request_id:raise Conflict('workspace preparation is already admitted; retry its original request')
         retained=controller.store.put(raw)
         row=controller._admit_operation_db(db,request_id,KIND,intent,request_digest,retained.sha256,set(refs),campaign_id=campaign_id,device_id=device)
-        if not saved:db.execute('INSERT INTO source_preparations VALUES(?,?,?,?)',(workspace_id,campaign_id,row['id'],artifact.sha256))
+        if not saved:db.execute('INSERT INTO source_preparations VALUES(?,?,?,?,?,?)',(workspace_id,campaign_id,row['id'],artifact.sha256,info.st_dev,info.st_ino))
     return envelope(controller.root,row,request_id)
 
 
@@ -118,13 +141,14 @@ def input_record(root,intent,operation_id):
 
 def selection(root,operation_id,value):
     """Existing operation journal is the only pending filesystem selection record."""
+    from .worker_execution import stage_path
     reader=StateReader(root)
     with reader.connection() as db:
         records=db.execute("SELECT document FROM operation_events WHERE operation=? AND kind='source_workspace_selection' ORDER BY id",(operation_id,)).fetchall()
         if not records:return None
         if len(records)!=1:raise Conflict('source workspace selection is ambiguous')
         record=json.loads(records[0][0])
-        fields={'schema_version','input_digest','workspace','capture_sha256','source_stage','worker_stop'}
+        fields={'schema_version','input_digest','workspace','capture_sha256','source_stage_nonce','worker_stop'}
         if not isinstance(record,dict) or set(record)!=fields or type(record['schema_version']) is not int or record['schema_version']!=1:
             raise ContractError('invalid retained source selection')
         saved=db.execute('SELECT input_digest FROM source_preparations WHERE operation=?',(operation_id,)).fetchone()
@@ -133,11 +157,12 @@ def selection(root,operation_id,value):
         if any(workspace[key]!=value[key] for key in ('workspace_id','campaign_id','base_oid','allowed_untracked','provenance')):
             raise Conflict('retained source selection scope differs')
         stop=record['worker_stop']
-        if (not isinstance(stop,dict) or set(stop)!={'worker_unit','worker_boot_id','worker_generation','stage_dir','input_digest','stop_kind'}
-                or stop['stop_kind']!='stopped' or record['source_stage']!=stop['stage_dir']):raise ContractError('retained source selection requires exact worker stop')
+        if (not isinstance(stop,dict) or set(stop)!={'worker_unit','worker_boot_id','worker_generation','stage_nonce','input_digest','stop_kind'}
+                or stop['stop_kind']!='stopped' or record['source_stage_nonce']!=stop['stage_nonce']):raise ContractError('retained source selection requires exact worker stop')
         stopped=db.execute("SELECT document FROM operation_events WHERE operation=? AND kind='worker_stopped'",(operation_id,)).fetchall()
         if not any(json.loads(item[0])==stop for item in stopped):raise Conflict('retained source selection lacks verified stop')
-    stage=Path(record['source_stage'])
+    from .worker_execution import stage_path
+    stage=stage_path(root,record['worker_stop'],operation_id)
     if stage.parent!=Path(root)/'workers'/operation_id or stage.resolve()!=stage:raise Conflict('retained source selection stage differs')
     path=location(root,value['workspace_id'])
     if path.exists() or path.is_symlink():owned_path(root,workspace)
@@ -146,7 +171,6 @@ def selection(root,operation_id,value):
         from .filesystem import _managed_path
         with private_workspace(path) as guard:guard()
         info=path.lstat()
-        if (info.st_dev,info.st_ino)!=(workspace['root_device'],workspace['root_inode']):raise Conflict('retained staged workspace changed')
     return record,path
 
 
@@ -160,8 +184,8 @@ def run(intent,stage,verify,report, *,state_root,operation_id,stage_only=False):
     pending=selection(state_root,operation_id,value)
     if pending:_,path=pending
     else:
-        path=Path(value['source_root']);info=path.lstat()
-        if path.resolve()!=path or (info.st_dev,info.st_ino)!=(value['root_device'],value['root_inode']):raise Conflict('approved original source root changed')
+        path=source_selection(state_root,value['workspace_id']);observation=source_observation(state_root,value['workspace_id']);info=path.lstat()
+        if path.resolve()!=path or (info.st_dev,info.st_ino)!=observation:raise Conflict('approved original source root changed')
     def guard():
         verify()
         if input_record(state_root,intent,operation_id)!=value:raise Conflict('source preparation scope changed')
@@ -170,7 +194,7 @@ def run(intent,stage,verify,report, *,state_root,operation_id,stage_only=False):
             if current!=pending:raise Conflict('pending source selection changed')
         else:
             info=path.lstat()
-            if (info.st_dev,info.st_ino)!=(value['root_device'],value['root_inode']):raise Conflict('original source root changed')
+            if (info.st_dev,info.st_ino)!=observation:raise Conflict('original source root changed')
     report('source-preparation','Preparing handed-off source in private staging; no execution approval.')
     store=ArtifactStore(Path(state_root)/'artifacts',reserve_bytes=reserve_bytes(state_root))
     result=prepare(path,value['base_oid'],value['allowed_untracked'],Path(stage)/'preparation',store,value['workspace_id'],
@@ -290,6 +314,7 @@ def consume(coordinator,claim,intent,data, *,fault_hook=None):
 
 
 def consume_prepared(coordinator,claim,intent,data,value, *,fault_hook=None,extra_refs=(),extra_fence=lambda:None,extra_sync=lambda:None):
+    from .worker_execution import stage_path
     c=coordinator.owner.controller;coordinator.verify(claim);result=validate_preparation(data)
     if any(result[key]!=value[key] for key in ('workspace_id','base_oid','allowed_untracked','provenance')):raise ContractError('prepared workspace scope differs')
     capture=validate_capture(json.loads(c.store.get(result['capture_sha256'])))
@@ -297,7 +322,7 @@ def consume_prepared(coordinator,claim,intent,data,value, *,fault_hook=None,extr
     entries=list(verify_tree(c.store,capture,verify=lambda:coordinator.verify(claim)).values())
     pending=selection(c.root,claim['id'],value)
     if pending and pending[0]['capture_sha256']!=result['capture_sha256']:raise Conflict('retained workspace selection differs from worker result')
-    path=pending[1] if pending else Path(claim['stage_dir'])/'preparation/output/workspace'
+    path=pending[1] if pending else stage_path(c.root,claim)/'preparation/output/workspace'
     def guard():coordinator.verify(claim)
     with private_workspace(path) as path_guard:
         def checked():guard();path_guard()
@@ -305,20 +330,20 @@ def consume_prepared(coordinator,claim,intent,data,value, *,fault_hook=None,extr
         git_identity=git_tree(path,value['base_oid'],checked);metadata=_git_metadata(path)
         from .source_capture import _git
         _git(path,['fsck','--strict','--no-reflogs','--no-dangling'],checked,timeout_s=3600)
-        verified=capture_source(path,value['base_oid'],value['allowed_untracked'],Path(claim['stage_dir'])/'owner-validation',c.store,
+        verified=capture_source(path,value['base_oid'],value['allowed_untracked'],stage_path(c.root,claim)/'owner-validation',c.store,
             writer_quiesced=True,verify=checked,provenance=value['provenance'])
         if verified!=capture:raise ContractError('stopped workspace bytes differ from frozen capture')
         verify_tree(c.store,capture,verify=checked)
         if working_tree(path,entries)!=working_identity:raise Conflict('prepared namespace changed during independent validation')
         if _git_metadata(path)!=metadata or git_tree(path,value['base_oid'])!=git_identity:raise Conflict('prepared Git metadata changed during independent validation')
-        info=path.lstat();workspace=validate_workspace({key:value[key] for key in ('workspace_id','campaign_id','base_oid','allowed_untracked','provenance')}|
-            {'schema_version':1,'record_type':'source-workspace','root_device':info.st_dev,'root_inode':info.st_ino})
+        info=path.lstat();source_identity=(info.st_dev,info.st_ino);workspace=validate_workspace({key:value[key] for key in ('workspace_id','campaign_id','base_oid','allowed_untracked','provenance')}|
+            {'schema_version':1,'record_type':'source-workspace'})
         if not pending:
             # Replay origins must survive a crash once selection is journaled.
             extra_sync();checked();extra_fence()
-            stop={key:claim[key] for key in ('worker_unit','worker_boot_id','worker_generation','stage_dir','input_digest')};stop['stop_kind']='stopped'
+            stop={key:claim[key] for key in ('worker_unit','worker_boot_id','worker_generation','stage_nonce','input_digest')};stop['stop_kind']='stopped'
             record={'schema_version':1,'input_digest':binding(intent)['preparation_sha256'],'workspace':workspace,
-                'capture_sha256':result['capture_sha256'],'source_stage':claim['stage_dir'],'worker_stop':stop}
+                'capture_sha256':result['capture_sha256'],'source_stage_nonce':claim['stage_nonce'],'worker_stop':stop}
             from .job_operations import current
             with c.transaction() as db:
                 current(coordinator.owner,db,claim)
@@ -345,7 +370,7 @@ def consume_prepared(coordinator,claim,intent,data,value, *,fault_hook=None,extr
         coordinator.verify(claim)
         with private_workspace(path) as guard:guard()
         info=path.lstat()
-        if (info.st_dev,info.st_ino)!=(workspace['root_device'],workspace['root_inode']):raise Conflict('prepared root changed before selection rename')
+        if (info.st_dev,info.st_ino)!=source_identity:raise Conflict('prepared root changed before selection rename')
         _managed_path(destination.parent)
         os.rename(path,destination)
         from .store import sync_directory
@@ -355,7 +380,7 @@ def consume_prepared(coordinator,claim,intent,data,value, *,fault_hook=None,extr
     if git_tree(destination,value['base_oid'])!=git_identity:raise Conflict('selected Git metadata changed after rename')
     metadata=_git_metadata(destination)
     # Last owner/native callbacks precede independently repeated source fencing.
-    final=capture_source(destination,value['base_oid'],value['allowed_untracked'],Path(claim['stage_dir'])/'selection-validation',c.store,
+    final=capture_source(destination,value['base_oid'],value['allowed_untracked'],stage_path(c.root,claim)/'selection-validation',c.store,
         writer_quiesced=True,verify=lambda:coordinator.verify(claim),provenance=value['provenance'])
     if final!=capture:raise Conflict('selected workspace differs before editing grant')
     artifact=c.store.put(canonical(workspace));prepared=c.store.put(canonical(result))

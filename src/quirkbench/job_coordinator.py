@@ -8,7 +8,7 @@ import configparser
 
 from .contracts import Conflict,ContractError,canonical,sha256
 from .job_operations import binding,current,adopt_inputs,resume
-from .job_worker import document,input_files
+from .job_worker import document,input_files,captured_input
 from .filesystem import read_file
 from .build import BuildError
 
@@ -52,6 +52,8 @@ class JobCoordinator:
         if active:
             if len(active)!=1: raise Conflict('multiple workers require reconciliation')
             claim=active[0]
+            from .worker_execution import stage_path
+            claim['stage_dir']=str(stage_path(c.root,claim))
             if claim['kind'] not in ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare','candidate_prepare') or claim['state']!='RUNNING': return None
             expired=c.clock()>=claim['deadline']
             if not expired and hasattr(self.services, 'advance'):
@@ -180,6 +182,9 @@ class JobCoordinator:
             from .investigation_pipeline import manifest
             prepared=json.loads(c.store.get(claim['prepared_digest'])) if claim['prepared_digest'] else None
             args={**args,'manifest':manifest(c.root,args,claim['kind'],prepared=prepared)}
+        elif claim['kind'] in ('build','compose'):
+            from .job_operations import current_manifest
+            args={**args,'manifest':current_manifest(c.root,claim,args)}
         if claim['kind']=='candidate_prepare':
             from .candidate_rootfs_operation import consume
             return consume(self,claim,json.loads(c.store.get(claim['input_digest'])),data)
@@ -206,7 +211,8 @@ class JobCoordinator:
             refs=[];prepared={'schema_version':1,'kind':claim['kind'],'files':{}}
             for role,entry in data['files'].items():
                 if expected[role][1] is not None and entry['sha256']!=expected[role][1]: raise ValueError('captured input digest differs: '+role)
-                artifact=self.staged(claim,entry['path'],sha256(entry['sha256']))
+                if set(entry)!={'sha256'}:raise ValueError('captured input requires content identity only')
+                artifact=self.staged(claim,captured_input(role),sha256(entry['sha256']))
                 refs.append(artifact.sha256);prepared['files'][role]={'sha256':artifact.sha256,'size':artifact.size}
             if args.get('schema_version')==3:
                 from .investigation_pipeline import validate_captured
@@ -219,7 +225,7 @@ class JobCoordinator:
             outputs=data['outputs']
             if not isinstance(outputs,dict) or len(outputs)>100 or not {'kernel','config','modules','initramfs','build_provenance','vmlinux','system_map'}<=outputs.keys():
                 raise ValueError('missing build outputs')
-            values={role:self.staged(claim,entry['path'],sha256(entry['sha256'])) for role,entry in outputs.items()}
+            values={role:self.staged(claim,'output/artifacts/objects/'+sha256(entry['sha256']),entry['sha256']) for role,entry in outputs.items()}
             provenance=json.loads(c.store.get(values['build_provenance'].sha256))
             raw=args['manifest']
             if (provenance.get('inputs',{}).get('source_archive',{}).get('sha256')!=raw['kernel_source_sha256'] or
@@ -255,6 +261,7 @@ class JobCoordinator:
         return result
 
     def publish_composition(self,claim,args,data):
+        from .controller_service import require_signing_home
         c=self.owner.controller;stage=Path(claim['stage_dir'])
         from .deployment import DeploymentManifest
         from .compose import _sync_tree
@@ -273,15 +280,17 @@ class JobCoordinator:
             raise ValueError('composition provenance differs from complete pinned identity')
         if any(manifest.provenance.get(key)!=value for key,value in composition_provenance(payload,policy).items()):
             raise ValueError('candidate payload or composition policy provenance differs')
-        values={role:self.staged(claim,entry['path'],sha256(entry['sha256'])) for role,entry in data['evidence'].items()}
+        values={role:self.staged(claim,'output/artifacts/objects/'+sha256(entry['sha256']),entry['sha256']) for role,entry in data['evidence'].items()}
         evidence=c._deployment_evidence(manifest)
         if any(role not in values or values[role].sha256!=value for role,value in evidence.items()): raise ValueError('staged composition evidence differs')
-        repo=stage/data['repo']
-        if Path(data['repo']).is_absolute() or '..' in Path(data['repo']).parts or repo.resolve()!=repo or repo.is_symlink() or not repo.is_dir(): raise ValueError('private OSTree repository unavailable')
-        destination=Path(publication['repository'])
+        repo=stage/'output/repository'
+        if repo.resolve()!=repo or repo.is_symlink() or not repo.is_dir(): raise ValueError('private OSTree repository unavailable')
         from .controller_service import configuration
         config=configuration(c.root)
-        if config.get('repositories',{}).get(manifest.repository)!=str(destination) or config.get('composition_signing')!={'home':publication['signing_home'],'fingerprint':publication['signing_key']}:
+        destination=Path(config.get('repositories',{}).get(publication['repository'],''))
+        from .controller_service import configuration
+        config=configuration(c.root)
+        if config.get('repositories',{}).get(manifest.repository)!=str(destination) or config.get('composition_signing',{}).get('fingerprint')!=publication['signing_key']:
             raise Conflict('controller publication configuration changed; refuse signing')
         from .retention import managed_path
         managed_path(c.root,destination)
@@ -341,7 +350,7 @@ class JobCoordinator:
                 parent_guard();os.fsync(parent_fd)
         managed_path(c.root,destination)
         with compose_lock(destination.parent/(destination.name+'.compose.lock')):
-            run(['ostree',f'--repo={repo}','gpg-sign','--gpg-homedir='+publication['signing_home'],manifest.revision,publication['signing_key']])
+            run(['ostree',f'--repo={repo}','gpg-sign','--gpg-homedir='+str(require_signing_home(c.root,config['composition_signing'])),manifest.revision,publication['signing_key']])
             if not destination.exists(): run(['ostree',f'--repo={destination}','init','--mode=archive'])
             run(['ostree',f'--repo={destination}','pull-local',str(repo),manifest.revision])
             run(['ostree',f'--repo={destination}','refs','--create=quirkbench/retained/'+manifest.revision,manifest.revision])
@@ -353,7 +362,7 @@ class JobCoordinator:
         c.deployment_repository.retain(manifest.repository,manifest.revision,claim['id'])
         self.verify(claim)
         from .store import atomic_write
-        atomic_write(c.root/'repositories.json',canonical(config['repositories']))
+        atomic_write(c.root/'repositories.json',canonical(sorted(config['repositories'])))
         artifact=c.store.put(canonical(manifest.to_dict()));values['deployment_manifest']=artifact
         final={'deployment':manifest.to_dict(),'artifact':{'sha256':artifact.sha256,'size':artifact.size}}
         return final,values,(artifact.sha256,manifest,evidence)
@@ -379,4 +388,4 @@ class JobCoordinator:
         retain_diagnostics(root,path,root/'diagnostics'/claim['id'])
         remove_tree(path,root)
         with self.owner.controller.transaction() as db:
-            db.execute("UPDATE storage_groups SET paths='[]' WHERE owner=?",(claim['id'],))
+            db.execute("UPDATE storage_groups SET stage_retained=0 WHERE owner=?",(claim['id'],))

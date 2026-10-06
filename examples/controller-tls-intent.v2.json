@@ -3,9 +3,12 @@
   "record_type": "controller-tls-intent",
   "host": "127.0.0.2",
   "request_id": "endpoint-1",
-  "previous_directory": "setup-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "previous_identity_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   "configuration_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
   "created_at": 1760000000,
-  "days": 365
+  "days": 365,
+  "previous_identity": {
+    "kind": "setup",
+    "request_id": "initial-controller"
+  }
 }

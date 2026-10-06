@@ -307,10 +307,10 @@ def import_prepared(entry, prepared, source_stage, stage, store, workspace_id, *
         _managed_path(path)
     if source_stage == stage or source_stage.is_relative_to(stage) or stage.is_relative_to(source_stage):
         raise ContractError('distribution import and source stages must be separate')
-    expected = {'schema_version','kernel_srpm_sha256','kernel_source_nevra','spec_sha256','source','source_tree_sha256','source_date_epoch'}
+    expected = {'schema_version','kernel_srpm_sha256','kernel_source_nevra','spec_sha256','source_tree_sha256','source_date_epoch'}
     if (not isinstance(prepared, dict) or set(prepared) != expected or type(prepared['schema_version']) is not int
             or prepared['schema_version'] != 1 or prepared['kernel_srpm_sha256'] != entry['kernel_srpm_sha256']
-            or prepared['kernel_source_nevra'] != entry['kernel_source_nevra'] or prepared['source'] != str(source_stage/'source')):
+            or prepared['kernel_source_nevra'] != entry['kernel_source_nevra']):
         raise Conflict('distribution source differs from pinned preparation')
     sha256(prepared['source_tree_sha256']); sha256(prepared['spec_sha256'])
     epoch = prepared['source_date_epoch']

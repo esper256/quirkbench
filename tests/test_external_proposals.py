@@ -219,7 +219,7 @@ def test_missing_state_propose_never_creates_it(tmp_path):
     assert not root.exists()
 
 
-def test_legacy_readonly_context_and_listing_need_no_migration_or_housekeeping(setup,monkeypatch,capsys):
+def test_incompatible_readonly_context_and_listing_preserve_state_without_migration(setup,monkeypatch,capsys):
     from quirkbench import cli
     from quirkbench.controller import MIGRATIONS
     c,_=setup;start(setup)
@@ -231,10 +231,9 @@ def test_legacy_readonly_context_and_listing_need_no_migration_or_housekeeping(s
     monkeypatch.setattr('quirkbench.filesystem.private_lock',forbidden)
     monkeypatch.setattr('quirkbench.maintenance.prune',forbidden)
     for action in ('context','proposals','proposal-schema'):
-        assert cli.main(['--state',str(c.root),'investigation',*{'context':['context'],'proposals':['proposal','list'],'proposal-schema':['proposal','schema']}[action],'investigation','--json'])==0
-        data=json.loads(capsys.readouterr().out)['data']
-        if action=='context':assert data['proposal_usage']['migration_required']
-        if action=='proposals':assert data['migration_required'] and data['items']==[]
+        assert cli.main(['--state',str(c.root),'investigation',*{'context':['context'],'proposals':['proposal','list'],'proposal-schema':['proposal','schema']}[action],'investigation','--json'])==2
+        error=json.loads(capsys.readouterr().out)['error']
+        assert 'incompatible development state' in error['message']
     with c.transaction() as db:assert db.execute('PRAGMA user_version').fetchone()[0]==len(MIGRATIONS)-1
 
 

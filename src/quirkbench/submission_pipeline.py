@@ -110,7 +110,7 @@ def completion(owner, db, proposal_id, experiment_id):
 
 
 def terminal(db,c,parent,state,error=None):
-    db.execute("INSERT OR REPLACE INTO storage_groups VALUES(?,'input',?,?,?,'[]',?)",
+    db.execute("INSERT OR REPLACE INTO storage_groups VALUES(?,'input',?,?,?,NULL,NULL,0,?)",
                (parent,c.clock(),c.clock(),state,canonical({'kind':submissions.KIND,'no_worker':True}).decode()))
     if error:db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)',('submission-record:'+parent,error))
     # Only generated proposals share the submission's finite retention policy.
@@ -124,7 +124,7 @@ def terminal(db,c,parent,state,error=None):
         proposal_state='FAILED'
         db.execute("UPDATE operations SET state='FAILED',wait_event='submission-failed; new-submission-required',updated=? WHERE id=?",(c.clock(),proposal['id']))
     if proposal_state not in ('SUCCEEDED','FAILED'):return
-    db.execute("INSERT OR REPLACE INTO storage_groups VALUES(?,'input',?,?,?,'[]',?)",
+    db.execute("INSERT OR REPLACE INTO storage_groups VALUES(?,'input',?,?,?,NULL,NULL,0,?)",
                (proposal['id'],proposal['created'],c.clock(),proposal_state,
                 canonical({'kind':'external_proposal','submission':parent,'no_worker':True}).decode()))
 

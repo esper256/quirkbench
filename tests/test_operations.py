@@ -21,14 +21,14 @@ def test_request_replay_and_changed_request_conflict(tmp_path):
     c = controller(tmp_path)
     source = c.store.put(b'pinned source')
     first = c.admit_operation('req-1', 'source_capture', {'branch': 'main'},
-                              source_refs=[source.sha256], local_paths={'checkout': tmp_path / 'tree'})
+                              source_refs=[source.sha256])
     replay = c.admit_operation('req-1', 'source_capture', {'branch': 'main'},
-                               source_refs=[source.sha256], local_paths={'checkout': tmp_path / 'tree'})
+                               source_refs=[source.sha256])
     assert first == replay
     assert first['state'] == 'QUEUED'
     assert source.sha256 in first['references']['source']
     intent = json.loads(c.store.get(first['input_digest']))
-    assert intent['local_paths']['checkout'] == str((tmp_path / 'tree').resolve())
+    assert 'local_paths' not in intent
     with pytest.raises(Conflict):
         c.admit_operation('req-1', 'source_capture', {'branch': 'other'}, source_refs=[source.sha256])
     with pytest.raises(ContractError):
@@ -111,35 +111,12 @@ def test_restore_interrupts_active_operation_without_losing_partial_output(tmp_p
                                     result={'public_artifacts': [], 'private_deliverable': None})
 
 
-def test_legacy_database_migrates_and_local_response_is_versioned(tmp_path):
-    root = tmp_path / 'state'
-    root.mkdir()
-    db = sqlite3.connect(root / 'controller.sqlite')
-    for number, migration in enumerate(MIGRATIONS[:-1], start=1):
-        db.executescript(migration + f'\nPRAGMA user_version={number};')
-    db.close()
-    c = Controller(root, reserve_bytes=0)
-    row = c.admit_operation('req', 'image_prepare', {})
-    response = c.operation_status(row['id'])
-    assert response == operation_response(operation_id=row['id'], data=row)
+def test_fresh_database_local_response_is_versioned(tmp_path):
+    c=controller(tmp_path)
+    row=c.admit_operation('req','image_prepare',{})
+    response=c.operation_status(row['id'])
+    assert response==operation_response(operation_id=row['id'],data=row)
     assert response['error'] is None and response['ok'] is True
-
-
-def test_schema_upgrade_refuses_active_legacy_attempt(tmp_path):
-    root = tmp_path / 'legacy'
-    root.mkdir()
-    db = sqlite3.connect(root / 'controller.sqlite')
-    for number, migration in enumerate(MIGRATIONS[:-1], start=1):
-        db.executescript(migration + f'\nPRAGMA user_version={number};')
-    db.execute("INSERT INTO devices(id,boot,generation,report) VALUES('target','boot',1,'{}')")
-    db.execute("INSERT INTO campaigns(id,device,state) VALUES('campaign','target','RUNNING')")
-    db.execute("INSERT INTO experiments(id,spec) VALUES('experiment','{}')")
-    db.execute("INSERT INTO jobs(id,campaign,experiment,repetition,state) VALUES(1,'campaign','experiment',0,'RUNNING')")
-    db.execute("INSERT INTO attempts(id,job,device,boot,generation,token,lease_until,deadline,state) VALUES('attempt',1,'target','boot',1,'token',100,200,'RUNNING')")
-    db.commit()
-    db.close()
-    with pytest.raises(Conflict, match='reconcile active'):
-        Controller(root, reserve_bytes=0)
 
 
 def test_cli_status_json_does_not_reconcile_running_operation(tmp_path, capsys):
@@ -271,7 +248,7 @@ def test_operation_output_reads_only_attached_public_bytes(tmp_path, capsys):
     assert base64.b64decode(printed['data']['content_base64']) == b'\x00gh'
     with pytest.raises(ContractError, match='not a public output'):
         c.operation_output(row['id'], unlisted.sha256)
-    with pytest.raises(ContractError, match='invalid operation output range'):
+    with pytest.raises(ContractError, match='invalid admin operation output range'):
         c.operation_output(row['id'], output.sha256, length=16385)
     object_path = c.store.path(output.sha256)
     object_path.unlink()

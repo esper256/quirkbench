@@ -153,7 +153,7 @@ def download(root,owner):
             row=db.execute('SELECT * FROM storage_groups WHERE owner=?',(owner,)).fetchone()
         if row is None or row['kind']!='input' or row['state']!='WAITING' or row['stop_proof']:
             raise BuildError('acquisition owner is unavailable or already downloaded')
-        generation=managed_path(root,Path(json.loads(row['paths'])[0]))
+        generation=managed_path(root,root/'inputs'/row['input_generation'])
         directory=generation/'rpms'
         from .recovery_acquisition import bound_spec
         spec=bound_spec(root,owner,generation)

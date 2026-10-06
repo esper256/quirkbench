@@ -1,10 +1,9 @@
 """Read the controller state selection without creating or migrating state."""
 from __future__ import annotations
 
-from .filesystem import _lexical_ancestors, _ancestors, canonical_user_path
+from .filesystem import canonical_user_path
 import json
 import fcntl
-from functools import lru_cache
 import os
 from pathlib import Path
 import stat
@@ -38,16 +37,16 @@ def _config_home(config_home: Path | None) -> Path:
     if config_home is None:
         xdg = os.environ.get("XDG_CONFIG_HOME")
         config_home = Path(xdg) if xdg else Path.home() / ".config"
-    config_home = Path(config_home)
+    config_home = Path(config_home).expanduser()
     if not config_home.is_absolute():
         raise StateConfigurationError("controller config home must be absolute")
-    return config_home
+    return canonical_user_path(config_home)
 
 
 def discover_state_root(explicit: Path | None = None, *, config_home: Path | None = None) -> Path:
     """Prefer explicit/configured identity, otherwise home state; never create it."""
     if explicit is not None:
-        return Path(explicit)
+        return canonical_user_path(explicit)
     selection = _config_home(config_home) / "quirkbench" / "controller.json"
     try:
         fd = os.open(selection, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -71,18 +70,18 @@ def discover_state_root(explicit: Path | None = None, *, config_home: Path | Non
                               parse_constant=lambda _: (_ for _ in ()).throw(StateConfigurationError("nonfinite controller state selection")))
     except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ContractError) as exc:
         raise StateConfigurationError("invalid controller state selection JSON") from exc
-    if (not isinstance(selected, dict) or set(selected) != {"schema_version", "state_root"}
+    if (not isinstance(selected, dict) or set(selected) not in ({"schema_version"}, {"schema_version", "state_root"})
             or type(selected["schema_version"]) is not int or selected["schema_version"] != 1
-            or type(selected["state_root"]) is not str or not selected["state_root"]):
+            or ("state_root" in selected and (type(selected["state_root"]) is not str or not selected["state_root"]))):
         raise StateConfigurationError("invalid controller state selection fields")
-    root = Path(selected["state_root"])
-    if not root.is_absolute() or root == Path("/"):
-        raise StateConfigurationError("configured controller state root must be absolute")
-    try:
-        if root.is_symlink() or root.resolve(strict=True) != root or not root.is_dir():
-            raise StateConfigurationError("configured controller state root must be an existing canonical directory")
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise StateConfigurationError("configured controller state root is unavailable") from exc
+    if "state_root" not in selected:
+        return default_state_root()
+    choice = Path(selected["state_root"])
+    if not choice.is_absolute() and not selected["state_root"].startswith("~/"):
+        raise StateConfigurationError("configured state must be absolute or home-relative ~/")
+    root = canonical_user_path(choice)
+    if root == Path("/") or not root.is_dir():
+        raise StateConfigurationError("configured controller state is unavailable; edit controller.json or select --state explicitly")
     return root
 
 
@@ -91,8 +90,6 @@ def configure_state_root(explicit: Path | None = None, *, config_home: Path | No
     """Select one controller root; leave service installation for P2d."""
     config = canonical_user_path(_config_home(config_home))
     directory = config / "quirkbench"
-    if config.is_symlink() or directory.is_symlink():
-        raise StateConfigurationError("controller config directory cannot be a symlink")
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     selection = directory / "controller.json"
     lock_path = directory / ".setup.lock"
@@ -105,7 +102,7 @@ def configure_state_root(explicit: Path | None = None, *, config_home: Path | No
             raise StateConfigurationError("controller setup lock must be a regular file")
         fcntl.flock(lock, fcntl.LOCK_EX)
         already_selected = selection.exists() or selection.is_symlink()
-        current = discover_state_root(config_home=config) if already_selected else None
+        current = discover_state_root(config_home=config) if already_selected and explicit is None else None
         if explicit is None and current is not None:
             root = current
         else:
@@ -115,8 +112,6 @@ def configure_state_root(explicit: Path | None = None, *, config_home: Path | No
                 requested = Path(explicit).expanduser()
                 if not requested.is_absolute():
                     requested = (cwd or Path.cwd()) / requested
-            if requested.is_symlink():
-                raise StateConfigurationError("controller state root cannot be a symlink")
             root = canonical_user_path(requested)
             if root == Path("/"):
                 raise StateConfigurationError("controller state root cannot be filesystem root")
@@ -130,8 +125,11 @@ def configure_state_root(explicit: Path | None = None, *, config_home: Path | No
         info = root.stat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
             raise StateConfigurationError("controller state root must be owned by this user")
-        if not already_selected:
-            atomic_write(selection, canonical({"schema_version": 1, "state_root": str(root)}))
+        document = {"schema_version": 1}
+        if root != default_state_root():
+            # Retain the user's one external choice, not a second identity for it.
+            document["state_root"] = str(explicit) if explicit is not None and str(explicit).startswith("~/") else str(root)
+        atomic_write(selection, canonical(document))
         if discover_state_root(config_home=config) != root:
             raise StateConfigurationError("controller state selection verification failed")
     return {"state_root": str(root), "selection": str(selection),

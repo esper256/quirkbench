@@ -109,7 +109,7 @@ Input follows [experiment-submission v1](../schemas/experiment-submission.v1.sch
 Both schema and runtime reject unknown fields; runtime bounds size to 64 KiB and
 nesting to 32. Repetitions default to one. Timeout and recipe parameters are explicit
 and checked against the installed pinned recipe. A missing repository is resolved
-only when exactly one is configured. The selected repository path/signing fingerprint,
+only when exactly one is configured. The selected repository alias/signing fingerprint,
 baseline, recipe, builder and source identity are frozen before work begins.
 
 Workspace mode is `{"mode":"workspace","quiesced":true}`. It requires a registered
@@ -218,11 +218,22 @@ Omitted retry choices retain the recorded values. The single initial setup journ
 refuses a different request or changed intent; later maintenance uses its own APIs.
 `status [--json]` does not initialize/migrate state or acquire execution ownership.
 
-Setup progress v1 lives privately in the controller configuration because intent
-must precede creation of its database. It is a synchronous setup journal, not a
-scheduler or second database. Its schema records state/runtime identity (including
+`admin controller reset --request-id ID --confirm-reset` explicitly stops the verified
+foreground controller gracefully (bounded to 30 seconds), then archives an
+unused controller's known-schema database, SQLite sidecars, settings, service
+configuration and matching setup journals. It refuses enrolled/attempted/bound
+state, outstanding workers and installation/publication transactions. Images,
+packages, keys, runtimes and the selected state root are preserved. Issued invitations
+are invalidated. Exact interrupted replay completes the same reset; completed replay
+cannot erase subsequently initialized state. A new `setup` uses a fresh request ID.
+See [controller installation](controller-installation.md#start-over-after-unsuccessful-setup).
+
+Setup progress lives in `STATE/private/setup-progress.json`; intent precedes
+creation of its database. It is a synchronous setup journal, not a
+scheduler or second database. Its schema records software identity (including
 archive and manifest digests), resource/connection/logout choices and ordered completed
-steps. Runtime validation additionally checks canonical paths/IPs and digest relationships.
+steps. Locations are derived from the current root and selected installation; runtime
+validation checks current content, ownership, addresses and digest relationships.
 Readiness retains existing service fields and separately reports database, resources,
 runtime, release, builder, enrollment and target count. Accepted setup is still partial:
 controller configuration is published with explicit `--configure-controller`; start

@@ -1,4 +1,5 @@
 """Signed factory acquisition on the existing fixed worker/lifecycle owner."""
+import json
 import hashlib
 import math
 import os
@@ -12,7 +13,7 @@ from urllib.parse import urlsplit
 
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
 from .controller_release import ASSET_LIMIT,bounded_file,verify_statement,verify_recovery_assets,_recovery_compatibility
-from .filesystem import _managed_path
+from .filesystem import _managed_path,read_file
 from .controller_setup import _database_present
 from .release_http import _response,_length,fetch_metadata
 from .release_trust import load_bundle
@@ -27,16 +28,14 @@ FIELDS={'schema_version','version','controller_archive_sha256','trust_bundle_sha
 
 
 def binding(intent):
-    args=intent.get('arguments');paths=intent.get('local_paths')
+    args=intent.get('arguments');paths='local_paths' in intent
     if (intent.get('kind')!=KIND or intent.get('campaign_id') is not None or intent.get('device_id') is not None
             or intent.get('source_refs')!=[] or intent.get('input_refs')!=[] or not isinstance(args,dict)
             or set(args)!=FIELDS or type(args['schema_version']) is not int or args['schema_version']!=1
-            or not isinstance(paths,dict) or set(paths)!={'runtime','trust_bundle','config_home'}):
+            or paths):
         raise ContractError('invalid fixed recovery acquisition intent')
     if not isinstance(args['version'],str) or not re.fullmatch(r'[0-9][A-Za-z0-9.+-]{0,63}',args['version']):raise ContractError('invalid recovery release version')
     for name in ('controller_archive_sha256','trust_bundle_sha256'):sha256(args[name])
-    for value in paths.values():
-        if not isinstance(value,str) or len(value)>4096 or not Path(value).is_absolute() or str(Path(value))!=value:raise ContractError('invalid fixed recovery acquisition path')
     return args
 
 
@@ -50,32 +49,39 @@ def submit(root,request_id=None, *, trust_bundle=None,config_home=None,ready=Non
     from .controller import Controller
     from .job_operations import envelope
     if request_id is not None:identifier(request_id)
-    root=_managed_path(root)
+    root=_managed_path(Path(root).expanduser().resolve())
     if not _database_present(root):raise ContractError('complete controller setup before recovery acquisition')
     with private_lock(root/'command.lock',shared=True):
         (ready or require_ready)(root);config=configuration(root);runtime=Path(config['runtime']).parent.parent
         from .installed_release import _document
-        local=_document(runtime/'installation.json',{'schema_version','version','archive_sha256','runtime_root','signed','qualified'},limit=16384)
+        local=_document(runtime/'installation.json',{'schema_version','version','archive_sha256','signed','qualified'},limit=16384)
         if (type(local['schema_version']) is not int or local['schema_version']!=1
-                or local['runtime_root']!=str(runtime) or local['signed'] is not False or local['qualified'] is not False):
+                or local['signed'] is not False or local['qualified'] is not False):
             raise ContractError('invalid local installed controller identity')
         args={'schema_version':1,'version':local['version'],'controller_archive_sha256':local['archive_sha256'],
               'trust_bundle_sha256':trust['bundle_sha256']}
         request_id=request_id or 'recovery-'+args['version']+'-'+args['controller_archive_sha256'][:16]
-        paths={'runtime':str(runtime),'trust_bundle':str(trust_path),'config_home':str(_config_home(config_home))}
-        from .operations import operation_intent
-        binding(operation_intent(KIND,args,local_paths=paths)[0])
+        select_inputs(root,trust_bundle=trust_bundle,config_home=config_home)
         c=Controller(root,reserve_bytes=int(config.get('reserve_gib',20)*1024**3))
-        row=c.admit_operation(request_id,KIND,args,local_paths=paths)
+        row=c.admit_operation(request_id,KIND,args)
         return envelope(root,row,request_id)
 
 
-def _trusted(intent, *, run):
-    args=binding(intent);paths=intent['local_paths']
+def select_inputs(root,*,trust_bundle=None,config_home=None):
+    choices={}
+    if trust_bundle is not None:choices['trust_bundle']=str(trust_bundle)
+    if config_home is not None and Path(config_home).expanduser().resolve()!=_config_home(None):choices['config_home']=str(config_home)
+    atomic_write(Path(root)/'recovery-input.json',canonical(choices))
+
+
+def _trusted(intent, *, state_root,run):
+    args=binding(intent)
+    choices=json.loads(read_file(Path(state_root),'recovery-input.json',limit=8192))
+    from .controller_install import selected_runtime
     from .installed_release import inspect_selected
-    trust=load_bundle(paths['trust_bundle'])
+    trust=load_bundle(choices.get('trust_bundle'))
     if trust['bundle_sha256']!=args['trust_bundle_sha256']:raise Conflict('publisher trust changed during recovery acquisition')
-    selected=inspect_selected(Path(paths['runtime']),config_home=Path(paths['config_home']),trust_bundle=paths['trust_bundle'],run=run)
+    selected=inspect_selected(selected_runtime(config_home=choices.get('config_home')),config_home=choices.get('config_home'),trust_bundle=choices.get('trust_bundle'),run=run)
     statement=selected['verification']['statement']
     if (statement['schema_version']!=2 or statement['controller_version']!=args['version']
             or statement['controller_archive_sha256']!=args['controller_archive_sha256']):
@@ -137,8 +143,8 @@ def download_to(url,path,expected_sha256,size, *, verify,report,reserve,deadline
             if (current.st_dev,current.st_ino)==(created.st_dev,created.st_ino):temporary.unlink()
 
 
-def capture(intent,stage,verify,report, *, deadline,reserve,run=subprocess.run,fetch=fetch_metadata,stream=download_to):
-    trust,selected,selected_sha=_trusted(intent,run=run);verify()
+def capture(intent,stage,verify,report, *, state_root,deadline,reserve,run=subprocess.run,fetch=fetch_metadata,stream=download_to):
+    trust,selected,selected_sha=_trusted(intent,state_root=state_root,run=run);verify()
     args=binding(intent);output=Path(stage)/'output';files=output/'recovery';files.mkdir(mode=0o700)
     base=trust['bundle']['release_base_url']+args['version']+'/'
     raw=fetch(base+'release.json',16384);signature=fetch(base+'release.sig',65536);verify()
@@ -159,17 +165,17 @@ def capture(intent,stage,verify,report, *, deadline,reserve,run=subprocess.run,f
     stream(base+ROLES['recovery_image'],files/ROLES['recovery_image'],statement['recovery_image_sha256'],candidate['image_size_bytes'],
         verify=verify,report=report,reserve=reserve,deadline=deadline)
     verified=verify_recovery_assets(statement,{role:files/name for role,name in ROLES.items()});verify()
-    current,current_statement,current_sha=_trusted(intent,run=run)
+    current,current_statement,current_sha=_trusted(intent,state_root=state_root,run=run)
     if current_sha!=selected_sha or current['bundle_sha256']!=trust['bundle_sha256']:raise Conflict('installed release or trust changed during acquisition')
     verify()
     return {'schema_version':1,'statement_sha256':selected_sha,'assets':{
-        role:{'path':str((files/ROLES[role]).relative_to(stage)),'sha256':item['sha256'],'size_bytes':item['size_bytes']}
+        role:{'sha256':item['sha256'],'size_bytes':item['size_bytes']}
         for role,item in verified.items()},'metadata':{'release.json':digest(raw),'release.sig':digest(signature)}}
 
 
 def consume(coordinator,claim,intent,data, *, run=subprocess.run):
     c=coordinator.owner.controller;stage=Path(claim['stage_dir']);files=stage/'output/recovery'
-    coordinator.verify(claim);trust,selected,selected_sha=_trusted(intent,run=run)
+    coordinator.verify(claim);trust,selected,selected_sha=_trusted(intent,state_root=c.root,run=run)
     if (not isinstance(data,dict) or set(data)!={'schema_version','statement_sha256','assets','metadata'}
             or type(data['schema_version']) is not int or data['schema_version']!=1 or data['statement_sha256']!=selected_sha
             or not isinstance(data['assets'],dict) or set(data['assets'])!=set(ROLES)
@@ -181,9 +187,9 @@ def consume(coordinator,claim,intent,data, *, run=subprocess.run):
     if digest(raw)!=selected_sha or canonical(receipt['statement'])!=canonical(selected):raise Conflict('stopped worker release differs from current installation')
     assets=verify_recovery_assets(selected,{role:files/name for role,name in ROLES.items()});refs=[];index={}
     for role,item in assets.items():
-        expected={'path':'output/recovery/'+ROLES[role],'sha256':item['sha256'],'size_bytes':item['size_bytes']}
+        expected={'sha256':item['sha256'],'size_bytes':item['size_bytes']}
         if data['assets'][role]!=expected or canonical(data['assets'][role])!=canonical(expected):raise ContractError('recovery worker asset receipt differs')
-        artifact=coordinator.staged(claim,expected['path'],expected['sha256'])
+        artifact=coordinator.staged(claim,'output/recovery/'+ROLES[role],expected['sha256'])
         if artifact.size!=expected['size_bytes']:raise Conflict('captured recovery asset size changed during retention')
         refs.append(artifact.sha256);index[role]={'sha256':artifact.sha256,'size_bytes':artifact.size}
     for name,value in (('release.json',raw),('release.sig',sig)):
@@ -197,7 +203,7 @@ def consume(coordinator,claim,intent,data, *, run=subprocess.run):
     artifact=c.store.put(canonical(document));refs.append(artifact.sha256)
     # Revalidate current trust/installed bytes after slow copying, then the existing
     # owner commits exact stop/epoch/generation/deadline and all references together.
-    final_trust,_,final_sha=_trusted(intent,run=run)
+    final_trust,_,final_sha=_trusted(intent,state_root=c.root,run=run)
     if final_sha!=selected_sha or final_trust['bundle_sha256']!=trust['bundle_sha256']:raise Conflict('current recovery trust changed before publication')
     coordinator.verify(claim)
     return c._publish_operation(claim['id'],coordinator.owner.epoch,claim['worker_generation'],output_refs=refs,state='SUCCEEDED',

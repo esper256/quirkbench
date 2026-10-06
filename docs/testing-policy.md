@@ -48,9 +48,9 @@ a PR. Constraints define the tested development stack; the package's Python 3.11
 compatibility and public dependency ranges remain unchanged.
 
 Keep temporary test state and build staging outside the checkout. Pytest's normal
-temporary directory is suitable, including a sandbox parent with an empty `.git`
-guard. Real repositories, linked worktrees and ambiguous Git metadata remain
-excluded. For a custom location, create a private directory and pass
+temporary directory is suitable. Explicit product state/build selections may be
+checkout-local, but tests must not use the owner's existing files. For a custom
+location, create a dedicated directory and pass
 `--basetemp=/absolute/private/directory/run` to pytest; pytest deletes that run
 directory, so never point it at existing state. Tests should work with either
 `umask 022` or `umask 077`; do not change a cloud host's permissions to appease a

@@ -30,7 +30,8 @@ BASE = 'sha256:' + 'a' * 64
 
 
 @pytest.fixture(autouse=True)
-def synthetic_reserve(monkeypatch):
+def synthetic_reserve(monkeypatch,tmp_path):
+    monkeypatch.setenv('XDG_CONFIG_HOME',str(tmp_path/'config'))
     monkeypatch.setattr(builder_setup, 'reserve_bytes', lambda root: 0)
 
 
@@ -46,7 +47,8 @@ def intent(c, archive, request='builder'):
     args = {'schema_version': 1, 'release_statement_sha256': '1'*64,
             'builder_archive_sha256': digest(builder_archive()), 'builder_config_digest': IMAGE,
             'builder_image_digest': BASE}
-    return c.admit_operation(request, 'builder_prepare', args, local_paths={'builder_archive': str(archive)})
+    builder_setup.select_archive(c.root,archive)
+    return c.admit_operation(request, 'builder_prepare', args)
 
 
 def execute(argv, log, **kwargs):
@@ -195,8 +197,9 @@ def test_admission_authenticates_release_and_keeps_native_work_in_worker(fixture
         builder_setup.prepare(tmp_path/'state',tmp_path/'other-runtime',archive,'first',config_home=tmp_path/'config',
                               ready=services.ready,release_inspector=inspect)
     config_path=tmp_path/'state/private/controller-service.json';config=json.loads(config_path.read_bytes())
-    config['runtime']=record['runtime_root']+'/bin/quirkbench-controller-service'
-    config['job_worker']=record['runtime_root']+'/bin/quirkbench-job-worker'
+    from quirkbench.controller_install import select_runtime
+    select_runtime(record['runtime_root'],config_home=tmp_path/'config')
+    config['software']={key:record[key] for key in ('version','archive_sha256')}
     atomic_write(config_path,canonical(config))
     result=builder_setup.prepare(tmp_path/'state',record['runtime_root'],archive,'first',config_home=tmp_path/'config',
                                 ready=lambda _:None,release_inspector=inspect,which=lambda _: '/usr/bin/podman')
@@ -278,7 +281,8 @@ def test_signed_nonempty_oci_entrypoint_cannot_replace_fixed_marker_command(tmp_
     archive=tmp_path/'entrypoint.tar';archive.write_bytes(payload)
     args={'schema_version':1,'release_statement_sha256':'1'*64,'builder_archive_sha256':digest(payload),
           'builder_config_digest':'sha256:'+digest(raw),'builder_image_digest':BASE}
-    row=c.admit_operation('entrypoint','builder_prepare',args,local_paths={'builder_archive':str(archive)})
+    builder_setup.select_archive(c.root,archive)
+    row=c.admit_operation('entrypoint','builder_prepare',args)
     stage=tmp_path/'stage';stage.mkdir(mode=0o700);(stage/'output').mkdir(mode=0o700)
     with pytest.raises(BuildError,match='no OCI Entrypoint'):
         builder_setup.capture(json.loads(c.store.get(row['input_digest'])),stage,lambda:None,lambda *args:None,state_root=c.root)

@@ -60,7 +60,7 @@ CREATE INDEX operation_events_scope ON operation_events(operation,id);
 CREATE TABLE controller_lifecycle(id INTEGER PRIMARY KEY CHECK(id=1), epoch INTEGER NOT NULL CHECK(epoch>=0));
 INSERT INTO controller_lifecycle(id,epoch) VALUES(1,0);
 ALTER TABLE operations ADD COLUMN queued_epoch INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE operations ADD COLUMN stage_dir TEXT;
+ALTER TABLE operations ADD COLUMN stage_nonce TEXT;
 """, """
 ALTER TABLE operations ADD COLUMN worker_boot_id TEXT;
 """, """
@@ -224,11 +224,12 @@ class _LifecycleOwner:
                 raise Conflict('operation staging root cannot be a symlink')
             # A transaction rollback leaves its directory unreferenced. A fresh
             # claim gets a new path and never reuses possibly changed bytes.
-            private_stage = operation_stage / f'{generation}-{uid()}'
+            stage_nonce=uid()
+            private_stage = operation_stage / f'{generation}-{stage_nonce}'
             private_stage.mkdir(mode=0o700)
             now = controller.clock()
-            db.execute("UPDATE operations SET state='RUNNING',stage=?,stage_dir=?,worker_epoch=?,worker_generation=?,worker_unit=?,worker_boot_id=?,started=?,deadline=?,heartbeat=?,progress=NULL,wait_event=NULL,updated=? WHERE id=?",
-                       (stage, str(private_stage), self.epoch, generation, unit, boot_id, now, deadline, now, now, operation_id))
+            db.execute("UPDATE operations SET state='RUNNING',stage=?,stage_nonce=?,worker_epoch=?,worker_generation=?,worker_unit=?,worker_boot_id=?,started=?,deadline=?,heartbeat=?,progress=NULL,wait_event=NULL,updated=? WHERE id=?",
+                       (stage, stage_nonce, self.epoch, generation, unit, boot_id, now, deadline, now, now, operation_id))
             db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
                        (operation_id, now, 'claimed', canonical({'stage': stage, 'worker_epoch': self.epoch,
                                                                   'worker_generation': generation, 'worker_unit': unit}).decode()))
@@ -260,7 +261,7 @@ class _LifecycleOwner:
         for value in refs:
             controller.store.verify(value)
         intent = json.loads(controller.store.get(saved_input))
-        if (intent.get('kind') != 'image_prepare' or intent.get('local_paths')
+        if (intent.get('kind') != 'image_prepare' or 'local_paths' in intent
                 or intent.get('source_refs')):
             raise Conflict('image preparation has mutable local or source inputs')
         if intent.get('arguments') != {}:
@@ -283,7 +284,7 @@ class _LifecycleOwner:
             if current_refs != refs:
                 raise Conflict('operation inputs changed before explicit resume')
             now = controller.clock()
-            db.execute("UPDATE operations SET state='QUEUED',queued_epoch=?,stage=NULL,stage_dir=NULL,"
+            db.execute("UPDATE operations SET state='QUEUED',queued_epoch=?,stage=NULL,stage_nonce=NULL,"
                        "started=NULL,deadline=NULL,heartbeat=NULL,progress=NULL,updated=? WHERE id=?",
                        (self.epoch, now, operation_id))
             db.execute('INSERT INTO operation_events(operation,created,kind,document) VALUES(?,?,?,?)',
@@ -318,7 +319,7 @@ class _LifecycleOwner:
                     if definitely_unlaunched:
                         db.execute('INSERT OR IGNORE INTO refs(owner,digest) VALUES(?,?)',
                                    (operation_id, terminal.sha256))
-                        db.execute("UPDATE operations SET state='FAILED',worker_epoch=NULL,worker_unit=NULL,worker_boot_id=NULL,stage_dir=NULL,error_digest=?,updated=? WHERE id=?",
+                        db.execute("UPDATE operations SET state='FAILED',worker_epoch=NULL,worker_unit=NULL,worker_boot_id=NULL,stage_nonce=NULL,error_digest=?,updated=? WHERE id=?",
                                    (terminal.sha256, now, operation_id))
                     else:
                         db.execute("UPDATE operations SET state='INTERRUPTED',worker_epoch=NULL,updated=? WHERE id=?",
@@ -332,7 +333,7 @@ class _LifecycleOwner:
     def _stop_worker_once(self, claim, services, *, allow_previous_boot=False):
         """Persist exact verified stop evidence in the existing operation journal."""
         controller=self.controller
-        fields=('worker_unit','worker_boot_id','worker_generation','stage_dir','input_digest')
+        fields=('worker_unit','worker_boot_id','worker_generation','stage_nonce','input_digest')
         proof={key:claim[key] for key in fields}
         with controller.transaction() as db:
             records=db.execute("SELECT document FROM operation_events WHERE operation=? AND kind='worker_stopped' ORDER BY id DESC",(claim['id'],)).fetchall()
@@ -361,6 +362,7 @@ class _LifecycleOwner:
         This publishes a verified rootfs stage, never an image_prepare success.
         The same coordinator owns subsequent assembly/publication.
         """
+        from .worker_execution import stage_path
         if self.closed or self.controller._lifecycle_owner is not self:
             raise Conflict('controller lifecycle ownership ended')
         from .recovery_worker import validate_staged_rootfs
@@ -371,13 +373,13 @@ class _LifecycleOwner:
                     or row['worker_epoch']!=self.epoch or epoch!=self.epoch or row['worker_unit'] is None
                     or self.controller.clock()>=row['deadline']):
                 raise Conflict('current recovery worker ownership required')
-            claim=dict(row)
+            claim=dict(row);claim['stage_dir']=str(stage_path(self.controller.root,claim))
         self._stop_worker_once(claim,services)
         summary=validate_staged_rootfs(self.controller,claim,query=query)
         artifact=self.controller.store.put(canonical(summary))
         published=self.controller._publish_operation(operation_id,self.epoch,claim['worker_generation'],
                                                      output_refs=(artifact.sha256,),expected_claim=claim)
-        return {'operation':published,'rootfs':str(Path(claim['stage_dir'])/'output/rootfs'),
+        return {'operation':published,'rootfs':str(stage_path(self.controller.root,claim)/'output/rootfs'),
                 'audit_sha256':artifact.sha256,'operation_complete':False}
 
     def record_activity(self, claim, report=None, *, heartbeat=None, worker_sample=False):
@@ -402,7 +404,7 @@ class _LifecycleOwner:
         with controller.transaction() as db:
             row=db.execute('SELECT * FROM operations WHERE id=?',(claim['id'],)).fetchone()
             epoch=db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
-            fields=('worker_epoch','worker_generation','worker_unit','worker_boot_id','stage_dir','input_digest','deadline')
+            fields=('worker_epoch','worker_generation','worker_unit','worker_boot_id','stage_nonce','input_digest','deadline')
             if (self.closed or controller._lifecycle_owner is not self or epoch!=self.epoch
                     or row is None or row['state']!='RUNNING' or row['worker_epoch']!=self.epoch
                     or any(row[field]!=claim[field] for field in fields) or controller.clock()>=row['deadline']):
@@ -436,8 +438,9 @@ class _LifecycleOwner:
                     (canonical(current).decode(),now if beat_changed else row['heartbeat'],now,claim['id']))
 
     def collect_activity(self, claim):
+        from .worker_execution import stage_path
         from .filesystem import read_file
-        stage=Path(claim['stage_dir'])
+        stage=stage_path(self.controller.root,claim)
         if not stage.is_relative_to(self.controller.root/'workers'/claim['id']):
             raise ContractError('worker activity path outside claim')
         report=heartbeat=None
@@ -467,6 +470,7 @@ class _LifecycleOwner:
                                trusted_public_key, fingerprint, query=None,
                                signing_run=None, verification_run=None):
         """Validate a stopped full stock worker, sign locally and publish fenced CAS."""
+        from .worker_execution import stage_path
         if self.closed or self.controller._lifecycle_owner is not self:
             raise Conflict('controller lifecycle ownership ended')
         from .recovery_worker import validate_staged_rootfs
@@ -481,13 +485,13 @@ class _LifecycleOwner:
                     or epoch!=self.epoch or row['worker_epoch']!=self.epoch
                     or row['worker_unit'] is None or controller.clock()>=row['deadline']):
                 raise Conflict('current recovery image worker ownership required')
-            claim=dict(row)
+            claim=dict(row);claim['stage_dir']=str(stage_path(controller.root,claim))
         arguments=recovery_rootfs_arguments(_json(controller.store.get(claim['input_digest']),'image intent'))
         if 'recipe_sha256' not in arguments: raise ContractError('rootfs-only operation cannot publish an image')
         self._stop_worker_once(claim,services)
         self.record_activity(claim,{'phase':'coordinator-validation','state':'ACTIVE','message':'Worker stopped; validating package, storage and image provenance.'})
         audit=validate_staged_rootfs(controller,claim,query=query)
-        assembled=validate_completed_image(Path(claim['stage_dir'])/'output',arguments,controller.root/'artifacts')
+        assembled=validate_completed_image(stage_path(controller.root,claim)/'output',arguments,controller.root/'artifacts')
         if self.closed or controller._lifecycle_owner is not self:
             raise Conflict('controller lifecycle ownership ended before signing')
         self.record_activity(claim,{'phase':'signing','state':'ACTIVE','message':'Signing the independently validated image.'})
@@ -562,20 +566,45 @@ class _LifecycleOwner:
                 cleared.append(saved['id'])
         return cleared
 
+def require_current_schema(db):
+    """Development formats are replaced directly; never reinterpret old state."""
+    expected={'operations':{'stage_nonce'},'source_workspaces':{'capture_device','capture_inode'},
+              'source_preparations':{'source_device','source_inode'},
+              'storage_groups':{'workspace_id','input_generation','stage_retained'},
+              'controller_job_service':{'software_sha256','configuration_sha256'}}
+    if (db.execute('PRAGMA user_version').fetchone()[0]!=len(MIGRATIONS) or
+            any(not fields <= {row[1] for row in db.execute('PRAGMA table_info('+table+')')} for table,fields in expected.items())):
+        raise ContractError('incompatible development state; initialize a fresh --state directory and preserve existing files')
+
+
 class Controller(OperatorApprovals):
     def __init__(self, root, clock=time.time, reserve_bytes=20 * 1024**3, deployment_repository=None,
                  boot_id_reader=controller_boot_id):
         from .filesystem import canonical_user_path
         self.root = canonical_user_path(Path(root))
+        from .controller_reset import require_no_reset
+        require_no_reset(self.root)
+        if (self.root/'controller.sqlite').exists():
+            with closing(sqlite3.connect((self.root/'controller.sqlite').as_uri()+'?mode=ro',uri=True)) as existing:
+                empty=(existing.execute('PRAGMA user_version').fetchone()[0]==0 and
+                       existing.execute('SELECT 1 FROM sqlite_master LIMIT 1').fetchone() is None)
+                if not empty:require_current_schema(existing)
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.clock = clock
         self.boot_id_reader = boot_id_reader
         self.deployment_repository = deployment_repository
         self._lifecycle_owner = None
-        self.store = ArtifactStore(self.root / 'artifacts', reserve_bytes=reserve_bytes)
         self.db_path = self.root / 'controller.sqlite'
         with (self.root / 'migration.lock').open('a+b') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
+            from .controller_reset import require_no_reset
+            require_no_reset(self.root)
+            if self.db_path.exists():
+                with closing(sqlite3.connect(self.db_path.as_uri()+'?mode=ro',uri=True)) as existing:
+                    empty=(existing.execute('PRAGMA user_version').fetchone()[0]==0 and
+                           existing.execute('SELECT 1 FROM sqlite_master LIMIT 1').fetchone() is None)
+                    if not empty:require_current_schema(existing)
+            self.store = ArtifactStore(self.root / 'artifacts', reserve_bytes=reserve_bytes)
             try:
                 fd = os.open(self.db_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             except FileExistsError:
@@ -586,29 +615,14 @@ class Controller(OperatorApprovals):
                 version = db.execute('PRAGMA user_version').fetchone()[0]
                 if version > len(MIGRATIONS):
                     raise ContractError('database created by newer software')
-                upgrade_fd = None
-                if version < len(MIGRATIONS):
-                    upgrade_fd = os.open(self.root / 'coordinator.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-                    try:
-                        fcntl.flock(upgrade_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    except BlockingIOError as exc:
-                        os.close(upgrade_fd)
-                        raise Conflict('stop the active controller before schema upgrade') from exc
-                try:
-                    if 0 < version < len(MIGRATIONS):
-                        active_attempt = db.execute("SELECT 1 FROM attempts WHERE state IN ('CLAIMED','RUNNING','BOOT_PENDING','UNCERTAIN') LIMIT 1").fetchone()
-                        if active_attempt:
-                            raise Conflict('reconcile active or uncertain target attempts before schema upgrade')
-                    if version >= 7 and version < len(MIGRATIONS):
-                        active = db.execute("SELECT 1 FROM operations WHERE state IN ('RUNNING','WAITING') OR worker_unit IS NOT NULL LIMIT 1").fetchone()
-                        if active:
-                            raise Conflict('stop and reconcile active workers before schema upgrade')
-                    for number in range(version, len(MIGRATIONS)):
-                        db.executescript('BEGIN IMMEDIATE;\n' + MIGRATIONS[number] + f'\nPRAGMA user_version={number + 1};\nCOMMIT;')
-                finally:
-                    if upgrade_fd is not None:
-                        fcntl.flock(upgrade_fd, fcntl.LOCK_UN)
-                        os.close(upgrade_fd)
+                if version==0:
+                    if db.execute('SELECT 1 FROM sqlite_master LIMIT 1').fetchone() is not None:
+                        raise ContractError('incompatible development state; preserve existing files and initialize fresh state')
+                    # Fresh creation is atomic; interrupted empty staging can retry
+                    # without interpreting a committed prefix as an upgrade.
+                    db.executescript('BEGIN IMMEDIATE;\n'+ '\n'.join(MIGRATIONS)+
+                                     f'\nPRAGMA user_version={len(MIGRATIONS)};\nCOMMIT;')
+                else:require_current_schema(db)
         sync_directory(self.root)
 
     def _connect(self):
@@ -672,9 +686,9 @@ class Controller(OperatorApprovals):
         # A live owner's unit names are evidence needed to stop complete cgroups.
         # Copied unit names in a restored backup refer to another controller.
         if restored:
-            db.execute("UPDATE operations SET state='INTERRUPTED',worker_epoch=NULL,worker_unit=NULL,worker_boot_id=NULL,stage_dir=NULL,updated=? WHERE state IN ('RUNNING','WAITING')", (self.clock(),))
-            db.execute("UPDATE operations SET worker_epoch=NULL,worker_unit=NULL,worker_boot_id=NULL,stage_dir=NULL,updated=? WHERE state='INTERRUPTED'", (self.clock(),))
-            db.execute("UPDATE operations SET worker_unit=NULL,worker_boot_id=NULL,stage_dir=NULL WHERE state IN ('SUCCEEDED','FAILED')")
+            db.execute("UPDATE operations SET state='INTERRUPTED',worker_epoch=NULL,worker_unit=NULL,worker_boot_id=NULL,stage_nonce=NULL,updated=? WHERE state IN ('RUNNING','WAITING')", (self.clock(),))
+            db.execute("UPDATE operations SET worker_epoch=NULL,worker_unit=NULL,worker_boot_id=NULL,stage_nonce=NULL,updated=? WHERE state='INTERRUPTED'", (self.clock(),))
+            db.execute("UPDATE operations SET worker_unit=NULL,worker_boot_id=NULL,stage_nonce=NULL WHERE state IN ('SUCCEEDED','FAILED')")
         else:
             db.execute("UPDATE operations SET state='INTERRUPTED',worker_epoch=NULL,updated=? WHERE state IN ('RUNNING','WAITING')", (self.clock(),))
 
@@ -731,12 +745,12 @@ class Controller(OperatorApprovals):
             os.close(fd)
 
     def admit_operation(self, request_id, kind, arguments, *, campaign_id=None, device_id=None,
-                        input_refs=(), source_refs=(), local_paths=None):
+                        input_refs=(), source_refs=()):
         """Durably record immutable work. P2b owns any subsequent execution claim."""
         identifier(request_id)
         intent, raw, request_digest = operation_intent(
             kind, arguments, campaign_id=campaign_id, device_id=device_id,
-            input_refs=input_refs, source_refs=source_refs, local_paths=local_paths)
+            input_refs=input_refs, source_refs=source_refs)
         for value in intent['input_refs'] + intent['source_refs']:
             self.store.verify(value)
         retained_inputs=set(intent['input_refs'])
@@ -812,10 +826,12 @@ class Controller(OperatorApprovals):
             input_refs=[recipe_sha256,recipe['rootfs_lock_sha256'],builder_archive_sha256])
 
     def _operation_status(self, db, operation_id):
+        from .worker_execution import stage_path
         row = db.execute('SELECT * FROM operations WHERE id=?', (identifier(operation_id),)).fetchone()
         if row is None:
             raise ContractError('unknown operation')
         data = dict(row)
+        data['stage_dir']=str(stage_path(self.root,data)) if data['stage_nonce'] else None
         data['references'] = {role: [item['digest'] for item in db.execute(
             'SELECT digest FROM operation_refs WHERE operation=? AND role=? ORDER BY digest',
             (operation_id, role))] for role in ('input', 'source', 'output')}
@@ -1028,11 +1044,11 @@ class Controller(OperatorApprovals):
                 owner=self._lifecycle_owner
                 if owner is None or owner.closed or owner.epoch!=worker_epoch:
                     raise Conflict('controller lifecycle ownership ended before adoption')
-                fields=('worker_epoch','worker_generation','worker_unit','worker_boot_id','stage','stage_dir','input_digest','deadline')
+                fields=('worker_epoch','worker_generation','worker_unit','worker_boot_id','stage','stage_nonce','input_digest','deadline')
                 if (any(row[key]!=expected_claim[key] for key in fields) or (state!='FAILED' and self.clock()>=row['deadline'])):
                     raise Conflict('recovery worker claim changed before adoption')
             if clear_stopped_worker:
-                proof={key:row[key] for key in ('worker_unit','worker_boot_id','worker_generation','stage_dir','input_digest')}
+                proof={key:row[key] for key in ('worker_unit','worker_boot_id','worker_generation','stage_nonce','input_digest')}
                 proof['stop_kind']='stopped'
                 records=db.execute("SELECT document FROM operation_events WHERE operation=? AND kind='worker_stopped'",(operation_id,)).fetchall()
                 if not any(json.loads(record[0])==proof for record in records):
@@ -1045,8 +1061,8 @@ class Controller(OperatorApprovals):
             now = self.clock()
             if state=='FAILED' and clear_stopped_worker and row['kind'] in ('build','compose','builder_prepare','recovery_download','source_capture','source_prepare','candidate_prepare'):
                 failed_kind='input' if row['kind'] in ('builder_prepare','recovery_download','source_capture','source_prepare','candidate_prepare') else 'build' if row['kind']=='build' else 'deployment'
-                db.execute("INSERT OR REPLACE INTO storage_groups VALUES(?,?,?,?, 'FAILED',?,?)",
-                           (operation_id,failed_kind,now,now,canonical([row['stage_dir']]).decode(),canonical(proof).decode()))
+                db.execute("INSERT OR REPLACE INTO storage_groups VALUES(?,?,?,?, 'FAILED',NULL,NULL,1,?)",
+                           (operation_id,failed_kind,now,now,canonical(proof).decode()))
             if storage_kind is not None:
                 if storage_kind=='recovery':
                     arguments=recovery_rootfs_arguments(json.loads(self.store.get(row['input_digest'])))
@@ -1062,11 +1078,11 @@ class Controller(OperatorApprovals):
                     joined=json.loads(self.store.get(row['input_digest']))['arguments'].get('schema_version')==3
                     if joined != callable(joined_job_fence):
                         raise ContractError('joined job publication requires its independent final fence')
-                paths=[] if storage_kind=='recovery' else [row['stage_dir']]
-                stopped={key:row[key] for key in ('worker_unit','worker_boot_id','worker_generation','stage_dir','input_digest')};stopped['stop_kind']='stopped'
+                stage_retained=int(storage_kind!='recovery')
+                stopped={key:row[key] for key in ('worker_unit','worker_boot_id','worker_generation','stage_nonce','input_digest')};stopped['stop_kind']='stopped'
                 insert='INSERT OR REPLACE' if row['kind']=='source_prepare' else 'INSERT'
-                db.execute(insert+" INTO storage_groups VALUES(?,?,?,?,'SUCCEEDED',?,?)",
-                           (operation_id,storage_kind,now,now,canonical(paths).decode(),canonical(stopped).decode()))
+                db.execute(insert+" INTO storage_groups VALUES(?,?,?,?,'SUCCEEDED',NULL,NULL,?,?)",
+                           (operation_id,storage_kind,now,now,stage_retained,canonical(stopped).decode()))
                 if row['kind']=='builder_prepare':
                     db.execute('INSERT OR IGNORE INTO storage_pins VALUES(?,?)',
                                (operation_id,'Signed builder dependency; explicitly unpin when no longer needed.'))
@@ -1100,7 +1116,7 @@ class Controller(OperatorApprovals):
                 if (self._lifecycle_owner is not owner or owner.closed or self.clock()>=row['deadline']
                         or db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]!=worker_epoch):
                     raise Conflict('workspace owner or deadline ended before editing grant')
-                db.execute("INSERT INTO source_workspaces VALUES(?,?,?,'EDITING',NULL)",
+                db.execute("INSERT INTO source_workspaces(id,campaign,document_digest,writer_state,capture_operation) VALUES(?,?,?,'EDITING',NULL)",
                     (workspace['workspace_id'],workspace['campaign_id'],document))
                 for value in set(outputs)|set(provenance_refs)|{item for key,item in workspace['provenance'].items() if key.endswith('_sha256')}:
                     db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)',('workspace:'+workspace['workspace_id'],value))
@@ -1319,7 +1335,7 @@ class Controller(OperatorApprovals):
             db.execute('INSERT OR IGNORE INTO maintenance VALUES(?,?,?)', (device_id, request, selection))
             owner='library:'+device_id+':'+request
             now=self.clock()
-            db.execute("INSERT OR IGNORE INTO storage_groups VALUES(?,'library',?,?,'WAITING','[]',NULL)",
+            db.execute("INSERT OR IGNORE INTO storage_groups VALUES(?,'library',?,?,'WAITING',NULL,NULL,0,NULL)",
                        (owner,now,now))
             for value in closure:
                 db.execute('INSERT OR IGNORE INTO refs VALUES(?,?)', (owner, value))
@@ -1853,6 +1869,7 @@ class Controller(OperatorApprovals):
         manifest = json.loads((backup / 'manifest.json').read_bytes())
         db = sqlite3.connect(f'file:{backup / "controller.sqlite"}?mode=ro&immutable=1', uri=True)
         try:
+            require_current_schema(db)
             if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                 raise ContractError('backup database corrupt')
             references = {row[0] for row in db.execute('SELECT DISTINCT digest FROM refs')}
@@ -1860,9 +1877,9 @@ class Controller(OperatorApprovals):
         finally:
             db.close()
         version = manifest.get('schema_version')
-        if version not in (1, 2) or references != set(manifest['artifacts']):
+        if type(version) is not int or version != 2 or references != set(manifest['artifacts']):
             raise ContractError('backup references do not match manifest')
-        if (version == 1 and deployments) or (version == 2 and manifest.get('deployments') != deployments):
+        if manifest.get('deployments') != deployments:
             raise ContractError('backup deployment references do not match manifest')
         from .backup_coverage import verify_if_present
         verify_if_present(backup)

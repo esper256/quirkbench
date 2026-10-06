@@ -288,13 +288,18 @@ def test_installed_cli_and_resources_export_without_checkout(lab,tmp_path):
     c,_=lab;populate(c)
     assets=tmp_path/'assets';assets.mkdir()
     catalog=json.loads((Path(__file__).parents[1]/'src/quirkbench/baselines/catalog.v1.json').read_bytes())
-    runtime=Path(install(archive(assets,catalog),data_home=tmp_path/'data')['runtime_root'])
+    installed=install(archive(assets,catalog),data_home=tmp_path/'data')
+    runtime=Path(installed['runtime_root'])
     # Actual supported service configuration, fixture-only zero reserve. No
     # process/service starts; existing lab database is the read-only input.
     private=c.root/'private';private.mkdir(exist_ok=True)
     placeholder=private/'fixture';placeholder.write_text('injected native input');placeholder.chmod(0o600)
-    config={'runtime':str(runtime/'bin/quirkbench'),'job_worker':str(runtime/'bin/quirkbench-job-worker'),
-            'cert':str(placeholder),'key':str(placeholder),'tokens_file':str(placeholder),'reserve_gib':0}
+    from quirkbench.controller_tls import create_identity
+    from tls_command_fixture import TLSCommands
+    create_identity(c.root,'127.0.0.1','export-fixture',run=TLSCommands())
+    config={'software':{key:installed[key] for key in ('version','archive_sha256')},
+            'tls_identity':{'kind':'setup','request_id':'export-fixture'},
+            'tokens_file':str(placeholder),'reserve_gib':0}
     config_path=private/'controller-service.json';config_path.write_text(json.dumps(config));config_path.chmod(0o600)
     env={k:v for k,v in os.environ.items() if k not in ('PYTHONPATH','PYTHONHOME')}
     help_run=subprocess.run([str(runtime / 'bin/quirkbench'), 'investigation', 'results', 'export', '--help'],cwd=tmp_path,env=env,capture_output=True,text=True,timeout=15)

@@ -126,7 +126,8 @@ already be available. Archive installation does not change host packages or serv
 initial setup publishes configuration for an explicitly started foreground controller.
 
 Archive input paths may use ordinary ancestor aliases (including a linked home
-directory); installation records use canonical paths. The archive itself must be
+directory). Installation records retain version and archive identity, not their
+location. The archive itself must be
 a regular file, and changing its bytes, leaf or ancestor alias during capture is
 rejected. Managed runtime destinations retain their existing no-symlink rules.
 
@@ -189,7 +190,8 @@ quirkbench doctor
 
 Activation refuses queued/running work, unreconciled worker identities and unresolved
 physical attempts. Stop the foreground controller first. Activation checks exclusive
-lifecycle ownership, updates the configured runtime/worker paths together, and switches
+lifecycle ownership, updates the configured software identity and local installation
+selection together, and switches
 `~/.local/bin/quirkbench`. It preserves private settings, state and the old runtime.
 A durable rollback record precedes publication; failed publication restores the old
 selection. Successful activation reports that controller startup is still required.
@@ -198,23 +200,28 @@ outstanding work has been reconciled. No upgrade or rollback starts a daemon.
 Setup reports CLI, configured-service, verified active-service and last-advertised
 revision identities. A stored advertisement alone is not live readiness.
 
-`setup` creates private controller state at `$XDG_STATE_HOME/quirkbench`
-(default `~/.local/state/quirkbench`) and records its identity in the user configuration.
-The current directory never selects a new `.quirkbench` root. Existing configured
-selections remain authoritative; explicit legacy paths remain available for read-only
-inspection. New state/build staging inside Git checkouts is rejected.
-Empty sandbox `.git` guards are allowed; linked worktrees and ambiguous metadata
-remain blocked. Controller build paths may also use explicitly selected
-scratch beneath `/var/tmp` or a build-storage volume under `/mnt` or `/media`.
-Create a dedicated directory owned by the executing user first
-(for example `/mnt/build-volume/quirkbench`). The volume must already be mounted;
-Quirkbench does not mount it or change permissions. The directory must be below the
-mount root, contain no nested mounts and have no symlink ancestors. Paths below
-it must remain user-owned. Usable user-selected permissions are preserved; no
-special umask or mode is required. System trees such as `/var/lib`,
-`/dev`, `/etc` and `/usr` remain forbidden. Use home state or a persistent volume
-for durable work; temporary storage may be cleaned by the host. These controller
-path choices do not change the target's boot-device-only storage policy.
+`setup` creates controller state at `$XDG_STATE_HOME/quirkbench`
+(default `~/.local/state/quirkbench`). Defaults are discovered at invocation and are
+not copied into configuration. A custom state location is selected once in
+`$XDG_CONFIG_HOME/quirkbench/controller.json` (default `~/.config/quirkbench`):
+`{"schema_version":1,"state_root":"~/work/quirkbench-state"}`. Absolute selections
+are also supported. Explicit `--state` takes precedence over a missing configured
+location; a missing configured directory otherwise reports an error.
+
+Selected symlinks resolve through ordinary Unix pathname resolution before work
+begins. Files inside state follow the managed layout; their locations are derived
+from workspace, operation, request or artifact IDs. An external selected resource
+must still be visible to the process and container engine that use it. Explicit
+state/build/output selections may be inside a checkout. System trees remain
+protected and admission grants no recursive deletion of user-selected output.
+
+The revised development formats require fresh state. Preserve an incompatible
+existing directory and choose a new `--state`; there is no conversion or automatic
+reset. Current-format backup/restore retains content integrity and leaves scheduling
+paused. Restore private configuration and required external selections separately.
+Moving stopped managed data does not authorize resuming work or running a target;
+recorded active workers must still be reconciled.
+
 Use `quirkbench monitor` for the manual terminal dashboard; see [monitoring](monitoring.md).
 Without an installed archive, the checkout's `./quirkbench` launcher exposes the
 same commands; see [running from a checkout](#run-from-a-source-checkout).
@@ -228,7 +235,7 @@ without creating state or starting services. A successful setup acknowledgment i
 partial: release/setup binding, builder readiness and the M2 enrollment exchange remain pending.
 Connection choices do not activate a listener. Historical `existing_linger` records describe
 the desired policy; check the observed logout behavior. Existing initialized databases
-are inspected without migrations; active owners/work and changed recorded choices
+must match the current development format; active owners/work and changed recorded choices
 block setup. `setup` and `doctor` remain supported.
 State selection stays valid if the extracted archive is moved.
 Run capability checks from the controller shell. An optional development
@@ -280,55 +287,62 @@ signing credentials or engine socket. The engine enforces CPU, memory, swap and
 process limits; the fixed worker entry point also enforces its deadline.
 
 Interrupted work remains fenced until its recorded containers are reconciled.
-A controller reboot alone does not prove an engine container stopped. Old service
-worker records remain readable; unresolved same-boot legacy workers need their
-original installation's shutdown or a host reboot before migration can proceed.
-No old `.service` identity is silently treated as a stopped container.
-Before upgrading an old daemon deployment, stop and disable that previously configured
-supervisor. The new installation does not manage or restart it. Preserve the old
-runtime until legacy workers and any interrupted installation journal are reconciled.
+A controller reboot alone does not prove an engine container stopped. Reconciliation
+uses recorded engine/container identities, boot IDs and worker generations, then
+checks whole-worker shutdown. Missing prior workers are never presumed stopped
+because their old directory is unavailable.
 
 ## Foreground build and composition controller
 
 The archive supplies the CLI and fixed worker entry points. The historical
 `bin/quirkbench-controller-service` executable remains a foreground compatibility
-entry point. No controller unit template is installed. Keep the runtime canonical
-and use guarded activation while the foreground controller is stopped.
+entry point. No controller unit template is installed. Use guarded activation
+while the foreground controller is stopped.
 `setup --configure-controller` publishes local TLS, configuration and the CLI
 launcher; start execution separately with `admin controller run`.
 
-Provision a complete `STATE/private/controller-service.json` pointing to existing
-TLS/device credentials. Keep actual keys and tokens in a private file or secret
-store; the configuration record itself has no exact-mode requirement. Illustrative paths below must be
-replaced; this example creates no keys or default credentials:
+Use `setup --configure-controller` to create `STATE/private/controller-service.json`
+and its managed TLS identity. The service record contains software version/archive
+identity, a TLS setup request ID, connection choices and optional worker/publication
+settings. Executable and TLS filenames are derived at startup; do not add `runtime`,
+`job_worker`, `cert` or `key` paths to that file. For example, its base configuration
+has this shape (substitute identities returned by your own setup):
 
 ```json
 {
-  "runtime": "/ABSOLUTE/INSTALL/bin/quirkbench-controller-service",
-  "job_worker": "/ABSOLUTE/INSTALL/bin/quirkbench-job-worker",
+  "software": {"version": "0.1.0", "archive_sha256": "REPLACE_WITH_ARCHIVE_SHA256"},
+  "tls_identity": {"kind": "setup", "request_id": "initial-setup"},
   "host": "127.0.0.1",
   "port": 8443,
-  "cert": "/ABSOLUTE/STATE/quirkbench/private/controller.crt",
-  "key": "/ABSOLUTE/STATE/quirkbench/private/controller.key",
-  "tokens_file": "/ABSOLUTE/STATE/quirkbench/private/device-tokens.json",
-  "builder_image_digest": "sha256:REPLACE_WITH_FEDORA_BASE_MARKER_DIGEST",
-  "builder_config_digest": "sha256:REPLACE_WITH_ACTUAL_BUILDER_IMAGE_CONFIG_ID",
-  "builder_archive_sha256": "REPLACE_WITH_RETAINED_OCI_ARCHIVE_SHA256",
-  "repositories": {"lab": "/ABSOLUTE/STATE/quirkbench/repositories/lab"},
-  "composition_signing": {
-    "home": "/ABSOLUTE/STATE/quirkbench/private/gnupg",
-    "fingerprint": "REPLACE_WITH_FULL_PROVISIONED_SIGNING_FINGERPRINT"
-  }
+  "credential_registry": true,
+  "reserve_gib": 20
 }
 ```
 
-The repository parent must already exist. Composition's input repository alias,
-`signing_home` and fingerprint must match this private configuration. The worker
-receives an empty signing-home placeholder, never these keys. Optional recovery
-coordinator fields are `recovery_worker`, `recovery_signing_home`,
-`recovery_public_key` and `recovery_fingerprint`; its resource policy stays separate.
-LAN listening remains an explicit `allow_lan` configuration choice with existing TLS
-verification. Keep target manual trust/repository provisioning unchanged.
+Use `admin repository configure` for publication. Managed repositories are selected
+by alias; their directories are `STATE/repositories/ALIAS`. Composition signing
+retains a fingerprint and, only for an external selection, a signing `home`.
+Its default is `STATE/private/gnupg`. Absolute and `~/` external selections may use
+symlinks. A missing signing home blocks signing rather than unrelated inspection.
+Signing keys never enter workers. The worker receives an empty signing-home
+placeholder. For manually provisioned authentication, `tokens_file` is an external
+local selection instead of `credential_registry: true`.
+
+Optional recovery configuration uses `recovery_enabled: true`,
+`recovery_signing_home`, `recovery_public_key` and `recovery_fingerprint`.
+The worker executable is derived from the selected verified installation.
+Resource policy and LAN `allow_lan` authorization remain separate.
+
+Installation defaults use current XDG directories. Necessary overrides live once
+in `installation-settings.json` beside `controller.json`: `data_home`, `cache_home`
+and `bin_home`. `installation.json` selects software by version and archive digest.
+`builder-input.json`, `recovery-input.json`, `source-selections.json` and
+`job-inputs/REQUEST_ID.json` in state hold the corresponding external input choices;
+immutable operation records retain their expected content identities, not those paths.
+These nonsecret input selections are outside `private/` so trusted preparation
+containers can read them while private credentials remain hidden. A location edit
+cannot substitute different bytes, trust or authorization. OS launchers outside
+managed roots may need regeneration through existing installation/setup tooling.
 
 The current service's `builder_archive_sha256` is a live retention root, including
 across controller activation and restart. Input-history expiry does not delete
@@ -340,8 +354,8 @@ These are three different identities. `builder_image_digest` is the immutable
 Fedora base marker also used by existing build provenance; the fixed worker runs
 `builder_config_digest`, after verifying its retained OCI archive and layers.
 Do not substitute the Fedora base image for the finished builder. Newly admitted
-build/compose jobs use argument version 2. Legacy argument records remain readable,
-but ambiguous old jobs require explicit resubmission with a new request ID.
+manual build/compose jobs use argument version 2. Superseded path-bearing records
+are rejected; use fresh development state with the current configuration.
 `build` and `compose` accept explicit `--builder-archive` and
 `--builder-config-digest` overrides when using separately retained inputs.
 
@@ -455,6 +469,42 @@ are preserved separately when migrated; old unit/start steps never become eviden
 of current foreground readiness. A completed setup can be inspected while the owner
 runs. Status keeps historical setup, live ownership, pairing, builder availability
 and qualification separate.
+
+### Start over after unsuccessful setup
+
+For an **unused controller** (no enrolled targets, attempts, credentials or bound
+enrollment), explicitly stop its controller and archive its database/setup records:
+
+```sh
+./quirkbench --state /absolute/controller-state admin controller reset \
+  --request-id fresh-start-1 --confirm-reset
+```
+
+Use a CLI containing this command; an older installed runtime will not have it.
+Confirmation also authorizes graceful shutdown of the verified running controller.
+The command waits at most 30 seconds for process exit, then checks the existing
+locks and worker shutdown proofs. It never force-kills an unknown process. If work
+remains unreconciled, the controller may be stopped while reset is still refused;
+the database remains available for reconciliation. Other commands/builds holding
+locks are named separately.
+
+The result prints the exact archive directory beneath
+`STATE/private/controller-resets/`. SQLite and present sidecars, settings, controller
+configuration and matching setup journals are retained there. Issued invitations
+are invalidated. Runtime installations, the selected state directory, TLS/signing
+keys, repositories, images, RPMs and build logs remain in place. Archived CAS objects
+remain protected from storage pruning. This archive is local recovery material,
+not a portable backup or a supported automatic restore command.
+
+Repeat the **same reset request ID** after interruption. An unfinished reset blocks
+new setup/controller database opening until replay completes. A completed replay
+returns its receipt and does not reset a later fresh database. Run `setup` afterward
+with a **new setup request ID**, your desired connection options and runtime.
+Retained installation/publication transactions, unknown/corrupt schemas, substituted
+files and active or unreconciled work are refused; do not delete the whole state tree
+to bypass these checks. Reset currently supports database schemas 32 through current,
+at most 128 MiB per retained file, 10000 CAS objects and 64 local reset archives.
+It does not upgrade an existing database or reset a previously used controller.
 
 For a fresh empty-registry installation, explicitly provision an existing private
 operator GnuPG home and composition signing key, then configure its first repository:

@@ -143,8 +143,7 @@ def run_rootfs_worker(state_root, operation, epoch, generation, stage_dir, *,
               'worker_epoch': claim.worker_epoch, 'worker_generation': claim.worker_generation,
               'worker_unit': claim.worker_unit, 'input_digest': claim.input_digest,
               'stage': 'recovery_rootfs', 'state': 'RUNNING',
-              'operation_complete': False, 'unit_reconciled': False,
-              'log_path': str(diagnostics / 'rootfs.log')}
+              'operation_complete': False, 'unit_reconciled': False}
     result_path = diagnostics / 'stage-result.json'
     atomic_write(result_path, canonical(record) + b'\n')
     sync_directory(stage)
@@ -173,7 +172,7 @@ def run_rootfs_worker(state_root, operation, epoch, generation, stage_dir, *,
         final = verify()
         if final != claim:
             raise WorkerClaimError('worker claim changed during rootfs preparation')
-        record.update(state='COMPLETED', output_path=str(output))
+        record.update(state='COMPLETED')
     except (BuildError, WorkerClaimError, OSError, ValueError) as exc:
         record.update(state='INTERRUPTED' if isinstance(exc, WorkerClaimError) else 'FAILED',
                       message='Worker unit stop/reconciliation required; ' + str(exc)[:256])
@@ -264,7 +263,7 @@ def validate_staged_rootfs(controller,claim,*,query=None):
     arguments=recovery_rootfs_arguments(intent)
     root=stage/('output/image-stage/rootfs' if 'recipe_sha256' in arguments else 'output/rootfs')
     if (record.get('state')!='COMPLETED' or record.get('exit_code')!=0
-            or record.get('operation_complete') is not False or record.get('output_path')!=str(root)
+            or record.get('operation_complete') is not False or {'output_path','log_path'} & set(record)
             or root.is_symlink() or not root.is_dir() or root.resolve()!=root):
         raise BuildError('staged rootfs is incomplete or has an unexpected destination')
     lock=validate_lock(_json(controller.store.get(arguments['rootfs_lock_sha256']),'rootfs lock'))

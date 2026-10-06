@@ -166,6 +166,7 @@ def parser():
             if option.dest in required:option.required=True
         if command in ('backup','restore'):
             node.epilog='Example\n  '+node.prog+(' --output ./backup' if command=='backup' else ' --input ./backup --state ./restored')
+        elif command=='controller-reset':node.epilog='Example\n  '+node.prog+' --request-id fresh-start-1 --confirm-reset'
         else:node.epilog='Example\n  '+example(node)
         node.epilog+='\n\nCommands never prompt; provide required choices as arguments or input files.'
         if getattr(node,'commands',None):node.usage=node.prog+' [OPTIONS] COMMAND ...'

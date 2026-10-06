@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Unused controller reset archive v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_type",
+    "request_id",
+    "files",
+    "objects",
+    "complete"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "record_type": {
+      "const": "unused-controller-reset"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "files": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state/controller.sqlite",
+        "state/controller.sqlite-wal",
+        "state/controller.sqlite-shm",
+        "state/controller.sqlite-journal",
+        "state/settings.json",
+        "state/private/controller-service.json",
+        "state/private/setup-progress.json",
+        "state/private/setup-service.json",
+        "state/source-selections.json",
+        "state/builder-input.json",
+        "state/recovery-input.json"
+      ],
+      "properties": {
+        "state/controller.sqlite": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/source"
+            }
+          ]
+        },
+        "state/controller.sqlite-wal": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/source"
+            }
+          ]
+        },
+        "state/controller.sqlite-shm": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/source"
+            }
+          ]
+        },
+        "state/controller.sqlite-journal": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/source"
+            }
+          ]
+        },
+        "state/settings.json": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/source"
+            }
+          ]
+        },
+        "state/private/controller-service.json": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/source"
+            }
+          ]
+        },
+        "state/private/setup-progress.json": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/source"
+            }
+          ]
+        },
+        "state/private/setup-service.json": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/source"
+            }
+          ]
+        },
+        "state/source-selections.json": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/source"
+            }
+          ]
+        },
+        "state/builder-input.json": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/source"
+            }
+          ]
+        },
+        "state/recovery-input.json": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/source"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "type": "array",
+      "maxItems": 10000,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    },
+    "complete": {
+      "type": "boolean"
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity",
+        "sha256",
+        "size"
+      ],
+      "properties": {
+        "identity": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 134217728
+        }
+      }
+    }
+  }
+}

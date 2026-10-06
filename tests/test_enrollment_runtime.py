@@ -91,12 +91,13 @@ def test_old_owner_cannot_publish_after_native_boundary(publication,stage,monkey
             app=pub.application
             if stage in ('challenge','binding'):
                 if stage=='binding':nonce=app.handle('/v1/enrollment/challenge',{'schema_version':1,'request':req},'127.0.0.1')
-                original=proof.validate_public_key
+                function='verify_signature' if stage=='binding' else 'validate_public_key'
+                original=getattr(proof,function)
                 def advance(*a,**kw):
                     result=original(*a,**kw)
                     with c.transaction() as db:db.execute('UPDATE controller_lifecycle SET epoch=epoch+1')
                     return result
-                monkeypatch.setattr(proof,'validate_public_key',advance)
+                monkeypatch.setattr(proof,function,advance)
                 document={'schema_version':1,'request':req}
                 path='/v1/enrollment/challenge'
                 if stage=='binding':
@@ -133,7 +134,7 @@ def test_managed_repository_uses_exact_registered_leaf_and_closes_existing_sessi
         reservation.bind(('127.0.0.1',0));port=reservation.getsockname()[1]
     path=c.root/'private/controller-service.json';config=json.loads(path.read_bytes())
     config['repository_endpoint']['url']='https://127.0.0.1:'+str(port);path.write_bytes(canonical(config))
-    repo=Path(config['repositories']['lab']);(repo/'summary').write_bytes(b'public summary')
+    repo=Path(configuration(c.root)['repositories']['lab']);(repo/'summary').write_bytes(b'public summary')
     cert=control/'client.pem';cert.write_text(result['repository_certificate_pem'])
     context=ssl.create_default_context(cadata=result['controller_ca_pem'])
     context.load_cert_chain(cert,control/'enrollment/pending/key.pem')

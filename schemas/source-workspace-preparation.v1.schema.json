@@ -8,7 +8,6 @@
     "workspace_id",
     "base_oid",
     "capture_sha256",
-    "workspace_path",
     "allowed_untracked",
     "provenance"
   ],
@@ -30,9 +29,6 @@
     "capture_sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
-    },
-    "workspace_path": {
-      "const": "output/workspace"
     },
     "allowed_untracked": {
       "type": "array",

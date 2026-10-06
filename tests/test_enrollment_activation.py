@@ -24,7 +24,8 @@ UUID='12345678-1234-1234-1234-123456789abc'
 @pytest.fixture
 def received(publication,tmp_path):
     c,_,_,kwargs=publication
-    config=json.loads((c.root/'private/controller-service.json').read_bytes());tls=Path(config['cert']).parent
+    from quirkbench.controller_service import configuration
+    config=configuration(c.root);tls=Path(config['cert']).parent
     identity=inspect_identity(tls,run=Commands());pem=Path(identity['certificate']).read_text()
     code=create_code(c,'second-target','second-code',**kwargs)
     control=tmp_path/'target-control';control.mkdir(mode=0o700)

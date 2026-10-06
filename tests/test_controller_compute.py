@@ -110,8 +110,7 @@ def test_first_signed_builder_bootstraps_without_prior_image(worker,monkeypatch,
     with c.lifecycle() as owner:
         if older_job:
             ordinary=c.admit_operation('older-download','recovery_download',
-                {'schema_version':1,'version':'1','controller_archive_sha256':'1'*64,'trust_bundle_sha256':'2'*64},
-                local_paths={'runtime':str(tmp_path/'runtime'),'trust_bundle':str(tmp_path/'trust'),'config_home':str(tmp_path/'config')})
+                {'schema_version':1,'version':'1','controller_archive_sha256':'1'*64,'trust_bundle_sha256':'2'*64})
         row=intent(c,archive)
         jobs=JobCoordinator(owner,services)
         first=jobs.tick()
@@ -123,7 +122,8 @@ def test_first_signed_builder_bootstraps_without_prior_image(worker,monkeypatch,
         record=services._load(second['worker_unit'])
         from jsonschema import Draft202012Validator
         schema=json.loads((Path(__file__).resolve().parents[1]/'schemas/worker-execution.v3.schema.json').read_bytes())
-        Draft202012Validator(schema).validate(record)
+        from quirkbench.worker_execution import document
+        Draft202012Validator(schema).validate(document(record))
         assert record['bootstrap'] and record['executions'][0]['phase']=='builder-marker'
         Path(second['stage_dir'],'diagnostics/builder-marker.txt').write_text(BASE+'\n')
         for container in engine.containers.values():container['State'].update(Running=False,Pid=0)

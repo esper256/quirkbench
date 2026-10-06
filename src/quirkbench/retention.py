@@ -16,7 +16,7 @@ from .store import sync_directory
 
 MIGRATION = '''
 CREATE TABLE storage_groups(owner TEXT PRIMARY KEY, kind TEXT NOT NULL, created REAL NOT NULL,
-    updated REAL NOT NULL, state TEXT NOT NULL, paths TEXT NOT NULL DEFAULT '[]', stop_proof TEXT);
+    updated REAL NOT NULL, state TEXT NOT NULL, workspace_id TEXT, input_generation TEXT, stage_retained INTEGER NOT NULL DEFAULT 0, stop_proof TEXT);
 CREATE TABLE storage_pins(owner TEXT PRIMARY KEY, note TEXT NOT NULL);
 CREATE TABLE storage_retired(owner TEXT PRIMARY KEY, retired REAL NOT NULL);
 CREATE TABLE storage_garbage(digest TEXT PRIMARY KEY, discovered REAL NOT NULL);
@@ -51,7 +51,7 @@ def managed_path(root,path):
         from .state_reader import StateReader
         with StateReader(root).connection() as db:
             records=db.execute("SELECT document FROM operation_events WHERE operation=? AND kind='worker_stopped'",(parts[0],)).fetchall()
-        if not any(json.loads(row[0]).get('stage_dir')==str(path) and json.loads(row[0]).get('stop_kind') in ('stopped','previous_boot') for row in records):
+        if not any(json.loads(row[0]).get('stage_nonce')==path.name.split('-',1)[1] and json.loads(row[0]).get('worker_generation')==int(path.name.split('-',1)[0]) and json.loads(row[0]).get('stop_kind') in ('stopped','previous_boot') for row in records):
             raise ContractError('worker stage lacks durable whole-service stop proof')
         return path
     if len(path.parts)<len(root.parts)+2 or path.parts[len(root.parts)] not in ('workspaces','inputs','deliveries','development-runs','repositories'):
@@ -69,16 +69,42 @@ def hashes(value):
         for item in value: yield from hashes(item)
 
 
+def group_paths(root,row):
+    """Fixed owned layouts; current roots are never retained as identity."""
+    paths=[]
+    from .contracts import identifier
+    for field,area in (('workspace_id','workspaces'),('input_generation','inputs')):
+        if row[field] is not None:paths.append(Path(root)/area/identifier(row[field]))
+    if row['stage_retained']:
+        from .worker_execution import stage_path
+        proof=json.loads(row['stop_proof'])
+        operation=row['owner'].split('-')[2] if row['owner'].startswith('job-stage-') else row['owner']
+        from .state_reader import StateReader
+        with StateReader(root).connection() as db:
+            events=db.execute("SELECT document FROM operation_events WHERE operation=? AND kind='worker_stopped'",(operation,)).fetchall()
+        if not any(all(json.loads(event[0]).get(key)==proof.get(key) for key in ('stage_nonce','worker_generation','input_digest')) and json.loads(event[0]).get('stop_kind') in ('stopped','previous_boot') for event in events):
+            raise ContractError('retained stage lacks its exact durable worker-stop evidence')
+        paths.append(stage_path(root,proof,operation))
+    return paths
+
+
 def register(root,kind,values=(),*,owner=None,paths=(),state='SUCCEEDED',stop_proof=None):
     if kind not in COUNTS: raise ContractError('unknown storage group kind')
     owner=owner or 'storage:'+uuid.uuid4().hex
-    checked=[]
+    workspace_id=input_generation=None
+    if len(paths)>1:raise ContractError('one owned workspace or input generation per storage group')
     for path in paths:
         path=managed_path(root,path)
         if path.is_dir():
             from .maintenance import disposable
             disposable(path,Path(root))
-        checked.append(str(path))
+        parts=path.relative_to(root).parts
+        if len(parts)!=2 or parts[0] not in ('workspaces','inputs'):
+            raise ContractError('storage registration requires an owned workspace or input generation')
+        from .contracts import identifier
+        identity=identifier(parts[1])
+        if parts[0]=='workspaces':workspace_id=identity
+        else:input_generation=identity
     roots={sha256(value) for value in values}
     for value in roots:
         if not (Path(root)/'artifacts/objects'/value).is_file(): raise ContractError('cannot retain unavailable artifact')
@@ -87,12 +113,12 @@ def register(root,kind,values=(),*,owner=None,paths=(),state='SUCCEEDED',stop_pr
     now=time.time()
     with connection(root) as db:
         db.execute('BEGIN IMMEDIATE')
-        for row in db.execute("SELECT owner,paths FROM storage_groups WHERE owner!=?",(owner,)):
-            for prior in json.loads(row['paths']):
-                if any(Path(prior).is_relative_to(p) or Path(p).is_relative_to(prior) for p in checked):
-                    raise ContractError('registered storage paths overlap')
-        db.execute('INSERT INTO storage_groups VALUES(?,?,?,?,?,?,?) ON CONFLICT(owner) DO UPDATE SET updated=excluded.updated,state=excluded.state,paths=excluded.paths,stop_proof=excluded.stop_proof',
-                   (owner,kind,now,now,state,json.dumps(checked),json.dumps(stop_proof) if stop_proof else None))
+        for row in db.execute("SELECT * FROM storage_groups WHERE owner!=?",(owner,)):
+            if ((workspace_id is not None and row['workspace_id']==workspace_id) or
+                    (input_generation is not None and row['input_generation']==input_generation)):
+                raise ContractError('registered storage identities overlap')
+        db.execute('INSERT INTO storage_groups VALUES(?,?,?,?,?,?,?,0,?) ON CONFLICT(owner) DO UPDATE SET updated=excluded.updated,state=excluded.state,workspace_id=excluded.workspace_id,input_generation=excluded.input_generation,stage_retained=0,stop_proof=excluded.stop_proof',
+                   (owner,kind,now,now,state,workspace_id,input_generation,json.dumps(stop_proof) if stop_proof else None))
         db.executemany('INSERT OR IGNORE INTO refs VALUES(?,?)',[(owner,sha256(value)) for value in roots])
         db.execute('DELETE FROM storage_retired WHERE owner=?',(owner,))
     return owner
@@ -260,15 +286,19 @@ def collect(root,*,dry_run=False):
             row=db.execute('SELECT * FROM storage_groups WHERE owner=?',(owner,)).fetchone()
             if row and row['kind']=='development' and (Path(root)/'development-runs'/owner/'work').exists():
                 blocked.append(owner+': retained development work awaits verified disposal'); continue
-            if row and json.loads(row['paths']) and not row['stop_proof']:
+            if row and (row['workspace_id'] or row['input_generation'] or row['stage_retained']) and not row['stop_proof']:
                 blocked.append(owner+': shutdown proof unavailable'); continue
             if row:
-                for name in json.loads(row['paths']):
+                for name in group_paths(root,row):
                     path=managed_path(root,Path(name))
                     if path.exists(): disposable(path,Path(root))
             retiring.append(owner)
         # Eligibility precedes reachability. A blocked group remains a live root.
         live=closure(root,_roots(db,retiring)|legacy_uploads['roots']|configured)
+        from .controller_reset import archived_artifacts
+        ordinary_live = set(live)
+        archived = archived_artifacts(root)
+        live.update(archived)
         if legacy_uploads['unidentified_bytes']:
             live.update(p.name for p in (Path(root)/'artifacts/objects').iterdir() if HASH.fullmatch(p.name))
             blocked.append('CAS deletion deferred: unidentified legacy upload bytes; explicitly abandon their IDs')
@@ -286,15 +316,15 @@ def collect(root,*,dry_run=False):
         else: db.rollback()
         old={r[0] for r in db.execute('SELECT owner FROM storage_retired')}
         for owner in set(retiring)|old:
-            row=db.execute('SELECT paths FROM storage_groups WHERE owner=?',(owner,)).fetchone()
-            for name in json.loads(row['paths']) if row else []:
+            row=db.execute('SELECT * FROM storage_groups WHERE owner=?',(owner,)).fetchone()
+            for name in group_paths(root,row) if row else []:
                 path=managed_path(root,Path(name))
                 if path.exists():
                     disposable(path,Path(root))
                     if not dry_run: remove_tree(path,Path(root))
                     removed.append(str(path.relative_to(root)))
             if not dry_run:
-                db.execute("UPDATE storage_groups SET paths='[]' WHERE owner=?",(owner,)); db.commit()
+                db.execute("UPDATE storage_groups SET workspace_id=NULL,input_generation=NULL,stage_retained=0 WHERE owner=?",(owner,)); db.commit()
             diagnostic=Path(root)/'diagnostics'/owner.replace(':','-')
             if diagnostic.exists():
                 disposable(diagnostic,Path(root))
@@ -340,7 +370,7 @@ def collect(root,*,dry_run=False):
             sync_directory(objects)
             db.executemany('DELETE FROM storage_garbage WHERE digest=?',[(v,) for v in queued if v in live or not (objects/v).exists()]); db.commit()
         references=[dict(r) for r in db.execute('SELECT repository,revision FROM deployment_refs')]
-        for value in live:
+        for value in live - (archived - ordinary_live):
             path=objects/value
             if path.is_file() and path.stat().st_size<=1024**2:
                 try:
@@ -350,6 +380,9 @@ def collect(root,*,dry_run=False):
                 except (ValueError,UnicodeError): pass
         protected=db.execute("SELECT 1 FROM storage_groups WHERE state IN ('RUNNING','WAITING','INTERRUPTED','FAILED') LIMIT 1").fetchone()
         protected=protected or db.execute('SELECT 1 FROM operations WHERE worker_unit IS NOT NULL LIMIT 1').fetchone()
+        # Reset intentionally removed old repository references from the DB.
+        # Preserve those repositories rather than inventing roots from opaque CAS.
+        protected=protected or (Path(root)/'private/controller-resets').exists()
     repositories=Path(root)/'repositories.json'
     if repositories.exists():
         import shutil
@@ -361,9 +394,11 @@ def collect(root,*,dry_run=False):
             from .filesystem import read_file
             from .ostree_repository import OstreeRepository
             mapping=json.loads(read_file(Path(root),'repositories.json',limit=65536))
+            if not isinstance(mapping,list):raise ContractError('repository aliases required')
             checked={}
-            for alias,name in mapping.items():
-                path=managed_path(root,Path(name))
+            for alias in mapping:
+                from .contracts import identifier
+                path=managed_path(root,Path(root)/'repositories'/identifier(alias))
                 if path.parts[len(Path(root).parts)]!='repositories':
                     blocked.append('repository '+alias+' requires explicit relocation into state/repositories'); continue
                 checked[alias]=path
@@ -419,7 +454,7 @@ def published(root,owner,values,*,disposable_work=False):
     from .maintenance import retain_diagnostics,remove_tree
     with connection(root) as db:
         row=db.execute('SELECT * FROM storage_groups WHERE owner=?',(owner,)).fetchone()
-    paths=[Path(p) for p in json.loads(row['paths'])]
+    paths=[p for p in group_paths(root,row)]
     proof=stop_proof(paths[0]) if paths else {'kind':'no_stage'}
     register(root,row['kind'],values,owner=owner,paths=paths,state='SUCCEEDED',stop_proof=proof)
     if disposable_work:
@@ -436,7 +471,7 @@ def release_acquisition(root,directory,value):
     with connection(root) as db:
         rows=[dict(r) for r in db.execute("SELECT * FROM storage_groups WHERE kind='input' AND state='WAITING'")]
     for row in rows:
-        if json.loads(row['paths'])==[str(directory.parent)] and row['stop_proof'] and json.loads(row['stop_proof']).get('download_complete'):
+        if group_paths(root,row)==[directory.parent] and row['stop_proof'] and json.loads(row['stop_proof']).get('download_complete'):
             generation=directory.parent
             # Lock validation and signature verification already completed. A
             # second use of this input is served from the retained CAS closure.
@@ -458,7 +493,7 @@ def abandon(root,owner):
         row=db.execute('SELECT * FROM storage_groups WHERE owner=?',(owner,)).fetchone()
     if row is None or row['state'] not in ('RUNNING','FAILED','WAITING','INTERRUPTED'):
         raise ContractError('only unresolved registered work may be abandoned')
-    paths=[Path(p) for p in json.loads(row['paths'])]
+    paths=[p for p in group_paths(root,row)]
     proof=row['stop_proof']
     if not proof:
         proof=stop_proof(paths[0])
@@ -482,6 +517,6 @@ def verified_acquisition(root,directory):
     directory=managed_path(root,directory)
     with connection(root) as db:
         for row in db.execute("SELECT * FROM storage_groups WHERE kind='input' AND state='WAITING'"):
-            if json.loads(row['paths'])==[str(directory.parent)] and row['stop_proof'] and json.loads(row['stop_proof']).get('download_complete'):
+            if group_paths(root,row)==[directory.parent] and row['stop_proof'] and json.loads(row['stop_proof']).get('download_complete'):
                 return
     raise ContractError('run the acquire-plan argv to complete registered acquisition before locking')

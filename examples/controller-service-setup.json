@@ -1,12 +1,10 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "record_type": "controller-service-setup",
   "request_id": "initial-setup",
-  "request_digest": "89cc6f065b39112d0407bea0505eff2a6085956fe1bc57fa038bfc8305efc054",
+  "request_digest": "a930413b98e90b5a4bea2ee62dfb3918d7bcc58b82856885ae83edee037f1090",
   "intent": {
     "initial_intent": {
-      "state_root": "/home/operator/.local/state/quirkbench",
-      "runtime_root": "/home/example/.local/share/quirkbench/controller/0.1.0-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "cache_gib": 50,
       "reserve_gib": 20.0,
       "host": "127.0.0.1",
@@ -14,11 +12,10 @@
       "allow_lan": false,
       "logout_policy": "session",
       "runtime_archive_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime_manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      "runtime_manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "runtime_version": "0.1.0"
     },
-    "setup_request_digest": "5046657509d315432cd866bf6ac91ccb51852d297431b2e48795c16f0e1cd652",
-    "config_home": "/home/example/.config",
-    "bin_home": "/home/example/.local/bin"
+    "setup_request_digest": "d269e9e22c2af29124c952a9b726f4ca3e6d7d0ac82873794a1ce812e546f4d8"
   },
   "completed_steps": [],
   "tls_identity_sha256": null

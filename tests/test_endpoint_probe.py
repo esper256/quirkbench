@@ -1,3 +1,4 @@
+from quirkbench.controller_service import configuration as controller_configuration
 """Original enrollment trust and read-only reachability precede any endpoint activation."""
 from contextlib import contextmanager
 from email.message import Message
@@ -129,7 +130,7 @@ def test_real_controller_and_repository_acceptance_with_revocation_and_no_work(p
     from quirkbench.release_http import _response
     from quirkbench.state_reader import StateReader
     c=publication[0];control,record,files,destination,request,result,pem,local,calls,response=prepared
-    config=json.loads((c.root/'private/controller-service.json').read_bytes());tls=Path(config['cert']).parent;registry=CredentialRegistry(c.root)
+    config=controller_configuration(c.root);tls=Path(config['cert']).parent;registry=CredentialRegistry(c.root)
     protocol=make_server(c,host='127.0.0.1',port=0,certfile=config['cert'],keyfile=config['key'],credential_registry=registry)
     repo=make_repository_server(('127.0.0.1',0),config['repositories'],config['cert'],config['key'],tls/'ca.crt',credential_registry=registry)
     threads=[threading.Thread(target=server.serve_forever,daemon=True) for server in (protocol,repo)]

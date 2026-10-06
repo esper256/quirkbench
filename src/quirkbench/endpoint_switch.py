@@ -11,7 +11,7 @@ from .filesystem import _strict_read
 from .controller_endpoint import _dates, validate_intent
 from .filesystem import _managed_path
 from .controller_setup import _database_present
-from .controller_tls import FILES, load_identity, inspect_identity, _lineage
+from .controller_tls import tls_directory, FILES, load_identity, inspect_identity, _lineage
 from .enrollment_records import _document, _now
 from .enrollment_client import endpoint
 from .filesystem import private_lock
@@ -23,20 +23,15 @@ from .store import atomic_write
 def validate_switch(value):
     fields={'schema_version','record_type','request_id','source_configuration',
         'destination_configuration','tls_intent_sha256','source_identity_sha256',
-        'destination_identity_sha256','approved_certificate_sha256','unit'}
-    if isinstance(value,dict) and value.get('schema_version')==2:fields.remove('unit')
+        'destination_identity_sha256','approved_certificate_sha256'}
     if (not isinstance(value,dict) or set(value)!=fields or type(value['schema_version']) is not int
-            or value['schema_version'] not in (1,2) or value['record_type']!='controller-endpoint-switch'):
+            or value['schema_version'] != 2 or value['record_type']!='controller-endpoint-switch'):
         raise ContractError('invalid controller endpoint switch')
     identifier(value['request_id'])
     for name in ('tls_intent_sha256','source_identity_sha256','destination_identity_sha256','approved_certificate_sha256'):
         sha256(value[name])
     for name in ('source_configuration','destination_configuration'):
         if not isinstance(value[name],dict):raise ContractError('endpoint switch requires exact service configurations')
-    if value['schema_version']==1:
-        unit=value['unit']
-        if not isinstance(unit,str) or len(unit)>4096 or str(Path(unit))!=unit or not Path(unit).is_absolute() or '..' in Path(unit).parts:
-            raise ContractError('endpoint switch requires a normalized absolute native unit path')
     if len(canonical(value))>65536:raise ContractError('endpoint switch exceeds byte limit')
     return value
 
@@ -66,23 +61,23 @@ def rollback_stopped(root, request_id, expected_switch_sha256, *, run=subprocess
 def _switch(root,request_id,expected_identity,approved_pin, *,unit,repository_url,run,runner,
             fault_hook,clock,monotonic,rollback,expected_switch_sha256=None):
     from .controller_install import _idle
-    from .controller_service import configuration, validate_configuration
+    from .controller_service import configuration, validate_configuration, configuration_document, materialize_configuration
     identifier(request_id)
     if not rollback:sha256(expected_identity);sha256(approved_pin)
-    root=_managed_path(root)
+    root=_managed_path(Path(root).expanduser().resolve())
     if not _database_present(root):raise Conflict('endpoint switch requires configured controller state')
     directory=_managed_path(root/'private/controller-tls'/('endpoint-'+digest(request_id.encode())[:32]))
     deadline=monotonic()+180;fault=fault_hook or (lambda _:None)
     with private_lock(root/'command.lock') as command_fd,private_lock(root/'coordinator.lock') as owner_fd:
         _remaining(deadline,monotonic);_idle(root)
         current=configuration(root);current_raw=_strict_read(root/'private','controller-service.json')
-        if current_raw!=canonical(current):raise ContractError('endpoint maintenance requires canonical service configuration')
+        if current_raw!=canonical(configuration_document(current)):raise ContractError('endpoint maintenance requires canonical service configuration')
         intent_raw=_strict_read(directory,'intent.json');intent=validate_intent(_document(intent_raw))
         identity_raw=_strict_read(directory,'identity.json');identity=load_identity(identity_raw)
         if identity['schema_version']!=2 or intent['request_id']!=request_id or any(identity[name]!=intent[name]
-                for name in ('request_id','host','previous_directory','previous_identity_sha256')):
+                for name in ('request_id','host','previous_identity','previous_identity_sha256')):
             raise Conflict('endpoint switch requires the exact completed successor stage')
-        previous=_managed_path(directory.parent/identity['previous_directory'])
+        previous=_managed_path(directory.parent/tls_directory(identity['previous_identity']))
         source_raw=_strict_read(previous,'identity.json');source=load_identity(source_raw)
         material={path:{name:_strict_read(path,name) for name in FILES} for path in (previous,directory)}
         if (digest(source_raw)!=identity['previous_identity_sha256']
@@ -100,20 +95,20 @@ def _switch(root,request_id,expected_identity,approved_pin, *,unit,repository_ur
             if (old['cert']!=str(previous/'controller.crt') or old['key']!=str(previous/'controller.key')
                     or digest(current_raw)!=intent['configuration_sha256']):
                 raise Conflict('endpoint stage belongs to another currently configured source')
-            new=old|{'host':identity['host'],'cert':str(directory/'controller.crt'),'key':str(directory/'controller.key')}
+            new=old|{'host':identity['host'],'cert':str(directory/'controller.crt'),'key':str(directory/'controller.key'),'tls_identity':{'kind':'endpoint','request_id':request_id}}
             if 'repository_endpoint' in old:
                 host,port=endpoint(repository_url)
                 if host!=identity['host'] or port==old.get('port',8443):raise ContractError('explicit repository URL must match successor SAN and use a separate port')
                 new['repository_endpoint']={'url':repository_url}
             elif repository_url is not None:raise Conflict('endpoint maintenance cannot introduce repository publication')
             saved=validate_switch({'schema_version':2,'record_type':'controller-endpoint-switch',
-                'request_id':request_id,'source_configuration':old,'destination_configuration':new,
+                'request_id':request_id,'source_configuration':configuration_document(old),'destination_configuration':configuration_document(new),
                 'tls_intent_sha256':digest(intent_raw),'source_identity_sha256':digest(source_raw),
                 'destination_identity_sha256':digest(identity_raw),'approved_certificate_sha256':approved_pin})
             saved_raw=canonical(saved)
-        old,new=saved['source_configuration'],saved['destination_configuration']
+        old,new=(materialize_configuration(root,saved[key]) for key in ('source_configuration','destination_configuration'))
         # Recompute every permitted configuration delta rather than trusting a journal.
-        expected_new=old|{'host':identity['host'],'cert':str(directory/'controller.crt'),'key':str(directory/'controller.key')}
+        expected_new=old|{'host':identity['host'],'cert':str(directory/'controller.crt'),'key':str(directory/'controller.key'),'tls_identity':{'kind':'endpoint','request_id':request_id}}
         if 'repository_endpoint' in old:
             repo=new.get('repository_endpoint')
             if not isinstance(repo,dict) or set(repo)!={'url'}:raise ContractError('invalid successor repository endpoint')
@@ -122,7 +117,7 @@ def _switch(root,request_id,expected_identity,approved_pin, *,unit,repository_ur
             expected_new['repository_endpoint']=repo
         if (saved['request_id']!=request_id or saved['tls_intent_sha256']!=digest(intent_raw)
                 or saved['source_identity_sha256']!=digest(source_raw) or saved['destination_identity_sha256']!=digest(identity_raw)
-                or digest(canonical(old))!=intent['configuration_sha256'] or old['cert']!=str(previous/'controller.crt')
+                or digest(canonical(configuration_document(old)))!=intent['configuration_sha256'] or old['cert']!=str(previous/'controller.crt')
                 or old['key']!=str(previous/'controller.key') or new!=expected_new):
             raise Conflict('endpoint switch differs from exact staged source or permitted delta')
         for config in (old,new):validate_configuration(root,config)
@@ -131,9 +126,9 @@ def _switch(root,request_id,expected_identity,approved_pin, *,unit,repository_ur
         if rollback:
             if digest(saved_raw)!=expected_switch_sha256:raise Conflict('confirm the exact endpoint switch before rollback')
         elif (saved['destination_identity_sha256']!=expected_identity or saved['approved_certificate_sha256']!=approved_pin
-                or (saved['schema_version']==1 and unit is not None and saved['unit']!=str(unit)) or (new.get('repository_endpoint',{}).get('url')!=repository_url)):
+                or (new.get('repository_endpoint',{}).get('url')!=repository_url)):
             raise Conflict('endpoint switch retry requires the original exact operator choices')
-        old_raw,new_raw=canonical(old),canonical(new)
+        old_raw,new_raw=canonical(configuration_document(old)),canonical(configuration_document(new))
         if current_raw not in (old_raw,new_raw):raise Conflict('another configuration superseded this endpoint switch')
         journal_required=journal.exists()
         rolled=directory/'rollback-intent.json';receipt=directory/'switch-completion.json'

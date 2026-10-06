@@ -4,19 +4,66 @@
   "title": "Local durable operation intent v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "kind", "campaign_id", "device_id", "arguments", "local_paths", "input_refs", "source_refs"],
+  "required": [
+    "schema_version",
+    "kind",
+    "campaign_id",
+    "device_id",
+    "arguments",
+    "input_refs",
+    "source_refs"
+  ],
   "properties": {
-    "schema_version": {"const": 1},
-    "kind": {"$ref": "#/$defs/id"},
-    "campaign_id": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/id"}]},
-    "device_id": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/id"}]},
-    "arguments": {"type": "object", "maxProperties": 256},
-    "local_paths": {"type": "object", "maxProperties": 256, "propertyNames": {"$ref": "#/$defs/id"}, "additionalProperties": {"type": "string", "pattern": "^/"}},
-    "input_refs": {"$ref": "#/$defs/digests"},
-    "source_refs": {"$ref": "#/$defs/digests"}
+    "schema_version": {
+      "const": 1
+    },
+    "kind": {
+      "$ref": "#/$defs/id"
+    },
+    "campaign_id": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/id"
+        }
+      ]
+    },
+    "device_id": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/id"
+        }
+      ]
+    },
+    "arguments": {
+      "type": "object",
+      "maxProperties": 256
+    },
+    "input_refs": {
+      "$ref": "#/$defs/digests"
+    },
+    "source_refs": {
+      "$ref": "#/$defs/digests"
+    }
   },
   "$defs": {
-    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
-    "digests": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "digests": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    }
   }
 }

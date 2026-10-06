@@ -87,9 +87,9 @@ def test_signed_install_replay_cache_eviction_and_destination_conflict(fixture, 
     shutil.rmtree(tmp_path / 'cache')
     assert acquire_install('0.1.0', 'first', **arguments) == result
     assert len(calls) == 6
-    with pytest.raises(Conflict, match='different intent'):
-        acquire_install('0.1.0', 'first', **{**arguments, 'data_home': tmp_path / 'another-data'})
-    assert not (tmp_path / 'another-data').exists()
+    selected=acquire_install('0.1.0', 'first', **{**arguments, 'data_home': tmp_path / 'another-data'})
+    assert selected['archive_sha256']==result['archive_sha256']
+    assert Path(selected['runtime_root']).is_relative_to(tmp_path/'another-data')
     assert (tmp_path / 'config/quirkbench/release-install/first/result.json').is_file()
     for name, kind in [('intent', 'intent'), ('metadata', 'metadata'), ('result', 'result')]:
         record = json.loads((tmp_path / f'config/quirkbench/release-install/first/{name}.json').read_text())

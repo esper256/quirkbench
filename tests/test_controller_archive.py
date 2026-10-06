@@ -107,7 +107,8 @@ def test_archive_runs_relocated_without_checkout_and_keeps_selected_state(tmp_pa
     assert guided.returncode == 0, guided.stderr
     result = json.loads(guided.stdout)['data']
     assert result['readiness']['runtime_verified'] and result['readiness']['target_count'] == 0
-    assert result['setup_progress']['intent']['runtime_root'] == str(managed)
+    assert result['setup_progress']['intent']['runtime_archive_sha256'] == record['archive_sha256']
+    assert 'runtime_root' not in result['setup_progress']['intent']
     assert not result['readiness']['setup_complete']
     status = invoke(managed, 'status', '--json')
     assert status.returncode == 0, status.stderr

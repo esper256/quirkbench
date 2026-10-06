@@ -1,3 +1,4 @@
+from quirkbench.controller_service import configuration as controller_configuration
 """New key proof stays inside exact paused original-source maintenance."""
 import json
 from pathlib import Path
@@ -182,7 +183,7 @@ def test_native_validation_of_new_key_cannot_hide_late_key_replacement(paused):
 
 def exchange(paused,**patch):
     spool,code,server=paused;c,control,original,attempt,agent=spool
-    config=json.loads((c.root/'private/controller-service.json').read_bytes());pem=Path(config['cert']).read_text()
+    config=controller_configuration(c.root);pem=Path(config['cert']).read_text()
     calls=patch.pop('calls',[]);transform=patch.pop('transform',lambda value:value)
     challenge_transform=patch.pop('challenge_transform',lambda value:value)
     class Client:

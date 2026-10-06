@@ -17,24 +17,20 @@ class SetupUnavailable(ContractError):
 
 
 def validate_intent(value):
-    fields = {'state_root', 'runtime_root', 'runtime_archive_sha256', 'runtime_manifest_sha256', 'cache_gib', 'reserve_gib',
+    fields = {'runtime_version', 'runtime_archive_sha256', 'runtime_manifest_sha256', 'cache_gib', 'reserve_gib',
               'host', 'port', 'allow_lan', 'logout_policy'}
     if not isinstance(value, dict) or set(value) != fields:
         raise ContractError('invalid setup intent fields')
-    for name in ('state_root', 'runtime_root'):
-        path = value[name]
-        if name == 'runtime_root' and path is None:
-            continue
-        if (not isinstance(path, str) or len(path) > 4096 or not Path(path).is_absolute()
-                or str(Path(path)) != path or '..' in Path(path).parts or path == '/'):
-            raise ContractError('setup paths must be normalized absolute paths')
     for name, low, high in (('cache_gib', 0, 1048576), ('port', 1, 65535)):
         if type(value[name]) is not int or not low <= value[name] <= high:
             raise ContractError('invalid setup ' + name)
-    if value['runtime_root'] is None:
+    if value['runtime_version'] is None:
         if value['runtime_archive_sha256'] is not None or value['runtime_manifest_sha256'] is not None:
-            raise ContractError('runtime identity requires a runtime root')
+            raise ContractError('runtime identity requires a version')
     else:
+        import re
+        if not isinstance(value['runtime_version'],str) or not re.fullmatch(r'[0-9][A-Za-z0-9.+-]{0,63}',value['runtime_version']):
+            raise ContractError('invalid runtime version')
         sha256(value['runtime_archive_sha256'])
         sha256(value['runtime_manifest_sha256'])
     if type(value['reserve_gib']) not in (int, float) or not 0 <= value['reserve_gib'] <= 1048576:

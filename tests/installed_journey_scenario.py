@@ -222,7 +222,7 @@ def run(home,runtime,inputs,case):
         assert query(c.root,*start_args)==started
         cfg={**controller_service.configuration(c.root),**builder}
         from quirkbench.store import atomic_write
-        atomic_write(c.root/'private/controller-service.json',canonical(cfg))
+        atomic_write(c.root/'private/controller-service.json',canonical(controller_service.configuration_document(cfg)))
         patch.setattr(controller_service,'require_ready',lambda _:None)
         # Native OCI identity/import is outside this software journey. Explicit
         # builder input uses existing validated admission instead of signed-ready

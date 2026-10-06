@@ -119,7 +119,6 @@
     "schema_version": 1,
     "record_type": "recovery-shutdown",
     "request_id": "shutdown-1",
-    "control_root": "/var/lib/quirkbench/evidence/control",
     "boot_id": "boot-1",
     "boot_config_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "source_sha256": {

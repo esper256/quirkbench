@@ -73,6 +73,7 @@ def read_active_worker_claim(state_root, operation_id, epoch, generation, stage_
     Recheck immediately before dispatch; a subsequent owner restart can still
     fence this worker, so private output alone never constitutes publication.
     """
+    from .worker_execution import stage_path
     if (os.geteuid() == 0 or not isinstance(operation_id, str)
             or not OPERATION.fullmatch(operation_id)
             or type(epoch) is not int or epoch < 1
@@ -110,7 +111,7 @@ def read_active_worker_claim(state_root, operation_id, epoch, generation, stage_
             db.execute('PRAGMA query_only=ON')
             db.execute('BEGIN')
             lifecycle = db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()
-            row = db.execute('SELECT id,kind,state,stage,stage_dir,input_digest,worker_epoch,'
+            row = db.execute('SELECT id,kind,state,stage,stage_nonce,input_digest,worker_epoch,'
                              'worker_generation,worker_unit,worker_boot_id,deadline '
                              'FROM operations WHERE id=?', (operation_id,)).fetchone()
     except sqlite3.Error as exc:
@@ -118,7 +119,7 @@ def read_active_worker_claim(state_root, operation_id, epoch, generation, stage_
     now = clock()
     if (lifecycle is None or lifecycle['epoch'] != epoch or row is None
             or (row['kind'],expected_stage) not in STAGES or row['state'] != 'RUNNING'
-            or row['stage'] != expected_stage or row['stage_dir'] != str(stage)
+            or row['stage'] != expected_stage or stage_path(root,row) != stage
             or row['worker_epoch'] != epoch or row['worker_generation'] != generation
             or row['worker_unit'] != unit or row['worker_boot_id'] != boot
             or not isinstance(row['input_digest'], str)
