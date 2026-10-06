@@ -175,9 +175,10 @@ class HTTPSDeviceClient:
         sha256(value)
         if type(size) is not int or size < 0 or timeout_s <= 0:
             raise ValueError("invalid download bounds")
-        destination = Path(destination)
-        if not destination.is_absolute() or destination.resolve() != destination:
-            raise ValueError("download requires an explicit cache path")
+        destination = Path(destination).expanduser().absolute()
+        destination = destination.parent.resolve() / destination.name
+        if destination.is_symlink():
+            raise ValueError("download cache destination cannot be a symlink")
         destination.parent.mkdir(parents=True, exist_ok=True)
         partial = destination.with_name(destination.name + ".part")
         lock = destination.with_name(destination.name + ".lock")

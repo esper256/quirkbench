@@ -32,14 +32,15 @@ def inspect(fd,size_bytes,work,*,deadline,guard,runner=_run):
             raise CommissionError('USB layout changed during observation')
         raw.append(block)
     first=raw[0];primary=first[512:1024]
-    # The original image-end view must not hide a competing current-tail GPT.
-    # No repair/conversion policy is implied by approving erasure.
+    # Observe stale tail metadata too: full replacement erases it, never repairs
+    # or imports the old layout. Its bytes remain bound to the confirmation.
     tail=raw[-1][-512:]
-    if tail[:8]==b'EFI PART' and (primary[:8]!=b'EFI PART'
-            or struct.unpack_from('<Q',primary,32)[0]!=size_bytes//512-1):
-        raise CommissionError('conflicting GPT header at physical USB tail; no preparation writes authorized')
+    stale_tail=tail[:8]==b'EFI PART' and (primary[:8]!=b'EFI PART'
+            or struct.unpack_from('<Q',primary,32)[0]!=size_bytes//512-1)
     if primary[:8]!=b'EFI PART':
-        if not any(any(block) for block in raw):
+        if not any(first) and stale_tail:
+            kind='stale-backup-gpt'
+        elif not any(any(block) for block in raw):
             kind='no-partition-table'
         elif first[510:512]==b'\x55\xaa':
             # Flat MBR partition records are wholly contained in the first
@@ -99,6 +100,7 @@ def inspect(fd,size_bytes,work,*,deadline,guard,runner=_run):
             result={'kind':'gpt','previous_quirkbench_labels':'QUIRKBENCH' in output,
                     'gpt_source_bytes':source_bytes}
         finally:os.close(destination)
+    result['stale_tail_gpt']=stale_tail
     final_observation=observe_layout(fd,size_bytes)
     guard()
     if time.monotonic()>=deadline or final_observation!=observations:

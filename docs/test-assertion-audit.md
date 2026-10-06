@@ -71,3 +71,36 @@ those subsystems change; this is not a mandate to rewrite justified security or
 performance regression tests. Full software, native/image/QEMU and hardware/release
 campaigns are outside this audit's validation scope. Follow the
 [testing policy](testing-policy.md) for future slices.
+
+
+## Single-user restriction follow-through (#165)
+
+Ordinary selected directory aliases are resolved before managed traversal. Release
+metadata and download cache ancestors accept those aliases; managed descendants,
+partial/lock leaves and destructive scopes still use their operation-specific
+substitution checks. Hash-verified read-only CAS/RPM/source inputs no longer require
+creator UID or a single hardlink. Held descriptors, named identities, read budgets,
+content hashes and exact evidence attribution remain required. Existing source
+handoff and fresh writable Git staging retain worker coordination checks.
+
+Library verification checks bytes, sizes and executable semantics rather than
+exact 0444/0555 modes. Diagnostic and temporary network stores may use a private
+enclosing directory; networking retains the writable restricted tmpfs: credential storage is not
+an execution or device namespace. Creation still uses private defaults. Native NetworkManager keyfile
+rules and target credential ownership remain functional requirements.
+
+Full tree modes remain part of restored build snapshots and deployed sysroot
+identities: permissions affect filesystem access and execution, and incremental
+source verification compares the exact copied metadata. These are not mode-based
+input admission. Read-only cache defaults now preserve executable file bits;
+hashes, not chmod, verify snapshot integrity. Fresh Git/index and cleanup ownership
+checks protect managed mutable staging and explicitly admitted deletion scopes,
+not a multi-user data-access model. Metadata equality during a bounded read detects
+concurrent change; locks alone never prove filesystem immutability.
+
+Captured source formats exclude privilege-changing special mode bits and escaping
+links. Generated payload modes remain explicit artifact/target credential data.
+The two FAT control-store umasks protect pairing credentials; the three finite-pool
+inode checks are advisory storage admission (unknown accounting is accepted). Real
+allocation, short-write and sync failures still determine completion. No application
+requirement is added for the user's shell umask.

@@ -53,7 +53,10 @@ def list_images(args):
 def prepare(args):
     from . import preparation
     from .contracts import ContractError
+    import os
     try:
+        if os.geteuid()==0 and 'SUDO_UID' in os.environ:
+            raise ContractError('run quirkbench as your normal user so it can use your controller; run sudo -v first for the device helper')
         if args.plan is None:
             if any(value is None for value in (args.image,args.device,args.target,args.plan_out)):
                 raise ContractError('planning requires --image, --device, --target and --plan-out; apply uses --plan, --confirm and --erase')

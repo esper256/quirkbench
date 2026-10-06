@@ -123,8 +123,8 @@ def configure_state_root(explicit: Path | None = None, *, config_home: Path | No
                 raise StateConfigurationError("existing default state root requires explicit local configuration; preserve existing files")
             root.mkdir(parents=True, exist_ok=True, mode=0o700)
         info = root.stat()
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
-            raise StateConfigurationError("controller state root must be owned by this user")
+        if not stat.S_ISDIR(info.st_mode):
+            raise StateConfigurationError("controller state root must be a directory")
         document = {"schema_version": 1}
         if root != default_state_root():
             # Retain the user's one external choice, not a second identity for it.

@@ -82,8 +82,8 @@ def _database_present(root):
         info = path.lstat()
     except FileNotFoundError:
         return False
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
-        raise ContractError('controller database must be a user-owned regular file')
+    if not stat.S_ISREG(info.st_mode):
+        raise ContractError('controller database must be a regular file')
     return True
 
 
@@ -108,8 +108,8 @@ def setup_progress(root=None, *, config_home=None):
         info = path.lstat()
     except FileNotFoundError:
         return None
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
-        raise ContractError('setup progress must be a user-owned regular file')
+    if not stat.S_ISREG(info.st_mode):
+        raise ContractError('setup progress must be a regular file')
     return load_progress(read_file(path.parent, path.name, limit=MAX_SETUP_BYTES))
 
 
@@ -238,6 +238,8 @@ def controller_status(root=None, *, config_home=None, filesystem=None,
         except (OSError, ValueError, sqlite3.Error) as exc:
             report['instructions'].append(str(exc)[:512])
         if report['background_work_ready']:
+            report['instructions'] = [item for item in report['instructions']
+                if not item.startswith('Start the configured controller with ')]
             from .controller_compute import readiness
             report.update(readiness(root))
     else:
@@ -251,23 +253,45 @@ def controller_status(root=None, *, config_home=None, filesystem=None,
     runtime_verified = False
     preferences_match = False
     connection = None
-    if matches:
-        intent = progress['intent']
+    if matches or (root / 'private/controller-service.json').exists():
+        intent = progress['intent'] if matches else None
         try:
-            runtime_verified = _runtime(intent, config_home=config_home)
+            from .controller_install import verify_installation
+            runtime = selected_runtime(config_home=config_home)
+            current = verify_installation(runtime)
+            runtime_verified = True
+            if (root / 'private/controller-service.json').exists():
+                from .controller_service import configuration, software_identity
+                configured = configuration(root)
+                actual = digest(canonical({key: current[key] for key in ('version','archive_sha256')}))
+                if software_identity(configured) != actual:
+                    raise Conflict('selected runtime differs from current controller configuration')
+            else:
+                # Before configuration exists, setup intent is the only pin.
+                runtime_verified = _runtime(intent, config_home=config_home)
         except (OSError, ValueError) as exc:
+            runtime_verified = False
             report['instructions'].append(str(exc)[:512])
         from .retention_settings import settings
-        if (root / 'settings.json').exists():
+        if intent is not None and (root / 'settings.json').exists():
             try:
                 preferences_match = settings(root)['cache_gib'] == intent['cache_gib']
                 if not preferences_match:
                     report['instructions'].append('cache preference differs from recorded setup intent')
             except (OSError, ValueError) as exc:
                 report['instructions'].append(str(exc)[:512])
-        connection = (connection_inspector or (lambda choice: {
-            'host': choice['host'], 'port': choice['port'], 'allow_lan': choice['allow_lan'],
-            'status': 'recorded_not_activated'}))(intent)
+        connection_choice = intent
+        connection_status = 'recorded_not_activated'
+        if (root / 'private/controller-service.json').exists():
+            try:
+                from .controller_service import configuration
+                connection_choice = configuration(root)
+                connection_status = 'active' if report['background_work_ready'] else 'configured_stopped'
+            except (OSError, ValueError) as exc:
+                report['instructions'].append(str(exc)[:512])
+        connection = None if connection_choice is None else (connection_inspector or (lambda choice: {
+            'host': choice.get('host','127.0.0.1'), 'port': choice.get('port',8443), 'allow_lan': choice.get('allow_lan',False),
+            'status': connection_status}))(connection_choice)
     if report['installations']['mismatch']:
         report['instructions'].append('CLI, configured and advertised service revisions differ; reconcile work before quirkbench dev install --activate (unsigned development) or quirkbench admin install (signed release).')
     service_setup = None

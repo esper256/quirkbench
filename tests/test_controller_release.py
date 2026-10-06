@@ -173,3 +173,17 @@ def test_supplied_release_assets_authenticate_exact_bytes_without_qualification(
     assets['builder_archive'].symlink_to(assets['recovery_image'])
     with pytest.raises((OSError, ContractError)):
         verify_release(*args, run=fake_gpg, assets=assets)
+
+
+def test_external_metadata_and_asset_ancestor_aliases_keep_digest_and_mutation_checks(tmp_path):
+    directory=tmp_path/'actual';directory.mkdir()
+    alias=tmp_path/'alias';alias.symlink_to(directory,target_is_directory=True)
+    path=directory/'asset';path.write_bytes(b'exact release bytes')
+    assert controller_release.bounded_file(alias/'asset',128)==path.read_bytes()
+    assert controller_release._asset_digest(alias/'asset')['sha256']==digest(path.read_bytes())
+    calls=[0]
+    def mutate():
+        calls[0]+=1
+        if calls[0]==2:path.write_bytes(b'changed release bytes')
+    with pytest.raises(ContractError,match='changed'):
+        controller_release._asset_digest(alias/'asset',verify=mutate)

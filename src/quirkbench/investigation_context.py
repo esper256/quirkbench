@@ -51,7 +51,7 @@ def baseline(reader, value):
         path=reader.root/'artifacts'/'objects'/identity
         try:
             info=path.lstat()
-            present=(stat.S_ISREG(info.st_mode) and info.st_nlink==1 and info.st_uid==os.geteuid()
+            present=(stat.S_ISREG(info.st_mode)
                      and path.resolve()==path)
         except OSError:present=False
         if not present:missing.append({'role':role,'sha256':identity})
@@ -228,7 +228,7 @@ def evidence_read(reader,name,identity, *,offset=0,length=LOG_BYTES,after=0,limi
         except FileNotFoundError:return {**result,'status':'unavailable','reason':'retained evidence bytes missing','content_base64':None}
         with os.fdopen(fd,'rb') as stream:
             before=os.fstat(stream.fileno())
-            if (not stat.S_ISREG(before.st_mode) or before.st_nlink!=1 or before.st_uid!=os.geteuid()
+            if (not stat.S_ISREG(before.st_mode)
                     or before.st_size!=sizes[0][0] or offset>before.st_size):
                 raise ContractError('retained evidence bytes differ from record')
             stream.seek(offset);raw=stream.read(length)

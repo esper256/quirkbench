@@ -173,7 +173,7 @@ def availability(reader,refs):
         try:
             with held_parent(path) as (parent,guard):
                 guard();info=os.stat(path.name,dir_fd=parent,follow_symlinks=False)
-                if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_uid!=os.geteuid():
+                if not stat.S_ISREG(info.st_mode):
                     raise Conflict('retained proposal input unavailable: '+identity)
         except OSError as exc:raise Conflict('retained proposal input unavailable: '+identity) from exc
 

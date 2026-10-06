@@ -23,8 +23,6 @@ def _source_owner(path):
         raise ContractError('canonical approved source root required')
     fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
     held=os.fstat(fd)
-    if held.st_uid!=os.geteuid():
-        os.close(fd);raise ContractError('approved source must be user-owned')
     def guard():
         named=path.lstat()
         if (held.st_dev,held.st_ino,held.st_uid,held.st_mode)!=(named.st_dev,named.st_ino,named.st_uid,named.st_mode) or path.resolve()!=path:

@@ -102,8 +102,8 @@ def package_archive(path,packages, *,destination=None,verify=lambda:None,reserve
         fd=os.open(path.name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=parent)
         with os.fdopen(fd,'rb') as stream:
             original=os.fstat(stream.fileno())
-            if not stat.S_ISREG(original.st_mode) or original.st_nlink!=1 or original.st_uid!=os.geteuid():
-                raise ContractError('RPM archive is foreign, linked or special')
+            if not stat.S_ISREG(original.st_mode):
+                raise ContractError('RPM archive must be a regular file')
             def guard():
                 verify();ancestor_guard()
                 if (_identity(os.fstat(stream.fileno()))!=_identity(original) or

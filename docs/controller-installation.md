@@ -379,12 +379,15 @@ Distrobox does not install its executable on the host, or vice versa.
    the new prepared-media layout merely by reflashing; prepare a fresh bundle with
    current software. A successful build reports an image path, not pairing readiness.
 
-   With the controller still running, use a second terminal:
+   With the controller still running, use a second host terminal as your normal
+   user. Authenticate the narrow device helper with `sudo -v`; do not prefix
+   Quirkbench itself with sudo, which would select root's controller state.
 
    ```sh
    IMAGE="/absolute/new-output/recovery.img"
    USB="/dev/SELECTED_WHOLE_USB"
-   PLAN="$HOME/.local/state/quirkbench-first-usb-plan.json"  # new file
+   PLAN="$HOME/.local/state/quirkbench-usb-plan-$(date -u +%Y%m%dT%H%M%SZ).json"
+   sudo -v
    quirkbench recovery prepare \
      --image "$IMAGE" --device "$USB" --target my-target \
      --plan-out "$PLAN" --unsigned-development

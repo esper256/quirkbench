@@ -97,7 +97,8 @@ def test_maintenance_backup_restores_complete_pack_closure_and_fence(maintenance
 def test_ranged_download_resumes_after_interruption(maintenance):
     controller, client, install, library, pack, selection, mounts, events, root = maintenance
     value = json.loads(controller.store.get(pack))['files']['model.bin']
-    output = root/'cache/object'
+    alias=root/'cache-alias';alias.symlink_to(root,target_is_directory=True)
+    output = alias/'cache/object'
     def interrupt(**progress):
         raise OSError('lost network after synchronized chunk')
     with pytest.raises(OSError):

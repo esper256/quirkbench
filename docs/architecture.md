@@ -154,7 +154,10 @@ not authorization for a continuing target-side partitioning workflow.
 New preparation is a destructive,
 explicit controller operation bound to the selected whole USB, artifact and actual
 capacity. Revalidate device identity/use and expected phase geometry before each
-write. The target validates completed prepared geometry and never automatically
+write. A stale physical-tail GPT left by a smaller factory flash is captured
+and reported during planning, then replaced only under whole-device erase
+confirmation; it grants no repair, import or preservation of an old filesystem.
+The target validates completed prepared geometry and never automatically
 partitions, formats, grows or repairs it. Preserve historical record interpretation.
 New layout policy budgets actual fixed recovery extents and shipped library payload
 (currently zero plus minimum six-role filesystem overhead), splitting remaining

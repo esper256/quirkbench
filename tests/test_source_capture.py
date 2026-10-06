@@ -87,7 +87,7 @@ def test_streamed_large_file_is_bound_to_manifest_digest(repository):
     assert entry['sha256']==__import__('hashlib').sha256((root/'new.c').read_bytes()).hexdigest()
 
 
-@pytest.mark.parametrize('kind',['escape','chain-escape','special','hardlink'])
+@pytest.mark.parametrize('kind',['escape','chain-escape','special'])
 def test_unsafe_source_nodes_rejected(repository,kind):
     root,base,state=repository
     if kind=='escape':(root/'new.c').symlink_to('../outside')
@@ -158,7 +158,7 @@ def test_serialized_source_or_stage_replacement_never_yields_complete_receipt(re
 @pytest.mark.parametrize('stream',['stdout','stderr'])
 def test_native_git_output_limits_terminate_and_reap_process(repository,stream,monkeypatch):
     import sys
-    from quirkbench import retention
+    from quirkbench import process_ownership as retention
     processes=[]
     def launch(argv,**kw):
         assert 'core.fsmonitor=false' in argv and 'core.hooksPath=/dev/null' in argv
@@ -172,7 +172,7 @@ def test_native_git_output_limits_terminate_and_reap_process(repository,stream,m
 
 def test_native_git_claim_loss_terminates_and_reaps_process(repository,monkeypatch):
     import sys
-    from quirkbench import retention
+    from quirkbench import process_ownership as retention
     processes=[];checks=[0]
     def launch(argv,**kw):
         process=subprocess.Popen([sys.executable,'-c','import threading; threading.Event().wait(3)'],**kw)
@@ -198,3 +198,10 @@ def test_raw_noncanonical_stage_is_rejected_before_path_helpers(repository,stage
     root,base,state=repository
     with pytest.raises(ContractError,match='canonical'):
         source.capture(root,base,[],stage,ArtifactStore(state/'artifacts',reserve_bytes=0),writer_quiesced=True,verify=lambda:None)
+
+
+def test_source_capture_reads_hardlinked_tracked_bytes(repository):
+    root,base,state=repository
+    os.link(root/'driver.c',root.parent/'extra-source-name')
+    value=capture(repository)
+    assert value

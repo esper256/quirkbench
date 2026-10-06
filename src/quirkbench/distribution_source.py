@@ -35,8 +35,8 @@ def snapshot(root, verify, *, git=False):
             info = os.stat(name, dir_fd=parent, follow_symlinks=False)
             if len(directories) + len(files) >= MAX_FILES:
                 raise ContractError('distribution source namespace exceeds bounds')
-            if info.st_uid != os.geteuid() or info.st_mode & 0o7000:
-                raise ContractError('prepared distribution input has foreign ownership or special mode')
+            if info.st_mode & 0o7000:
+                raise ContractError('prepared distribution input has special mode')
             if stat.S_ISDIR(info.st_mode):
                 child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
                 try:

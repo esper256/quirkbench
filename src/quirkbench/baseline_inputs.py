@@ -66,8 +66,8 @@ def verify_object(store,identity,limit, *,verify=lambda:None,consume=lambda size
             if root.resolve()!=root:raise Conflict('candidate CAS root moved')
         guard();fd = os.open(identity,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=objects_fd)
         before = os.fstat(fd)
-        if (not stat.S_ISREG(before.st_mode) or before.st_nlink!=1
-                or before.st_uid!=os.geteuid() or not 0 < before.st_size <= limit):
+        if (not stat.S_ISREG(before.st_mode)
+                or not 0 < before.st_size <= limit):
             raise ContractError('candidate CAS object outside regular-file byte bounds: '+identity)
         state = hashlib.sha256();total = 0
         while True:

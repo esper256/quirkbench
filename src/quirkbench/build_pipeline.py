@@ -84,6 +84,7 @@ def _tree_hash(root: Path, *, excluded_paths: frozenset[str] = frozenset(EXCLUDE
         if relative_text in excluded_paths:
             continue
         relative = relative_text.encode()
+        # Restored/deployed filesystem access and execution semantics are data.
         mode = stat.S_IMODE(entry.lstat().st_mode).to_bytes(4, "big")
         if entry.is_symlink():
             item = b"L" + relative + b"\0" + os.readlink(entry).encode()
@@ -757,7 +758,9 @@ def _make_immutable(root: Path) -> None:
     for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
         if path.is_symlink():
             continue
-        path.chmod(0o500 if path.is_dir() else 0o400)
+        # Retained snapshots remain executable where the staged file was.
+        # Read-only defaults prevent accidental writes; hashes prove integrity.
+        path.chmod(0o500 if path.is_dir() else 0o400 | (path.stat().st_mode & 0o111))
     root.chmod(0o500)
 
 

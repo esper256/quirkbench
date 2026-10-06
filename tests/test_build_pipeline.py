@@ -663,3 +663,14 @@ def test_waiting_build_lock_does_not_update_durable_advancement_on_countdowns(tm
             pipeline._acquire_build_lock(contender)
     assert len(changes) == 1
     assert changes[0][1]['state'] == 'WAITING'
+
+
+def test_snapshot_readonly_defaults_preserve_executable_metadata(tmp_path):
+    from quirkbench.build_pipeline import _make_immutable
+    import stat
+    root=tmp_path/'snapshot';root.mkdir()
+    executable=root/'program';executable.write_bytes(b'program');executable.chmod(0o755)
+    ordinary=root/'data';ordinary.write_bytes(b'data');ordinary.chmod(0o644)
+    _make_immutable(root)
+    assert stat.S_IMODE(executable.stat().st_mode)==0o511
+    assert stat.S_IMODE(ordinary.stat().st_mode)==0o400

@@ -7,7 +7,7 @@ import zipfile
 import pytest
 
 from quirkbench import cli, controller_setup
-from quirkbench.contracts import Conflict, ContractError
+from quirkbench.contracts import Conflict, ContractError, canonical
 from quirkbench.controller import Controller
 from quirkbench.controller_setup import SetupFilesystem, controller_status, setup_controller, setup_progress
 from quirkbench.retention_settings import set_setting
@@ -213,7 +213,7 @@ def test_journal_symlink_refused_and_explicit_checkout_state_accepted(tmp_path):
     config = tmp_path / 'state/private'
     config.mkdir(parents=True, mode=0o700)
     (config / 'setup-progress.json').symlink_to(tmp_path / 'elsewhere')
-    with pytest.raises(ContractError, match='user-owned regular file'):
+    with pytest.raises(ContractError, match='regular file'):
         setup(tmp_path)
     (config / 'setup-progress.json').unlink()
     tree = tmp_path / 'checkout'
@@ -375,3 +375,43 @@ def test_publication_ack_loss_reconciles_owned_stage_cleanup(tmp_path, monkeypat
     monkeypatch.setattr(controller_setup, 'sync_directory', original)
     assert setup(tmp_path)['readiness']['database_available']
     assert not list((tmp_path / 'state').glob('.setup-database-*'))
+
+
+def test_current_configured_update_does_not_rewrite_initial_intent(tmp_path,monkeypatch):
+    from quirkbench.controller_install import install,select_runtime
+    from test_controller_install import make_archive
+    original=runtime_archive(tmp_path)
+    setup(tmp_path,runtime_root=Path(original['runtime_root']))
+    before=setup_progress(tmp_path/'state',config_home=tmp_path/'config')
+    new=tmp_path/'new';new.mkdir()
+    current=install(make_archive(new,payload=b'updated'),data_home=tmp_path/'data')
+    select_runtime(Path(current['runtime_root']),config_home=tmp_path/'config')
+    monkeypatch.setenv('XDG_CONFIG_HOME',str(tmp_path/'config'))
+    (tmp_path/'state/private/controller-service.json').write_bytes(canonical({
+        'software':{key:current[key] for key in ('version','archive_sha256')},
+        'tls_identity':{'kind':'setup','request_id':'initial'},'credential_registry':True,
+        'host':'192.0.2.23','port':8443,'allow_lan':True}))
+    tls=tmp_path/'state/private/controller-tls'/('setup-'+__import__('quirkbench.contracts',fromlist=['digest']).digest(b'initial')[:32])
+    tls.mkdir(parents=True,exist_ok=True)
+    for name in ('controller.crt','controller.key'):(tls/name).write_bytes(b'test trust')
+    adapters=observations();adapters.pop('connection_inspector')
+    adapters['service_inspector']=lambda:{'background_work_ready':False,'service_installation':'unverified',
+        'instructions':['Start the configured controller with quirkbench admin controller run and keep that terminal open.']}
+    adapters['ready']=lambda _: {'background_work_ready':True,'service_installation':'verified'}
+    adapters['enrollment_inspector']=lambda _: {'enrollment_available':False}
+    report=controller_status(tmp_path/'state',config_home=tmp_path/'config',**adapters)
+    assert report['readiness']['runtime_verified']
+    assert report['connection']['status']=='active'
+    assert report['connection']['host']=='192.0.2.23'
+    assert not any(text.startswith('Start the configured') for text in report['instructions'])
+    assert setup_progress(tmp_path/'state',config_home=tmp_path/'config')==before
+    config_path=tmp_path/'state/private/controller-service.json'
+    config=json.loads(config_path.read_bytes());config['software']['archive_sha256']='f'*64
+    config_path.write_bytes(canonical(config))
+    mismatch=controller_status(tmp_path/'state',config_home=tmp_path/'config',**adapters)
+    assert not mismatch['readiness']['runtime_verified']
+    config['software']={key:current[key] for key in ('version','archive_sha256')}
+    for key in ('host','port','allow_lan'):config.pop(key,None)
+    config_path.write_bytes(canonical(config))
+    defaults=controller_status(tmp_path/'state',config_home=tmp_path/'config',**adapters)
+    assert defaults['connection']['host']=='127.0.0.1' and defaults['connection']['port']==8443

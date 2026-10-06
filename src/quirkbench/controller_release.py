@@ -83,7 +83,7 @@ def load_statement(raw):
 
 
 def bounded_file(path, limit):
-    path = Path(path).expanduser().absolute()
+    path = Path(path).expanduser().resolve(strict=True)
     return read_file(path.parent, path.name, limit=limit)
 
 
@@ -92,8 +92,7 @@ def _asset_digest(path, *, inspect=None, verify=lambda:None, byte_limit=ASSET_LI
     if type(byte_limit) is not int or not 1<=byte_limit<=ASSET_LIMIT:raise ContractError('invalid asset byte limit')
     verify()
     path = Path(path).expanduser().absolute()
-    if path.parent.resolve() != path.parent:
-        raise ContractError('release asset parent must be canonical')
+    path = path.parent.resolve(strict=True) / path.name
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         before = os.fstat(fd)
