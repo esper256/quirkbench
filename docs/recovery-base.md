@@ -123,6 +123,15 @@ the controller, not public internet. Clock plausibility is checked before TLS; a
 operator-supplied system time or a configured reachable time source, never a certificate
 verification bypass or an implicit firmware-clock write.
 
+Prepared enrollment uses the existing retained request/key, challenge, redemption
+and generation activation. It retains the inspected controller certificate against
+the staged fingerprint before activation. After interrupted activation, cleanup
+revalidates native trust, exact media/binding and the complete active generation
+before deleting the bootstrap secret. A request timeout preserves the same
+invitation and request; pairing never authorizes a run. These adapters are software
+foundations; the controller preparation command and automatic console handoff
+are not yet delivered.
+
 Restore only the selected private network profile into RAM after target binding is
 checked. Recovery mounts evidence before optional experiment/library storage; failure
 of those optional mounts must not prevent setup, credential access or uploads.

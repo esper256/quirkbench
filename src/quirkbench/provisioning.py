@@ -44,13 +44,24 @@ def validate_signing_key(path, *, runner=None,temporary_parent=None):
         raise ContractError('repository trust lacks a usable public signing key')
 
 
+def generation_description(files):
+    """Describe the existing immutable generation and rewritten active paths."""
+    manifest={name:digest(data) for name,data in sorted(files.items())}
+    generation=digest(canonical(manifest))
+    active=json.loads(files['runtime.json'],object_pairs_hook=_pairs)
+    prefix='generations/'+generation+'/'
+    for key in ('ca','token_file'): active[key]=prefix+active[key]
+    for remote in active['remotes'].values():
+        for key in ('ca','public_key','client_cert','client_key'): remote[key]=prefix+remote[key]
+    return manifest,generation,active
+
+
 def _publish_generation(files,control,verify_target,validator,fault):
     """Caller holds configuration/execution locks; retain the existing generation."""
     from .runtime import load_provisioning
     from .binding import verify_binding
-    manifest={name:digest(data) for name,data in sorted(files.items())}
-    generation=digest(canonical(manifest));generations=control/'generations'
-    config=json.loads(files['runtime.json'],object_pairs_hook=_pairs)
+    manifest,generation,active=generation_description(files)
+    generations=control/'generations'
     staging=generations/('.pending-'+uuid.uuid4().hex)
     staging.mkdir(mode=0o700)
     try:
@@ -93,11 +104,6 @@ def _publish_generation(files,control,verify_target,validator,fault):
             verify_target()
             os.rename(staging,target); sync_directory(generations)
         fault('generation_published')
-        active=json.loads(canonical(config))
-        prefix='generations/'+generation+'/'
-        for key in ('ca','token_file'): active[key]=prefix+active[key]
-        for remote in active['remotes'].values():
-            for key in ('ca','public_key','client_cert','client_key'): remote[key]=prefix+remote[key]
         return target,generation,active
     finally:
         if staging.exists():

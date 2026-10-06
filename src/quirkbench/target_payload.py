@@ -44,6 +44,8 @@ TARGET_MODULES = (
     'ostree',
     'process_identity',
     'process_ownership',
+    'prepared_enrollment',
+    'prepared_media',
     'product_contracts',
     'provisioning',
     'recipe_registry',
