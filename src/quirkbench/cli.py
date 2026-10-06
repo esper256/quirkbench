@@ -386,6 +386,8 @@ def main(argv=None):
         exclusive = args.command == 'maintenance' and args.action in ('abandon','abandon-upload')
         with private_lock(root/'command.lock',shared=not exclusive):
             result=_main(args)
+        if result != 0:
+            return result
         try: prune(root)
         except (OSError,ValueError,sqlite3.Error) as exc:
             print('Housekeeping deferred: '+type(exc).__name__+'. Use quirkbench admin storage show.',file=sys.stderr)

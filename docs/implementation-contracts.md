@@ -287,7 +287,8 @@ does not stop a freshly initialized controller.
 
 An explicit unused-controller reset is synchronous maintenance under the existing
 setup, installation, command, coordinator, build, migration and CAS locks. It reads
-the current schema without conversion, refuses enrolled targets, all attempts, credential
+known development schemas 32 through current without conversion, verifies the
+tables/fields needed for reset admission, refuses enrolled targets, all attempts, credential
 generations, bound enrollment and unreconciled work, and archives an exact allowlist
 of database/sidecar/configuration/setup files. Admission grants no recursive deletion.
 A version-1 local reset inventory records exact source identities and digests before
@@ -297,6 +298,9 @@ before completion, and inventoried CAS objects remain opaque retention roots whi
 the archive exists. Unrelated evidence, runtime, keys and repositories are preserved.
 This local archive is not the C7 portable backup/restore protocol. Issued invitations
 are explicitly invalidated; reset grants no target execution or evidence upload.
+Historical pathname-bearing storage records are never interpreted: any such rows
+block reset. Unknown schema shapes remain protected. An incompatible live owner
+may require stopping it in its terminal before reset can verify exclusive ownership.
 
 An operation result distinguishes a public CAS reference from a private deliverable
 descriptor (credential generation and private-store key). Generic factory images

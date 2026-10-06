@@ -83,8 +83,20 @@ this revised contract rather than ask the owner to approve the same decision aga
   incidental second image builder. See [recovery design](docs/recovery-base.md).
 - Require authenticated setup and exact-candidate/attempt operator approval. Agent
   proposals, successful builds, pairing and watchdog availability do not grant it.
-- Obtain higher-reasoning review for changes to storage, trust/binding, source/worker
-  ownership, durable execution, shutdown or watchdog authorization boundaries.
+- Obtain one independent review using **gpt-6-astra at medium reasoning effort**
+  at the end of a substantial implementation campaign, such as a complete
+  refactoring plan or a feature milestone. Review the accumulated changes before
+  merging the campaign, including affected storage, trust/binding, source/worker
+  ownership, durable execution, shutdown and watchdog authorization boundaries.
+  Do not launch reviewer subagents for individual packets, routine bugs, small
+  refactors, documentation changes or ordinary test failures. Use implementer
+  review and focused tests during development. Resolve findings within the same
+  review cycle; request another review only when the resolution materially changes
+  the reviewed design or guarantees. Concrete architectural, trust, ownership or
+  data-loss concerns still require pausing for the owner's decision; they do not
+  automatically authorize an additional reviewer. This policy supersedes review
+  cadence and effort requirements in older implementation plans and guidance;
+  historical review records remain unchanged.
 - Keep readiness, source capture, worker draining, recovery arrival, evidence durability,
   safe shutdown and unattended eligibility separate. Do not infer them from one status.
 - Default state lives outside Git checkouts; explicit user-selected state/build/output

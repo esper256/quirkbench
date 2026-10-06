@@ -223,14 +223,6 @@ def controller_status(root=None, *, config_home=None, filesystem=None,
     root = discover_state_root(root, config_home=config_home)
     progress = setup_progress(root, config_home=config_home)
     report = (service_inspector or inspect_user_manager)()
-    try:
-        report.update((ready or require_ready)(root))
-    except (OSError, ValueError, sqlite3.Error) as exc:
-        report['instructions'].append(str(exc)[:512])
-    if report['background_work_ready']:
-        from .controller_compute import readiness
-        report.update(readiness(root))
-    report.update((installation_inspector or installation_report)(root, service_ready=report['background_work_ready']))
     count = None
     database_available = False
     if (root / 'controller.sqlite').exists() or (root / 'controller.sqlite').is_symlink():
@@ -240,6 +232,19 @@ def controller_status(root=None, *, config_home=None, filesystem=None,
             database_available = True
         except (OSError, ValueError, sqlite3.Error) as exc:
             report['instructions'].append(str(exc)[:512])
+    if database_available:
+        try:
+            report.update((ready or require_ready)(root))
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            report['instructions'].append(str(exc)[:512])
+        if report['background_work_ready']:
+            from .controller_compute import readiness
+            report.update(readiness(root))
+    else:
+        report['background_work_ready'] = False
+        report['instructions'] = [item for item in report['instructions']
+                                  if not item.startswith('Start the configured controller with ')]
+    report.update((installation_inspector or installation_report)(root, service_ready=report['background_work_ready']))
     selection = _config_home(config_home) / 'quirkbench/controller.json'
     selected = selection.exists() and discover_state_root(config_home=config_home) == root
     matches = progress is not None

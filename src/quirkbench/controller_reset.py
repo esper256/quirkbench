@@ -106,7 +106,7 @@ def _validate(record, root, config):
 
 def _admit(captured):
     """Query disposable copies: SQLite cannot alter the retained source sidecars."""
-    from .controller import require_current_schema
+    from .controller import MIGRATIONS
     with tempfile.TemporaryDirectory(prefix='quirkbench-reset-') as temporary:
         for name in STATE_FILES[:4]:
             snapshot = captured['state/' + name]
@@ -114,17 +114,38 @@ def _admit(captured):
         database = Path(temporary) / 'controller.sqlite'
         if not database.exists(): raise Conflict('no controller database to reset')
         with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True)) as db:
-            try: require_current_schema(db)
-            except ContractError as exc: raise Conflict('incompatible development database; preserve it and initialize fresh state') from exc
+            version = db.execute('PRAGMA user_version').fetchone()[0]
+            # Disposal does not execute or upgrade old records. Check precisely
+            # the facts needed to prove this controller is unused and stopped.
+            required = {'devices': {'id'}, 'attempts': {'id'},
+                        'credential_generations': {'generation'}, 'enrollment_requests': {'request_id'},
+                        'operations': {'state', 'worker_unit'}, 'jobs': {'state'},
+                        'storage_groups': {'state', 'stop_proof'}}
+            tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if not 32 <= version <= len(MIGRATIONS) or any(
+                    table not in tables or not fields <= {row[1] for row in db.execute('PRAGMA table_info('+table+')')}
+                    for table, fields in required.items()):
+                raise Conflict('incompatible development database cannot be safely reset: unknown schema or missing reset safety fields; preserve existing files')
+            storage_fields = {row[1] for row in db.execute('PRAGMA table_info(storage_groups)')}
+            current_storage = {'workspace_id', 'input_generation', 'stage_retained'} <= storage_fields
+            if not current_storage:
+                if 'paths' not in storage_fields:
+                    raise Conflict('incompatible development database cannot be safely reset: unknown storage shape')
+                # Never interpret historical pathname records for deletion or
+                # shutdown authority. Only their complete absence is sufficient.
+                if db.execute('SELECT 1 FROM storage_groups LIMIT 1').fetchone():
+                    raise Conflict('legacy storage records require explicit recovery before reset; preserve existing files')
             if db.execute('PRAGMA quick_check').fetchall() != [('ok',)]:
                 raise Conflict('database integrity unavailable; preserve it for explicit recovery')
             for table in ('devices', 'attempts', 'credential_generations', 'enrollment_requests'):
                 if db.execute('SELECT 1 FROM ' + table + ' LIMIT 1').fetchone():
                     raise Conflict('reset is limited to unused controllers without targets, attempts or bound enrollment')
-            for query in (
+            queries = [
                 "SELECT 1 FROM operations WHERE state IN ('QUEUED','RUNNING','WAITING') OR worker_unit IS NOT NULL LIMIT 1",
-                "SELECT 1 FROM jobs WHERE state IN ('QUEUED','ACTIVE') LIMIT 1",
-                "SELECT 1 FROM storage_groups WHERE stop_proof IS NULL AND (state IN ('RUNNING','WAITING','FAILED','INTERRUPTED') OR workspace_id IS NOT NULL OR input_generation IS NOT NULL OR stage_retained!=0) LIMIT 1"):
+                "SELECT 1 FROM jobs WHERE state IN ('QUEUED','ACTIVE') LIMIT 1"]
+            if current_storage:
+                queries.append("SELECT 1 FROM storage_groups WHERE stop_proof IS NULL AND (state IN ('RUNNING','WAITING','FAILED','INTERRUPTED') OR workspace_id IS NOT NULL OR input_generation IS NOT NULL OR stage_retained!=0) LIMIT 1")
+            for query in queries:
                 if db.execute(query).fetchone(): raise Conflict('stop and reconcile outstanding work before reset')
 
 
