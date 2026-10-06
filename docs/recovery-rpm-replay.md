@@ -117,7 +117,7 @@ all acquired RPMs must pass the independent public-key verification at `lock`.
 On an existing or freshly set up controller, use its selected state outside Git:
 
 ```sh
-quirkbench --state /absolute/controller-state recovery-inputs acquire-plan \
+quirkbench recovery-inputs acquire-plan \
   /absolute/controller-state/inputs/replay-1 --spec /absolute/replay-candidate.json \
   > /absolute/replay-plan.json
 ```
@@ -147,7 +147,7 @@ Do not run `lock` on a failed or manually filled acquisition generation.
 After acquisition completes, separately verify and retain its RPMs:
 
 ```sh
-quirkbench --state /absolute/controller-state dev recovery inputs lock \
+quirkbench dev recovery inputs lock \
   /absolute/controller-state/inputs/replay-1/rpms \
   --spec /absolute/replay-candidate.json --public-key /absolute/reviewed-fedora-public.asc \
   --builder-image-digest sha256:ACTUAL_BUILDER_DIGEST \

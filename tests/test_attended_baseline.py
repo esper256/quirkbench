@@ -60,20 +60,20 @@ def test_installed_joined_baseline_approval_evidence_and_recovery(published,monk
     response=baseline.admit(c,'investigation',composition,'baseline',ready=lambda _:None)
     assert response['ok'] and not response['data']['boot_authorized']
     experiment=response['data']['experiment_id']
-    assert cli.main(['--state', str(c.root), 'experiment', 'show', experiment, '--json'])==0
+    assert cli.main(['experiment', 'show', experiment, '--json'], state_root=str(c.root))==0
     review=json.loads(capsys.readouterr().out)['data']
     assert review['baseline_input']['composition_operation_id']==composition
     assert review['deployment']['revision'] and review['problem_reproduced'] is None
     report,client,step,backend,boot=attended_lab(c,tmp_path)
     assert step()=='awaiting_operator_approval'
     with c.transaction() as db:attempt=db.execute('SELECT id FROM attempts').fetchone()[0]
-    assert cli.main(['--state', str(c.root), 'run', 'show', attempt, '--json'])==0
+    assert cli.main(['run', 'show', attempt, '--json'], state_root=str(c.root))==0
     data=json.loads(capsys.readouterr().out)['data']
     assert data['approval_effective']['state']=='waiting' and data['evidence']['declaration_known'] is False
-    assert cli.main(['--state', str(c.root), 'run', 'approve', attempt])==0
+    assert cli.main(['run', 'approve', attempt], state_root=str(c.root))==0
     accepted=json.loads(capsys.readouterr().out)
     assert accepted['request_id'].startswith('operator-')
-    assert cli.main(['--state', str(c.root), 'run', 'approve', attempt])==0
+    assert cli.main(['run', 'approve', attempt], state_root=str(c.root))==0
     assert json.loads(capsys.readouterr().out)==accepted
     assert boot.armed==[]
     assert step()=='candidate_requested'
@@ -181,7 +181,7 @@ def test_queries_are_readonly_and_approval_json_requires_retry_id(published,monk
     monkeypatch.setattr('quirkbench.filesystem.private_lock',forbidden)
     for args in (['experiment','list','investigation','--json'],
         ['experiment','show',response['data']['experiment_id'],'--json'],['run','show',attempt,'--json'],['run','show',attempt,'--json']):
-        assert cli.main(['--state',str(c.root),*args])==0
+        assert cli.main([*args], state_root=str(c.root))==0
         raw=capsys.readouterr().out
         assert 'token' not in raw.lower() and json.loads(raw)
     # Mutating decisions are tested separately; read views never acquire a writer.
@@ -249,16 +249,16 @@ def test_human_retry_binding_and_legacy_explicit_output(published,capsys,tmp_pat
     baseline.admit(c,'investigation',composition,'baseline',ready=lambda _:None)
     _,_,step,_,boot=attended_lab(c,tmp_path);step()
     with c.transaction() as db:attempt=db.execute('SELECT id FROM attempts').fetchone()[0]
-    argv=['--state', str(c.root), 'run', 'approve', attempt, '--request-id', 'legacy-approve']
-    assert cli.main(argv)==0
+    argv=['run', 'approve', attempt, '--request-id', 'legacy-approve']
+    assert cli.main(argv, state_root=str(c.root))==0
     original=json.loads(capsys.readouterr().out)
     assert original==c.decide_attempt(attempt,'approved',request_id='legacy-approve')
-    assert cli.main(argv)==0 and json.loads(capsys.readouterr().out)==original
+    assert cli.main(argv, state_root=str(c.root))==0 and json.loads(capsys.readouterr().out)==original
     assert cli.main(argv+['--json'])==0
     machine=json.loads(capsys.readouterr().out)
     assert machine['data']['decision']==original and machine['data']['request_id']=='legacy-approve'
     c.startup()
-    assert cli.main(['--state', str(c.root), 'run', 'approve', attempt])==3
+    assert cli.main(['run', 'approve', attempt], state_root=str(c.root))==3
     assert boot.armed==[]
 
 

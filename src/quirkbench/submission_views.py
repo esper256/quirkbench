@@ -1,7 +1,6 @@
 """Bounded public preparation views reconstructed from durable links."""
 import base64
 import json
-from shlex import quote
 from pathlib import Path
 from .contracts import ContractError, identifier
 from .state_reader import safe_text, bounded_items, LOG_BYTES
@@ -49,7 +48,7 @@ def status(reader,name,request):
         state=db.execute('SELECT state FROM campaigns WHERE id=?',(name,)).fetchone()[0]
         blocked=next((s for s in reversed(stages) if s['state'] in ('FAILED','INTERRUPTED')),None)
         active=blocked or next((s for s in reversed(stages) if s['state'] in ('RUNNING','WAITING','QUEUED')),stages[-1])
-        prefix='quirkbench --state '+quote(str(reader.root))+' '
+        prefix='quirkbench '
         next_action=(prefix+'investigation resume '+name if state!='RUNNING' else
             prefix+'experiment resume '+name+' --request-id '+request+' --resume-request-id NEW_ID' if parent['state']=='INTERRUPTED' else
             'Submit corrected inputs with a new --request-id.' if parent['state']=='FAILED' else
@@ -179,7 +178,7 @@ def experiments(reader, name, *, after='', limit=20):
 def attention(reader, *, limit=20):
     """Bounded overview only; detailed views decide approval and continuation."""
     if type(limit) is not int or not 1<=limit<=100:raise ContractError('invalid attention limit')
-    prefix='quirkbench --state '+quote(str(reader.root))+' '
+    prefix='quirkbench '
     with reader.connection() as db:
         queries=["SELECT i.id AS investigation,'investigation' AS kind,i.id AS reference,c.state AS state FROM investigations i JOIN campaigns c ON c.id=i.id WHERE c.state!='RUNNING'",
                  "SELECT j.campaign,'run',a.id,a.state FROM attempts a JOIN jobs j ON j.id=a.job JOIN investigations i ON i.id=j.campaign WHERE a.state IN ('CLAIMED','UNCERTAIN')"]

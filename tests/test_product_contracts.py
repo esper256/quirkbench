@@ -121,7 +121,7 @@ def test_executable_cli_rejects_missing_or_unsupported_arguments(argv):
 
 def test_existing_executable_does_not_claim_planned_session_works(tmp_path):
     state = tmp_path / "state"
-    run = subprocess.run([sys.executable, "-m", "quirkbench", "--state", str(state),
+    run = subprocess.run([sys.executable, "-m", "quirkbench",
                           "session", "start", "--device", "target-01"],
                          capture_output=True, text=True)
     assert run.returncode != 0

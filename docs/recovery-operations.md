@@ -355,7 +355,7 @@ V1 reports and the standalone collector's existing default remain supported;
 On the controller, retrieve the report and deterministic candidate planning facts:
 
 ```sh
-quirkbench --state /absolute/controller-state target inventory TARGET_ID --json
+quirkbench target inventory TARGET_ID --json
 ```
 
 The response includes the report/digest, recovery boot context, HardwarePlan, exact
@@ -625,7 +625,7 @@ Configure and run the controller first. Select its reachable LAN endpoint, then
 plan without writing USB bytes:
 
 ```sh
-quirkbench --state /absolute/controller-state recovery prepare \
+quirkbench recovery prepare \
   --image /absolute/recovery.img --device /dev/SELECTED_USB \
   --target ACTUAL_TARGET_NAME --plan-out /absolute/new-usb-plan.json \
   --public-key /absolute/publisher.asc --fingerprint FULL_VERIFIED_FINGERPRINT

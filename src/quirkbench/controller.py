@@ -580,7 +580,7 @@ def require_current_schema(db):
             any(not fields <= {row[1] for row in db.execute('PRAGMA table_info('+table+')')} for table,fields in expected.items())):
         import shlex
         location = next((row[2] for row in db.execute('PRAGMA database_list') if row[1] == 'main'), '')
-        command = shlex.join(['quirkbench', '--state', str(Path(location).parent),
+        command = shlex.join(['quirkbench',
                              'admin', 'controller', 'reset', '--request-id',
                              'CHOOSE_NEW_RESET_ID', '--confirm-reset'])
         raise ContractError('incompatible development state: '+location+

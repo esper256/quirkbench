@@ -57,7 +57,7 @@ Keep existing XDG defaults: `$XDG_STATE_HOME/quirkbench` or `~/.local/state/quir
 
 Do not persist expanded defaults. Derive them from the current environment. For necessary custom locations, keep one setting; accept documented home-relative values and absolute paths. Home-relative settings follow the current home. An explicitly supplied absolute external location may need editing when that resource moves; the application cannot guess where arbitrary user files went.
 
-Explicit `--state` must select existing state before consulting a stale configured selection. Missing configured state gives an actionable error; never silently initialize a replacement. Help/status must not mutate or repair state. A settings edit and restart is sufficient for ordinary configuration changes; initialize fresh development state when the revised formats require it; do not implement upgrades from the superseded formats.
+Owner follow-up #157 removes the public `--state` override. Commands use the single selected controller; internal service APIs retain explicit roots. Missing configured state gives an actionable error; never silently initialize a replacement. Help/status must not mutate or repair state. A settings edit and restart is sufficient for ordinary configuration changes; initialize fresh development state when the revised formats require it; do not implement upgrades from the superseded formats.
 
 Resolve a user-selected alias at entry and open the real directory. Internal helpers may operate on that resolved root. Do not persist its canonical spelling as an identity or require the old alias to remain present. Two aliases to one directory must use the same filesystem locks. There is no special `/home` or Distrobox compatibility mode.
 

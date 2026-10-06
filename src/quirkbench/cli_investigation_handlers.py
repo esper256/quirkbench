@@ -26,8 +26,7 @@ def investigation(args):
             print(render_brief(answer['data']))
         elif answer.get('operation_id'):
             print('Preparation accepted for '+args.name+'.')
-            from shlex import quote
-            prefix='quirkbench --state '+quote(str(discover_state_root(args.state).expanduser().absolute()))+' '
+            prefix='quirkbench '
             print('Status: '+prefix+'investigation status '+args.name)
             print('Watch: '+prefix+'monitor '+args.name)
             print('Target execution requires separate approval for an exact run.')

@@ -60,7 +60,6 @@ def walk(parser):
 
 
 def globals(parser):
-    parser.add_argument('--state',type=Path,default=argparse.SUPPRESS,help='Use controller data at PATH',metavar='PATH')
     parser.add_argument('--json',action='store_true',default=argparse.SUPPRESS,help='Return structured output')
 
 
@@ -123,7 +122,7 @@ def example(p):
     """Generate a syntactically complete example from this action's arguments."""
     words=[p.prog]
     if p.get_default('command') in ('backup','restore'):
-        return p.prog+(' --output ./backup' if p.get_default('command')=='backup' else ' --input ./backup --state ./restored')
+        return p.prog+(' --output ./backup' if p.get_default('command')=='backup' else ' --input ./backup --output ./restored')
     for a in p._actions:
         if a.dest in ('help','state','json') or isinstance(a,argparse._SubParsersAction):continue
         if a.option_strings and not a.required:continue
@@ -137,13 +136,13 @@ def example(p):
     return ' '.join(words)
 
 
-def parser():
+def parser(*, state_root=None):
     root=CommandParser(prog='quirkbench',usage='quirkbench [OPTIONS] COMMAND ...',
                        description='Quirkbench — investigate Linux hardware problems and test patches.',
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     globals(root)
     root.add_argument('--version',dest='show_version',action='store_true',help='Show the running version and source')
-    root.set_defaults(state=None,json=False,reserve_gib=20,repositories=None,show_version=False)
+    root.set_defaults(state=Path(state_root) if state_root is not None else None,json=False,reserve_gib=20,repositories=None,show_version=False)
     # Real family builders call existing services through typed parsed namespaces.
     from . import cli_setup_commands,cli_status_commands,cli_monitor_commands,cli_investigation_commands
     from . import cli_experiment_commands,cli_run_commands,cli_target_commands,cli_recovery_commands,cli_admin_commands,cli_dev_commands
@@ -165,7 +164,7 @@ def parser():
         for option in node._actions:
             if option.dest in required:option.required=True
         if command in ('backup','restore'):
-            node.epilog='Example\n  '+node.prog+(' --output ./backup' if command=='backup' else ' --input ./backup --state ./restored')
+            node.epilog='Example\n  '+node.prog+(' --output ./backup' if command=='backup' else ' --input ./backup --output ./restored')
         elif command=='controller-reset':node.epilog='Example\n  '+node.prog+' --request-id fresh-start-1 --confirm-reset'
         else:node.epilog='Example\n  '+example(node)
         node.epilog+='\n\nCommands never prompt; provide required choices as arguments or input files.'

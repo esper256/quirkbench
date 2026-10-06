@@ -128,14 +128,14 @@ def test_no_inventory_or_unsupported_catalog_creates_explicit_support_gap(setup)
 
 def test_cli_start_brief_baseline_are_installed_and_queries_are_read_only(setup,monkeypatch,capsys):
     c,catalog = setup
-    command = ['--state', str(c.root), 'investigation', 'start', 'investigation', '--target', 'target-1', '--request-id', 'cli-start', '--json', '--reserve-gib', '0']
-    assert cli.main(command)==0;value = json.loads(capsys.readouterr().out)
+    command = ['investigation', 'start', 'investigation', '--target', 'target-1', '--request-id', 'cli-start', '--json', '--reserve-gib', '0']
+    assert cli.main(command, state_root=str(c.root))==0;value = json.loads(capsys.readouterr().out)
     assert value['data']['investigation']['session']['driver']=='external'
-    assert cli.main(command)==0;assert json.loads(capsys.readouterr().out)==value
+    assert cli.main(command, state_root=str(c.root))==0;assert json.loads(capsys.readouterr().out)==value
     def unavailable(*a,**kw):raise AssertionError('query initialized controller')
     monkeypatch.setattr(Controller,'__init__',unavailable)
     for action in (('brief',),('baseline','show'),('status',)):
-        assert cli.main(['--state',str(c.root),'investigation',*action,'investigation','--json'])==0
+        assert cli.main(['investigation',*action,'investigation','--json'], state_root=str(c.root))==0
         assert not json.loads(capsys.readouterr().out)['data'].get('execution_authorized',False)
 
 
@@ -216,13 +216,13 @@ def test_joined_start_default_source_stopped_grant_edit_capture_and_restart_repl
 
 def test_legacy_budget_command_cannot_change_frozen_investigation_limits(setup,capsys):
     c,catalog = setup;value = start(setup)
-    command = ['--state', str(c.root), 'campaign', 'budget', 'investigation']
-    assert cli.main(command+['--seconds','700000','--tokens','1']) != 0
+    command = ['campaign', 'budget', 'investigation']
+    assert cli.main(command+['--seconds','700000','--tokens','1'], state_root=str(c.root)) != 0
     capsys.readouterr()
     status = c.status('investigation')
     assert status['session_seconds']==28800 and status['token_budget']==1000000
     assert start(setup)==value
-    assert cli.main(command+['--seconds','28800','--tokens','1000000'])==2
+    assert cli.main(command+['--seconds','28800','--tokens','1000000'], state_root=str(c.root))==2
     capsys.readouterr()
     c.create_campaign('legacy','target-1');c.configure_budget('legacy',700000,1)
     assert c.status('legacy')['session_seconds']==700000

@@ -86,8 +86,7 @@ def submission(args,root):
         c=Controller(root,reserve_bytes=int(args.reserve_gib*1024**3))
         result=asdict(service.submit(c,args.name,value,args.request_id) if args.action=='submit' else
                       service.resume(c,args.name,args.request_id,args.resume_request_id))
-    from shlex import quote
-    prefix='quirkbench --state '+quote(str(root))+' '
+    prefix='quirkbench '
     command=prefix+'experiment '
     result.update(approval_required=True,boot_authorized=False,
         status_command=command+'status '+args.name+' --request-id '+args.request_id,

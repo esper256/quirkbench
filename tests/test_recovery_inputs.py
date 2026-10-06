@@ -126,7 +126,7 @@ def test_lock_cli_reports_native_phase_and_retained_log(tmp_path, monkeypatch, c
             return runner(*args, **kwargs)
         monkeypatch.setattr(ostree, 'CommandRunner', short_runner)
     diagnostics = root/'inputs/verification'
-    assert main(['--state', str(root), 'dev', 'recovery', 'inputs', 'lock', str(root / 'inputs/rpms'), '--public-key', str(tmp_path / 'key'), '--builder-image-digest', 'sha256:' + 'a' * 64, '--diagnostics', str(diagnostics)]) == 1
+    assert main(['dev', 'recovery', 'inputs', 'lock', str(root / 'inputs/rpms'), '--public-key', str(tmp_path / 'key'), '--builder-image-digest', 'sha256:' + 'a' * 64, '--diagnostics', str(diagnostics)], state_root=str(root)) == 1
     output = capsys.readouterr()
     assert not output.out
     assert phase in output.err and str(diagnostics/'package-verification.log') in output.err

@@ -57,10 +57,10 @@ def test_cli_human_json_same_facts_and_reads_do_not_initialize_prune_or_pin(lab,
     monkeypatch.setattr('quirkbench.controller.Controller.__init__',forbidden)
     monkeypatch.setattr('quirkbench.maintenance.prune',forbidden)
     monkeypatch.setattr('quirkbench.retention.pin',forbidden)
-    argv=['--state', str(c.root), 'investigation', 'results', 'show', 'investigation']
+    argv=['investigation', 'results', 'show', 'investigation']
     assert cli.main(argv+['--json'])==0
     machine=json.loads(capsys.readouterr().out)['data']
-    assert cli.main(argv)==0
+    assert cli.main(argv, state_root=str(c.root))==0
     human=json.loads(capsys.readouterr().out)
     assert machine==human
 
@@ -327,8 +327,8 @@ def test_same_recovery_start_interrupted_handoff_result_is_not_candidate_adoptio
 
 def test_retention_machine_input_and_receipt_privacy_are_strict(lab,capsys):
     c,_=lab;populate(c)
-    argv=['--state', str(c.root), 'investigation', 'results', 'retain', 'investigation', '--note', 'preserve', '--json']
-    assert cli.main(argv)==0
+    argv=['investigation', 'results', 'retain', 'investigation', '--note', 'preserve', '--json']
+    assert cli.main(argv, state_root=str(c.root))==0
     implicit=json.loads(capsys.readouterr().out)['data']
     assert implicit['request_id'].startswith('report-retain-')
     assert cli.main(argv+['--request-id','cli-retain'])==0

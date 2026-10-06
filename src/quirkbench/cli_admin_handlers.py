@@ -266,3 +266,27 @@ def diagnostics(args):
     except (OSError,ValueError,RuntimeError,sqlite3.Error) as exc:
         error(args,'Recovery diagnostics unavailable ('+type(exc).__name__+'); no report receipt or execution authority created.')
         return 3 if isinstance(exc,Conflict) else 2
+
+
+def restore(args):
+    """Verify an offline restore artifact without changing controller selection."""
+    try:
+        if args.reserve_gib < 0:
+            raise ValueError('reserve must be nonnegative')
+        repository=None
+        if args.repositories is not None:
+            from .ostree_repository import configured_repositories,OstreeRepository
+            repository=OstreeRepository(configured_repositories(args.restore_output,args.repositories))
+        restored=Controller.restore(args.backup,args.restore_output,
+            reserve_bytes=int(args.reserve_gib*1024**3),deployment_repository=repository)
+        answer={'restored':str(restored.root),'scheduling':'paused','controller_selection_changed':False}
+        if args.input:
+            from .backup_coverage import load_summary
+            answer['historical_backup_coverage']=load_summary(args.backup)
+            answer['next_steps']=['Restore private identity and operator configuration separately.',
+                'Restore editable Git separately; reconcile original source ownership before capture.',
+                'Reconcile target execution, recovery return and pending evidence before explicit resume.',
+                'Keep the current controller stopped before explicitly selecting restored state in local configuration.']
+        emit(args,answer);return 0
+    except (OSError,ValueError,sqlite3.Error) as exc:
+        error(args,str(exc));return 2

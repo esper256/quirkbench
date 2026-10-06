@@ -56,7 +56,7 @@ def query(root,*args):
     """Actual installed CLI and durable services, without replacing its output."""
     from contextlib import redirect_stdout
     output=StringIO()
-    with redirect_stdout(output):status=cli.main(['--state',str(root),*args,'--json'])
+    with redirect_stdout(output):status=cli.main([*args,'--json'], state_root=str(root))
     assert status==0,(status,output.getvalue())
     value=json.loads(output.getvalue());assert value.get('ok',True)
     return value.get('data',value)
@@ -171,7 +171,7 @@ def pair(home,runtime,patch,case):
     c=Controller(root,reserve_bytes=0,boot_id_reader=lambda:BOOT)
     cfg=controller_service.configuration(root)
     with c.lifecycle() as owner:
-        with enrollment_runtime.publication_runtime(c,registry=CredentialRegistry(root),service_runtime=cfg['runtime'],host=cfg['host'],port=cfg['port'],certfile=cfg['cert'],keyfile=cfg['key'],allow_lan=False,
+        with enrollment_runtime.publication_runtime(c,registry=CredentialRegistry(root),service_runtime=cfg['runtime'],host=cfg['host'],port=cfg['port'],certfile=cfg['cert'],keyfile=cfg['key'],allow_lan=cfg.get('allow_lan',False),
                 run=options['run'],tls_inspector=options['tls_inspector'],repository_factory=NativePublicationRepository) as published:
             advertise(patch,owner,published)
             ready=lambda r:enrollment_runtime.require_enrollment(r,ready=services.ready)

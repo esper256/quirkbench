@@ -51,11 +51,11 @@ def test_fresh_context_resources_and_readonly_cli(lab,monkeypatch,capsys):
     monkeypatch.setattr(Controller,'__init__',forbidden)
     monkeypatch.setattr('quirkbench.maintenance.prune',forbidden)
     for action in (('context',),('history',),('recipe','list'),('proposal','schema'),('observation','list'),('brief',)):
-        assert cli.main(['--state',str(c.root),'investigation',*action,'investigation','--json'])==0
+        assert cli.main(['investigation',*action,'investigation','--json'], state_root=str(c.root))==0
         data=json.loads(capsys.readouterr().out)['data']
         assert not data.get('execution_authorized',False)
         assert len(canonical(data))<QUERY_BYTES
-    assert cli.main(['--state',str(c.root),'investigation','brief','investigation'])==0
+    assert cli.main(['investigation','brief','investigation'], state_root=str(c.root))==0
     human=capsys.readouterr().out
     assert 'agent-guide.md' in human and 'product-contracts.v1.schema.json' in human
     assert 'context investigation --json' in human and 'source prepare' in human
@@ -122,11 +122,11 @@ def test_recipe_discovery_non_audio_missing_peripheral_and_unsupported(lab):
 def test_investigation_response_late_replay_conflict_and_foreign_session(lab,tmp_path,capsys):
     c,_=lab;q=question();c.issue_observation('investigation',q)
     path=tmp_path/'response.json';path.write_bytes(canonical(answer(q)))
-    command=['--state', str(c.root), 'investigation', 'observation', 'answer', 'investigation', '--request', 'question', '--file', str(path), '--request-id', 'answer-command', '--json']
-    assert cli.main(command)==0;first=json.loads(capsys.readouterr().out)['data'];assert first['late']
-    assert cli.main(command)==0;assert json.loads(capsys.readouterr().out)['data']==first
+    command=['investigation', 'observation', 'answer', 'investigation', '--request', 'question', '--file', str(path), '--request-id', 'answer-command', '--json']
+    assert cli.main(command, state_root=str(c.root))==0;first=json.loads(capsys.readouterr().out)['data'];assert first['late']
+    assert cli.main(command, state_root=str(c.root))==0;assert json.loads(capsys.readouterr().out)['data']==first
     changed=answer(q);changed['answer']='observed';path.write_bytes(canonical(changed))
-    assert cli.main(command)==3;capsys.readouterr()
+    assert cli.main(command, state_root=str(c.root))==3;capsys.readouterr()
     c.create_campaign('foreign','target-1');foreign=question('foreign-question','foreign-session');c.issue_observation('foreign',foreign)
     with pytest.raises(ContractError):c.respond_observation('foreign-session','foreign-question','foreign-answer',canonical(answer(foreign)),campaign_id='investigation')
     with pytest.raises(ContractError):StateReader(c.root).observation_detail('foreign-session','foreign-question',campaign_id='investigation')
@@ -134,7 +134,7 @@ def test_investigation_response_late_replay_conflict_and_foreign_session(lab,tmp
 
 def test_query_missing_state_does_not_initialize(tmp_path,capsys):
     state=tmp_path/'absent'
-    assert cli.main(['--state',str(state),'investigation','context','unknown','--json'])==2
+    assert cli.main(['investigation','context','unknown','--json'], state_root=str(state))==2
     assert not state.exists()
 
 
@@ -188,11 +188,11 @@ def test_attended_answer_selection_and_lost_reply_retry(lab,monkeypatch,capsys):
     c,_=lab;q=question();c.issue_observation('investigation',q)
     file=c.root/'answer.json';file.write_bytes(canonical(answer(q)))
     monkeypatch.setattr('builtins.input',lambda _:pytest.fail('command prompted'))
-    command=['--state',str(c.root),'investigation','observation','answer','investigation',
+    command=['investigation','observation','answer','investigation',
              '--request','question','--file',str(file),'--request-id','attended-answer','--json']
-    assert cli.main(command)==0;first=json.loads(capsys.readouterr().out)['data']
+    assert cli.main(command, state_root=str(c.root))==0;first=json.loads(capsys.readouterr().out)['data']
     assert first['late'] and first['response']['request_id']=='question'
-    assert cli.main(command)==0
+    assert cli.main(command, state_root=str(c.root))==0
     assert json.loads(capsys.readouterr().out)['data']==first
 
 
@@ -232,6 +232,6 @@ def test_attended_retry_rejects_changed_operator(lab,monkeypatch,capsys):
     c,_=lab;q=question();c.issue_observation('investigation',q)
     c.respond_observation('investigation','question','answer-command',canonical(answer(q)),campaign_id='investigation')
     file=c.root/'changed-answer.json';file.write_bytes(canonical({**answer(q),'operator_id':'other'}))
-    command=['--state',str(c.root),'investigation','observation','answer','investigation','--request','question','--file',str(file),'--request-id','answer-command','--json']
-    assert cli.main(command)==3
+    command=['investigation','observation','answer','investigation','--request','question','--file',str(file),'--request-id','answer-command','--json']
+    assert cli.main(command, state_root=str(c.root))==3
     assert json.loads(capsys.readouterr().out)['error']['code']=='CONFLICT'

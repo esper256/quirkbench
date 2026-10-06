@@ -128,7 +128,7 @@ def test_baseline_patch_further_comparison_with_distinct_approvals_evidence_cont
             response,experiment=dispatch_and_build(c,owner,monkeypatch,operation,candidate,'dispatch-'+decision)
             experiments.append(experiment)
             assert response['data']['approval_required'] and not response['data']['boot_authorized']
-            assert cli.main(['--state', str(c.root), 'experiment', 'show', experiment, '--json'])==0
+            assert cli.main(['experiment', 'show', experiment, '--json'], state_root=str(c.root))==0
             review=json.loads(capsys.readouterr().out)['data']
             assert review['proposal_input']['proposal_operation_id']==operation
             assert review['proposal_input']['source_capture_sha256']==proposal['source']['capture_sha256']
@@ -187,8 +187,8 @@ def test_real_human_cli_and_machine_replay(published,monkeypatch,capsys):
     with c.lifecycle():
         c.resume('investigation');operation,_=source_free(c)
         monkeypatch.setattr('quirkbench.controller_service.require_ready',lambda _:None)
-        argv=['--state', str(c.root), 'investigation', 'proposal', 'submit', 'investigation', '--proposal', operation, '--reserve-gib', '0']
-        assert cli.main(argv)==0
+        argv=['investigation', 'proposal', 'submit', 'investigation', '--proposal', operation, '--reserve-gib', '0']
+        assert cli.main(argv, state_root=str(c.root))==0
         human=capsys.readouterr().out
         assert 'investigation status investigation' in human and 'monitor investigation' in human
         with c.transaction() as db:request=db.execute('SELECT request_id FROM proposal_dispatch_commands').fetchone()[0]
@@ -204,7 +204,7 @@ def test_real_dispatch_cli_unavailable_service_is_retryable_block(published,monk
         c.resume('investigation');operation,_=source_free(c)
         def unavailable(*args):raise Conflict('native controller user service unavailable')
         monkeypatch.setattr('quirkbench.controller_service.require_ready',unavailable)
-        assert cli.main(['--state', str(c.root), 'investigation', 'proposal', 'submit', 'investigation', '--proposal', operation, '--request-id', 'dispatch-unavailable', '--json', '--reserve-gib', '0'])==4
+        assert cli.main(['investigation', 'proposal', 'submit', 'investigation', '--proposal', operation, '--request-id', 'dispatch-unavailable', '--json', '--reserve-gib', '0'], state_root=str(c.root))==4
         error=json.loads(capsys.readouterr().out)['error']
         assert error['code']=='BLOCKED' and error['retryable'] is True and 'native controller' in error['message']
         with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM proposal_dispatch_commands').fetchone()[0]==0

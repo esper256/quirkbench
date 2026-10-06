@@ -103,3 +103,41 @@ def test_controller_readiness_uses_foreground_owner_and_expires_on_exit(tmp_path
         assert result['controller_unit'].startswith('foreground-v1:')
     with pytest.raises(Conflict):
         require_ready(root, runner=no_manager)
+
+
+def test_lock_record_device_can_differ_from_file_stat(tmp_path,monkeypatch):
+    import fcntl
+    from quirkbench import foreground_owner
+    with (tmp_path/'coordinator.lock').open('w') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        read=foreground_owner._lock_info
+        def other_device(path):
+            raw=read(path)
+            lines=[]
+            for line in raw.splitlines():
+                parts=line.split()
+                if parts and parts[0]=='lock:':
+                    parts[6]='00:ffff:'+parts[6].split(':')[2]
+                    line=' '.join(parts)
+                lines.append(line)
+            return '\n'.join(lines)
+        monkeypatch.setattr(foreground_owner,'_lock_info',other_device)
+        verify(tmp_path,os.getpid(),identity(os.getpid()))
+        fcntl.flock(lock,fcntl.LOCK_UN)
+        with pytest.raises(Conflict,match='does not hold'):
+            verify(tmp_path,os.getpid(),identity(os.getpid()))
+
+
+def test_descriptor_binding_rechecked_after_kernel_record_read(tmp_path,monkeypatch):
+    import fcntl
+    from quirkbench import foreground_owner
+    with (tmp_path/'coordinator.lock').open('w') as lock, (tmp_path/'other').open('w') as other:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        read=foreground_owner._lock_info
+        def reuse_after_read(path):
+            raw=read(path)
+            if path.name==str(lock.fileno()):os.dup2(other.fileno(),lock.fileno())
+            return raw
+        monkeypatch.setattr(foreground_owner,'_lock_info',reuse_after_read)
+        with pytest.raises(Conflict,match='descriptor changed'):
+            verify(tmp_path,os.getpid(),identity(os.getpid()))

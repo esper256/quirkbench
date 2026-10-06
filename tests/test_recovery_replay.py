@@ -73,11 +73,11 @@ def test_inventory_cli_is_read_only_and_blocks_incomplete_inputs(tmp_path,monkey
     import quirkbench.recovery_replay as replay
     original=replay.check_replay
     monkeypatch.setattr(replay,'check_replay',lambda spec,path:original(spec,path,query=query))
-    args=['--state', str(tmp_path / 'unused'), 'dev', 'recovery', 'inputs', 'replay-check', '--spec', str(specfile), '--directory', str(directory)]
-    assert main(args)==0
+    args=['dev', 'recovery', 'inputs', 'replay-check', '--spec', str(specfile), '--directory', str(directory)]
+    assert main(args, state_root=str(tmp_path / 'unused'))==0
     assert json.loads(capsys.readouterr().out)['selected_inputs_available']
     (directory/'glibc-common.rpm').unlink()
-    assert main(args)==4
+    assert main(args, state_root=str(tmp_path / 'unused'))==4
     assert not json.loads(capsys.readouterr().out)['selected_inputs_available']
     assert not (tmp_path/'unused').exists()
 

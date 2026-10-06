@@ -197,12 +197,12 @@ def test_inventory_cli_returns_plan_envelope_without_queueing(observations, tmp_
     root = tmp_path/'controller'
     controller = Controller(root, reserve_bytes=0)
     controller.register(report(collect(observations)))
-    assert main(['--state', str(root), 'target', 'inventory', 'target-1', '--json']) == 0
+    assert main(['target', 'inventory', 'target-1', '--json'], state_root=str(root)) == 0
     answer = json.loads(capsys.readouterr().out)
     assert answer['ok'] and answer['operation_id'] is None
     assert answer['data']['current_recovery']
     assert answer['data']['plan']['locked_build_inputs'] is None
-    assert main(['--state', str(root), 'target', 'inventory', 'unknown', '--json']) == 2
+    assert main(['target', 'inventory', 'unknown', '--json'], state_root=str(root)) == 2
     assert json.loads(capsys.readouterr().out)['error']['code'] == 'INVALID_INPUT'
 
 

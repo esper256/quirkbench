@@ -194,3 +194,19 @@ def test_interrupted_bootstrap_import_cannot_invent_subprocess_stop(worker,tmp_p
         with pytest.raises(WorkerServiceError,match='stop remains unresolved'):
             successor.reconcile_units(services)
         assert c.operation_status(row['id'])['data']['worker_unit']==claim['worker_unit']
+
+
+def test_foreground_owner_conflict_is_not_reported_as_invalid_input(worker,monkeypatch,capsys):
+    from quirkbench import cli
+    from quirkbench.contracts import Conflict
+    from quirkbench.controller_process import parser
+    from quirkbench.controller import Controller
+    c,services,_=worker
+    def conflict(*args,**kwargs):raise Conflict('foreground controller does not hold the live lifecycle lock')
+    monkeypatch.setattr(Controller,'lifecycle',conflict)
+    tokens=c.root/'tokens.json';tokens.write_text('{"target":"explicit-token"}')
+    args=parser().parse_args(['--state',str(c.root),'--reserve-gib','0','--cert','cert','--key','key','--tokens-file',str(tokens),'--json'])
+    assert cli.main(args)==3
+    result=json.loads(capsys.readouterr().out)
+    assert result['error']['code']=='CONFLICT'
+    assert 'live lifecycle lock' in result['error']['message']

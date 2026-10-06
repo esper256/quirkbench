@@ -63,7 +63,7 @@ idle. Mutating commands and the existing owner also trigger housekeeping. Read-o
 monitoring does no cleanup; no cron/timer or additional service is involved. See
 [settings and directory coverage](local-state-maintenance.md).
 
-Run `quirkbench --state /absolute/controller-state watch CAMPAIGN`. A TTY refreshes the same view; redirected output is a timestamped sequence of snapshots. `--once` prints one snapshot, and `--json` provides machine-readable snapshots. The watcher reads the controller directly and spends no agent tokens. `campaign status` remains a concise administrative JSON view. `Controller.events(campaign, after=cursor)` retrieves durable progress events in order.
+Run `quirkbench watch CAMPAIGN`. A TTY refreshes the same view; redirected output is a timestamped sequence of snapshots. `--once` prints one snapshot, and `--json` provides machine-readable snapshots. The watcher reads the controller directly and spends no agent tokens. `campaign status` remains a concise administrative JSON view. `Controller.events(campaign, after=cursor)` retrieves durable progress events in order.
 
 Each activity reports phase, state, human-readable reason, optional measured completed/total/unit counters, expected report interval, stall threshold, and deadline. IDs and sequences make duplicates harmless. The controller assigns receipt times; replaying the same sequence never refreshes its age. A changed sequence with the same phase/message/count/state proves only that the reporting loop is alive. The immutable deadline cannot slide forward on each heartbeat.
 

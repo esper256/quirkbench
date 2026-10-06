@@ -19,6 +19,8 @@ def setup_or_status(args):
     operation_id = None
     try:
         if args.command == 'setup':
+            if args.start_service and args.host is None and setup_progress(args.state) is None:
+                raise ContractError('Choose the controller LAN IP with setup --host IP --configure-controller. For deliberate local-only setup, explicitly select --host 127.0.0.1.')
             answer = setup_controller(args.state, request_id=args.request_id, runtime_root=args.runtime,
                 cache_gib=args.cache_gib, reserve_gib=args.setup_reserve_gib, host=args.host,
                 port=args.port, allow_lan=args.allow_lan, logout_policy=args.logout_policy)
@@ -47,6 +49,13 @@ def setup_or_status(args):
         else:
             if progress:
                 print('Setup request: ' + progress['request_id'])
+                choice=progress['intent']
+                host=choice['host']
+                address='['+host+']' if ':' in host else host
+                print('Recorded setup address: https://'+address+':'+str(choice['port']))
+                import ipaddress
+                if ipaddress.ip_address(host).is_loopback:
+                    print('That address is local-only; a separate recovery target cannot reach it. Inspect the current endpoint with quirkbench admin connection show.')
             print('Controller state: ' + answer['state_root'])
             print('Setup complete: '+('yes' if answer['readiness']['setup_complete'] else 'no; pending '+', '.join(answer['pending_integration'])))
             print('Background work ready: ' + str(answer['background_work_ready']).lower())

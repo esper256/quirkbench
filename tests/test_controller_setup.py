@@ -40,7 +40,7 @@ def test_distrobox_is_optional_and_docker_is_a_supported_engine():
 def test_cli_setup_check_adds_revision_report_without_initializing_state(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(controller_setup, 'inspect_user_manager', lambda: {
         'user_manager':'available','background_work_ready':False,'instructions':[]})
-    assert cli.main(['--state', str(tmp_path / 'absent'), 'doctor'])==0
+    assert cli.main(['doctor'], state_root=str(tmp_path / 'absent'))==0
     report=json.loads(capsys.readouterr().out)
     assert report['user_manager']=='available' and not report['background_work_ready']
     assert 'installations' in report

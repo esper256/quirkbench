@@ -100,7 +100,7 @@ def test_pairing_candidate_preserves_historical_inputs_and_requests_executable(t
     assert current['openssl']['nevra'] == 'openssl-1:3.5.8-1.fc44.x86_64'
     assert current['openssl-libs'] == historical['openssl-libs']
     assert current['gnupg2'] == historical['gnupg2']
-    assert main(['--state', str(tmp_path / 'unused-state'), 'dev', 'recovery', 'inputs', 'candidate-spec', '--candidate', 'fedora44-pairing-v1', '--repository', str(repository), '--repository-id', 'retained-stock']) == 0
+    assert main(['dev', 'recovery', 'inputs', 'candidate-spec', '--candidate', 'fedora44-pairing-v1', '--repository', str(repository), '--repository-id', 'retained-stock'], state_root=str(tmp_path / 'unused-state')) == 0
     assert json.loads(capsys.readouterr().out) == selected
     assert not (tmp_path/'unused-state').exists()
     generation=tmp_path/'generation';generation.mkdir();stage_spec(selected,generation)
@@ -120,7 +120,7 @@ def test_pairing_candidate_refuses_unknown_repository_id(tmp_path):
 def test_candidate_spec_repository_ancestor_loop_is_command_error(tmp_path, capsys):
     from quirkbench.cli import main
     loop=tmp_path/'loop';loop.symlink_to('loop')
-    assert main(['--state', str(tmp_path / 'unused-state'), 'dev', 'recovery', 'inputs', 'candidate-spec', '--candidate', 'fedora44-pairing-v1', '--repository', str(loop / 'selected.repo'), '--repository-id', 'selected']) == 2
+    assert main(['dev', 'recovery', 'inputs', 'candidate-spec', '--candidate', 'fedora44-pairing-v1', '--repository', str(loop / 'selected.repo'), '--repository-id', 'selected'], state_root=str(tmp_path / 'unused-state')) == 2
     output=capsys.readouterr()
     assert output.out == '' and 'Stock specification unavailable:' in output.err
     assert not (tmp_path/'unused-state').exists()

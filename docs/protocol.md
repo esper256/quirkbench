@@ -17,7 +17,10 @@ missing or changed identity leaves recovery waiting for explicit setup.
 
 The controller listens on HTTPS only. `make_server` binds to `127.0.0.1` by
 default; a LAN address requires `allow_lan=True`, a configured certificate and
-private key, and one random token of at least 32 characters per device. Device
+private key, and one random token of at least 32 characters per device. Fresh
+controller setup records `allow_lan=True` by default; the operator selects the
+literal bind address with `--host`. This does not change the low-level server
+default or enable an unconfigured listener. Device
 clients verify the server certificate and hostname against a supplied CA file.
 There is no insecure client mode. Tokens are sent in `Authorization: Bearer`
 with `X-Device-ID`; request paths, headers, and tokens are not logged.

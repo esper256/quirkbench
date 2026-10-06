@@ -26,7 +26,8 @@ def checkout(tmp_path):
 
 
 def run(launcher, *args, cwd, path=None):
-    env = dict(os.environ, HOME=str(cwd), PYTHONNOUSERSITE='1')
+    env = dict(os.environ, HOME=str(cwd), PYTHONNOUSERSITE='1',
+               XDG_CONFIG_HOME=str(cwd/'config'),XDG_STATE_HOME=str(cwd/'state'))
     env.pop('PYTHONPATH', None)
     env.pop('PYTHONHOME', None)
     if path is not None:
@@ -56,8 +57,7 @@ def test_fresh_offline_checkout_and_manual_symlink(checkout, tmp_path):
 
 
 def test_arguments_and_exit_status(checkout, tmp_path):
-    result = run(checkout / 'quirkbench', '--state', tmp_path / 'absent state',
-                 'investigation', 'status', 'missing', cwd=tmp_path)
+    result = run(checkout / 'quirkbench', 'investigation', 'status', 'missing', cwd=tmp_path)
     assert result.returncode == 2
     assert 'controller state unavailable' in result.stderr
     assert not (tmp_path / 'absent state').exists()

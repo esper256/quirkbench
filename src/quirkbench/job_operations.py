@@ -230,7 +230,7 @@ def submission(controller, kind, raw, request_id, *, campaign=None, publish_repo
 def envelope(root,row,request_id):
     from .operations import operation_response
     import shlex
-    prefix='quirkbench --state '+shlex.quote(str(root))
+    prefix='quirkbench'
     campaign=row['campaign'] if 'campaign' in row.keys() else None
     return operation_response(operation_id=row['id'],data={'accepted':True,'request_id':request_id,
         'state':row['state'],'status_command':prefix+' investigation status '+campaign if campaign else prefix+' admin operation show '+row['id'],

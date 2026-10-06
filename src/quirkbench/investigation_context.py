@@ -81,8 +81,8 @@ def brief(reader, name):
     # Paths are data. Human copy commands quote them as argv, never shell fragments.
     import shlex
     paths={'context':['context'],'history':['history'],'recipes':['recipe','list'],'proposal-schema':['proposal','schema'],'observations':['observation','list'],'status':['status']}
-    commands={key:shlex.join(['quirkbench','--state',str(reader.root),'investigation',*path,name,'--json']) for key,path in paths.items()}
-    commands['experiments']=shlex.join(['quirkbench','--state',str(reader.root),'experiment','list',name,'--json'])
+    commands={key:shlex.join(['quirkbench','investigation',*path,name,'--json']) for key,path in paths.items()}
+    commands['experiments']=shlex.join(['quirkbench','experiment','list',name,'--json'])
     return bounded({'investigation':value,'problem_excerpt':text[:4096],
         'problem_excerpt_complete':len(text)<=4096,'source':source,'baseline':baseline(reader,value),
         'resources':resources(),'commands':commands,'driver':'external','execution_authorized':False,

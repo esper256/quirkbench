@@ -179,7 +179,7 @@ def test_command_failures_do_not_initialize_state_and_cli_options_remain_separat
     from quirkbench.setup_contracts import SetupUnavailable
     with pytest.raises(SetupUnavailable):revoke_target(tmp_path/'absent','target')
     assert not (tmp_path/'absent').exists()
-    assert cli.main(['--state', str(tmp_path / 'absent'), 'target', 'access', 'revoke', 'target', '--json'])==4
+    assert cli.main(['target', 'access', 'revoke', 'target', '--json'], state_root=str(tmp_path / 'absent'))==4
     assert json.loads(capsys.readouterr().out)['error']['code']=='UNAVAILABLE'
     assert not (tmp_path/'absent').exists()
     for argv in (['target', 'access', 'revoke', 'target', '--ttl-seconds', '60'],['target','show','target','--generation','gen'],
