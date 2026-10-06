@@ -84,6 +84,11 @@ def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, t
               'config_home': str(home), 'bin_home': str(launchers)}
     fault_hook = fault_hook or (lambda _: None)
     with private_lock(journal.parent / '.installation.lock'), private_lock(root / 'command.lock'):
+        from .controller_reset import require_no_reset
+        require_no_reset(root)
+        if initial_progress(config_home=home) != initial:
+            raise Conflict('initial setup changed before service configuration publication')
+        SetupFilesystem().database(root)
         progress = service_progress(config_home=home)
         if progress:
             if progress['intent'] != intent or progress['request_id'] != initial['request_id']:

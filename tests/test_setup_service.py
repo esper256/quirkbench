@@ -169,3 +169,33 @@ def test_cli_missing_native_dependency_is_typed_unavailable(tmp_path,initialized
     response=json.loads(capsys.readouterr().out)
     assert response['error']['code']=='UNAVAILABLE' and response['operation_id']
     assert response['data']['request_id']=='initial'
+
+
+def test_unused_reset_preserves_runtime_launcher_and_tls_then_reconfigures(tmp_path, initialized):
+    from quirkbench.controller_reset import reset
+    from quirkbench.controller_install import verify_installation
+    start(tmp_path, Services())
+    root = tmp_path / 'state'; config = tmp_path / 'config'
+    original_config = configuration(root)
+    tls = {path: path.read_bytes() for path in (root / 'private/controller-tls').rglob('*') if path.is_file()}
+    link = tmp_path / 'bin/quirkbench'; selected = config / 'quirkbench/installation.json'
+    before_link = os.readlink(link); before_selection = selected.read_bytes()
+    reset(root, config_home=config, request_id='fresh-start', confirm_reset=True)
+    verify_installation(initialized)
+    assert os.readlink(link) == before_link
+    assert selected.read_bytes() == before_selection
+    assert all(path.read_bytes() == raw for path, raw in tls.items())
+    assert not (root / 'private/controller-service.json').exists()
+    assert not (config / 'quirkbench/setup-service.json').exists()
+    setup_controller(root, request_id='new-setup', runtime_root=initialized, reserve_gib=0,
+                     config_home=config, **observations())
+    start(tmp_path, Services())
+    assert configuration(root)['runtime'] == original_config['runtime']
+    assert all(path.read_bytes() == raw for path, raw in tls.items())
+
+
+def test_reset_fence_blocks_service_configuration_under_owner_lock(tmp_path, initialized):
+    from quirkbench.controller_reset import FENCE
+    (tmp_path / 'state' / FENCE).write_text('{}')
+    with pytest.raises(Conflict, match='reset unfinished'): start(tmp_path, Services())
+    assert not (tmp_path / 'state/private/controller-service.json').exists()

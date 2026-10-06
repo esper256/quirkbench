@@ -360,6 +360,8 @@ def setup_controller(root=None, *, request_id=None, runtime_root=None, cache_gib
             if state.exists() and not selected.exists() and any(state.iterdir()):
                 raise Conflict('existing default state requires explicit --state selection')
         state = _managed_path(state)
+        from .controller_reset import require_no_reset
+        require_no_reset(state)
         runtime = runtime_root if runtime_root is not None else saved.get('runtime_root')
         if runtime is None and not progress:
             installed = Path(__file__).resolve().parents[2]

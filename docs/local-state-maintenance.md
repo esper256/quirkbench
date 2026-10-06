@@ -90,3 +90,10 @@ Terminal uploads, attempt completion and confirmed recovery return request idle-
 housekeeping. The current service handles it after target replies, while no physical
 attempt or heavy worker is active. Retirement commits before unlink so interrupted
 cleanup can retry. There is no additional timer, service or monitor-owned cleanup.
+
+An unsuccessful **unused** setup can be restarted with the guarded
+[`admin controller reset`](controller-installation.md#start-over-after-unsuccessful-setup)
+command. It archives only known database/configuration/setup files and preserves
+images, packages, keys and logs. Reset archives protect their inventoried CAS objects
+from pruning; they have no automatic expiry. Reset is not an alternative to backup
+or target/worker reconciliation for a controller that has already been used.

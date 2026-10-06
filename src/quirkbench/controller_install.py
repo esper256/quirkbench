@@ -287,6 +287,8 @@ def activate(record, root, *, config_home=None, bin_home=None,
     link = launchers/'quirkbench'
     selection = directory/'installation.json'
     with _lock(directory/'.installation.lock'), _lock(root/'command.lock'):
+        from .controller_reset import require_no_reset
+        require_no_reset(root)
         if journal.exists(): raise Conflict('unfinished activation; run quirkbench dev install --rollback first')
         old_config = configuration(root)
         _idle(root)
@@ -355,4 +357,6 @@ def _rollback(journal,root,runner,ready):
 def rollback(root, *, config_home=None, runner=subprocess.run, ready=require_ready):
     directory = _managed(_home(config_home,'XDG_CONFIG_HOME','.config')/'quirkbench')
     with _lock(directory/'.installation.lock'), _lock(Path(root)/'command.lock'):
+        from .controller_reset import require_no_reset
+        require_no_reset(root)
         return _rollback(directory/'installation-activation.json',Path(root).resolve(),runner,ready)

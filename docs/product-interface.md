@@ -218,6 +218,15 @@ Omitted retry choices retain the recorded values. The single initial setup journ
 refuses a different request or changed intent; later maintenance uses its own APIs.
 `status [--json]` does not initialize/migrate state or acquire execution ownership.
 
+`admin controller reset --request-id ID --confirm-reset` explicitly archives an
+unused controller's known-schema database, SQLite sidecars, settings, service
+configuration and matching setup journals. It refuses enrolled/attempted/bound
+state, outstanding workers and installation/publication transactions. Images,
+packages, keys, runtimes and the selected state root are preserved. Issued invitations
+are invalidated. Exact interrupted replay completes the same reset; completed replay
+cannot erase subsequently initialized state. A new `setup` uses a fresh request ID.
+See [controller installation](controller-installation.md#start-over-after-unsuccessful-setup).
+
 Setup progress v1 lives privately in the controller configuration because intent
 must precede creation of its database. It is a synchronous setup journal, not a
 scheduler or second database. Its schema records state/runtime identity (including

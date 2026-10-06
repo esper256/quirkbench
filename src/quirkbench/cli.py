@@ -19,6 +19,9 @@ from .cli_output import emit, error
 
 def _main(argv=None):
     args = argv if isinstance(argv,argparse.Namespace) else parser().parse_args(argv)
+    if args.command=='controller-reset':
+        from .cli_admin_handlers import controller_reset
+        return controller_reset(args)
     if args.command=='controller-run':
         from .cli_admin_handlers import controller_run
         return controller_run(args)

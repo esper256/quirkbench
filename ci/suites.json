@@ -231,7 +231,11 @@
       "src/quirkbench/process_ownership.py",
       "src/quirkbench/retention.py",
       "tests/test_retained_process.py",
-      "tests/test_installation.py"
+      "tests/test_installation.py",
+      "src/quirkbench/controller_reset.py",
+      "tests/test_controller_reset.py",
+      "schemas/controller-reset*",
+      "examples/controller-reset*"
     ],
     "tests": [
       "tests/test_build_storage.py",
@@ -268,7 +272,8 @@
       "tests/test_manual_provisioning.py",
       "tests/test_build_launcher.py",
       "tests/test_retained_process.py",
-      "tests/test_installation.py"
+      "tests/test_installation.py",
+      "tests/test_controller_reset.py"
     ]
   },
   "release-preparation": {

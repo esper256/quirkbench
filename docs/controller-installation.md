@@ -456,6 +456,36 @@ of current foreground readiness. A completed setup can be inspected while the ow
 runs. Status keeps historical setup, live ownership, pairing, builder availability
 and qualification separate.
 
+### Start over after unsuccessful setup
+
+Stop the foreground controller and any workers first. For an **unused controller**
+(no enrolled targets, attempts, credentials or bound enrollment), explicitly archive
+its database and setup records:
+
+```sh
+./quirkbench --state /absolute/controller-state admin controller reset \
+  --request-id fresh-start-1 --confirm-reset
+```
+
+Use a CLI containing this command; an older installed runtime will not have it.
+The result prints the exact archive directory beneath
+`STATE/private/controller-resets/`. SQLite and present sidecars, settings, controller
+configuration and matching setup journals are retained there. Issued invitations
+are invalidated. Runtime installations, the selected state directory, TLS/signing
+keys, repositories, images, RPMs and build logs remain in place. Archived CAS objects
+remain protected from storage pruning. This archive is local recovery material,
+not a portable backup or a supported automatic restore command.
+
+Repeat the **same reset request ID** after interruption. An unfinished reset blocks
+new setup/controller database opening until replay completes. A completed replay
+returns its receipt and does not reset a later fresh database. Run `setup` afterward
+with a **new setup request ID**, your desired connection options and runtime.
+Retained installation/publication transactions, unknown/corrupt schemas, substituted
+files and active or unreconciled work are refused; do not delete the whole state tree
+to bypass these checks. Reset currently supports database schemas 32 through current,
+at most 128 MiB per retained file, 10000 CAS objects and 64 local reset archives.
+It does not upgrade an existing database or reset a previously used controller.
+
 For a fresh empty-registry installation, explicitly provision an existing private
 operator GnuPG home and composition signing key, then configure its first repository:
 

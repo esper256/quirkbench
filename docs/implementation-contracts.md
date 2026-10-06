@@ -253,6 +253,19 @@ boolean. New command exit codes: 0 accepted/query successful, 2 invalid input,
 current behavior until explicitly adapted. Acceptance of background work is not
 completion. Status returns operation state even when that operation failed.
 
+An explicit unused-controller reset is synchronous maintenance under the existing
+setup, installation, command, coordinator, build, migration and CAS locks. It reads
+known schemas without migration, refuses enrolled targets, all attempts, credential
+generations, bound enrollment and unreconciled work, and archives an exact allowlist
+of database/sidecar/configuration/setup files. Admission grants no recursive deletion.
+A version-1 local reset inventory records exact source identities and digests before
+removal; interrupted work fences database creation and setup/publication until exact
+replay. A completed replay never resets fresh state. Archive payloads are verified
+before completion, and inventoried CAS objects remain opaque retention roots while
+the archive exists. Unrelated evidence, runtime, keys and repositories are preserved.
+This local archive is not the C7 portable backup/restore protocol. Issued invitations
+are explicitly invalidated; reset grants no target execution or evidence upload.
+
 An operation result distinguishes a public CAS reference from a private deliverable
 descriptor (credential generation and private-store key). Generic factory images
 are public artifacts; credential generations are not. Status can report that an originally successful private deliverable

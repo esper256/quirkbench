@@ -576,6 +576,8 @@ class Controller(OperatorApprovals):
         self.db_path = self.root / 'controller.sqlite'
         with (self.root / 'migration.lock').open('a+b') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
+            from .controller_reset import require_no_reset
+            require_no_reset(self.root)
             try:
                 fd = os.open(self.db_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             except FileExistsError:

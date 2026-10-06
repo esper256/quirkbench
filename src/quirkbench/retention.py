@@ -269,6 +269,10 @@ def collect(root,*,dry_run=False):
             retiring.append(owner)
         # Eligibility precedes reachability. A blocked group remains a live root.
         live=closure(root,_roots(db,retiring)|legacy_uploads['roots']|configured)
+        from .controller_reset import archived_artifacts
+        ordinary_live = set(live)
+        archived = archived_artifacts(root)
+        live.update(archived)
         if legacy_uploads['unidentified_bytes']:
             live.update(p.name for p in (Path(root)/'artifacts/objects').iterdir() if HASH.fullmatch(p.name))
             blocked.append('CAS deletion deferred: unidentified legacy upload bytes; explicitly abandon their IDs')
@@ -340,7 +344,7 @@ def collect(root,*,dry_run=False):
             sync_directory(objects)
             db.executemany('DELETE FROM storage_garbage WHERE digest=?',[(v,) for v in queued if v in live or not (objects/v).exists()]); db.commit()
         references=[dict(r) for r in db.execute('SELECT repository,revision FROM deployment_refs')]
-        for value in live:
+        for value in live - (archived - ordinary_live):
             path=objects/value
             if path.is_file() and path.stat().st_size<=1024**2:
                 try:
@@ -350,6 +354,9 @@ def collect(root,*,dry_run=False):
                 except (ValueError,UnicodeError): pass
         protected=db.execute("SELECT 1 FROM storage_groups WHERE state IN ('RUNNING','WAITING','INTERRUPTED','FAILED') LIMIT 1").fetchone()
         protected=protected or db.execute('SELECT 1 FROM operations WHERE worker_unit IS NOT NULL LIMIT 1').fetchone()
+        # Reset intentionally removed old repository references from the DB.
+        # Preserve those repositories rather than inventing roots from opaque CAS.
+        protected=protected or (Path(root)/'private/controller-resets').exists()
     repositories=Path(root)/'repositories.json'
     if repositories.exists():
         import shutil
