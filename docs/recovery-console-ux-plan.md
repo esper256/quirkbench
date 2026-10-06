@@ -1,11 +1,6 @@
 # Make recovery feel like a finished Quirkbench product
 
-Status: all five implementation steps and applicable software checks are complete
-on the original `codex/recovery-console-ux` branch (#137). Integration with current
-path-portable main is underway on `codex/recovery-console-integration`; reconciliation
-checks and independent boundary review must pass before merge. No installed-controller
-activation, image production or physical acceptance was performed. Existing images
-do not acquire these changes automatically.
+Status: software implementation is complete in [PR #147](https://github.com/esper256/quirkbench/pull/147), including reconciliation with the path-portable controller. Independent boundary review and local focused acceptance passed. Actual USB preparation/boot and production release acceptance remain separate gates. Existing images do not acquire these changes automatically.
 
 Owner-approved direction: prepare the final USB layout and controller connection on the controller; never repartition on the target. Reserve library space only for actual shipped contents (currently zero), split remaining capacity between experiments and evidence, and handle space shortages at the affected operation rather than imposing a RAM-based admission limit. Debug uploads require normal pairing; collection and local export do not. A selectable terminal action must work without function keys.
 
@@ -320,3 +315,12 @@ physical VT switching, graphics/Wi-Fi drivers or PID 1 ordering. Production publ
 provisioning/publication remains an independent release gate. RAM reports survive
 UI restart but disappear on reboot; full filesystems may prevent durable failure
 metadata. No automatic eviction, repartitioning or diagnostic authentication bypass.
+
+
+Path-portable integration evidence (PR #147): source `dba707b487f295a614747c8d5ed1cf38469a2eaf`. Preparation plans contain content/trust and physical attachment identities, without image/device/sysfs paths. Apply accepts current `--image` and `--device`, verifies them against the confirmed plan, and derives managed components from current staging. External source/device/certificate locations are transient helper arguments; certificate and device fences remain. Report export accepts Unix aliases. Diagnostic/reset-retained artifacts remain opaque during GC; selected report deletion preserves reset archival roots.
+
+- `make smoke`: 90 passed. Focused prepared-media/enrollment/copy/completion/stock-worker/runtime selection: 813 passed in 29.02s (`/tmp/quirkbench-reconcile-final-foundations.log`).
+- `python -m ci.run run --suite recovery-console-reports --output /tmp/quirkbench-reconcile-final-console --timeout 60`: 91 passed, 31.42s including evidence capture.
+- `QB_NATIVE_RECOVERY_CACHE=/tmp/quirkbench-console-integration-native python -m ci.run run --suite recovery-native --output /tmp/quirkbench-reconcile-final-native --timeout 60`: 10 passed, 14.59s including evidence capture. Cache prepared separately from already retained hash-pinned RPMs; no download during tests.
+- Diagnostic opacity/reset retention/device observation: 20 passed in 11.79s. Joined prepared enrollment, controller reset and shutdown: 139 passed; corrected fixture-only device failures are covered by the final foundation selection. First failures remain in `/tmp/quirkbench-reconcile-first.log`, `/tmp/quirkbench-reconcile-second.log` and the initial gate directories.
+- 110 local documentation links, changed JSON schemas and `git diff --check` passed. Required independent `console_path_review` (GPT-6-astra/high) approved exact source commit for paths, trust/device fencing, GC opacity/retention and shutdown. No installed state or physical target was changed.
