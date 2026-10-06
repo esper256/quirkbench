@@ -202,6 +202,36 @@ def test_cli_missing_native_dependency_is_typed_unavailable(tmp_path,initialized
     assert response['data']['request_id']=='initial'
 
 
+@pytest.mark.parametrize('failure,message', [
+    (FileNotFoundError('missing executable'), 'OpenSSL executable not found'),
+    (subprocess.TimeoutExpired(['openssl', 'genpkey'], 15), 'OpenSSL genpkey timed out'),
+])
+def test_cli_native_failure_preserves_setup_and_resumes_same_request(tmp_path, initialized, monkeypatch, capsys, failure, message):
+    native=TLSCommands();pending=[True]
+    def run(argv,**kwargs):
+        if pending[0]:
+            pending[0]=False
+            raise failure
+        return native(argv,**kwargs)
+    def configure():
+        return install_service(config_home=tmp_path/'config',bin_home=tmp_path/'bin',
+            tls_run=run,ready=observations()['ready'])
+    monkeypatch.setattr(setup_service,'install_service',configure)
+    monkeypatch.setattr(controller_setup,'inspect_user_manager',observations()['service_inspector'])
+    args=['--state',str(tmp_path/'state'),'setup','--request-id','initial','--configure-controller','--json']
+    assert cli.main(args)==4
+    error=json.loads(capsys.readouterr().out)
+    assert error['error']['code']=='UNAVAILABLE' and message in error['error']['message']
+    assert error['data']['request_id']=='initial'
+    assert not (tmp_path/'state/private/controller-service.json').exists()
+    assert cli.main(args)==0
+    result=json.loads(capsys.readouterr().out)['data']
+    assert result['setup_progress']['request_id']=='initial'
+    assert result['service_setup_result']['controller_start_required']
+    assert not result['readiness']['service_ready'] and not result['readiness']['enrollment_available']
+    assert configuration(tmp_path/'state')['credential_registry']
+
+
 def test_unused_reset_preserves_runtime_launcher_and_tls_then_reconfigures(tmp_path, initialized):
     from quirkbench.controller_reset import reset
     from quirkbench.controller_install import verify_installation

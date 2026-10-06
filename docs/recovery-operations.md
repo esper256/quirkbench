@@ -619,6 +619,8 @@ the historical boot path. Fresh stock recipes now select v3 through the existing
 foreground and durable worker paths. Prepared-media software tests do not qualify
 a produced image or prove physical USB preparation/boot.
 
+Follow the [first-local-USB walkthrough](controller-installation.md#first-local-prepared-recovery-usb)
+for installation, TLS, repository publication and independent pairing readiness.
 Configure and run the controller first. Select its reachable LAN endpoint, then
 plan without writing USB bytes:
 
