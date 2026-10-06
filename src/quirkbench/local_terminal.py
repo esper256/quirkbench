@@ -11,6 +11,9 @@ BANNER = '''Root terminal: commands are unrestricted and can modify internal dis
 Type exit to return to Quirkbench. Ctrl+Alt+F2 also returns to the dashboard.
 Boot logs: journalctl -b       Failed services: systemctl --failed
 Kernel logs: dmesg            Boot output: Ctrl+Alt+F1
+Offline report: python3 -m quirkbench.recovery_reports collect
+Review/export/send: python3 -m quirkbench.recovery_reports --help
+RAM reports survive UI restart, but are lost on reboot.
 '''
 
 

@@ -233,3 +233,23 @@ def operation(args):
         else:
             print(f'{code}: {message}', file=sys.stderr)
         return status
+
+
+def diagnostics(args):
+    from . import recovery_report_service as reports
+    from .state_reader import StateReader,safe_text
+    from .contracts import Conflict
+    try:
+        root=discover_state_root(args.state)
+        reader=StateReader(root)
+        with reader.connection():pass
+        if args.action=='list':answer=reports.listing(reader,after=args.after,limit=args.limit)
+        elif args.action=='show':answer=reports.show(reader,args.report_id)
+        elif args.action=='export':answer=reports.export(reader,args.report_id,args.output)
+        else:answer=reports.delete(Controller(root),args.report_id)
+        if args.json:emit(args,answer)
+        else:print(safe_text(json.dumps(answer,indent=2,sort_keys=True)))
+        return 0
+    except (OSError,ValueError,RuntimeError,sqlite3.Error) as exc:
+        error(args,'Recovery diagnostics unavailable ('+type(exc).__name__+'); no report receipt or execution authority created.')
+        return 3 if isinstance(exc,Conflict) else 2

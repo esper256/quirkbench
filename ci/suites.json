@@ -449,12 +449,58 @@
       "src/quirkbench/network_profiles.py",
       "tests/test_console.py",
       "tests/test_local_terminal.py",
-      "tests/test_network_profiles.py"
+      "tests/test_network_profiles.py",
+      "src/quirkbench/recovery_dashboard.py",
+      "src/quirkbench/recovery_status.py",
+      "src/quirkbench/recovery_actions.py",
+      "src/quirkbench/recovery_report*",
+      "development/constraints.txt",
+      "pyproject.toml"
     ],
     "tests": [
       "integration/test_recovery_native.py",
       "integration/test_preparation_native.py",
       "integration/test_preparation_service_native.py"
+    ]
+  },
+  "recovery-console-reports": {
+    "paths": [
+      "src/quirkbench/recovery_dashboard.py",
+      "src/quirkbench/recovery_status.py",
+      "src/quirkbench/recovery_actions.py",
+      "src/quirkbench/recovery_report*",
+      "src/quirkbench/prepar*",
+      "src/quirkbench/network_profiles.py",
+      "src/quirkbench/shutdown_local.py",
+      "src/quirkbench/target_install.py",
+      "src/quirkbench/target_payload.py",
+      "src/quirkbench/release_http.py",
+      "src/quirkbench/transport_server.py",
+      "src/quirkbench/retention.py",
+      "src/quirkbench/upload_retention.py",
+      "src/quirkbench/store.py",
+      "src/quirkbench/controller.py",
+      "target-assets/*",
+      "development/constraints.txt",
+      "pyproject.toml",
+      "tests/test_recovery_dashboard.py",
+      "tests/test_recovery_status.py",
+      "tests/test_recovery_actions.py",
+      "tests/test_recovery_reports.py",
+      "src/quirkbench/recovery_storage.py",
+      "src/quirkbench/recovery_initramfs_audit.py",
+      "src/quirkbench/recovery_stock_pipeline.py",
+      "src/quirkbench/image.py",
+      "src/quirkbench/boot.py",
+      "src/quirkbench/recovery_inputs.py",
+      "src/quirkbench/recovery_runtime_revision.py",
+      "schemas/recovery-debug-report.*.schema.json"
+    ],
+    "tests": [
+      "tests/test_recovery_dashboard.py",
+      "tests/test_recovery_status.py",
+      "tests/test_recovery_actions.py",
+      "tests/test_recovery_reports.py"
     ]
   }
 }

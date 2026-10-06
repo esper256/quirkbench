@@ -101,7 +101,7 @@ def test_actual_console_entrypoint_paints_before_first_vt_switch_without_input(t
           'switch=lambda n:print("INITIAL_VT",n,flush=True)); '
           'runpy.run_module("quirkbench.console",run_name="__main__")')
     process=subprocess.Popen([sys.executable,'-c',code], stdin=slave,stdout=slave,stderr=slave,
-        start_new_session=True,env=dict(os.environ,PYTHONPATH=str(Path(__file__).parents[1]/'src')))
+        start_new_session=True,env=dict(os.environ,TERM='linux',PYTHONPATH=str(Path(__file__).parents[1]/'src')))
     os.close(slave); raw=bytearray(); deadline=time.monotonic()+5
     try:
         while b'INITIAL_VT 2' not in raw:
@@ -109,7 +109,7 @@ def test_actual_console_entrypoint_paints_before_first_vt_switch_without_input(t
             assert remaining>0, raw.decode(errors='replace')
             assert select.select([master],[],[],remaining)[0]
             raw.extend(os.read(master,65536))
-        assert raw.index(b'Quirkbench target recovery')<raw.index(b'INITIAL_VT 2')
+        assert raw.index(b'QUIRKBENCH')<raw.index(b'INITIAL_VT 2')
         os.write(master,b'\x04')
         assert process.wait(timeout=2)==0
     finally:

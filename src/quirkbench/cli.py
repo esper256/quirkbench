@@ -19,6 +19,9 @@ from .cli_output import emit, error
 
 def _main(argv=None):
     args = argv if isinstance(argv,argparse.Namespace) else parser().parse_args(argv)
+    if args.command=='diagnostics':
+        from .cli_admin_handlers import diagnostics
+        return diagnostics(args)
     if args.command=='controller-run':
         from .cli_admin_handlers import controller_run
         return controller_run(args)
@@ -369,7 +372,7 @@ def main(argv=None):
               (args.command=='maintenance' and args.action in ('status','prune')) or
               (args.command=='session' and args.action in ('observations','observation')) or
               (args.command=='build-cache' and args.action=='list'))
-    if readonly or args.command in ('setup-state','setup','publication','serve','controller-install','release-install'): return _main(args)
+    if readonly or args.command in ('setup-state','setup','publication','serve','controller-install','release-install','diagnostics'): return _main(args)
     try:
         root=discover_state_root(args.state).expanduser().absolute()
         if not (root/'controller.sqlite').is_file(): return _main(args)

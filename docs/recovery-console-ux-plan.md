@@ -1,6 +1,6 @@
 # Make recovery feel like a finished Quirkbench product
 
-Status: implementation plan; this document describes intended behavior, not current capabilities.
+Status: implementation in progress on `codex/recovery-console-ux` (#137). Controller preparation, non-expiring initial invitations, independent networking/VTs, dashboard, local restart and paired diagnostic collection/receipt/retention are implemented in software. Fresh stock-input selection and final joined acceptance remain in progress; physical acceptance remains outstanding.
 
 Owner-approved direction: prepare the final USB layout and controller connection on the controller; never repartition on the target. Reserve library space only for actual shipped contents (currently zero), split remaining capacity between experiments and evidence, and handle space shortages at the affected operation rather than imposing a RAM-based admission limit. Debug uploads require normal pairing; collection and local export do not. A selectable terminal action must work without function keys.
 
@@ -103,7 +103,7 @@ Preparation reports usable experiment and evidence capacities, not a maximum sup
 
 1. **Automatic local initialization:** check prepared media and create private temporary network storage without asking the user to approve routine service startup. Show concrete failures, not “verifying recovery.”
 2. **Wi-Fi & Ethernet:** open `nmtui`, then return to a refreshed dashboard. Ethernet may already be connected. Temporary networking does not depend on writable evidence storage.
-3. **Connect to controller:** use the prepared endpoint and trust to complete normal pairing through existing authenticated enrollment. Controller preparation is the explicit authorization to use that staged endpoint/trust for initial enrollment; connect automatically when its prerequisites become available. No manual fingerprint transcription in the normal prepared-USB journey. Permit only one enrollment attempt at a time and use bounded retry backoff; authentication/trust failures require repair rather than endless retries. Show connecting, paired and currently connected as distinct states. Expired enrollment credentials or changed controller trust require explicit repair, never a verification bypass.
+3. **Connect to controller:** use the prepared endpoint and trust to complete normal pairing through existing authenticated enrollment. Controller preparation is the explicit authorization to use that staged endpoint/trust for initial enrollment; connect automatically when its prerequisites become available. No manual fingerprint transcription in the normal prepared-USB journey. Permit only one enrollment attempt at a time and use bounded retry backoff; authentication/trust failures require repair rather than endless retries. Show connecting, paired and currently connected as distinct states. Expired historical credentials or changed controller trust require explicit repair, never a verification bypass.
 4. **Remember this connection:** offer explicit saving of selected connections when verified writable control storage and binding are available. Otherwise say “Connected for this session. USB storage must be available to remember this connection.”
 5. **Ready:** direct the user back to their controller and coding agent.
 
@@ -261,3 +261,18 @@ Use existing focused suites and cached integration infrastructure. Aim for 30 se
 Select these gates when console code, controller preparation/layout policy, action adapters, network/boot services, diagnostic transport, payload packaging, pinned dependency identities or console boot arguments change. Run the matching gate once per relevant revision; reuse matching evidence. No image builds, flashing, QEMU or kernel compilation for these checks. A report records the source revision and dependency identities tested, so passing checkout tests are not confused with checks of different image contents.
 
 At the next separately requested physical boot, use a short acceptance checklist: the dashboard appears without Enter; late boot logs stay off VT2; Wi-Fi works even when persistent USB storage is unavailable; the menu opens the real terminal and `exit` returns without function keys; a recovery report reaches the controller and can be exported; prepared media connects normally and reaches truthful readiness without partition changes. Pseudo-terminals and staged-unit checks cannot prove real VT switching, graphics-driver behavior, Wi-Fi drivers or actual PID 1 startup ordering. Software tests alone must not be presented as physical-console qualification. Feed failures back into the narrowest fast regression that can faithfully detect them.
+
+
+Latest local software evidence: focused dashboard/action/storage gate, 80 passed
+(`/tmp/quirkbench-dashboard-action-storage-first.log`); authentication/receipt faults,
+5 passed (`/tmp/quirkbench-recovery-reports-auth-faults-corrected.log`); selected
+retention/backup, 4 passed (`/tmp/quirkbench-report-selected-deletion-backup.log`);
+collector process/deadline, 2 passed (`/tmp/quirkbench-report-owned-child-corrected.log`);
+post-TLS binding check, 1 passed (`/tmp/quirkbench-status-tls-explicit.log`). Independent
+higher-reasoning review: `prepared_media_design_review`, gpt-6-astra/high, uncommitted
+slice over 610ce8dc3a4d4b91a86daecd24ac523742e0052a; source boundaries approved after
+retention, process ownership, sanitization and deadline corrections. Final joined
+portable/native gates will record matching evidence before completion. No image,
+USB, QEMU, physical networking/VT or release qualification was performed.
+
+Reviewed console/report gate: `timeout 60s .venv/bin/python -m pytest -q tests/test_recovery_dashboard.py tests/test_recovery_status.py tests/test_recovery_actions.py tests/test_recovery_reports.py`, 58 passed in 29.18s (`/tmp/quirkbench-console-reports-reviewed-gate.log`). Help/CI selection: 49 passed in 0.97s after adding diagnostic pagination help (`/tmp/quirkbench-console-gate-selection-help-corrected.log`). Manifest schema assertion passed (`/tmp/quirkbench-report-manifest-schema.log`).

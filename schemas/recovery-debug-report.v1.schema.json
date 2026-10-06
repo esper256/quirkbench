@@ -1,0 +1,440 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "recovery-debug-report v1",
+  "description": "Reported opaque diagnostics; aggregate payload <=16 MiB and canonical manifest <=1 MiB are additionally enforced by the reader.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_type",
+    "request_id",
+    "boot_id",
+    "collected_at",
+    "files",
+    "sources",
+    "reported_identity"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "recovery-debug-report"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "boot_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "collected_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "files": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 16,
+      "additionalProperties": false,
+      "properties": {
+        "addresses.txt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sha256",
+            "size"
+          ],
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            }
+          }
+        },
+        "build.json": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sha256",
+            "size"
+          ],
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            }
+          }
+        },
+        "cmdline.txt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sha256",
+            "size"
+          ],
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            }
+          }
+        },
+        "configuration.json": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sha256",
+            "size"
+          ],
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            }
+          }
+        },
+        "dns.txt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sha256",
+            "size"
+          ],
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            }
+          }
+        },
+        "early.txt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sha256",
+            "size"
+          ],
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            }
+          }
+        },
+        "journal.txt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sha256",
+            "size"
+          ],
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            }
+          }
+        },
+        "kernel.txt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sha256",
+            "size"
+          ],
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            }
+          }
+        },
+        "links.txt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sha256",
+            "size"
+          ],
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            }
+          }
+        },
+        "mounts.txt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sha256",
+            "size"
+          ],
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            }
+          }
+        },
+        "packages.txt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sha256",
+            "size"
+          ],
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            }
+          }
+        },
+        "routes.txt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sha256",
+            "size"
+          ],
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            }
+          }
+        },
+        "services.txt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sha256",
+            "size"
+          ],
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            }
+          }
+        }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "addresses.txt": {
+          "enum": [
+            "included",
+            "truncated",
+            "unavailable",
+            "deadline",
+            "error"
+          ]
+        },
+        "build.json": {
+          "enum": [
+            "included",
+            "truncated",
+            "unavailable",
+            "deadline",
+            "error"
+          ]
+        },
+        "cmdline.txt": {
+          "enum": [
+            "included",
+            "truncated",
+            "unavailable",
+            "deadline",
+            "error"
+          ]
+        },
+        "configuration.json": {
+          "enum": [
+            "included",
+            "truncated",
+            "unavailable",
+            "deadline",
+            "error"
+          ]
+        },
+        "dns.txt": {
+          "enum": [
+            "included",
+            "truncated",
+            "unavailable",
+            "deadline",
+            "error"
+          ]
+        },
+        "early.txt": {
+          "enum": [
+            "included",
+            "truncated",
+            "unavailable",
+            "deadline",
+            "error"
+          ]
+        },
+        "journal.txt": {
+          "enum": [
+            "included",
+            "truncated",
+            "unavailable",
+            "deadline",
+            "error"
+          ]
+        },
+        "kernel.txt": {
+          "enum": [
+            "included",
+            "truncated",
+            "unavailable",
+            "deadline",
+            "error"
+          ]
+        },
+        "links.txt": {
+          "enum": [
+            "included",
+            "truncated",
+            "unavailable",
+            "deadline",
+            "error"
+          ]
+        },
+        "mounts.txt": {
+          "enum": [
+            "included",
+            "truncated",
+            "unavailable",
+            "deadline",
+            "error"
+          ]
+        },
+        "packages.txt": {
+          "enum": [
+            "included",
+            "truncated",
+            "unavailable",
+            "deadline",
+            "error"
+          ]
+        },
+        "routes.txt": {
+          "enum": [
+            "included",
+            "truncated",
+            "unavailable",
+            "deadline",
+            "error"
+          ]
+        },
+        "services.txt": {
+          "enum": [
+            "included",
+            "truncated",
+            "unavailable",
+            "deadline",
+            "error"
+          ]
+        }
+      }
+    },
+    "reported_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kernel": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "image_sha256": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "recipe_sha256": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "source_revision": {
+          "type": "string",
+          "maxLength": 160
+        }
+      }
+    }
+  }
+}

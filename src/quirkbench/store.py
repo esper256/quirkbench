@@ -15,6 +15,15 @@ from .contracts import Artifact, Conflict, ContractError, canonical, digest, ide
 class StoragePressure(RuntimeError):
     pass
 
+
+def write_all(handle,data):
+    """Short writes cannot publish a complete object or atomic record."""
+    view=memoryview(data)
+    while view:
+        count=handle.write(view)
+        if type(count) is not int or not 0<count<=len(view):raise OSError('storage write made no progress')
+        view=view[count:]
+
 def sync_directory(path: Path):
     fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
     try:
@@ -33,7 +42,7 @@ def atomic_write(path: Path, data: bytes):
     try:
         with os.fdopen(fd, 'wb') as handle:
             os.fchmod(handle.fileno(), mode)
-            handle.write(data)
+            write_all(handle,data)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
@@ -60,6 +69,7 @@ class ArtifactStore:
             yield
 
     def check_space(self, needed=0):
+        if os.statvfs(self.root).f_favail==0:raise StoragePressure('artifact storage has no available inodes')
         if shutil.disk_usage(self.root).free - needed < self.reserve_bytes:
             raise StoragePressure('free-space reserve reached')
 
@@ -131,7 +141,7 @@ class ArtifactStore:
                 tail = data[overlap:]
                 self.check_space(len(tail))
                 handle.seek(0, os.SEEK_END)
-                handle.write(tail)
+                write_all(handle,tail)
                 handle.flush()
                 os.fsync(handle.fileno())
             sync_directory(self.uploads)

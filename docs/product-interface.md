@@ -270,7 +270,7 @@ Only two explicit registry routes accept this separate credential: upload and
 evidence acknowledgment. No register/claim/start/heartbeat/handoff/completion,
 repository access or physical-state claim is permitted. Fresh owner/scope/time
 checks fence I/O and ACK replay; original attempt tokens and attribution remain.
-Recovery console choice 7 exports an exact original plan with `plan REQUEST_ID`
+Recovery **Connection details → Review original evidence** exports an exact original plan with `plan REQUEST_ID`
 and drains its selected records with `drain REQUEST_ID GRANT_ID` after private grant
 staging. Original binding/media/runtime/trust and immutable source checks precede
 requests and selected ACK saves; retries never widen the plan or complete the attempt.
@@ -609,3 +609,26 @@ parent completion commit atomically after final CAS/native-retention fences.
 actions retain their decision and pause without build or experiment. Parent success
 means submission; attempt approval, evidence acknowledgement, recovery and problem
 reproduction remain separate. No managed invocation or unattended grant is implied.
+
+
+### Recovery presentation and reported diagnostics
+
+The recovery dashboard is a read-only status reader plus serialized attended action
+adapters. Current authenticated contact is distinct from durable pairing. Temporary
+networking, offline diagnostics and the local VT3 root terminal remain independent
+of persistent USB verification. `T` opens that terminal; manual commands are
+unrestricted. Automated actions retain exact-run approval and storage protection.
+
+`admin diagnostics list/show/export/delete` manages reported recovery debug snapshots.
+A versioned manifest identifies opaque bounded attachments and an immutable transfer
+request. Existing paired target authentication authorizes upload; no experiment,
+attempt, recovery-arrival acknowledgement or execution permission is fabricated.
+Collection/export is offline; sending requires explicit review and confirmation.
+Only the controller's durable receipt permits a received message. Same-request
+replay returns the same receipt; changed content conflicts. Selected deletion
+preserves other diagnostic and ordinary retained artifacts, with restartable tombstones.
+
+Local **Power → Prepare safe restart** retains a v2 local restart record and performs
+the same verified evidence preparation as shutdown before ordinary OS reboot. It
+never arms a candidate or certifies physical power completion. Broken recovery offers
+explicitly unconfirmed local OS power actions without clearing durable records.

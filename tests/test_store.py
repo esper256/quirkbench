@@ -74,3 +74,36 @@ def test_controller_reopen_preserves_existing_database_mode(tmp_path):
     path.chmod(0o640)
     Controller(controller.root, reserve_bytes=0)
     assert path.stat().st_mode & 0o777 == 0o640
+
+
+@pytest.mark.parametrize('fault',['short','no_progress','enospc'])
+def test_atomic_storage_failures_preserve_existing_record_and_candidate_visibility(tmp_path,monkeypatch,fault):
+    import errno,os
+    from quirkbench import store
+    path=tmp_path/'candidate.json';store.atomic_write(path,b'previous-complete')
+    original=os.fdopen
+    class Writer:
+        def __init__(self,handle):self.handle=handle
+        def __enter__(self):return self
+        def __exit__(self,*args):self.handle.close()
+        def __getattr__(self,name):return getattr(self.handle,name)
+        def write(self,data):
+            if fault=='enospc':raise OSError(errno.ENOSPC,'filesystem full')
+            if fault=='no_progress':return 0
+            return self.handle.write(data[:max(1,len(data)//2)])
+    monkeypatch.setattr(os,'fdopen',lambda *a,**k:Writer(original(*a,**k)))
+    if fault=='short':
+        store.atomic_write(path,b'next-complete');assert path.read_bytes()==b'next-complete'
+    else:
+        with pytest.raises(OSError):store.atomic_write(path,b'partial-not-complete')
+        assert path.read_bytes()==b'previous-complete'
+    assert not list(tmp_path.glob('.pending-*'))
+
+
+def test_inode_exhaustion_rejects_new_artifact_without_losing_existing(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from quirkbench.store import StoragePressure
+    store=ArtifactStore(tmp_path,reserve_bytes=0);old=store.put(b'previous-unuploaded')
+    monkeypatch.setattr('os.statvfs',lambda _:SimpleNamespace(f_favail=0))
+    with pytest.raises(StoragePressure,match='inodes'):store.put(b'new')
+    assert store.get(old.sha256)==b'previous-unuploaded'

@@ -126,6 +126,8 @@ MIGRATIONS.append("ALTER TABLE experiment_submissions ADD COLUMN candidate_opera
 MIGRATIONS.append("ALTER TABLE experiment_submissions ADD COLUMN public_document TEXT;")
 from .enrollment import NONEXPIRING_MIGRATION
 MIGRATIONS.append(NONEXPIRING_MIGRATION)
+from .recovery_report_service import MIGRATION as DIAGNOSTIC_MIGRATION
+MIGRATIONS.append(DIAGNOSTIC_MIGRATION)
 
 
 def uid():
@@ -1807,11 +1809,13 @@ class Controller(OperatorApprovals):
             target = sqlite3.connect(temporary / 'controller.sqlite')
             try:
                 source.backup(target)
-                values = [row[0] for row in target.execute('SELECT DISTINCT digest FROM refs')]
+                ordinary_values = {row[0] for row in target.execute('SELECT DISTINCT digest FROM refs')}
+                from .recovery_report_service import completed_artifacts
+                values = sorted(ordinary_values|completed_artifacts(target))
                 deployments = self._deployment_rows(target)
             finally:
                 source.close(); target.close()
-            if not self._library_closure(values) <= set(values):
+            if not self._library_closure(ordinary_values) <= set(values):
                 raise ContractError('backup is missing retained library content')
             for row in deployments:
                 closure = self._deployment_evidence(self._deployment_manifest(row['manifest_digest']))
@@ -1857,7 +1861,9 @@ class Controller(OperatorApprovals):
         try:
             if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                 raise ContractError('backup database corrupt')
-            references = {row[0] for row in db.execute('SELECT DISTINCT digest FROM refs')}
+            ordinary_references = {row[0] for row in db.execute('SELECT DISTINCT digest FROM refs')}
+            from .recovery_report_service import completed_artifacts
+            references = ordinary_references|completed_artifacts(db)
             deployments = cls._deployment_rows(db)
         finally:
             db.close()
@@ -1893,7 +1899,7 @@ class Controller(OperatorApprovals):
         temporary = destination.with_name(destination.name + '.pending-' + uid())
         shutil.copytree(backup, temporary)
         controller = cls(temporary, **kwargs)
-        if not controller._library_closure(references) <= references:
+        if not controller._library_closure(ordinary_references) <= references:
             raise ContractError('restore is missing retained library content')
         for row in deployments:
             closure = controller._deployment_evidence(controller._deployment_manifest(row['manifest_digest']))

@@ -276,7 +276,28 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
 
 def main() -> int:
     from .local_terminal import present_once
-    return run_console(present=present_once)
+    from .recovery_actions import RecoveryActions
+    from .recovery_status import read_status
+    services=RecoveryActions()
+    def fallback():
+        print('Quirkbench recovery: dashboard unavailable.\n'
+              'Boot logs: journalctl -b. T opens the independent root terminal.\n'
+              'Ctrl+Alt+F3 also opens the terminal; commands can modify internal disks.',flush=True)
+        present_once()
+        for line in sys.stdin:
+            if line.strip().upper()=='T':
+                try: services.terminal()
+                except OSError:print('Terminal switch unavailable. Try Ctrl+Alt+F3.',flush=True)
+        return 0
+    try: import curses
+    except ImportError: return fallback()
+    try:
+        from .recovery_dashboard import run
+        return curses.wrapper(lambda window:run(window,read_status=read_status,
+            dispatch=services.dispatch,network=services.network,terminal=services.terminal,present=present_once))
+    except (ImportError, OSError, curses.error):
+        # A minimal escape hatch, not a second full interactive application.
+        return fallback()
 
 
 if __name__ == '__main__':

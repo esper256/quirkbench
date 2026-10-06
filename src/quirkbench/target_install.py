@@ -456,7 +456,7 @@ def _install_runtime_files(rootfs: Path, assets_dir: Path | None = None, *, cand
     network_dropin.mkdir(exist_ok=True)
     (network_dropin / "quirkbench.conf").write_text(
         f"[Unit]\nRequires={network_mount}\nAfter={network_mount}\n" +
-        ("" if candidate else "[Service]\nEnvironment=PYTHONPATH=/usr/lib/quirkbench\nExecStartPre=/usr/bin/python3 -m quirkbench.network_profiles\n"))
+        ("" if candidate else "[Service]\nEnvironment=PYTHONPATH=/usr/lib/quirkbench\nExecStartPre=/usr/bin/python3 -m quirkbench.network_profiles --recovery\n"))
     network_link = units / "multi-user.target.wants/NetworkManager.service"
     if network_link.exists() or network_link.is_symlink():
         network_link.unlink()

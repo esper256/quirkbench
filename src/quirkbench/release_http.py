@@ -99,7 +99,7 @@ def _connect(address,deadline,clock, *,source_address=None,resolve=_resolve,sock
 @contextmanager
 def _response(url,deadline,clock, *,connection_factory=http.client.HTTPSConnection,
               method='GET',body=None,headers=None,context=None,expected_status=200,
-              expected_peer_sha256=None,operation=None):
+              expected_peer_sha256=None,operation=None,before_request=None):
     """No redirect/proxy; the reviewed stream bounds status, headers and body."""
     deadline_context=operation or 'release acquisition'
     parts=urlsplit(url)
@@ -132,6 +132,8 @@ def _response(url,deadline,clock, *,connection_factory=http.client.HTTPSConnecti
                 raise Conflict('controller trust changed before enrollment request')
             _remaining(deadline,clock,operation=deadline_context)
         if getattr(connection,'sock',None) is not None:connection.sock.settimeout(remaining)
+        if before_request:before_request()
+        _remaining(deadline,clock,operation=deadline_context)
         if method=='POST' and getattr(connection,'sock',None) is not None:
             connection.sock=_DeadlineWrites(connection.sock,deadline,clock,operation=deadline_context)
         connection.request(method,parts.path or '/',**({'body':body} if method=='POST' else {}),

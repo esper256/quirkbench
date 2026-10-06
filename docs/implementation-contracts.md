@@ -751,3 +751,39 @@ M7 modes. It extends C0–C7 without replacing the
 frozen Experiment/Result envelopes or existing database authority. Implement its
 records through additive migrations and versioned schemas. Preview commands are
 acceptance targets, not evidence that an implementation exists.
+
+
+### Recovery diagnostic upload extension
+
+The existing controller HTTPS server accepts `/v1/recovery-reports/begin`, `chunk`
+and `finish` only for current normally paired credentials. Current authorization
+is repeated at every durable mutation; static/anonymous credentials cannot use
+these endpoints. Before sending authentication, the target verifies current media,
+binding, maintenance state and exact retained trust/credential bytes after TLS.
+Held locks never substitute for source verification. Operation deadlines remain
+absolute, including collection sanitization and publication.
+
+`recovery-debug-report` manifest v1 bounds collection to 10 seconds, payload to
+16 MiB and manifest to 1 MiB. Attachments remain opaque, allowlisted names with
+exact actual sizes/digests. Source-specific sanitization precedes bounded tail
+retention, preview and hashing. Private RAM admission is serialized and bounded;
+uncertain collector-child shutdown fails rather than reporting an omitted source.
+Missing identity is represented as missing; uploaded labels are reported facts only.
+Existing database diagnostic rows and `DIAGNOSTIC` upload ownership distinguish
+reports from attempt evidence. Completed attachments join backup/restore and
+explicit retention independently; no diagnostic object is recursively interpreted
+as a library reference. Deletion tombstones first, repeats safely after interruption,
+and uses the shared complete CAS retention calculation before selected object removal.
+ENOSPC, inodes, short writes, lost receipts and revoked credentials cannot produce
+false completion or discard existing target reports/unuploaded experiment evidence.
+
+Recovery-only saved-profile replay uses an incomplete/active guard on the existing
+private RAM profile mount. Before any secret copy it marks replay incomplete; only
+verified completion marks it active. Restart after interruption or later authority
+loss remains fail-closed. Explicit session reset proves whole-NetworkManager shutdown
+and removal of the old RAM mount before creating new temporary storage. Candidate
+networking semantics are unchanged.
+
+Local attended restart uses shutdown record v2 with explicit `power_action=reboot`;
+v1 retains poweroff semantics. It reuses configuration ownership, work/evidence
+fences and preparation proof, never candidate arming or recovery-arrival authority.

@@ -11,7 +11,7 @@ from ci.evidence import FILE_LIMIT, ATTACHMENT_LIMIT, capture_stage, redact
     (['src/quirkbench/distribution_source_worker.py'], {'source-workers'}),
     (['src/quirkbench/endpoint_probe.py'], {'endpoint-control', 'endpoint-retarget'}),
     (['tests/test_retarget_evidence.py'], {'endpoint-retarget', 'evidence'}),
-    (['src/quirkbench/recovery_initramfs_audit.py'], {'release-preparation', 'recovery-integration', 'recovery-native'}),
+    (['src/quirkbench/recovery_initramfs_audit.py'], {'release-preparation', 'recovery-integration', 'recovery-native', 'recovery-console-reports'}),
     (['tests/conftest.py'], set(SUITES)),
     (['schemas/operation.schema.json'], set(SUITES)),
     (['src/quirkbench/new_shared_module.py'], set(SUITES)),
@@ -38,7 +38,7 @@ def test_recovery_boot_change_selects_direct_and_joined_regressions():
     value=select(['src/quirkbench/recovery_initramfs_audit.py',
                   'src/quirkbench/recovery_storage.py', 'tests/test_stock_recovery_flow.py'])
     assert not value['unmapped']
-    assert set(value['selected'])=={'filesystem','release-preparation','recovery-integration','recovery-native'}
+    assert set(value['selected'])=={'filesystem','release-preparation','recovery-integration','recovery-native','recovery-console-reports'}
     assert {'tests/test_recovery_storage.py','tests/test_recovery_initramfs_audit.py',
             'tests/test_recovery_image_plan.py','tests/test_stock_recovery_flow.py'}<=set(value['tests'])
 

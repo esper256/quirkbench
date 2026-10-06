@@ -212,3 +212,73 @@ def test_native_keyfile_modes_are_required_without_normalizing_user_files(local)
     with pytest.raises(ContractError, match='NetworkManager requires'):
         network.replay_selected(control, **kw)
     assert path.stat().st_mode & 0o777 == 0o644
+
+
+def test_recovery_ram_fence_survives_retry_without_boot_and_preserves_manual_profiles(local,monkeypatch):
+    from quirkbench import runtime
+    control,profiles,kw=local
+    network.save_selected(control,['Home Wi-Fi.nmconnection'],**kw)
+    path=profiles/'Home Wi-Fi.nmconnection';path.unlink()
+    def verify():
+        if path.exists():
+            atomic_write(path,PROFILE.replace(b'password',b'changed-local-password'))
+            raise Conflict('binding changed during copy')
+    monkeypatch.setattr(runtime,'CONTROL',control)
+    monkeypatch.setattr(runtime,'boot_context',lambda:(None,{},verify))
+    real=network.replay_selected
+    monkeypatch.setattr(network,'replay_selected',lambda root,**opts:real(root,**(kw|opts)))
+    assert network.main(recovery=True,profiles=profiles,profiles_ready=kw['profiles_ready'])==1
+    before={p.name:p.read_bytes() for p in profiles.iterdir()}
+    monkeypatch.setattr(runtime,'boot_context',lambda:(_ for _ in ()).throw(ValueError('missing boot')))
+    assert network.main(recovery=True,profiles=profiles,profiles_ready=kw['profiles_ready'])==1
+    assert network.replay_blocked(profiles)
+    assert {p.name:p.read_bytes() for p in profiles.iterdir()}==before
+    assert b'changed-local-password' in path.read_bytes()
+
+
+def test_recovery_pre_copy_binding_failure_leaves_temporary_networking_available(local,monkeypatch):
+    from quirkbench import runtime
+    control,profiles,kw=local
+    network.save_selected(control,['Home Wi-Fi.nmconnection'],**kw)
+    monkeypatch.setattr(runtime,'CONTROL',control)
+    monkeypatch.setattr(runtime,'boot_context',lambda:(None,{},lambda:(_ for _ in ()).throw(Conflict('moved'))))
+    real=network.replay_selected
+    monkeypatch.setattr(network,'replay_selected',lambda root,**opts:real(root,**(kw|opts)))
+    assert network.main(recovery=True,profiles=profiles,profiles_ready=kw['profiles_ready'])==0
+    assert not network.replay_blocked(profiles)
+
+
+def test_successful_recovery_replay_rechecks_authority_on_every_manager_restart(local,monkeypatch):
+    from quirkbench import runtime
+    control,profiles,kw=local
+    network.save_selected(control,['Home Wi-Fi.nmconnection'],**kw)
+    monkeypatch.setattr(runtime,'CONTROL',control)
+    monkeypatch.setattr(runtime,'boot_context',lambda:(None,{},lambda:True))
+    real=network.replay_selected
+    monkeypatch.setattr(network,'replay_selected',lambda root,**opts:real(root,**(kw|opts)))
+    assert network.main(recovery=True,profiles=profiles,profiles_ready=kw['profiles_ready'])==0
+    assert not network.replay_blocked(profiles)
+    assert network.main(recovery=True,profiles=profiles,profiles_ready=kw['profiles_ready'])==0
+    previous=(profiles/'Home Wi-Fi.nmconnection').read_bytes()
+    monkeypatch.setattr(runtime,'boot_context',lambda:(_ for _ in ()).throw(ValueError('missing boot')))
+    assert network.main(recovery=True,profiles=profiles,profiles_ready=kw['profiles_ready'])==1
+    assert network.replay_blocked(profiles)
+    assert (profiles/'Home Wi-Fi.nmconnection').read_bytes()==previous
+
+
+def test_process_interruption_after_ram_fence_blocks_next_prestart(local,monkeypatch):
+    from quirkbench import runtime
+    control,profiles,kw=local;network.save_selected(control,['Home Wi-Fi.nmconnection'],**kw)
+    path=profiles/'Home Wi-Fi.nmconnection';path.unlink()
+    monkeypatch.setattr(runtime,'CONTROL',control)
+    monkeypatch.setattr(runtime,'boot_context',lambda:(None,{},lambda:True))
+    original=network.atomic_write
+    def interrupt(destination,raw):
+        original(destination,raw)
+        if destination==profiles/network.REPLAY_FENCE:raise KeyboardInterrupt()
+    monkeypatch.setattr(network,'atomic_write',interrupt)
+    real=network.replay_selected
+    monkeypatch.setattr(network,'replay_selected',lambda root,**opts:real(root,**(kw|opts)))
+    with pytest.raises(KeyboardInterrupt):network.main(recovery=True,profiles=profiles,profiles_ready=kw['profiles_ready'])
+    assert network.replay_blocked(profiles) and not path.exists()
+    assert network.main(recovery=True,profiles=profiles,profiles_ready=kw['profiles_ready'])==1
