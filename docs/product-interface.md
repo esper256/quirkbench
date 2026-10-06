@@ -109,7 +109,7 @@ Input follows [experiment-submission v1](../schemas/experiment-submission.v1.sch
 Both schema and runtime reject unknown fields; runtime bounds size to 64 KiB and
 nesting to 32. Repetitions default to one. Timeout and recipe parameters are explicit
 and checked against the installed pinned recipe. A missing repository is resolved
-only when exactly one is configured. The selected repository path/signing fingerprint,
+only when exactly one is configured. The selected repository alias/signing fingerprint,
 baseline, recipe, builder and source identity are frozen before work begins.
 
 Workspace mode is `{"mode":"workspace","quiesced":true}`. It requires a registered
@@ -228,11 +228,12 @@ are invalidated. Exact interrupted replay completes the same reset; completed re
 cannot erase subsequently initialized state. A new `setup` uses a fresh request ID.
 See [controller installation](controller-installation.md#start-over-after-unsuccessful-setup).
 
-Setup progress v1 lives privately in the controller configuration because intent
-must precede creation of its database. It is a synchronous setup journal, not a
-scheduler or second database. Its schema records state/runtime identity (including
+Setup progress lives in `STATE/private/setup-progress.json`; intent precedes
+creation of its database. It is a synchronous setup journal, not a
+scheduler or second database. Its schema records software identity (including
 archive and manifest digests), resource/connection/logout choices and ordered completed
-steps. Runtime validation additionally checks canonical paths/IPs and digest relationships.
+steps. Locations are derived from the current root and selected installation; runtime
+validation checks current content, ownership, addresses and digest relationships.
 Readiness retains existing service fields and separately reports database, resources,
 runtime, release, builder, enrollment and target count. Accepted setup is still partial:
 controller configuration is published with explicit `--configure-controller`; start

@@ -6,6 +6,8 @@ Owner-approved direction: prepare the final USB layout and controller connection
 
 Product acceptance: an operator prepares one USB on the controller, boots a target, configures networking if necessary and reaches the existing investigation workflow without partition management or copied fingerprints. A failure always leaves an understandable explanation and accessible diagnostics/terminal. This plan includes controller preparation because it removes target-side work; it is not permission for a general installer, UI framework or pairing redesign.
 
+Implementation guidance: follow the [current location and identity contract](implementation-contracts.md#local-locations-and-durable-identity). Prepared-media identity comes from the selected device and immutable content, not a saved controller root. Derive managed trust/enrollment files from existing IDs and layout; retain external input selections once in ordinary local configuration. Use fresh current-format state for software checks. This changes no boot-device protection, pairing or exact-run authorization guarantee.
+
 ## 1. Experience: a guided dashboard
 
 Replace the numbered menu with a full-screen, keyboard-operated dashboard. It should answer three questions immediately:
