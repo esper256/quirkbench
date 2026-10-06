@@ -64,3 +64,47 @@ def test_missing_selected_image_names_the_actionable_input(tmp_path):
         preparation.plan(tmp_path,image=tmp_path/'missing/recovery.img',device='/dev/not-selected',
             target='target',output=tmp_path/'plan',unsigned_development=True,
             access=lambda *a,**k:pytest.fail('missing image cannot inspect a device'))
+
+
+@pytest.mark.parametrize('json_output',[False,True])
+def test_real_plan_progress_is_human_unless_json_requested(tmp_path,artifact,selected,monkeypatch,capsys,json_output):
+    from quirkbench import preparation_layout,image as image_tools
+    image,manifest,candidate,key=artifact;value,fd=selected
+    root=tmp_path/'state';root.mkdir()
+    output=tmp_path/'plan.json'
+    original=preparation.plan
+    def access(*a,**k):
+        return {'device':value['device'],'observed_layout':value['observed_layout'],
+            'metadata':[{'offset':entry['offset'],'hex':os.pread(fd,entry['length'],entry['offset']).hex()}
+                for entry in value['observed_layout']]}
+    def joined(*a,**k):
+        image_tools._emit('image-tool-sgdisk',status='running',timeout_s=30)
+        image_tools._emit('image-tool-sgdisk',status='complete',output_bytes=127)
+        return original(*a,**k,access=access,controller_reader=lambda _:value['controller'])
+    monkeypatch.setattr(preparation,'plan',joined)
+    command=['recovery','prepare','--image',str(image),'--device','/dev/selected-test',
+        '--target','chromebook','--plan-out',str(output),'--unsigned-development']
+    assert cli.main(command+(['--json'] if json_output else []),state_root=str(root))==0
+    captured=capsys.readouterr()
+    if json_output:
+        assert json.loads(captured.out)['written'] is False
+        assert all(isinstance(json.loads(line),dict) for line in captured.err.splitlines())
+    else:
+        assert 'Plan ready. The USB has not been changed.' in captured.out
+        assert 'GiB' in captured.out and 'Apply:' in captured.out
+        assert '{' not in captured.out+captured.err
+
+
+def test_failed_plan_never_reports_completion_and_restores_progress(tmp_path,monkeypatch,capsys):
+    from quirkbench.image import _image_event
+    root=tmp_path/'state';root.mkdir()
+    previous=_image_event.get()
+    def fail(*args,**kwargs):raise CommissionError('selected device disappeared')
+    monkeypatch.setattr(preparation,'plan',fail)
+    assert cli.main(['recovery','prepare','--image','image','--device','device','--target','chromebook',
+        '--plan-out',str(tmp_path/'plan'),'--unsigned-development'],state_root=str(root))==2
+    captured=capsys.readouterr()
+    assert 'Plan ready' not in captured.out and 'completed and verified' not in captured.out
+    assert 'selected device disappeared' in captured.err
+    assert _image_event.get() is previous
+    assert not (tmp_path/'plan').exists()

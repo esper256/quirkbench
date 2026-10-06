@@ -267,7 +267,7 @@ def runtime_archive(tmp_path):
     return install(archive, data_home=tmp_path / 'data')
 
 
-def test_runtime_pinned_and_different_runtime_refused(tmp_path):
+def test_local_code_edits_are_allowed_but_setup_request_history_is_not_rewritten(tmp_path):
     record = runtime_archive(tmp_path)
     first = setup(tmp_path, runtime_root=Path(record['runtime_root']))
     assert first['readiness']['runtime_verified']
@@ -281,19 +281,17 @@ def test_runtime_pinned_and_different_runtime_refused(tmp_path):
     selected=selected_runtime(config_home=tmp_path/'config')
     executable = selected / 'bin/quirkbench-controller-service'
     executable.write_bytes(b'changed')
-    with pytest.raises(ContractError, match='bytes differ'):
-        setup(tmp_path)
+    assert setup(tmp_path)['readiness']['runtime_verified']
     report = controller_status(tmp_path / 'state', config_home=tmp_path / 'config', **observations())
-    assert not report['readiness']['runtime_verified']
+    assert report['readiness']['runtime_verified']
     assert report['readiness']['resources_recorded']
     manifest_path = selected / 'controller-manifest.json'
     manifest = json.loads(manifest_path.read_bytes())
     from quirkbench.contracts import digest
     manifest['files']['bin/quirkbench-controller-service'] = digest(b'changed')
     manifest_path.write_text(json.dumps(manifest))
-    with pytest.raises(Conflict, match='different intent'):
-        setup(tmp_path)
-    assert not controller_status(tmp_path / 'state', config_home=tmp_path / 'config', **observations())['readiness']['runtime_verified']
+    assert setup(tmp_path)['readiness']['runtime_verified']
+    assert controller_status(tmp_path / 'state', config_home=tmp_path / 'config', **observations())['readiness']['runtime_verified']
 
 
 def test_configured_state_conflict_does_not_poison_initial_journal(tmp_path):

@@ -37,7 +37,7 @@ Manual checksum checks alone detect corruption, not publisher authenticity.
 
 Package runtime units, templates, recipes, migrations and the agent guide as installed
 resources. No runtime path may require a source checkout. The current development archive uses existing system Python 3.11+; its guarded
-installer manages immutable runtime directories and the launcher. The future signed
+installer manages versioned runtime directories and the launcher. The future signed
 installer may supply a private Python environment; users should not construct virtualenvs,
 kernel manifests or package recipes to start a supported investigation. Missing host
 prerequisites produce specific instructions, never automatic host package changes.

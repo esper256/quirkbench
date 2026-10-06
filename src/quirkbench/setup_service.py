@@ -9,10 +9,10 @@ import subprocess
 from contextlib import nullcontext
 
 from .contracts import Conflict, ContractError, canonical, digest
-from .controller_install import _idle, verify_installation
+from .controller_install import _idle, installation_record
 from .controller_service import require_ready
 from .filesystem import _durable_directory, _managed_path
-from .controller_setup import _manifest_digest, _database_present, SetupFilesystem, setup_progress as initial_progress
+from .controller_setup import _database_present, SetupFilesystem, setup_progress as initial_progress
 from .controller_tls import create_identity, inspect_identity
 from .filesystem import private_lock
 from .setup_contracts import STEPS as INITIAL_STEPS, SetupUnavailable
@@ -64,9 +64,9 @@ def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, t
     if choice['runtime_version'] is None: raise ContractError('service setup requires --runtime')
     from .controller_install import selected_runtime
     runtime = selected_runtime(config_home=config_home)
-    record = verify_installation(runtime)
+    record = installation_record(runtime)
     if (record['archive_sha256'] != choice['runtime_archive_sha256']
-            or _manifest_digest(runtime) != choice['runtime_manifest_sha256']):
+            or record['version'] != choice['runtime_version']):
         raise Conflict('initial setup runtime identity differs')
     home = _config_home(config_home)
     journal = _journal(home, root); _durable_directory(journal.parent)

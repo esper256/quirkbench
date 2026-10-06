@@ -596,7 +596,7 @@ path remains an explicit development option.
 
 Acquisition pins HTTPS location, exact key SHA256/full fingerprint, signed statement
 and archive identity. Reusing a request ID with different choices conflicts. Retry
-checks actual immutable runtime bytes; the optional download cache can be rebuilt,
+checks the acquired archive and signed provenance; the optional download cache can be rebuilt,
 while accepted metadata and results remain in private configuration. No service is
 activated by release acquisition. Production publisher provisioning, rotation and
 release publication are outstanding release acceptance work.
@@ -619,7 +619,7 @@ legacy development archives remain readable.
 
 ## Initial controller setup
 
-From a managed installed runtime, initial setup discovers its own immutable runtime:
+From an installed runtime, initial setup discovers its declared archive provenance:
 
 ```sh
 bin/quirkbench setup --request-id INITIAL_SETUP --configure-controller --json
@@ -776,3 +776,10 @@ explicit successor `--repository-url https://CONTROLLER_LAN_IP:REPOSITORY_PORT`.
 Keep the same request and hashes for interrupted replay. Rollback uses the returned
 switch hash and restores the exact original configuration, including any old LAN
 restriction. No database reset is needed.
+
+Local installed code is ordinary application code. Setup, status, selection, startup
+and heartbeats do not inventory or hash it, enforce exact modes, or reject generated
+Python caches. Local edits do not attest current bytes as publisher-authenticated;
+signed-release status describes the acquired archive. Explicit installation verifies
+archive inputs and refuses to overwrite changed packaged files, while allowing
+extra local files and normal permission changes. No cache cleanup is required.

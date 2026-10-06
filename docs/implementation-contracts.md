@@ -114,7 +114,7 @@ The remaining access-mode checks have specific purposes:
 - The configured GnuPG signing home keeps a private boundary for publication keys
   outside worker/output mounts. NetworkManager's RAM profile store must be private
   and writable for saved network credentials, and retains its restricted tmpfs.
-- Executable bits, source special-mode exclusions, installed archive modes and
+- Executable bits, source special-mode exclusions and
   read-only library/build snapshots retain their functional or reproducibility
   meanings. They are not evidence of secret confidentiality or worker authority.
 
@@ -122,6 +122,28 @@ Permission changes on newly created artifacts preserve the required source/image
 modes or establish secret defaults. Cleanup may restore owner access only inside
 an explicitly disposable, stopped, application-owned snapshot; it never normalizes
 user source or ordinary state as a precondition for use.
+
+## Ordinary local application code
+
+Owner-approved simplification (#171): installed controller code is ordinary trusted
+local application code, not a secure-boot or continuously attested runtime. Read
+its existing installation record for declared version/archive provenance; do not
+walk inventories, hash installed code, enforce exact modes or reject extra caches
+in configuration reads, runtime selection, status, startup or heartbeats. Actual OS
+access and execution failures remain actionable errors. Local code edits and cache
+files do not erase the historical provenance of the acquired archive. Setup
+manifest digests are historical acquisition observations, never live-code checks.
+The existing `runtime_verified` status field means declared installation/configuration
+consistency; it does not promise attestation of current local bytes.
+
+Explicit signed distribution verification still verifies the requested archive and
+publisher statement. An explicit install/check can compare declared packaged bytes,
+but extra local files and ordinary modes are not evidence of corruption. Installation
+never silently replaces changed owner files. Keep active process/configuration
+coordination, target authentication, exact-run approval, selected-disk erasure
+confirmation and preservation/attribution of existing evidence. Content IDs for
+retained experiment inputs and evidence describe the user's actual data; they are
+not an authorization system for the local application.
 
 ## Local locations and durable identity
 

@@ -6,7 +6,7 @@ from .cli_parser import action
 def build(root):
     p = action(root, 'setup', 'Configure this controller', command='setup', internal_action=None)
     p.add_argument('--request-id', help='durable retry identity')
-    p.add_argument('--runtime', type=Path, help='verified immutable installed runtime root')
+    p.add_argument('--runtime', type=Path, help='installed runtime root')
     p.add_argument('--cache-gib', type=int, help='Maximum intermediate build cache size in GiB')
     p.add_argument('--reserve-gib', dest='setup_reserve_gib', type=float, help='Minimum free storage to preserve in GiB')
     p.add_argument('--host', help='Controller bind IP; use a reachable LAN IP for separate targets (default: 127.0.0.1)')

@@ -1,4 +1,4 @@
-"""Read-only re-verification of a signed installation against independent trust."""
+"""Read-only verification of acquired signed archive provenance."""
 from __future__ import annotations
 
 import json
@@ -7,7 +7,7 @@ import re
 import subprocess
 
 from .contracts import Conflict, ContractError, canonical, digest, identifier, sha256
-from .controller_install import _verified_archive, verify_installation
+from .controller_install import _verified_archive, installation_record
 from .controller_release import bounded_file, verify_statement
 from .filesystem import _managed_path
 from .product_contracts import _depth, _pairs
@@ -29,7 +29,7 @@ def _document(path, fields, limit=65536):
 
 
 def verify_request(request_id, *, config_home=None, trust_bundle=None, run=subprocess.run):
-    """Current publisher trust, captured signed inputs and actual installed bytes.
+    """Current publisher trust and captured signed archive provenance.
 
     No cache dependency, state initialization, download, activation or qualification.
     Explicit trust injection never updates the packaged production trust configuration.
@@ -75,11 +75,14 @@ def verify_request(request_id, *, config_home=None, trust_bundle=None, run=subpr
         raise Conflict('retained controller archive differs from signed release identity')
     record={'schema_version':1,'version':manifest['version'],'archive_sha256':archive_digest,
             'signed':False,'qualified':False}
-    verify_installation(runtime, {**files,'installation.json':canonical(record)})
+    # Signed provenance describes the acquired archive, not continuously
+    # attested local code. Ordinary local edits do not invalidate that history.
+    if installation_record(runtime)['archive_sha256'] != archive_digest:
+        raise Conflict('local installation record differs from release provenance')
     expected={**record,'request_id':request_id,'distribution_verification':{
         **receipt,'controller_archive_authenticated':True,'other_release_assets_verified':False}}
     if installation != expected or record['archive_sha256'] != statement['controller_archive_sha256']:
-        raise Conflict('signed installation result differs from actual authenticated runtime')
+        raise Conflict('signed installation result differs from acquired archive provenance')
     # Equality alone accepts boolean/integer substitution in Python; canonical bytes
     # retain the strict types across every nested historical receipt field.
     if canonical(installation) != canonical(expected):

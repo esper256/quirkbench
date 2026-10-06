@@ -41,9 +41,9 @@ def require_ready(root,*,runner=subprocess.run,clock=time.time):
 
 def advertise(owner,runtime,capabilities=None, *, generation=None):
     c=owner.controller
-    from .controller_install import verify_installation
+    from .controller_install import installation_record
     from .contracts import canonical,digest
-    running=verify_installation(Path(runtime).resolve().parent.parent)
+    running=installation_record(Path(runtime).resolve().parent.parent)
     actual=digest(canonical({key:running[key] for key in ('version','archive_sha256')}))
     current=configuration(c.root)
     current_generation=configuration_generation(current)
@@ -138,12 +138,12 @@ def materialize_configuration(root, config, *, runtime=None):
     if not isinstance(software,dict) or set(software)!={'version','archive_sha256'}:
         raise ContractError('invalid configured software identity')
     sha256(software['archive_sha256'])
-    from .controller_install import selected_runtime, verify_installation
+    from .controller_install import selected_runtime, installation_record
     if runtime is None:
         installed=Path(__file__).resolve().parents[2]
         runtime=installed if (installed/'installation.json').exists() else selected_runtime()
     runtime=Path(runtime).expanduser().resolve()
-    record=verify_installation(runtime)
+    record=installation_record(runtime)
     if any(record[key]!=software[key] for key in software):
         raise ContractError('running installation differs from selected software; use the selected CLI')
     from .contracts import digest
@@ -183,8 +183,8 @@ def validate_configuration(root, config):
         raise ContractError('invalid controller service reserve_gib')
     for name in ('runtime','job_worker','cert','key') + (() if registry else ('tokens_file',)):
         path=Path(config[name]).expanduser()
-        if not path.is_absolute() or not path.is_file():
-            raise ContractError('canonical service input required: '+name)
+        if not path.is_absolute():
+            raise ContractError('absolute service location required: '+name)
     runtime=Path(config['runtime'])
     worker=Path(config['job_worker'])
     if worker.parent!=runtime.parent or worker.name!='quirkbench-job-worker':

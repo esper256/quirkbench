@@ -54,6 +54,19 @@ def prepare(args):
     from . import preparation
     from .contracts import ContractError
     import os
+    from .image import _image_event
+    last_activity=[time.monotonic()]
+    def progress(event):
+        if args.json:
+            print(json.dumps(event,sort_keys=True),file=sys.stderr,flush=True)
+        elif event.get('status')=='failed':
+            print('USB preparation tool failed: '+event['phase'].removeprefix('image-tool-'),file=sys.stderr,flush=True)
+        elif event.get('activity') and time.monotonic()-last_activity[0]>=5:
+            print('USB preparation is still working: '+event['activity'],file=sys.stderr,flush=True)
+            last_activity[0]=time.monotonic()
+    token=_image_event.set(progress)
+    def capacity(size):
+        return f'{size/1024**3:.2f} GiB' if size>=1024**3 else f'{size/1024**2:.0f} MiB'
     try:
         if os.geteuid()==0 and 'SUDO_UID' in os.environ:
             raise ContractError('run quirkbench as your normal user so it can use your controller; run sudo -v first for the device helper')
@@ -71,21 +84,24 @@ def prepare(args):
         if not root.is_dir():raise ContractError('configure the controller first; preparation needs its existing enrollment trust')
         common={'public_key':args.public_key,'fingerprint':args.fingerprint,'unsigned_development':args.unsigned_development}
         if args.plan is None:
+            if not args.json:print('Planning USB preparation; the USB will not be changed.',flush=True)
             answer=preparation.plan(root,image=args.image,device=args.device,target=args.target,output=args.plan_out,**common)
         else:
             output=args.output or root/'private/preparation'/('apply-'+str(time.time_ns()))
             output.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+            if not args.json:print('Preparing the selected USB. Keep it connected until completion.',flush=True)
             answer=preparation.apply(root,plan_path=args.plan,confirmation=args.confirm,erase=args.erase,output=output,image=args.image,device=args.device,**common)
         if args.json:print(json.dumps(answer,sort_keys=True))
         elif args.plan is None:
-            print('USB preparation plan: '+answer['plan'])
-            print('Device: '+str(args.device)+' ('+str(answer['device']['device_bytes'])+' bytes)')
+            print('Plan ready. The USB has not been changed.')
+            print('Saved plan: '+answer['plan'])
+            print('Device: '+str(args.device)+' ('+capacity(answer['device']['device_bytes'])+')')
             for number,(role,(start,end)) in enumerate(zip(('Boot','Recovery','State','Experiments','Library','Evidence'),answer['geometry']),1):
-                print(str(number)+'. '+role+': '+str((end-start+1)*512)+' bytes (sectors '+str(start)+'–'+str(end)+')')
-            print('Library payload: 0 bytes; filesystem overhead: '+str(answer['library_overhead_bytes'])+' bytes')
-            print('Experiments: '+str(answer['experiment_bytes'])+' bytes; evidence: '+str(answer['evidence_bytes'])+' bytes; library payload: 0')
+                print(str(number)+'. '+role+': '+capacity((end-start+1)*512))
+            print('Library contains no shipped payload; its size is filesystem overhead.')
             print('All existing USB data, evidence and credentials will be erased on apply.')
             import shlex
+            print('Next: review the selected device, then run this command to erase and configure it.')
             print('Apply: quirkbench recovery prepare --plan '+shlex.quote(answer['plan'])+' --image '+shlex.quote(str(args.image))+' --device '+shlex.quote(str(args.device))+' --confirm '+answer['confirmation']+' --erase'+
                 (' --unsigned-development' if args.unsigned_development else ' --public-key '+shlex.quote(str(args.public_key))+' --fingerprint '+shlex.quote(args.fingerprint)))
         else:
@@ -99,3 +115,5 @@ def prepare(args):
                 'message':str(exc)[:4096],'retryable':False}),sort_keys=True))
         else:print('USB preparation blocked: '+str(exc),file=sys.stderr)
         return 2
+    finally:
+        _image_event.reset(token)
