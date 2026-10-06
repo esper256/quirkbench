@@ -43,8 +43,8 @@ def test_old_image_end_backup_and_array_are_captured_and_live_mutations_detected
 def test_untrusted_header_addresses_cannot_expand_observation(device,count,entry_size,alternate):
     fd,path,work=device
     os.pwrite(fd,header(1,alternate,2,count,entry_size),512)
-    with pytest.raises(CommissionError,match='unbounded|outside'):
-        plans.observe_layout(fd,path.stat().st_size)
+    observations=plans.observe_layout(fd,path.stat().st_size)
+    assert len(observations)==2 and sum(o['length'] for o in observations)==2*1024**2
 
 
 def test_no_partition_table_and_flat_mbr_use_only_captured_records(device):
@@ -64,9 +64,9 @@ def test_extended_or_damaged_protective_layout_never_authorizes_conversion(devic
     fd,path,work=device
     raw=bytearray(512);raw[510:512]=b'\x55\xaa';raw[450]=kind
     struct.pack_into('<II',raw,454,2048,4096);os.pwrite(fd,raw,0)
-    with pytest.raises(CommissionError,match='unsupported extended or damaged'):
-        layouts.inspect(fd,path.stat().st_size,work,deadline=time.monotonic()+2,guard=lambda:None,
-                        runner=lambda *a,**kw:pytest.fail('no conversion'))
+    result=layouts.inspect(fd,path.stat().st_size,work,deadline=time.monotonic()+2,guard=lambda:None,
+        runner=lambda *a,**kw:pytest.fail('no repair or conversion'))
+    assert result['description']['kind']=='flat-mbr'
 
 
 @pytest.mark.parametrize('deadline',[float('nan'),float('inf'),True,0])

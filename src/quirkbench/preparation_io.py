@@ -42,9 +42,9 @@ def claim(expected, disk, *, observe_options=None):
 
     Linux block-device O_EXCL refuses existing holders/mounted use even when
     proc reports another mount namespace or a synthetic filesystem identity.
-    Actual device writes must use this FD directly. Native filesystem/GPT tools
-    operate on regular-file components; reopening a block /proc/self/fd/N is
-    not equivalent to using the held block-device description.
+    Payload/GPT writes use this FD directly. Filesystem tools receive temporary
+    offset/size-limited loop views attached to this exact FD; the whole device
+    is never reopened by pathname for a native formatter.
     """
     from pathlib import Path
     disk = Path(disk).expanduser().resolve(strict=True)
@@ -60,7 +60,8 @@ def claim(expected, disk, *, observe_options=None):
 
 def copy_extent(source_fd, destination_fd, *, source_offset, destination_offset,
                 length, expected_sha256, deadline, guard, monotonic=time.monotonic,
-                read=os.pread, write=os.pwrite, sync=os.fsync):
+                read=os.pread, write=os.pwrite, sync=os.fsync, progress=lambda done,total:None,
+                readback_progress=lambda done,total:None):
     """Copy exact retained bytes; short writes/ENOSPC never mean completion.
 
     Hash copied bytes and read them back after fsync. A held FD/claim does not
@@ -93,19 +94,23 @@ def copy_extent(source_fd, destination_fd, *, source_offset, destination_offset,
         if write(destination_fd, block, destination_offset+position) != len(block):
             raise CommissionError('USB preparation short write; media remains incomplete')
         checksum.update(block); position += len(block)
+        progress(position,length)
     if checksum.hexdigest() != expected_sha256:
         raise CommissionError('preparation source changed during copy; media remains incomplete')
     guard()
     if monotonic() >= deadline:raise CommissionError('USB preparation copy deadline exceeded before sync')
     sync(destination_fd)
     checksum = hashlib.sha256(); position = 0
+    readback_progress(0,length)
     while position < length:
+        guard()
         if monotonic() >= deadline:
             raise CommissionError('USB preparation verification deadline exceeded')
         block = read(destination_fd, min(MAX_CHUNK, length-position), destination_offset+position)
         if not block:
             raise CommissionError('USB preparation verification short read')
         checksum.update(block); position += len(block)
+        readback_progress(position,length)
     guard()
     if monotonic() >= deadline:raise CommissionError('USB preparation verification deadline exceeded')
     if checksum.hexdigest() != expected_sha256:

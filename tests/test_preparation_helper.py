@@ -63,17 +63,40 @@ def test_privileged_child_import_does_not_modify_installation_inventory(tmp_path
         ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
     before={str(p.relative_to(package_root)):p.read_bytes() for p in package_root.rglob('*') if p.is_file()}
     native=subprocess.run
-    def run(argv,**kwargs):
+    def run(argv):
         assert argv[:3]==['sudo','-n','--']
         child=argv[3:]
         assert '-B' in child and '-I' in child
         child[child.index('-c')+2]=str(package_root)
         # Help imports the real packaged helper and dependencies but touches no
         # device and needs no root or enrollment fixture.
-        result=native(child,**kwargs)
+        result=native(child,capture_output=True,text=True,timeout=10)
         assert result.returncode==0 and 'Internal bounded USB' in result.stdout
-        return subprocess.CompletedProcess(argv,0,'{}','')
-    monkeypatch.setattr(preparation.subprocess,'run',run)
+        return '{}'
+    monkeypatch.setattr('quirkbench.ostree.CommandRunner.__call__',lambda self,argv:run(argv))
     assert preparation.helper('--help',timeout_s=10)=={}
     after={str(p.relative_to(package_root)):p.read_bytes() for p in package_root.rglob('*') if p.is_file()}
     assert after==before
+
+
+def test_missing_native_tools_are_reported_before_loop_access(monkeypatch):
+    monkeypatch.setattr('shutil.which',lambda name:None if name=='mkfs.ext4' else '/usr/bin/'+name)
+    monkeypatch.setattr(helper.os,'open',lambda *a:pytest.fail('missing tools must not access a device'))
+    with pytest.raises(CommissionError,match='mkfs.ext4'):helper.preflight()
+
+
+def test_helper_entrypoint_wires_stdin_cancellation(monkeypatch,capsys):
+    import time
+    seen=[]
+    monkeypatch.setenv('LC_ALL','C.UTF-8')
+    monkeypatch.setattr(helper,'invoking_uid',lambda:os.getuid())
+    def guard(pid,start,uid,stack,*,cancellation_fd=None):
+        assert cancellation_fd==0
+        seen.append(cancellation_fd)
+        return lambda:None
+    monkeypatch.setattr(helper,'owner_guard',guard)
+    monkeypatch.setattr(helper,'observation',lambda *a,**kw:{'observed':True})
+    assert helper.main(['--owner-pid','123','--owner-start','456','--deadline',str(time.monotonic()+5),
+        'observe','--device','unused-test-selection'])==0
+    assert seen==[0] and os.environ['LC_ALL']=='C'
+    assert 'observed' in capsys.readouterr().out

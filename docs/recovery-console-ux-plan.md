@@ -2,6 +2,11 @@
 
 Status: software implementation is complete in [PR #147](https://github.com/esper256/quirkbench/pull/147), including reconciliation with the path-portable controller. Independent boundary review and local focused acceptance passed. Actual USB preparation/boot and production release acceptance remain separate gates. Existing images do not acquire these changes automatically.
 
+The [direct preparation design](direct-usb-preparation-design.md) supersedes the
+capacity-sized scratch/copy strategy: no preliminary flash, direct empty filesystem
+creation and one copied-payload readback. Historical validation below describes its
+original revision, not acceptance evidence for this follow-up.
+
 Owner-approved direction: prepare the final USB layout and controller connection on the controller; never repartition on the target. Reserve library space only for actual shipped contents (currently zero), split remaining capacity between experiments and evidence, and handle space shortages at the affected operation rather than imposing a RAM-based admission limit. Debug uploads require normal pairing; collection and local export do not. A selectable terminal action must work without function keys.
 
 Product acceptance: an operator prepares one USB on the controller, boots a target, configures networking if necessary and reaches the existing investigation workflow without partition management or copied fingerprints. A failure always leaves an understandable explanation and accessible diagnostics/terminal. This plan includes controller preparation because it removes target-side work; it is not permission for a general installer, UI framework or pairing redesign.

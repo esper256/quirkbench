@@ -1,22 +1,18 @@
-"""Bounded descriptor-only writer; callers supply the exclusive device claim.
-
-No native tool ever receives a block descriptor. This is not a resume journal:
-failed writes require a fresh observed plan and explicit erase authorization.
-"""
+"""Direct USB preparation: content copies and extent-confined filesystem tools."""
 import hashlib
-import math
 import os
-import stat
+import re
 import time
 
 from .commission import CommissionError
 from .contracts import canonical,digest
 from .prepared_media import completed
-from .preparation_completion import publish
+from .prepared_factory import validate as factory_identity
+from .preparation_completion import publish,completion_sector
 from .preparation_components import capture_extents
 from .preparation_io import MAX_CHUNK,copy_extent
 from .preparation_plan import require_apply,observe_layout
-from .prepared_factory import validate as factory_identity
+from .preparation_partitions import view
 
 
 def _hash(fd,offset,length,deadline,guard):
@@ -27,162 +23,110 @@ def _hash(fd,offset,length,deadline,guard):
         block=os.pread(fd,min(MAX_CHUNK,length-position),offset+position)
         if not block:raise CommissionError('USB preparation component ended early')
         checksum.update(block);position+=len(block)
-    guard()
-    if time.monotonic()>=deadline:raise CommissionError('USB preparation verification deadline exceeded')
     return checksum.hexdigest()
 
 
-def freeze(plan,components,geometry_fd,completion,*,verification,deadline,guard):
-    """Normal-user frozen handoff; launcher pins its digest before privilege."""
-    value={'schema_version':1,'record_type':'prepared-components','plan_sha256':digest(canonical(plan)),
-        'components':{str(n):{'size_bytes':os.fstat(fd).st_size,
-            'sha256':_hash(fd,0,os.fstat(fd).st_size,deadline,guard)} for n,fd in components.items()},
-        'geometry':{'size_bytes':os.fstat(geometry_fd).st_size,
-            'sha256':_hash(geometry_fd,0,34*512,deadline,guard),
-            'backup_sha256':_hash(geometry_fd,os.fstat(geometry_fd).st_size-33*512,33*512,deadline,guard)},
-        'completion':{'offset':completion['offset'],'before':completion['before'].hex(),
-                      'after':completion['after'].hex(),'component_sha256':completion['component_sha256']}}
-    if value['components']['3']['sha256']!=completion['component_sha256']:
-        raise CommissionError('STATE changed after FAT completion proof')
-    if (set(verification)!={'4','5','6','geometry'} or verification['geometry']!=value['geometry']
-            or any(verification[str(n)]!=value['components'][str(n)]['sha256'] for n in (4,5,6))):
-        raise CommissionError('components changed after native filesystem/GPT verification')
-    return value
-
-
-def write(plan,device_fd,source_fd,components,geometry_fd,completion,*,finalization,finalization_sha256,confirmation,
-          erase,deadline,guard,progress=lambda phase:None):
-    """Write only the approved geometry, with current-byte checks between phases.
-
-    Production caller owns a pinned O_EXCL block descriptor and verifies all
-    inputs are regular files owned by the invoking controller user. Tests use
-    disposable regular destinations and the same copy/readback implementation.
-    The callback checks current descriptor/attachment; it grants no authorization.
-    No physical-sector atomicity or rollback is promised.
-    """
+def write(plan,device_fd,source_fd,state_fd,geometry_fd,completion,*,source_checksums,
+          payload,payload_files,geometry_hashes,confirmation,erase,deadline,guard,progress=lambda event:None,
+          partition_view=view,tool=None):
+    """Only factory content is bulk-copied; never copy or hash empty capacity."""
     require_apply(plan,confirmation,erase)
-    if (digest(canonical(finalization))!=finalization_sha256
-            or set(finalization)!={'schema_version','record_type','plan_sha256','components','geometry','completion'}
-            or type(finalization['schema_version']) is not int or finalization['schema_version']!=1
-            or finalization['record_type']!='prepared-components'
-            or finalization['plan_sha256']!=confirmation):
-        raise CommissionError('prepared component handoff differs from confirmed plan')
-    if (isinstance(deadline,bool) or not isinstance(deadline,(int,float))
-            or not math.isfinite(deadline) or deadline<=0):
-        raise CommissionError('USB preparation requires a finite positive deadline')
-    if set(components)!=set(range(1,7)):
-        raise CommissionError('all six prepared components are required')
-    factory=factory_identity(plan['factory']);media=plan['prepared_media']
-    geometry=media['geometry'];size=media['device_bytes']
-    for number,fd in components.items():
-        info=os.fstat(fd);start,end=geometry[number-1]
-        if not stat.S_ISREG(info.st_mode) or info.st_size!=(end-start+1)*512:
-            raise CommissionError('prepared component size/type differs from confirmed geometry')
-    info=os.fstat(geometry_fd)
-    if not stat.S_ISREG(info.st_mode) or info.st_size!=size:
-        raise CommissionError('prepared GPT view differs from confirmed geometry')
-    source_parts=list(zip(factory.partition_starts[:3],factory.fixed_ends))+[(factory.partition_starts[3],factory.factory_data_end)]
-    expected_source=capture_extents(source_fd,source_parts,
-        expected_sha256=plan['source']['sha256'],deadline=deadline,guard=guard)
-    hashes={number:_hash(fd,0,os.fstat(fd).st_size,deadline,guard)
-            for number,fd in components.items()}
-    if (finalization['components']!={str(n):{'size_bytes':os.fstat(fd).st_size,'sha256':hashes[n]} for n,fd in components.items()}
-            or finalization['geometry']!={'size_bytes':size,
-                'sha256':_hash(geometry_fd,0,34*512,deadline,guard),
-                'backup_sha256':_hash(geometry_fd,size-33*512,33*512,deadline,guard)}):
-        raise CommissionError('prepared component bytes changed after finalization')
-    if any(hashes[number]!=expected_source[number-1] for number in (1,2)):
-        raise CommissionError('fixed recovery components differ from confirmed artifact')
-    if (set(completion)!={'offset','before','after','before_sha256','after_sha256','component_sha256'}
-            or type(completion['offset']) is not int or completion['offset']%512
-            or completion['offset']<0 or completion['offset']+512>os.fstat(components[3]).st_size
-            or any(not isinstance(completion[name],bytes) or len(completion[name])!=512 for name in ('before','after'))
-            or any(digest(completion[name])!=completion[name+'_sha256'] for name in ('before','after'))
-            or completion['component_sha256']!=hashes[3]
-            or os.pread(components[3],512,completion['offset'])!=completion['before']):
-        raise CommissionError('invalid verified completion sector')
-    # Join the supplied sector to the exact record rather than accepting an
-    # arbitrary privileged final write. FAT allocation was proved by the caller.
-    from .preparation_completion import completion_sector
-    state_size=os.fstat(components[3]).st_size
-    if state_size>64*1024**2:raise CommissionError('STATE exceeds bounded completion proof')
-    proof=completion_sector(os.pread(components[3],state_size,0),media)
-    guard()
-    if time.monotonic()>=deadline:raise CommissionError('USB preparation completion proof deadline exceeded')
-    if (proof!=(completion['offset'],completion['before'],completion['after'])
-            or finalization['completion']!={'offset':completion['offset'],
-                'before':completion['before'].hex(),'after':completion['after'].hex(),
-                'component_sha256':completion['component_sha256']}):
-        raise CommissionError('completion sector differs from confirmed media record')
-    guard()
-    if observe_layout(device_fd,size)!=plan['observed_layout']:
-        raise CommissionError('USB layout changed before erasure; obtain a fresh plan')
-    windows=[]
-    for entry in plan['observed_layout']:
-        raw=os.pread(device_fd,entry['length'],entry['offset'])
-        if len(raw)!=entry['length'] or digest(raw)!=entry['sha256']:
-            raise CommissionError('USB layout changed before erasure')
-        windows.append([entry['offset'],bytearray(raw)])
+    factory=factory_identity(plan['factory']);media=plan['prepared_media'];geometry=media['geometry']
     def check():
         guard()
-        if time.monotonic()>=deadline:raise CommissionError('USB preparation write deadline exceeded')
-        for offset,expected in windows:
-            if os.pread(device_fd,len(expected),offset)!=expected:
-                raise CommissionError('USB metadata changed during preparation; media incomplete')
-        guard()
-        if time.monotonic()>=deadline:raise CommissionError('USB preparation write deadline exceeded')
-    def advance(offset,raw):
-        for start,expected in windows:
-            lo=max(start,offset);hi=min(start+len(expected),offset+len(raw))
-            if lo<hi:expected[lo-start:hi-start]=raw[lo-offset:hi-offset]
-    # Invalidate old address metadata before exposing any successor GPT. This
-    # prevents the supported boot reader accepting an old completed layout; it
-    # is not a promise about every firmware's boot policy.
-    progress('Invalidate previous layout');check()
-    for offset,expected in windows:
-        check();raw=bytes(len(expected))
-        if os.pwrite(device_fd,raw,offset)!=len(raw):raise CommissionError('USB preparation short metadata write; media incomplete')
-        expected[:]=raw
-    os.fsync(device_fd);check()
-    def copy(fd,offset,length,checksum,label):
-        progress(label);check()
-        # Expected windows advance only from bytes actually written; the
-        # existing copy adapter checks their SHA and durable destination SHA.
-        def write_bytes(destination,raw,position):
-            if any(position<start+len(expected) and position+len(raw)>start for start,expected in windows):check()
-            count=os.pwrite(destination,raw,position)
-            if count==len(raw):advance(position,raw)
-            return count
-        copy_extent(fd,device_fd,source_offset=0,destination_offset=offset,
-                    length=length,expected_sha256=checksum,deadline=deadline,
-                    guard=guard,write=write_bytes)
+        if time.monotonic()>=deadline:raise CommissionError('USB preparation deadline exceeded')
+    check()
+    extents=list(zip(factory.partition_starts[:3],factory.fixed_ends))+[(factory.partition_starts[3],factory.factory_data_end)]
+    hashes=capture_extents(source_fd,extents,expected_sha256=plan['source']['sha256'],deadline=deadline,guard=check)
+    if hashes!=source_checksums:raise CommissionError('factory content changed before preparation')
+    state_size=(geometry[2][1]-geometry[2][0]+1)*512
+    if os.fstat(state_fd).st_size!=state_size or state_size>64*1024**2:
+        raise CommissionError('prepared STATE size differs')
+    raw=os.pread(state_fd,state_size,0)
+    if (digest(raw)!=completion['component_sha256']
+            or completion_sector(raw,media)!=(completion['offset'],completion['before'],completion['after'])):
+        raise CommissionError('prepared STATE completion proof differs')
+    if os.fstat(geometry_fd).st_size!=media['device_bytes']:
+        raise CommissionError('prepared geometry size differs')
+    heads=os.pread(geometry_fd,34*512,0);tail=os.pread(geometry_fd,33*512,media['device_bytes']-33*512)
+    if (len(heads)!=34*512 or len(tail)!=33*512
+            or [digest(heads),digest(tail)]!=geometry_hashes):
+        raise CommissionError('prepared GPT changed from confirmed handoff')
+    if observe_layout(device_fd,media['device_bytes'])!=plan['observed_layout']:
+        raise CommissionError('USB layout changed before erasure; obtain a fresh plan')
+    def event(phase,**values):progress({'phase':phase,**values})
+    def write_bytes(raw,offset):
         check()
-    # PREPARING STATE must be durable before a new GPT can point at it.
-    for number in (3,1,2,4,5,6):
-        start,end=geometry[number-1]
-        copy(components[number],start*512,(end-start+1)*512,hashes[number],f'Write partition {number}')
-    # Existing assembler produces GPT bytes; never call a tool on this device.
-    for start,length in ((0,34*512),(size-33*512,33*512)):
-        check();raw=os.pread(geometry_fd,length,start)
-        key='sha256' if start==0 else 'backup_sha256'
-        if len(raw)!=length or digest(raw)!=finalization['geometry'][key]:
-            raise CommissionError('prepared GPT bytes changed before device write')
-        check()
-        if os.pwrite(device_fd,raw,start)!=length:raise CommissionError('USB preparation short GPT write; media incomplete')
-        advance(start,raw);os.fsync(device_fd);check()
-    progress('Verify all durable components');check()
-    for number,(start,end) in enumerate(geometry,1):
-        if _hash(device_fd,start*512,(end-start+1)*512,deadline,guard)!=hashes[number]:
-            raise CommissionError('USB preparation final partition verification failed; media incomplete')
-    # Check native-assembled metadata again after all component writes.
-    for start,length,key in ((0,34*512,'sha256'),(size-33*512,33*512,'backup_sha256')):
-        if _hash(device_fd,start,length,deadline,guard)!=finalization['geometry'][key]:
-            raise CommissionError('USB preparation final GPT verification failed; media incomplete')
-    check();progress('Confirm completed media')
-    offset=geometry[2][0]*512+completion['offset']
-    def completion_write(fd,raw,position):
-        count=os.pwrite(fd,raw,position)
-        if count==len(raw):advance(position,raw)
-        return count
-    publish(device_fd,offset,completion['before'],completion['after'],deadline=deadline,guard=check,write=completion_write)
+        if os.pwrite(device_fd,raw,offset)!=len(raw):raise CommissionError('USB preparation short write; media incomplete')
+    # Remove old boot metadata and STATE completion before any successor content.
+    event('Removing previous layout')
+    for entry in plan['observed_layout']:
+        write_bytes(bytes(entry['length']),entry['offset'])
+    state_start=geometry[2][0]*512
+    write_bytes(bytes(state_size),state_start);os.fsync(device_fd)
+    for number in (3,1,2,4):
+        start,end=extents[number-1]
+        length=(end-start+1)*512
+        source=state_fd if number==3 else source_fd
+        offset=0 if number==3 else start*512
+        expected=completion['component_sha256'] if number==3 else hashes[number-1]
+        phase={1:'Writing boot payload',2:'Writing recovery',3:'Writing preparation state',4:'Writing factory experiment content'}[number]
+        event(phase,bytes_total=length,bytes_done=0)
+        last=[0]
+        def report(label,done,total):
+            now=time.monotonic()
+            if done in (0,total) or now-last[0]>=2:
+                event(label,bytes_done=done,bytes_total=total);last[0]=now
+        copy_extent(source,device_fd,source_offset=offset,destination_offset=geometry[number-1][0]*512,
+            length=length,expected_sha256=expected,deadline=deadline,guard=check,progress=lambda done,total:report(phase,done,total),
+            readback_progress=lambda done,total:report(phase.replace('Writing','Verifying'),done,total))
+    from .ostree import CommandRunner
+    def native(argv,fd,verify):
+        verify();check()
+        if tool is not None:return tool(argv,fd,verify)
+        # Existing runner fences/drains the whole tool process group.
+        return CommandRunner(lambda *_:event('Running '+argv[0]),verify,timeout_s=deadline-time.monotonic(),
+            operation='USB preparation '+argv[0],phase='preparation-tool',pass_fds=(fd,),
+            diagnostic=lambda raw:print(raw.decode(errors='replace'),file=__import__('sys').stderr,flush=True),
+            failure_guidance='media remains incomplete; preserve preparation diagnostics',
+            success_codes=(0,1) if argv[0]=='e2fsck' else (0,))(argv)
+    for number,label in ((4,'QBEXPERIMENTS'),(5,'QBLIBRARY'),(6,'QBEVIDENCE')):
+        start,end=geometry[number-1];length=(end-start+1)*512
+        phase='Growing experiment filesystem' if number==4 else 'Creating '+('library' if number==5 else 'evidence')+' filesystem'
+        event(phase)
+        with partition_view(device_fd,start*512,length,guard=check) as (path,fd,verify):
+            if number==4:
+                native(['e2fsck','-f','-p',str(path)],fd,verify)
+                native(['resize2fs',str(path)],fd,verify)
+            else:
+                args=['mkfs.ext4','-q','-F','-L',label,'-U',factory.partition_uuids[number-1],
+                    '-O','^metadata_csum_seed','-E','lazy_itable_init=1,lazy_journal_init=1,nodiscard']
+                if number==6:args+=['-d',str(payload)]
+                native(args+[str(path)],fd,verify)
+            header=native(['dumpe2fs','-h',str(path)],fd,verify)
+            fields={}
+            for key in ('Filesystem UUID','Block count','Block size'):
+                match=re.search(r'^'+key+r':\s+(\S+)',header,re.M)
+                if match:fields[key]=match.group(1)
+            if (fields.get('Filesystem UUID')!=factory.partition_uuids[number-1]
+                    or not fields.get('Block count','').isdigit() or not fields.get('Block size','').isdigit()
+                    or int(fields['Block count'])*int(fields['Block size'])!=length):
+                raise CommissionError('prepared filesystem identity/capacity differs')
+            if number==6:
+                event('Configuring pairing')
+                # Source files have controller ownership; target control files belong to root.
+                for name in ('/','/control',*('/control/'+n for n in payload_files)):
+                    for field in ('uid','gid'):
+                        native(['debugfs','-w','-R',f'set_inode_field {name} {field} 0',str(path)],fd,verify)
+                for name,expected in payload_files.items():
+                    actual=native(['debugfs','-R','cat /control/'+name,str(path)],fd,verify).encode()
+                    if actual!=expected:raise CommissionError('USB pairing data readback differs')
+            os.fsync(fd);verify()
+    check();event('Writing final partition layout')
+    write_bytes(heads,0);write_bytes(tail,media['device_bytes']-33*512);os.fsync(device_fd)
+    if (os.pread(device_fd,len(heads),0)!=heads
+            or os.pread(device_fd,len(tail),media['device_bytes']-len(tail))!=tail):
+        raise CommissionError('USB partition layout readback differs')
+    check();event('Confirming completed media')
+    publish(device_fd,state_start+completion['offset'],completion['before'],completion['after'],deadline=deadline,guard=check)
     return {'prepared':True,'prepared_media':completed(media),'device_written':True}

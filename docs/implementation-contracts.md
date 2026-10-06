@@ -859,3 +859,34 @@ networking semantics are unchanged.
 Local attended restart uses shutdown record v2 with explicit `power_action=reboot`;
 v1 retains poweroff semantics. It reuses configuration ownership, work/evidence
 fences and preparation proof, never candidate arming or recovery-arrival authority.
+
+## Direct controller USB preparation (#174)
+
+The existing privileged helper may run fixed filesystem tools only on temporary
+partition-sized loop views attached with `LOOP_CONFIGURE` to its exclusively held
+selected USB descriptor. No native formatter receives the whole-device path.
+Offset and size limits, backing identity, current attachment/use, invoking-process
+ownership, tool-group shutdown and view teardown remain required. Closing the
+caller-held cancellation pipe asks the privileged helper to drain its own native
+groups before teardown; the caller waits for confirmed helper shutdown rather
+than killing it and orphaning privileged writers. A missing shutdown confirmation
+is an error, never proof that the USB can be reused. This supersedes
+the former prohibition on all native filesystem tools in the helper.
+The [Linux loop implementation](https://github.com/torvalds/linux/blob/master/drivers/block/loop.c)
+uses the supplied descriptor and applies the declared extent limits.
+
+Copy fixed boot/recovery and required factory experiment content, grow the latter
+and create empty library/evidence filesystems directly. Stage only small STATE,
+GPT metadata and pairing files; never bulk-copy or hash unused partition capacity.
+Each copied payload has one durable readback. Verify small layout/configuration
+records and filesystem identity/capacity; no second full-device scan.
+The helper receives public controller trust and initial enrollment data, never
+controller private keys or DB access. Materialize its small filesystem population
+source in owned temporary scratch, avoiding mutable user-directory traversal by
+privileged filesystem tools. Publish completion last.
+
+Any old USB contents may be replaced under explicit whole-device erase approval;
+old GPT validity is not an admission requirement or permission to repair/import it.
+An interruption retains diagnostics and requires a fresh plan and erase confirmation.
+Authentication, single-use non-expiring pairing, exact-run approval and internal-disk
+protection are unchanged. Software adapter evidence does not prove physical writes.

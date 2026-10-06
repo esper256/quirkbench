@@ -617,7 +617,8 @@ remain available for diagnosis.
 ## Controller USB preparation
 
 `quirkbench recovery prepare` plans and applies the final layout of an explicitly
-selected whole USB. It requires a compatible controller-prepared v3 artifact;
+selected whole USB. No preliminary flash or Media Writer step is required.
+Blank and previously flashed drives use the same plan/apply workflow. It requires a compatible controller-prepared v3 artifact;
 older images return an actionable fresh-build requirement and remain readable by
 the historical boot path. Fresh stock recipes now select v3 through the existing
 foreground and durable worker paths. Prepared-media software tests do not qualify
@@ -648,6 +649,11 @@ The erase acknowledgement covers **all existing USB data, evidence and credentia
 A stale backup GPT left at the physical USB tail by flashing a smaller valid
 factory image is reported in the plan and bound to confirmation. Preparation
 replaces it under explicit erasure; it does not repair or import that old layout.
+Apply needs the existing filesystem tools (`mkfs.ext4`, `resize2fs`, `e2fsck`,
+`dumpe2fs`, `debugfs`) and the host Linux loop-device facility. Tools receive
+partition-sized temporary views of the exclusively selected USB. Missing tools or
+loop support are reported before erasure; if the loop module is unloaded, enable
+it on the host with `sudo modprobe loop`, then retry.
 Both invocations need access to the narrow sudo device helper; the controller itself
 runs as the user. No prompt selects or approves a device.
 
@@ -659,7 +665,11 @@ it copies no controller private key. Supported trust maintenance is fenced while
 final staging/writing is active. Explicit invitation cancellation remains available;
 a cancelled invitation prevents a successful final preparation response.
 
-A fresh staging directory retains components, handoff, invitation ID and failure
+Only the recovery/factory content is copied, with one readback; empty library/evidence
+filesystems are created directly and factory experiments are grown in place.
+Progress names actual phases and transferred MiB, not an estimated timeout.
+
+A fresh staging directory retains small STATE/GPT metadata, handoff, invitation ID and failure
 information outside the checkout by default; `--output` selects a new directory.
 Preserve it after failure. Completion is unconfirmed after a short write, sync,
 readback, deadline or attachment failure, even if a final marker is readable. Retry
