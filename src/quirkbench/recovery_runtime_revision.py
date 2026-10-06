@@ -15,6 +15,9 @@ MAX_MANIFEST_BYTES = 64 * 1024
 RUNTIME_ASSETS = ("quirkbench-console.service", "quirkbench-recovery.service",
                   "quirkbench-supervisor-failure.service", "quirkbench-supervisor.service",
                   "tmp.mount", "var.mount")
+# New captures include the terminal, while historical v1 manifests retain their
+# original required-file interpretation. Native packaging audits check new roots.
+CAPTURE_ASSETS = (*RUNTIME_ASSETS, 'quirkbench-terminal.service')
 REQUIRED_PACKAGE_FILES = ("quirkbench/__init__.py", "quirkbench/boot.py",
                           "quirkbench/console.py", "quirkbench/runtime.py",
                           "quirkbench/recipes/system-observation.v1.json")
@@ -60,7 +63,7 @@ def capture_runtime_revision(package_dir: Path, assets_dir: Path) -> dict:
         raise BuildError("recovery runtime source directories missing")
     files = []
     for source in (*(package_dir / (name+".py") for name in TARGET_MODULES), *package_dir.glob("recipes/*.json"),
-                   *(assets_dir / name for name in RUNTIME_ASSETS)):
+                   *(assets_dir / name for name in CAPTURE_ASSETS)):
         if source.is_symlink() or not source.is_file():
             raise BuildError("recovery runtime source must be a regular file")
         relative = ("target-assets/" + source.name if source.parent == assets_dir
@@ -84,7 +87,10 @@ def audit_installed_runtime(rootfs: Path, manifest: dict) -> None:
             raise BuildError("installed recovery runtime directory escapes rootfs")
     for path in (*package.glob("*.py"), *package.glob("recipes/*.json")):
         installed["quirkbench/" + path.relative_to(package).as_posix()] = path
-    for name in RUNTIME_ASSETS:
+    for name in CAPTURE_ASSETS:
+        if ('target-assets/' + name not in expected and not (units / name).exists()
+                and not (units / name).is_symlink()):
+            continue
         installed["target-assets/" + name] = units / name
     if set(installed) != set(expected):
         raise BuildError("installed recovery runtime files differ from reviewed revision")

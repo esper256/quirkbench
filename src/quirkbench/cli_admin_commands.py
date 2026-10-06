@@ -5,6 +5,12 @@ from .cli_parser import action
 
 def build(root):
     connection(root)
+    for name in ('list','show','export','delete'):
+        p=action(root,'admin diagnostics '+name,{'list':'List reported recovery diagnostics','show':'Inspect a recovery report; reported data is not recovery proof','export':'Export opaque recovery report attachments to a new directory','delete':'Delete one report and its unreferenced files with controller workers stopped'}[name],command='diagnostics',internal_action=name)
+        if name!='list':p.add_argument('report_id',help='Exact received report SHA256')
+        else:
+            p.add_argument('--after',default='',help='Continue after the returned report cursor');p.add_argument('--limit',type=int,default=20,help='Maximum diagnostic reports to return')
+        if name=='export':p.add_argument('--output',type=Path,required=True,help='New directory, never an existing destination')
     p = action(root, 'admin repository configure', 'Configure a repository using an existing signing key; controller must be stopped', command='publication', internal_action='setup')
     p.add_argument('--repository', required=True, help='fresh explicit repository alias beneath controller state')
     p.add_argument('--url', required=True, help='HTTPS controller certificate host with a separate repository port')

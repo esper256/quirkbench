@@ -123,6 +123,7 @@ def abandon(root,upload):
         disposable(Path(root)/'artifacts/uploads',Path(root))
         recover_legacy(root,db)
         row=db.execute('SELECT * FROM upload_owners WHERE id=?',(upload,)).fetchone()
+        if row and row['state']=='DIAGNOSTIC':raise Conflict('use admin diagnostics delete for this report upload')
         if row and row['state']=='RETIRED': raise Conflict('upload already retired')
         if row and row['attempt'] is not None and _needed(db,row['attempt']):
             raise Conflict('active or unresolved attempt still needs this upload')

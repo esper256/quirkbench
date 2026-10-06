@@ -1,7 +1,7 @@
 """Private operator-created enrollment intents; exchange grants no boot authority."""
 from __future__ import annotations
 
-from .enrollment_records import _now, _document, validate_code
+from .enrollment_records import _now, _document, validate_code, invitation_live
 import json
 import math
 from pathlib import Path
@@ -26,6 +26,18 @@ INSERT INTO enrollment_clock VALUES(1,0);
 '''
 LIMIT = 16384
 
+# Preserve the original migration and every row/binding. DROP/ADD operates on
+# the existing table (no table rename or foreign-key rewrite). The temporary
+# column preserves even inconsistent old metadata for row_code to reject.
+NONEXPIRING_MIGRATION = '''
+ALTER TABLE enrollment_codes ADD COLUMN retained_expires_at INTEGER;
+UPDATE enrollment_codes SET retained_expires_at=expires_at;
+ALTER TABLE enrollment_codes DROP COLUMN expires_at;
+ALTER TABLE enrollment_codes ADD COLUMN expires_at INTEGER;
+UPDATE enrollment_codes SET expires_at=retained_expires_at;
+ALTER TABLE enrollment_codes DROP COLUMN retained_expires_at;
+'''
+
 
 
 
@@ -48,7 +60,7 @@ def _snapshot(root, *, tls_inspector=None):
             'certificate_sha256': observed['certificate_sha256']}
 
 
-def create_code(controller, name, request_id, *, ttl_seconds=300, ready=None, tls_inspector=None,
+def create_code(controller, name, request_id, *, ttl_seconds=None, ready=None, tls_inspector=None,
                 clock=time.time, fault_hook=None):
     from .filesystem import private_lock
     from .filesystem import _managed_path
@@ -75,14 +87,14 @@ def _create_code(controller, name, request_id, *, ttl_seconds, ready, tls_inspec
     These records alone enable no anonymous exchange, identity or execution authority.
     """
     identifier(name); identifier(request_id)
-    if type(ttl_seconds) is not int or not 60 <= ttl_seconds <= 900:
+    if ttl_seconds is not None and (type(ttl_seconds) is not int or not 60 <= ttl_seconds <= 900):
         raise ContractError('enrollment code lifetime must be 60 to 900 seconds')
     from .controller_service import require_ready
     from .filesystem import _durable_directory, _managed_path
     from .filesystem import private_lock
     (ready or require_ready)(controller.root)
     snapshot = _snapshot(controller.root, tls_inspector=tls_inspector)
-    intent = {'schema_version': 1, 'kind': 'enrollment_code', 'request_id': request_id,
+    intent = {'schema_version': 2 if ttl_seconds is None else 1, 'kind': 'enrollment_code', 'request_id': request_id,
               'name': name, 'ttl_seconds': ttl_seconds, **snapshot}
     if retarget_scope is not None:
         from .retarget_records import validate_scope
@@ -105,7 +117,8 @@ def _create_code(controller, name, request_id, *, ttl_seconds, ready, tls_inspec
                 raise Conflict('enrollment request already has another immutable intent')
             record = validate_code(saved['record']); code = saved['code']
             if (record['request_digest'] != request_digest or record['request_id'] != request_id
-                    or record['name'] != name or record['expires_at']-record['created_at'] != ttl_seconds
+                    or record['name'] != name
+                    or (None if record['expires_at'] is None else record['expires_at']-record['created_at']) != ttl_seconds
                     or any(record[key] != value for key,value in snapshot.items())):
                 raise Conflict('private enrollment issuance differs from its intent')
             if not isinstance(code, str) or not re.fullmatch(r'[A-Za-z0-9_-]{43}', code):
@@ -114,15 +127,16 @@ def _create_code(controller, name, request_id, *, ttl_seconds, ready, tls_inspec
             with controller.transaction() as db:
                 if db.execute('SELECT 1 FROM enrollment_codes WHERE request_id=?',(request_id,)).fetchone():
                     raise Conflict('committed enrollment secret is missing; preserve history and use a new request ID')
-            record = validate_code({'schema_version': 1, 'record_type': 'enrollment-code',
+            record = validate_code({'schema_version': 2 if ttl_seconds is None else 1, 'record_type': 'enrollment-code',
                 'code_id': 'code-' + secrets.token_hex(16), 'request_id': request_id, 'request_digest': request_digest,
-                'name': name, **snapshot, 'created_at': now, 'expires_at': now + ttl_seconds})
+                'name': name, **snapshot, 'created_at': now,
+                'expires_at': None if ttl_seconds is None else now + ttl_seconds})
             code = secrets.token_urlsafe(32)
             saved = {'schema_version': 1, 'intent': intent, 'record': record, 'code': code}
             atomic_write(path, canonical(saved))
         fault_hook('secret_retained')
         now=_now(clock);observe_clock(controller,now)
-        if not record['created_at'] <= now < record['expires_at']:
+        if not invitation_live(record, now):
             raise Conflict('enrollment code expired or clock moved backwards; use a new request ID')
         with controller.transaction() as db:
             if now < db.execute('SELECT last_seen FROM enrollment_clock WHERE id=1').fetchone()[0]:
@@ -168,7 +182,7 @@ def code_status(root, code_id, *, clock=time.time):
         raise ContractError('unknown enrollment code')
     record = row_code(row)
     return {'record': record, 'state': row['state'],
-            'redeemable': row['state'] == 'ACTIVE' and record['created_at'] <= now < record['expires_at'],
+            'redeemable': row['state'] == 'ACTIVE' and invitation_live(record, now),
             'enrolled': False, 'boot_authorized': False}
 
 

@@ -9,7 +9,7 @@ def build(root):
     p = action(root, 'target pair', 'Create a pairing invitation; confirm the fingerprint on the target', command='target', internal_action='add')
     p.add_argument('name', help='Target name or exact target ID')
     p.add_argument('--request-id', help='Durable request identity for safe retries')
-    p.add_argument('--ttl-seconds', type=int, help='Invitation lifetime in seconds')
+    p.add_argument('--ttl-seconds', type=int, help='Legacy option; initial pairing now lasts until redeemed or cancelled')
     p.set_defaults(replace=None, ttl_seconds=None, generation=None, new_name=None, new_uuid=None, file=None, grant=None, status_version=2)
     p = action(root, 'target show', 'Show target enrollment, contact and recovery facts', command='target', internal_action='show')
     p.add_argument('name', help='Target name or exact target ID')

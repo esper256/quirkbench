@@ -39,6 +39,25 @@ def audit_pairing_executables(root):
         if not usable:
             raise BuildError('stock pairing executable missing, nonexecutable or outside sysroot: usr/bin/'+name)
 
+
+def audit_console_dependencies(root):
+    """Check the actual installed console tools and Python extension payload."""
+    root = Path(root).resolve()
+    for name in ('bash', 'nmtui'):
+        path = root/'usr/bin'/name
+        try:
+            real = path.resolve(strict=True)
+            usable = real.is_relative_to(root) and real.is_file() and real.stat().st_mode & 0o111
+        except (OSError, RuntimeError):
+            usable = False
+        if not usable:
+            raise BuildError('stock console executable missing, nonexecutable or outside sysroot: usr/bin/'+name)
+    for extension in ('_curses', 'fcntl'):
+        matches = list(root.glob('usr/lib*/python3.*/lib-dynload/'+extension+'.*.so'))
+        if (len(matches) != 1 or matches[0].is_symlink() or not matches[0].is_file()
+                or not matches[0].resolve().is_relative_to(root)):
+            raise BuildError('stock console Python extension missing or ambiguous: '+extension)
+
 def run_base(recipe, store, stage, *, runner, limits, rootfs_installer, cache=None):
     checked = preflight_recipe(recipe, store)
     stage = Path(stage)
@@ -78,6 +97,7 @@ def run_base(recipe, store, stage, *, runner, limits, rootfs_installer, cache=No
             or (rootfs / "etc/quirkbench-rootfs").read_text().strip() != "quirkbench-fedora-target-v1"):
         raise BuildError("stock rootfs marker missing")
     audit_pairing_executables(stage / "rootfs")
+    audit_console_dependencies(stage / "rootfs")
     release = checked["rootfs_lock"]["kernel_release"]
     kernel = _file(rootfs, f"usr/lib/modules/{release}/vmlinuz", f"lib/modules/{release}/vmlinuz", f"boot/vmlinuz-{release}")
     config = _file(rootfs, f"usr/lib/modules/{release}/config", f"lib/modules/{release}/config", f"boot/config-{release}")
@@ -113,6 +133,7 @@ def verify_base(recipe, store, stage, base):
         raise BuildError("stock base record differs from recipe")
     kernel = base.get("kernel_stage", {})
     audit_pairing_executables(stage / "rootfs")
+    audit_console_dependencies(stage / "rootfs")
     release = checked["rootfs_lock"]["kernel_release"]
     if (kernel.get("kernel_release") != release
             or kernel.get("rpm_snapshot_sha256") != checked["rootfs_lock"]["rpm_snapshot_sha256"]
@@ -234,7 +255,9 @@ def prepare_image(recipe, store, stage, record, output):
         recovery_profile_digest=digest(canonical(checked["profile"])),
         recovery_kernel_release=release, recovery_module_files_digest=ir["module_files_digest"],
         size_mib=layout["factory_size_mib"], root_mib=layout["root_mib"],
-        experiment_mib=layout["experiment_mib"], library_mib=layout["library_mib"],
-        log_budget_mib=layout["log_budget_mib"])
+        experiment_mib=layout["experiment_mib"] if recipe["schema_version"]==2 else 0,
+        library_mib=layout["library_mib"] if recipe["schema_version"]==2 else 0,
+        log_budget_mib=layout["log_budget_mib"] if recipe["schema_version"]==2 else 0,
+        controller_prepared=recipe["schema_version"]==3)
     inputs.validate()
     return inputs

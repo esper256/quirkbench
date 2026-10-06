@@ -77,8 +77,34 @@ def validate_lock(value):
     return value
 
 
+PREPARED_LAYOUT_FIELDS = {"factory_size_mib", "root_mib", "library_payload_bytes"}
+
+
+def validate_layout(layout, version):
+    from .recovery_recipe import LAYOUT_FIELDS
+    from .image import ESP_MIB, STATE_MIB, MIN_IMAGE_MIB, EMPTY_DATA_MIB
+    if version == 3:
+        if (not isinstance(layout, dict) or set(layout) != PREPARED_LAYOUT_FIELDS
+                or any(type(v) is not int for v in layout.values())
+                or layout['library_payload_bytes'] != 0
+                or layout['root_mib'] < 256 or layout['factory_size_mib'] < MIN_IMAGE_MIB
+                or layout['factory_size_mib'] < layout['root_mib'] + ESP_MIB + STATE_MIB + EMPTY_DATA_MIB + 2):
+            raise BuildError('invalid controller-prepared stock layout; shipped library payload is zero')
+    elif version == 2:
+        if (not isinstance(layout, dict) or set(layout) != LAYOUT_FIELDS
+                or any(type(v) is not int or v < 1 for v in layout.values())
+                or layout['root_mib'] < 256 or layout['factory_size_mib'] < MIN_IMAGE_MIB
+                or layout['factory_size_mib'] < layout['root_mib'] + ESP_MIB + STATE_MIB + 514
+                or layout['factory_size_mib'] - layout['root_mib'] - ESP_MIB - STATE_MIB - 1 > layout['experiment_mib']):
+            raise BuildError('invalid historical stock recovery image layout')
+    else:
+        raise BuildError('unsupported stock layout version')
+    return layout
+
+
 def validate_recipe(value):
-    _fields(value, RECIPE_FIELDS, 2, "stock recovery recipe")
+    version = value.get('schema_version') if isinstance(value,dict) else None
+    _fields(value, RECIPE_FIELDS, version if version in (2,3) else 2, "stock recovery recipe")
     identifier(value["recipe_id"])
     for field in RECIPE_FIELDS:
         if field.endswith("_sha256"):
@@ -89,16 +115,7 @@ def validate_recipe(value):
             or value["policy"] != POLICY
             or any(type(value["policy"].get(k)) is not type(v) for k, v in POLICY.items())):
         raise BuildError("invalid stock recovery recipe policy/identity")
-    from .recovery_recipe import LAYOUT_FIELDS
-    from .image import ESP_MIB, STATE_MIB, MIN_IMAGE_MIB
-    layout = value["layout"]
-    if (not isinstance(layout, dict) or set(layout) != LAYOUT_FIELDS
-            or any(type(v) is not int or v < 1 for v in layout.values())
-            or layout["root_mib"] < 256 or layout["factory_size_mib"] < MIN_IMAGE_MIB
-            or layout["factory_size_mib"] < layout["root_mib"] + ESP_MIB + STATE_MIB + 514
-            or layout["factory_size_mib"] - layout["root_mib"] - ESP_MIB - STATE_MIB - 1
-            > layout["experiment_mib"]):
-        raise BuildError("invalid stock recovery image layout")
+    validate_layout(value['layout'], version)
     return value
 
 

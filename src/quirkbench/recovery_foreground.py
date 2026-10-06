@@ -104,7 +104,7 @@ def build(*, cas_root, recipe_sha256, image, output, engine='podman', cpus=None,
         raise BuildError('local builder must be the pinned Linux amd64 image without an entrypoint')
     store = CASReader(cas_root)
     recipe = load_recipe(store.get(recipe_sha256))
-    if recipe['schema_version'] != 2 or recipe['builder_image_digest'] != image:
+    if recipe['schema_version'] not in (2,3) or recipe['builder_image_digest'] != image:
         raise BuildError('stock recipe differs from selected builder')
     checked = preflight_recipe(recipe, store)
     output = user_build_path(output)

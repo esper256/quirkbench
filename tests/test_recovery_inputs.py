@@ -18,11 +18,11 @@ def test_acquisition_uses_recorded_nevras_and_exact_stock_kernel(tmp_path):
     with pytest.raises(BuildError): acquisition_command(tmp_path/'download',kernel='7.2.8-200.fc44.x86_64')
 
 
-def test_default_recipe_is_v2_and_independent_of_candidate_sources(tmp_path):
+def test_default_recipe_is_v3_and_independent_of_candidate_sources(tmp_path):
     recipe,lock,_,store=stock_fixture(tmp_path)
     generated=generate_recipe(recipe['rootfs_lock_sha256'],store,recipe_id='new-stock',
-        builder_image_digest=lock['builder_image_digest'],source_date_epoch=recipe['source_date_epoch'],layout=recipe['layout'])
-    assert generated['schema_version']==2 and 'baseline_id' not in generated
+        builder_image_digest=lock['builder_image_digest'],source_date_epoch=recipe['source_date_epoch'],layout={'root_mib':2048,'factory_size_mib':4096,'library_payload_bytes':0})
+    assert generated['schema_version']==3 and 'baseline_id' not in generated
     assert preflight_recipe(generated,store)['rootfs_lock']==lock
 
 
@@ -32,7 +32,7 @@ def test_omitted_recipe_identity_comes_from_selected_lock(tmp_path):
     args = parser().parse_args(['dev', 'recovery', 'inputs', 'recipe', '--lock', recipe['rootfs_lock_sha256'], '--builder-image-digest', lock['builder_image_digest'], '--epoch', '0'])
     assert args.id is None
     generated = generate_recipe(recipe['rootfs_lock_sha256'], store, recipe_id=args.id,
-        builder_image_digest=lock['builder_image_digest'], source_date_epoch=0, layout=recipe['layout'])
+        builder_image_digest=lock['builder_image_digest'], source_date_epoch=0, layout={'root_mib':2048,'factory_size_mib':4096,'library_payload_bytes':0})
     assert generated['recipe_id'] == 'stock-recovery-' + recipe['rootfs_lock_sha256']
     assert preflight_recipe(generated, store)['rootfs_lock'] == lock
 
@@ -160,3 +160,22 @@ def test_acquisition_wrapper_bootstraps_library_without_site_or_checkout(tmp_pat
     assert {p.relative_to(library):p.read_bytes() for p in library.rglob('*') if p.is_file()} == before
     assert not any(library.rglob('__pycache__'))
     assert not (tmp_path/'unused-state').exists()
+
+
+@pytest.mark.parametrize('layout',[{'root_mib':2048,'factory_size_mib':4096,'library_payload_bytes':True},
+    {'root_mib':2048,'factory_size_mib':4096,'library_payload_bytes':1},
+    {'root_mib':2048,'factory_size_mib':2100,'library_payload_bytes':0},
+    {'root_mib':2048,'factory_size_mib':4096,'library_mib':32768}])
+def test_v3_never_reinterprets_old_layout_or_reserves_unshipped_content(tmp_path,layout):
+    recipe,lock,_,store=stock_fixture(tmp_path)
+    with pytest.raises(BuildError):generate_recipe(recipe['rootfs_lock_sha256'],store,recipe_id=None,
+        builder_image_digest=lock['builder_image_digest'],source_date_epoch=0,layout=layout)
+
+
+def test_explicit_historical_generator_preserves_v2_layout_and_meaning(tmp_path):
+    recipe,lock,_,store=stock_fixture(tmp_path)
+    generated=generate_recipe(recipe['rootfs_lock_sha256'],store,recipe_id=recipe['recipe_id'],
+        builder_image_digest=lock['builder_image_digest'],source_date_epoch=recipe['source_date_epoch'],
+        layout=recipe['layout'],schema_version=2)
+    assert generated==recipe
+    assert preflight_recipe(generated,store)['rootfs_lock']==lock

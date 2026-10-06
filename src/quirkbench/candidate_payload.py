@@ -64,7 +64,7 @@ def capture(package=None, assets=None):
              units+'multi-user.target.wants/quirkbench-candidate.service': '../quirkbench-candidate.service',
              units+'multi-user.target.wants/quirkbench-supervisor.service': '../quirkbench-supervisor.service',
              units+'multi-user.target.wants/NetworkManager.service': '/usr/lib/systemd/system/NetworkManager.service'}
-    links.update({units+name: '/dev/null' for name in RECOVERY_MASKED_UNITS-{'getty@tty1.service'}})
+    links.update({units+name: '/dev/null' for name in RECOVERY_MASKED_UNITS-{'getty@tty1.service','getty@tty2.service','getty@tty3.service'}})
     links.update({'usr/etc/systemd/system-generators/'+name: '/dev/null' for name in RECOVERY_MASKED_GENERATORS})
     directories = {'usr/etc/quirkbench': 0o755, 'usr/etc/NetworkManager/system-connections': 0o700}
     for name in (*files, *links):

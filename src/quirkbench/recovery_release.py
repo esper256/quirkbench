@@ -58,7 +58,7 @@ HASH_FIELDS = FIELDS & {"recipe_digest", "baseline_digest", "profile_digest",
 
 
 def validate_release_candidate(value: dict) -> dict:
-    if isinstance(value, dict) and type(value.get("schema_version")) is int and value["schema_version"] == 2:
+    if isinstance(value, dict) and type(value.get("schema_version")) is int and value["schema_version"] in (2,3):
         from .recovery_stock_release import validate_candidate
         return validate_candidate(value)
     if (not isinstance(value, dict) or set(value) != FIELDS
@@ -147,7 +147,7 @@ def _image_identity(path: Path) -> tuple[str, int]:
 def recovery_release_candidate(recipe: dict, catalog: dict, store,
                                stage_record: dict, inputs: ImageInputs) -> dict:
     """Verify completed image sidecars and return an unsigned candidate record."""
-    if recipe.get("schema_version") == 2:
+    if recipe.get("schema_version") in (2,3):
         from .recovery_stock_release import create_candidate
         return create_candidate(recipe, store, stage_record, inputs)
     checked = preflight_recipe(recipe, catalog, store)

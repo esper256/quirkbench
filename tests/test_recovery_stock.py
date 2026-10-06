@@ -51,11 +51,15 @@ def stock_fixture(tmp_path):
 def install_fixture(root, release):
     (root/'etc').mkdir(parents=True)
     (root/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1\n')
-    for name in ('openssl', 'gpg'):
+    for name in ('openssl', 'gpg', 'bash', 'nmtui'):
         program = root/'usr/bin'/name
         program.parent.mkdir(parents=True, exist_ok=True)
         program.write_bytes(b'synthetic pairing program')
         program.chmod(0o755)
+    extensions = root/'usr/lib64/python3.14/lib-dynload'
+    extensions.mkdir(parents=True)
+    for name in ('_curses', 'fcntl'):
+        (extensions/(name+'.fixture.so')).write_bytes(b'synthetic extension')
     modules = root/'lib/modules'/release
     modules.mkdir(parents=True)
     (modules/'vmlinuz').write_bytes(b'stock kernel')
@@ -238,4 +242,20 @@ def test_stock_staging_rejects_missing_pairing_tool_before_cache_publication(tmp
     with pytest.raises(BuildError,match='pairing executable.*'+name):
         run_recovery_base_stage(recipe,None,reader,tmp_path/'stock',runner=None,
             limits=ResourceLimits(1,4*1024**3,1),rootfs_installer=install)
+    assert not (tmp_path/'stock/artifacts').exists()
+
+
+@pytest.mark.parametrize('missing', ['bash', 'nmtui', '_curses', 'fcntl'])
+def test_stock_staging_rejects_missing_console_dependency(tmp_path, missing):
+    recipe, lock, reader, _ = stock_fixture(tmp_path)
+    def install(catalog, passed, store, root):
+        install_fixture(root, lock['kernel_release'])
+        if missing in ('bash', 'nmtui'):
+            (root/'usr/bin'/missing).unlink()
+        else:
+            (root/'usr/lib64/python3.14/lib-dynload'/(missing+'.fixture.so')).unlink()
+        return root
+    with pytest.raises(BuildError, match='console .*'+missing):
+        run_recovery_base_stage(recipe, None, reader, tmp_path/'stock', runner=None,
+            limits=ResourceLimits(1,4*1024**3,1), rootfs_installer=install)
     assert not (tmp_path/'stock/artifacts').exists()

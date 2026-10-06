@@ -22,6 +22,9 @@ def _main(argv=None):
     if args.command=='controller-reset':
         from .cli_admin_handlers import controller_reset
         return controller_reset(args)
+    if args.command=='diagnostics':
+        from .cli_admin_handlers import diagnostics
+        return diagnostics(args)
     if args.command=='controller-run':
         from .cli_admin_handlers import controller_run
         return controller_run(args)
@@ -44,8 +47,8 @@ def _main(argv=None):
         from .cli_investigation_handlers import investigation
         return investigation(args)
     if args.command=='recovery':
-        from .cli_recovery_handlers import download
-        return download(args)
+        from .cli_recovery_handlers import download,prepare
+        return prepare(args) if args.action=='prepare' else download(args)
     if args.command=='endpoint':
         from .cli_admin_handlers import connection
         return connection(args)
@@ -233,7 +236,8 @@ def _main(argv=None):
                     release_acquisition(controller.root,args.directory.resolve(),value)
                     answer={'lock':lock,'sha256':value}
                 else:
-                    layout={name:getattr(args,name) for name in ('root_mib','factory_size_mib','experiment_mib','library_mib','log_budget_mib')}
+                    layout={name:getattr(args,name) for name in ('root_mib','factory_size_mib')}
+                    layout['library_payload_bytes']=0
                     recipe=generate_recipe(args.lock,controller.store,recipe_id=args.id,
                         builder_image_digest=args.builder_image_digest,source_date_epoch=args.epoch,layout=layout)
                     from .retention import register
@@ -362,7 +366,7 @@ def main(argv=None):
             emit(args,answer);return 0
         except (BuildError,WorkerServiceError,OSError,ValueError,KeyError,subprocess.TimeoutExpired) as exc:
             error(args,'Recovery image unavailable: '+str(exc));return 2
-    readonly=((args.command=='recovery-inputs' and args.action in ('replay-check','candidate-spec')) or args.command in ('storage','experiment','build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
+    readonly=((args.command=='recovery' and args.action=='prepare') or (args.command=='recovery-inputs' and args.action in ('replay-check','candidate-spec')) or args.command in ('storage','experiment','build','compose','candidate-rootfs','monitor','watch','target-inventory','operation','doctor','setup-check','status','recovery-images',
                                'target','endpoint','target-service','serve-repository','release-check') or
               (args.command=='campaign' and args.action=='status') or
               (args.command=='attempt' and args.action in ('status','show')) or
@@ -371,7 +375,7 @@ def main(argv=None):
               (args.command=='maintenance' and args.action in ('status','prune')) or
               (args.command=='session' and args.action in ('observations','observation')) or
               (args.command=='build-cache' and args.action=='list'))
-    if readonly or args.command in ('setup-state','setup','publication','serve','controller-install','release-install','controller-reset'): return _main(args)
+    if readonly or args.command in ('setup-state','setup','publication','serve','controller-install','release-install','controller-reset','diagnostics'): return _main(args)
     try:
         root=discover_state_root(args.state).expanduser().absolute()
         if not (root/'controller.sqlite').is_file(): return _main(args)

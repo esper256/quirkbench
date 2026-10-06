@@ -34,11 +34,11 @@ POLICY = {"recovery_selinux": "disabled", "secure_boot": "disabled",
 UNIT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}\.(?:service|mount|socket)\Z")
 REQUIRED_UNITS = {"quirkbench-console.service", "quirkbench-recovery.service",
                   "quirkbench-supervisor.service", "quirkbench-supervisor-failure.service",
-                  "quirkbench-network-state.service", "tmp.mount", "var.mount"}
+                  "quirkbench-network-state.service", "quirkbench-terminal.service", "tmp.mount", "var.mount"}
 
 
 def validate_recipe(value: dict) -> dict:
-    if isinstance(value, dict) and type(value.get("schema_version")) is int and value["schema_version"] == 2:
+    if isinstance(value, dict) and type(value.get("schema_version")) is int and value["schema_version"] in (2,3):
         from .recovery_stock import validate_recipe as stock_recipe
         return stock_recipe(value)
     if not isinstance(value, dict) or set(value) != FIELDS:
@@ -97,7 +97,7 @@ def _unit_allowlist(raw: bytes) -> list[str]:
             or any(not isinstance(item, str) or not UNIT.fullmatch(item) for item in value["units"])
             or value["units"] != sorted(set(value["units"]))):
         raise BuildError("invalid recovery unit allowlist")
-    if not REQUIRED_UNITS <= set(value["units"]):
+    if not (REQUIRED_UNITS - {"quirkbench-terminal.service"}) <= set(value["units"]):
         raise BuildError("recovery runtime units are missing from allowlist")
     return value["units"]
 
@@ -105,7 +105,7 @@ def _unit_allowlist(raw: bytes) -> list[str]:
 def preflight_recipe(recipe: dict, catalog: dict, store) -> dict:
     """Resolve exact catalog/lock/CAS closure without installing or executing."""
     validate_recipe(recipe)
-    if recipe["schema_version"] == 2:
+    if recipe["schema_version"] in (2,3):
         from .recovery_stock import preflight_recipe as stock_preflight
         return stock_preflight(recipe, store)
     validate_catalog(catalog)
@@ -154,5 +154,5 @@ def preflight_recipe(recipe: dict, catalog: dict, store) -> dict:
 
 def require_executable_recipe(recipe: dict) -> None:
     """Historical v1 records remain readable, but no longer start work."""
-    if not isinstance(recipe, dict) or type(recipe.get('schema_version')) is not int or recipe['schema_version'] != 2:
-        raise BuildError('custom-kernel recovery recipe execution is retired; prepare a stock Fedora schema-v2 recipe')
+    if not isinstance(recipe, dict) or type(recipe.get('schema_version')) is not int or recipe['schema_version'] not in (2,3):
+        raise BuildError('custom-kernel recovery recipe execution is retired; prepare a stock Fedora schema-v3 recipe')

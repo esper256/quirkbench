@@ -7,9 +7,9 @@ from quirkbench.image import ImageError, _input_identity
 from quirkbench.recovery_image_plan import prepare_recovery_image_inputs
 
 
-def prepared(tmp_path, monkeypatch):
+def prepared(tmp_path, monkeypatch, *, version=2):
     from test_stock_recovery_flow import prepared as stock_prepared
-    recipe,lock,store,stage,result,_=stock_prepared(tmp_path)
+    recipe,lock,store,stage,result,_=stock_prepared(tmp_path,version=version)
     return None,recipe,store,stage,result['initramfs']
 
 

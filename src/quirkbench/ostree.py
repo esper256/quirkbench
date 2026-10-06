@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 import fcntl
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import os
@@ -61,18 +62,22 @@ class CommandRunner:
     """Bounded output and live activity for slow pulls and deployment commands."""
     def __init__(self, progress, guard, timeout_s=1800, diagnostic=None, *,
                  operation='OSTree command', phase='deployment-command',
-                 failure_guidance='deployment remains unarmed'):
+                 failure_guidance='deployment remains unarmed', pass_fds=()):
+        if (isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float))
+                or not math.isfinite(timeout_s) or timeout_s <= 0):
+            raise ContractError('command timeout must be finite and positive')
         self.progress, self.guard, self.timeout_s = progress, guard, timeout_s
         self.diagnostic = diagnostic or (lambda raw: None)
         self.operation, self.phase = operation, phase
         self.failure_guidance = failure_guidance
+        self.pass_fds = tuple(pass_fds)
 
     def __call__(self, argv):
         start = time.monotonic()
-        from .process_ownership import launch
+        from .process_ownership import launch, drain_group
         try:
             process = launch(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             start_new_session=True)
+                             start_new_session=True, pass_fds=self.pass_fds)
         except OSError as exc:
             log = self.diagnostic(str(exc).encode())
             raise OSError(f'{self.operation} could not start (errno={exc.errno}); '
@@ -85,6 +90,7 @@ class CommandRunner:
         count = 0
         last_report = 0
         last_output = start
+        reaped = False
         try:
             while selector.get_map():
                 if time.monotonic() - start > self.timeout_s:
@@ -114,7 +120,18 @@ class CommandRunner:
                                   f'elapsed {now - start:.0f}s; deadline in '
                                   f'{max(0, self.timeout_s - (now - start)):.0f}s; waiting for completion')
                     last_report = time.monotonic()
-            code = process.wait(timeout=max(1, self.timeout_s - (time.monotonic() - start)))
+            # Keep the leader unreaped until its process group is stopped. A
+            # successful leader can leave children holding inherited device
+            # descriptors after closing their output pipes. WNOWAIT pins the
+            # group ID against reuse while we terminate those descendants.
+            while os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT | os.WNOHANG) is None:
+                if time.monotonic() - start >= self.timeout_s:
+                    raise TimeoutError(f'{self.operation} deadline exceeded')
+                self.guard()
+                time.sleep(0.05)
+            drain_group(process)
+            code = process.wait(timeout=10)
+            reaped = True
             if code:
                 log = self.diagnostic(bytes(errors))
                 raise ContractError(f'{self.operation} failed with exit status {code}; '
@@ -125,12 +142,14 @@ class CommandRunner:
             raise TimeoutError(f'{self.operation} deadline exceeded; '
                                f'{self.failure_guidance}; diagnostic={log}') from exc
         finally:
-            if process.poll() is None:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait(timeout=10)
-            selector.close()
-            process.stdout.close()
-            process.stderr.close()
+            try:
+                if not reaped:
+                    try:drain_group(process)
+                    finally:process.wait(timeout=10)
+            finally:
+                selector.close()
+                process.stdout.close()
+                process.stderr.close()
 
 
 class OstreeBackend:

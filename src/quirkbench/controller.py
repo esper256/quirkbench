@@ -124,6 +124,10 @@ from .experiment_submissions import MIGRATION as SUBMISSION_MIGRATION
 MIGRATIONS.append(SUBMISSION_MIGRATION)
 MIGRATIONS.append("ALTER TABLE experiment_submissions ADD COLUMN candidate_operation TEXT REFERENCES operations(id);")
 MIGRATIONS.append("ALTER TABLE experiment_submissions ADD COLUMN public_document TEXT;")
+from .enrollment import NONEXPIRING_MIGRATION
+MIGRATIONS.append(NONEXPIRING_MIGRATION)
+from .recovery_report_service import MIGRATION as DIAGNOSTIC_MIGRATION
+MIGRATIONS.append(DIAGNOSTIC_MIGRATION)
 
 
 def uid():
@@ -767,7 +771,7 @@ class Controller(OperatorApprovals):
                 from .recovery_recipe import load_recipe
                 from .recovery_stock import preflight_recipe
                 recipe=load_recipe(self.store.get(fixed['recipe_sha256']))
-                if (recipe['schema_version']!=2 or recipe['rootfs_lock_sha256']!=fixed['rootfs_lock_sha256']
+                if (recipe['schema_version'] not in (2,3) or recipe['rootfs_lock_sha256']!=fixed['rootfs_lock_sha256']
                         or recipe['builder_image_digest']!=fixed['builder_config_digest']):
                     raise ContractError('recovery image recipe differs from immutable worker inputs')
                 preflight_recipe(recipe,self.store)
@@ -817,7 +821,7 @@ class Controller(OperatorApprovals):
         """Admit the complete stock image with immutable recipe, using existing intent."""
         from .recovery_recipe import load_recipe
         recipe=load_recipe(self.store.get(sha256(recipe_sha256)))
-        if recipe['schema_version']!=2: raise ContractError('new recovery image admission requires v2')
+        if recipe['schema_version'] not in (2,3): raise ContractError('new recovery image admission requires stock v2/v3')
         arguments={'schema_version':2,'recipe_sha256':recipe_sha256,
                    'rootfs_lock_sha256':recipe['rootfs_lock_sha256'],
                    'builder_config_digest':recipe['builder_image_digest'],
@@ -1821,11 +1825,13 @@ class Controller(OperatorApprovals):
             target = sqlite3.connect(temporary / 'controller.sqlite')
             try:
                 source.backup(target)
-                values = [row[0] for row in target.execute('SELECT DISTINCT digest FROM refs')]
+                ordinary_values = {row[0] for row in target.execute('SELECT DISTINCT digest FROM refs')}
+                from .recovery_report_service import completed_artifacts
+                values = sorted(ordinary_values|completed_artifacts(target))
                 deployments = self._deployment_rows(target)
             finally:
                 source.close(); target.close()
-            if not self._library_closure(values) <= set(values):
+            if not self._library_closure(ordinary_values) <= set(values):
                 raise ContractError('backup is missing retained library content')
             for row in deployments:
                 closure = self._deployment_evidence(self._deployment_manifest(row['manifest_digest']))
@@ -1872,7 +1878,9 @@ class Controller(OperatorApprovals):
             require_current_schema(db)
             if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                 raise ContractError('backup database corrupt')
-            references = {row[0] for row in db.execute('SELECT DISTINCT digest FROM refs')}
+            ordinary_references = {row[0] for row in db.execute('SELECT DISTINCT digest FROM refs')}
+            from .recovery_report_service import completed_artifacts
+            references = ordinary_references|completed_artifacts(db)
             deployments = cls._deployment_rows(db)
         finally:
             db.close()
@@ -1908,7 +1916,7 @@ class Controller(OperatorApprovals):
         temporary = destination.with_name(destination.name + '.pending-' + uid())
         shutil.copytree(backup, temporary)
         controller = cls(temporary, **kwargs)
-        if not controller._library_closure(references) <= references:
+        if not controller._library_closure(ordinary_references) <= references:
             raise ContractError('restore is missing retained library content')
         for row in deployments:
             closure = controller._deployment_evidence(controller._deployment_manifest(row['manifest_digest']))

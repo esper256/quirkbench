@@ -20,10 +20,10 @@ ROOT = Path(__file__).resolve().parents[1]
 FAKE_IMAGE_SHA = "a" * 64
 
 
-def assembled(tmp_path, monkeypatch):
+def assembled(tmp_path, monkeypatch, *, version=2):
     import quirkbench.recovery_stock_release as release
 
-    catalog, recipe, store, stage, record = prepared(tmp_path, monkeypatch)
+    catalog, recipe, store, stage, record = prepared(tmp_path, monkeypatch,version=version)
     inputs = plan(catalog, recipe, store, stage, record, tmp_path / "factory.img")
     inputs.output.write_bytes(b"synthetic image placeholder")
     monkeypatch.setattr(release, "_image_identity",
@@ -35,7 +35,7 @@ def assembled(tmp_path, monkeypatch):
                 "data_partuuid": "00000000-0000-0000-0000-000000000005",
                 "library_partuuid": "00000000-0000-0000-0000-000000000006",
                 "evidence_partuuid": "00000000-0000-0000-0000-000000000007"}
-    parts = partition_layout(inputs.size_mib, inputs.root_mib)
+    parts = partition_layout(inputs.size_mib, inputs.root_mib,controller_prepared=inputs.controller_prepared)
     for part, name in zip(parts, ("esp_partuuid", "root_partuuid", "state_partuuid",
                                    "data_partuuid")):
         part["partuuid"] = identity[name]
@@ -64,6 +64,10 @@ def assembled(tmp_path, monkeypatch):
                           "library_mib": inputs.library_mib,
                           "log_budget_mib": inputs.log_budget_mib},
     }
+    if version==3:
+        from quirkbench.prepared_factory import record as factory_record
+        manifest.update(schema_version=3,layout_version=3)
+        manifest['commissioning']=factory_record(identity['disk_guid'],[part['partuuid'] for part in parts]+[identity['library_partuuid'],identity['evidence_partuuid']],parts)
     Path(str(inputs.output) + ".json").write_bytes(canonical(manifest))
     Path(str(inputs.output) + ".sha256").write_text(
         f"{FAKE_IMAGE_SHA}  {inputs.output.name}\n")
@@ -177,3 +181,16 @@ def test_image_changed_while_hashing_is_rejected(tmp_path, monkeypatch):
     monkeypatch.setattr(release, "sha256_file", changing_hash)
     with pytest.raises(BuildError, match="changed during checksum"):
         release._image_identity(image)
+
+
+def test_v3_candidate_joins_recipe_factory_and_public_readers_without_build(tmp_path,monkeypatch):
+    _,recipe,store,record,inputs,manifest=assembled(tmp_path,monkeypatch,version=3)
+    candidate=recovery_release_candidate(recipe,None,store,record,inputs)
+    assert candidate['schema_version']==3 and candidate['layout']['library_payload_bytes']==0
+    assert load_release_candidate(canonical(candidate))==candidate
+    schema=json.loads((ROOT/'schemas/recovery-release-candidate.v3.schema.json').read_bytes())
+    from jsonschema import Draft202012Validator
+    Draft202012Validator(schema).validate(candidate)
+    assert candidate['qualified_capabilities']==[] and manifest['schema_version']==3
+    from dataclasses import replace
+    with pytest.raises(BuildError):recovery_release_candidate(recipe,None,store,record,replace(inputs,controller_prepared=False))

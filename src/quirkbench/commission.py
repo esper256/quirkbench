@@ -59,16 +59,21 @@ class CommissionIdentity(BootIdentity):
         super().__post_init__()
         if any(type(v) is not int or v < 1 for v in (self.experiment_mib, self.library_mib, self.log_budget_mib)):
             raise CommissionError("commissioning capacities must be positive integer MiB")
-        if len(self.partition_starts) != 4 or len(self.fixed_ends) != 3:
-            raise CommissionError("expected four starts and three fixed ends")
+        validate_factory_geometry(self.partition_starts, self.fixed_ends)
         object.__setattr__(self, "partition_starts", tuple(self.partition_starts))
         object.__setattr__(self, "fixed_ends", tuple(self.fixed_ends))
-        if any(type(value) is not int or value < 34 for value in (*self.partition_starts, *self.fixed_ends)):
-            raise CommissionError("invalid commissioned geometry")
-        if any(self.partition_starts[index] > self.fixed_ends[index] for index in range(3)):
-            raise CommissionError("fixed partition ends before its start")
-        if any(self.fixed_ends[index] >= self.partition_starts[index + 1] for index in range(3)):
-            raise CommissionError("commissioned partitions overlap or are out of order")
+
+
+def validate_factory_geometry(partition_starts, fixed_ends):
+    """Shared fixed geometry validation, independent of legacy RAM sizing."""
+    if len(partition_starts) != 4 or len(fixed_ends) != 3:
+        raise CommissionError("expected four starts and three fixed ends")
+    if any(type(value) is not int or value < 34 for value in (*partition_starts, *fixed_ends)):
+        raise CommissionError("invalid commissioned geometry")
+    if any(partition_starts[index] > fixed_ends[index] for index in range(3)):
+        raise CommissionError("fixed partition ends before its start")
+    if any(fixed_ends[index] >= partition_starts[index + 1] for index in range(3)):
+        raise CommissionError("commissioned partitions overlap or are out of order")
 
 
 @dataclass(frozen=True)
@@ -732,7 +737,19 @@ def _load_commission_identity(path: Path) -> CommissionIdentity:
     details = path.stat()
     if not stat.S_ISREG(details.st_mode):
         raise CommissionError("identity file must be regular")
-    document = json.loads(path.read_text())
+    from .product_contracts import _pairs, _depth
+    from .contracts import ContractError
+    with path.open('rb') as stream:raw=stream.read(65537)
+    if len(raw)>65536:raise CommissionError('factory identity exceeds 64 KiB')
+    try:
+        document = json.loads(raw, object_pairs_hook=_pairs,
+            parse_constant=lambda _: (_ for _ in ()).throw(ContractError('nonfinite factory JSON')))
+        _depth(document)
+    except (ContractError, ValueError, UnicodeError, RecursionError) as exc:
+        raise CommissionError('invalid factory identity document') from exc
+    if isinstance(document, dict) and type(document.get('schema_version')) is int and document['schema_version'] == 3:
+        from .prepared_factory import validate
+        return validate(document)
     required = {"schema_version", "disk_guid", "partition_uuids", "partition_starts", "fixed_ends", "experiment_mib", "library_mib", "log_budget_mib"}
     if not isinstance(document, dict) or set(document) != required or type(document["schema_version"]) is not int or document["schema_version"] != 2:
         raise CommissionError("invalid commissioned identity document")
@@ -755,6 +772,9 @@ def main(
     args = parser.parse_args(argv)
     try:
         identity = _load_commission_identity(args.identity)
+        from .prepared_factory import PreparedFactoryIdentity
+        if isinstance(identity, PreparedFactoryIdentity):
+            raise CommissionError('controller-prepared USB cannot be partitioned on the target; reprepare on the controller')
         boot = verify_boot_identity(identity, paths=paths, runner=runner, block_rdev=block_rdev, allow_factory=True, allow_unformatted=True)
         recorded_ram = None
         if args.apply:

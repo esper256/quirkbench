@@ -52,6 +52,16 @@ def test_pin_changes_select_real_consumer():
     assert 'integration/test_recovery_native.py' in result['tests']
 
 
+@pytest.mark.parametrize('path',['src/quirkbench/preparation_completion.py',
+    'src/quirkbench/preparation_components.py','src/quirkbench/prepared_media.py'])
+def test_prepared_media_changes_select_portable_and_actual_native_adapters(path):
+    result=select([path])
+    assert {'recovery-integration','recovery-native'}<=set(result['selected'])
+    assert 'tests/test_preparation_completion.py' in result['tests']
+    assert 'integration/test_preparation_native.py' in result['tests']
+    assert not result['unmapped']
+
+
 @pytest.mark.parametrize('wrong_bytes', [False, True])
 def test_cold_prepare_downloads_signed_bytes_and_rejects_different_payload(tmp_path, monkeypatch, wrong_bytes):
     import hashlib

@@ -16,7 +16,7 @@ def build_stock_image(recipe_digest,store,output,*,runner=None,limits=None,
     from .build_pipeline import BoundedRunner,ResourceLimits
     from .recovery_synthesis import prepare_recovery_image_stage,assemble_recovery_image
     recipe=load_recipe(store.get(recipe_digest))
-    if recipe['schema_version']!=2: raise BuildError('fixed image worker requires stock recipe v2')
+    if recipe['schema_version'] not in (2,3): raise BuildError('fixed image worker requires stock recipe v2/v3')
     preflight_recipe(recipe,store)
     output=Path(output)
     if output.resolve()!=output or not output.is_dir() or any(output.iterdir()):
@@ -63,7 +63,7 @@ def validate_completed_image(output,arguments,cas_root):
         raise BuildError('image result differs from immutable operation')
     store=CASReader(cas_root)
     recipe=load_recipe(store.get(result['recipe_sha256']))
-    if (recipe['schema_version']!=2 or recipe['rootfs_lock_sha256']!=arguments['rootfs_lock_sha256']
+    if (recipe['schema_version'] not in (2,3) or recipe['rootfs_lock_sha256']!=arguments['rootfs_lock_sha256']
             or recipe['builder_image_digest']!=arguments['builder_config_digest']):
         raise BuildError('image recipe differs from immutable rootfs operation')
     stage=output/'image-stage'

@@ -519,6 +519,56 @@ def trigger_candidate_panic(boot: dict, vendor: str, *, trigger: Path = Path("/p
     raise BootError("panic injection unexpectedly returned")
 
 
+def validate_capacity(capacity):
+    """Explicit new assessment dispatch; unversioned legacy RAM fields stay frozen."""
+    from .contracts import ContractError, sha256
+    if isinstance(capacity, dict) and 'schema_version' in capacity:
+        if (set(capacity) != {'schema_version', 'record_type', 'eligible', 'prepared',
+                             'prepared_media_sha256', 'experiment_mib', 'evidence_mib'}
+                or type(capacity['schema_version']) is not int or capacity['schema_version'] != 1
+                or capacity['record_type'] != 'prepared-capacity' or capacity['eligible'] is not True
+                or capacity['prepared'] is not True
+                or any(type(capacity[name]) is not int or capacity[name] < 64
+                       for name in ('experiment_mib', 'evidence_mib'))):
+            raise ContractError('invalid verified capacity assessment')
+        sha256(capacity['prepared_media_sha256'])
+        return capacity
+    if (not isinstance(capacity, dict)
+            or set(capacity) != {'eligible', 'current_ram_mib', 'evidence_mib', 'required_evidence_mib'}
+            or type(capacity['eligible']) is not bool
+            or type(capacity['evidence_mib']) is not int or capacity['evidence_mib'] < 0
+            or any(value is not None and (type(value) is not int or value < 1)
+                   for value in (capacity['current_ram_mib'], capacity['required_evidence_mib']))
+            or (capacity['eligible'] and (capacity['required_evidence_mib'] is None
+                 or capacity['evidence_mib'] < capacity['required_evidence_mib']))):
+        raise ContractError('invalid verified capacity assessment')
+    return capacity
+
+
+def prepared_capacity(identity, layout, state_mount):
+    """Recheck selected prepared geometry without formatting or mounting media."""
+    from .contracts import ContractError
+    from .commission import CommissionError
+    from .prepared_media import validate_geometry, confirmation, is_complete
+    from .enrollment_records import _document
+    from .filesystem import read_file
+    try:
+        value = _document(read_file(state_mount/'quirkbench', 'prepared-media.json', limit=65536))
+        validate_geometry(value, factory=identity, factory_data_end=identity.factory_data_end)
+        if (not is_complete(value) or layout.logical_sector_size != 512
+                or layout.backup_needs_relocation
+                or value['device_bytes'] != layout.disk_sectors*layout.logical_sector_size
+                or value['library_payload_bytes'] != identity.library_payload_bytes
+                or value['geometry'] != [[part.start, part.end] for part in layout.partitions]):
+            raise CommissionError('incomplete or changed prepared geometry')
+    except (ContractError, CommissionError, OSError, ValueError) as exc:
+        raise BootError('USB preparation is incomplete or changed; reprepare this USB on the controller') from exc
+    return validate_capacity({'schema_version':1, 'record_type':'prepared-capacity',
+            'eligible':True, 'prepared':True, 'prepared_media_sha256':confirmation(value),
+            'experiment_mib':(value['geometry'][3][1]-value['geometry'][3][0]+1)//2048,
+            'evidence_mib':(value['geometry'][5][1]-value['geometry'][5][0]+1)//2048})
+
+
 def require_commissioned_boot(config: RecoveryConfig, *,
                               identity_path: Path = Path("/etc/quirkbench/commission.json"),
                               state_mount: Path = Path("/boot/quirkbench-state"),
@@ -526,20 +576,25 @@ def require_commissioned_boot(config: RecoveryConfig, *,
                               identity_verifier=None,
                               ram_reader=None,
                               runner: Callable[[list[str]], str] = _run) -> dict:
-    """Read the completed journal and assess current RAM without changing media."""
+    """Validate prepared v3 media, or retain historical v2 admission semantics."""
     from .commission import (
         CommissionError, _load_commission_identity, _target_ram_mib, planned_geometry,
         selected_commission_identity, verify_boot_identity,
     )
     identity = _load_commission_identity(identity_path)
+    from .prepared_factory import PreparedFactoryIdentity
+    prepared = isinstance(identity, PreparedFactoryIdentity)
     expected = (config.esp_partuuid, config.root_partuuid, config.state_partuuid,
                 config.data_partuuid, config.library_partuuid, config.evidence_partuuid)
     if identity.disk_guid != config.disk_guid or identity.partition_uuids != expected:
         raise BootError("commissioning identity differs from fixed boot configuration")
-    layout = (identity_verifier or verify_boot_identity)(identity, allow_factory=True, allow_unformatted=True)
+    layout = (identity_verifier or verify_boot_identity)(identity, allow_factory=not prepared,
+                                                         allow_unformatted=not prepared)
     inventory = Path("/proc/self/mountinfo").read_text() if mountinfo is None else mountinfo
     _mount_one(layout.partitions[2].path, state_mount, "vfat",
                "rw,nosuid,nodev,noexec,umask=0077", runner=runner, mountinfo=inventory)
+    if prepared:
+        return prepared_capacity(identity, layout, state_mount)
     journal = state_mount / "quirkbench/commission.json"
     if journal.parent.is_symlink() or journal.is_symlink():
         raise BootError("commissioning journal path is a symlink")

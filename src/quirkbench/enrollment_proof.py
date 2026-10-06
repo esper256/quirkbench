@@ -13,7 +13,7 @@ import tempfile
 import time
 
 from .contracts import Conflict, ContractError, canonical, digest, identifier, sha256
-from .enrollment_records import _document, _now
+from .enrollment_records import _document, _now, invitation_live
 from .enrollment import observe_clock, row_code
 from .store import atomic_write
 
@@ -64,7 +64,7 @@ def _invitation(db, request, now):
                 or row['redeemed_key_sha256']!=digest(_bytes(request['public_key'],44))):
             raise Conflict('invitation is bound to another request/key')
         row_request(previous,request)
-    elif row['state']!='ACTIVE' or not row['created_at']<=now<row['expires_at']:
+    elif row['state']!='ACTIVE' or not invitation_live(code, now):
         raise Conflict('enrollment invitation expired or revoked')
     from .retarget_invitation import check_request
     check_request(db,row,request)
@@ -184,7 +184,7 @@ def reserve_redemption(controller, request, challenge_id, code, signature, *, cl
                     raise Conflict('invitation was redeemed by another request/key')
                 row_request(previous,request)
             else:
-                if (row['state']!='ACTIVE' or not row['created_at']<=now<row['expires_at']
+                if (row['state']!='ACTIVE' or not invitation_live(record, now)
                         or not hmac.compare_digest(row['code_sha256'],digest(code.encode()))):
                     raise ContractError('enrollment invitation is invalid, expired or revoked')
                 if previous is not None:raise Conflict('enrollment request already has a different binding')

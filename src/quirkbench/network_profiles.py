@@ -18,6 +18,15 @@ from .store import atomic_write,sync_directory
 PROFILES=Path('/etc/NetworkManager/system-connections')
 MAX_PROFILES=16
 MAX_TOTAL=512*1024
+REPLAY_FENCE='.quirkbench-replay-incomplete'
+
+
+def replay_blocked(profiles=PROFILES):
+    """RAM-only uncertainty survives manager/UI restart, never a reboot."""
+    path=Path(profiles)/REPLAY_FENCE
+    if not path.exists() and not path.is_symlink():return False
+    try:return _read(Path(profiles),REPLAY_FENCE,limit=128)!=b'Quirkbench saved replay active\n'
+    except (OSError,ValueError):return True
 
 
 class ReplayCleanupIncomplete(ContractError):
@@ -158,7 +167,7 @@ def save_selected(control,selected, *, verify_target,profiles=PROFILES,profiles_
         return {'saved':True,'generation':generation,'profiles':sorted(files)}
 
 
-def replay_selected(control, *, verify_target,profiles=PROFILES,profiles_ready=None,binding_reader=read_system_uuid):
+def replay_selected(control, *, verify_target,profiles=PROFILES,profiles_ready=None,binding_reader=read_system_uuid,before_copy=None):
     """Validate active binding before reading profile secrets, copy only into RAM."""
     control,verify=_storage(control,verify_target);profiles=Path(profiles);_ready(profiles,profiles_ready)
     with private_lock(control/'runtime-config.lock'):
@@ -180,6 +189,7 @@ def replay_selected(control, *, verify_target,profiles=PROFILES,profiles_ready=N
         if sum(map(len,files.values()))>MAX_TOTAL or any(digest(raw)!=manifest['files'][name] for name,raw in files.items()):
             raise Conflict('private network profile differs from selected bytes')
         created=[]
+        if before_copy:before_copy()
         try:
             for name,raw in files.items():
                 verify();_ready(profiles,profiles_ready,files)
@@ -236,17 +246,49 @@ def save_attended_network(*,input_stream=None,output_stream=None,control=None,pr
     return answer
 
 
-def main():
-    """Existing native network-state oneshot invokes this before NetworkManager."""
+def main(*, recovery=None, profiles=PROFILES, profiles_ready=None):
+    """Restore only trusted saved profiles before NetworkManager starts.
+
+    Recovery invokes this in NetworkManager's pre-start phase. Missing boot or
+    binding permits temporary local connections; incomplete secret cleanup does
+    not. Late successful boot checks never replay into a running manager.
+    """
     from .runtime import CONTROL,boot_context
+    recovery='--recovery' in sys.argv[1:] if recovery is None else recovery
+    profiles=Path(profiles)
+    if recovery:
+        try:
+            _ready(profiles,profiles_ready)
+            if replay_blocked(profiles):raise ReplayCleanupIncomplete('earlier replay remains uncertain')
+        except (OSError,ValueError,RuntimeError):
+            print('Private RAM profiles unavailable or saved replay cleanup incomplete; NetworkManager remains blocked. Reset temporary connections explicitly.')
+            return 1
+    copied=recovery and ((profiles/REPLAY_FENCE).exists() or (profiles/REPLAY_FENCE).is_symlink())
+    def fence():
+        nonlocal copied
+        _ready(profiles,profiles_ready)
+        if replay_blocked(profiles):raise ReplayCleanupIncomplete('earlier replay remains uncertain')
+        # Published before any copy, including interrupted atomic-write cleanup.
+        copied=True
+        atomic_write(profiles/REPLAY_FENCE,b'Quirkbench saved replay incomplete\n')
     try:
         _,_,verify=boot_context()
-        answer=replay_selected(CONTROL,verify_target=verify)
+        options={'profiles':profiles,'profiles_ready':profiles_ready,'before_copy':fence} if recovery else {}
+        answer=replay_selected(CONTROL,verify_target=verify,**options)
+        if copied:
+            _ready(profiles,profiles_ready)
+            if _read(profiles,REPLAY_FENCE)!=b'Quirkbench saved replay incomplete\n':raise ReplayCleanupIncomplete('RAM fence changed')
+            atomic_write(profiles/REPLAY_FENCE,b'Quirkbench saved replay active\n')
         print('Selected network profiles restored to private RAM.' if answer['replayed'] else 'No saved network selection; local Network setup remains available.')
     except ReplayCleanupIncomplete:
         print('Saved network replay cleanup incomplete; NetworkManager remains blocked. Inspect private RAM profiles locally.')
         return 1
     except (OSError,ValueError,RuntimeError):
+        if copied:
+            try:atomic_write(profiles/REPLAY_FENCE,b'Quirkbench saved replay incomplete\n')
+            except OSError:pass
+            print('Saved network replay interrupted; NetworkManager remains blocked. Reset temporary connections explicitly.')
+            return 1
         # Missing initial setup/moved media must keep local nmtui usable. Do not
         # log private filenames, keyfile bytes or malformed config contents.
         print('Saved network selection blocked; local Network setup remains available.')

@@ -17,6 +17,14 @@ UUIDS = tuple(str(n)*8+'-'+str(n)*4+'-'+str(n)*4+'-'+str(n)*4+'-'+str(n)*12 for 
 CONFIG = RecoveryConfig('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', *UUIDS)
 
 
+@pytest.fixture
+def legacy_root(monkeypatch):
+    from quirkbench import commission
+    identity = commission.CommissionIdentity(CONFIG.disk_guid, UUIDS,
+        (2048,4096,8192,16384), (4095,8191,16383))
+    monkeypatch.setattr(commission, '_load_commission_identity', lambda path:identity)
+
+
 def test_non_audio_recipe_collects_without_audio_tools_or_peripherals(monkeypatch):
     from quirkbench.contracts import CapabilityReport, Experiment, Outcome
     from quirkbench.recipe_registry import installed_registry
@@ -79,7 +87,7 @@ def test_provisioning_symlink_ancestors_and_non_boolean_qualification_rejected(t
         runtime.load_provisioning(provision(tmp_path / 'real', qualification_run='yes'))
 
 
-def test_boot_context_revalidates_external_identity_before_return(tmp_path, monkeypatch):
+def test_boot_context_revalidates_external_identity_before_return(tmp_path, monkeypatch, legacy_root):
     boot = {'quirkbench.mode': 'recovery'}
     path = tmp_path / 'boot.json'
     path.write_text(json.dumps({'config': CONFIG.to_dict(), 'boot': boot}))
@@ -97,7 +105,7 @@ def test_boot_context_revalidates_external_identity_before_return(tmp_path, monk
         runtime.boot_context(path)
 
 
-def test_boot_context_preserves_specific_capacity_block_and_rejects_forged_eligibility(tmp_path, monkeypatch):
+def test_boot_context_preserves_specific_capacity_block_and_rejects_forged_eligibility(tmp_path, monkeypatch, legacy_root):
     capacity = {'eligible': False, 'current_ram_mib': 100000,
                 'evidence_mib': 51, 'required_evidence_mib': 250005}
     boot = {'quirkbench.mode': 'recovery', 'quirkbench.capacity': capacity}

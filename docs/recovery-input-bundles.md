@@ -82,3 +82,9 @@ A future release may distribute this immutable input snapshot alongside its pinn
 builder and application versions. Creating or exporting a bundle does not publish
 a release or claim boot qualification. Lower-level `dev recovery inputs`,
 `dev recovery build` and `dev recovery cleanup` remain available for diagnosis.
+
+Fresh bundles contain a stock v3 recipe and produce a controller-prepared v3 factory
+artifact. `quirkbench recovery prepare` applies its final USB geometry; copying the
+factory artifact alone does not prepare usable media. Retained v2 bundles preserve
+their old recipe/layout interpretation. New recipe sizing exposes recovery root and
+factory artifact size only; remaining USB capacity is allocated during preparation.

@@ -1,8 +1,8 @@
 [Unit]
 Description=Quirkbench offline recovery status and local network setup
 After=local-fs.target
-Conflicts=getty@tty1.service
-Before=getty@tty1.service
+Conflicts=getty@tty2.service
+Before=getty@tty2.service
 
 [Service]
 Type=simple
@@ -12,7 +12,7 @@ ExecStart=/usr/bin/python3 -m quirkbench.console
 StandardInput=tty-fail
 StandardOutput=tty
 StandardError=tty
-TTYPath=/dev/tty1
+TTYPath=/dev/tty2
 TTYReset=yes
 NoNewPrivileges=yes
 Restart=on-failure

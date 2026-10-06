@@ -542,7 +542,7 @@ Starting the configured native service publishes its repository and enrollment l
 owner; the repository uses mutual TLS plus exact registered leaf lookup. Setup
 status observes a separate, current owner/configuration/TLS capability. Missing
 publication remains unavailable. Use `quirkbench target pair NAME` to display the
-short-lived invitation, endpoint, code ID and full certificate SHA-256; machine
+single-use, explicitly revocable invitation, endpoint, code ID and full certificate SHA-256; machine
 add supplies `--request-id ID --json`. `target show NAME` reads public recorded facts
 and does not establish current connectivity or authorize experiments.
 
