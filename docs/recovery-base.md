@@ -308,3 +308,11 @@ probing; new enabled behavior must satisfy the same boot/storage contract.
 The build stages the selected inventory and verifies its hash and Fedora release.
 Installation and the final factory-root audit reject changed generators or unknown
 enablement. No inventory update establishes native boot or hardware qualification.
+
+Controller preparation admission now binds the current source bytes and derived
+factory identity, selected USB attachment, bounded old-layout metadata and controller
+trust in an explicit erase confirmation. Layout inspection uses the existing native
+GPT reader on a regular metadata view; ambiguous physical-tail GPTs and repair or
+conversion are refused. Signed source admission uses the existing signature readers;
+unsigned development must be selected explicitly. These are tested preparation
+foundations, not yet an available device-writing command.

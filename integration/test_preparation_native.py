@@ -43,6 +43,30 @@ finally:os.close(fd)
 answer=preparation_components.finish_filesystems(factory,record,components,expected_artifact_sha256=checksum,deadline=deadline,runner=run)
 assert answer=={'filesystems_prepared':True,'device_written':False,'complete':False}
 for number in (4,5,6):run('e2fsck','-f','-n',str(components/f'partition-{number}'))
+from quirkbench import preparation_layout
+from quirkbench.commission import CommissionError
+from quirkbench.contracts import ContractError
+# A formerly flashed image has its valid backup at the old image end. Retain
+# actual-byte capacity separately and verify its original GPT without repair.
+geometry=components/'geometry'
+with geometry.open('r+b') as stream:stream.truncate(320*1024**2)
+fd=os.open(geometry,os.O_RDWR);view=work/'layout-view';view.mkdir()
+try:
+    observed=preparation_layout.inspect(fd,320*1024**2,view,deadline=deadline,guard=lambda:None,runner=run)
+    assert observed['description']=={'kind':'gpt','previous_quirkbench_labels':True,'gpt_source_bytes':256*1024**2}
+    assert len(observed['observation'])==3
+    os.pwrite(fd,b'EFI PART',320*1024**2-512)
+    conflict=work/'conflicting-layout-view';conflict.mkdir()
+    try:preparation_layout.inspect(fd,320*1024**2,conflict,deadline=deadline,guard=lambda:None,runner=run)
+    except CommissionError as exc:assert 'conflicting GPT header' in str(exc)
+    else:raise AssertionError('competing physical-tail GPT was accepted')
+    os.pwrite(fd,b'\x00'*8,320*1024**2-512)
+    os.pwrite(fd,b'broken-crc',(256*1024**2)-512+16)
+    bad=work/'bad-layout-view';bad.mkdir()
+    try:preparation_layout.inspect(fd,320*1024**2,bad,deadline=deadline,guard=lambda:None,runner=run)
+    except (CommissionError,ContractError):pass
+    else:raise AssertionError('corrupted backup GPT was accepted')
+finally:os.close(fd)
 print('Actual FAT completion and copied-filesystem/GPT adapter checks passed; no image/device write')
 '''
     script_path=tmp_path/'exercise.py';script_path.write_text(script)

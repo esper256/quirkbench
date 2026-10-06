@@ -348,7 +348,13 @@
       "tests/test_preparation_device.py",
       "tests/test_preparation_io.py",
       "tests/test_preparation_components.py",
-      "tests/test_preparation_completion.py"
+      "tests/test_preparation_completion.py",
+      "src/quirkbench/preparation_plan.py",
+      "tests/test_preparation_plan.py",
+      "src/quirkbench/preparation_layout.py",
+      "tests/test_preparation_layout.py",
+      "src/quirkbench/preparation_source.py",
+      "tests/test_preparation_source.py"
     ],
     "tests": [
       "tests/test_recovery_storage.py",
@@ -363,7 +369,10 @@
       "tests/test_preparation_device.py",
       "tests/test_preparation_io.py",
       "tests/test_preparation_components.py",
-      "tests/test_preparation_completion.py"
+      "tests/test_preparation_completion.py",
+      "tests/test_preparation_plan.py",
+      "tests/test_preparation_layout.py",
+      "tests/test_preparation_source.py"
     ]
   },
   "recovery-native": {
@@ -398,7 +407,13 @@
       "tests/test_preparation_device.py",
       "tests/test_preparation_io.py",
       "tests/test_preparation_components.py",
-      "tests/test_preparation_completion.py"
+      "tests/test_preparation_completion.py",
+      "src/quirkbench/preparation_plan.py",
+      "tests/test_preparation_plan.py",
+      "src/quirkbench/preparation_layout.py",
+      "tests/test_preparation_layout.py",
+      "src/quirkbench/preparation_source.py",
+      "tests/test_preparation_source.py"
     ],
     "tests": [
       "integration/test_recovery_native.py",
