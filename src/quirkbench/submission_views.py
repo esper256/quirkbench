@@ -1,7 +1,6 @@
 """Bounded public preparation views reconstructed from durable links."""
 import base64
 import json
-from shlex import quote
 from pathlib import Path
 from .contracts import ContractError, identifier
 from .state_reader import safe_text, bounded_items, LOG_BYTES

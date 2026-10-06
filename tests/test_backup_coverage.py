@@ -229,3 +229,12 @@ def test_offline_restore_preserves_selection_and_original_controller(tmp_path,mo
     assert (output/'controller.sqlite').is_file()
     assert selection.read_bytes()==raw and database.read_bytes()==before
     assert selected_available or not selected.exists()
+
+
+def test_offline_restore_rejects_negative_reserve_before_creating_output(tmp_path,capsys):
+    controller=Controller(tmp_path/'controller',reserve_bytes=0)
+    backup=tmp_path/'backup';controller.backup(backup)
+    output=tmp_path/'offline'
+    assert cli.main(['admin','restore',str(backup),'--output',str(output),'--reserve-gib','-1'])==2
+    assert 'nonnegative' in capsys.readouterr().err
+    assert not output.exists()

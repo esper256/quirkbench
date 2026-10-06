@@ -26,7 +26,6 @@ def investigation(args):
             print(render_brief(answer['data']))
         elif answer.get('operation_id'):
             print('Preparation accepted for '+args.name+'.')
-            from shlex import quote
             prefix='quirkbench '
             print('Status: '+prefix+'investigation status '+args.name)
             print('Watch: '+prefix+'monitor '+args.name)

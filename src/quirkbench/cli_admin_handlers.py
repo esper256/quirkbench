@@ -271,6 +271,8 @@ def diagnostics(args):
 def restore(args):
     """Verify an offline restore artifact without changing controller selection."""
     try:
+        if args.reserve_gib < 0:
+            raise ValueError('reserve must be nonnegative')
         repository=None
         if args.repositories is not None:
             from .ostree_repository import configured_repositories,OstreeRepository

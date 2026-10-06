@@ -138,6 +138,21 @@ def test_invalid_selection_is_not_bypassed_or_replaced(tmp_path):
     assert (controller.root/'controller.sqlite').read_bytes()==before
 
 
+@pytest.mark.parametrize("raw", [
+    b'{"schema_version":1,"state_root":"/tmp/a","state_root":"/tmp/b"}',
+    b'{"schema_version":2,"state_root":"/tmp/a"}',
+    b'{"schema_version":1,"state_root":"relative"}',
+    b'{"schema_version":1,"state_root":"/"}',
+    b'{"schema_version":1,"state_root":"/tmp/a","extra":true}',
+    b" " * 4097,
+])
+def test_invalid_selection_fails_closed(tmp_path, raw):
+    config = tmp_path / "config"
+    _selection(config, raw)
+    with pytest.raises(StateConfigurationError):
+        discover_state_root(config_home=config)
+
+
 def test_missing_selected_root_and_symlink_selection_fail_closed(tmp_path):
     config = tmp_path / "config"
     path = _selection(config, json.dumps({"schema_version": 1,
