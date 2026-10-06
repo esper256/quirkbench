@@ -27,7 +27,7 @@ def test_incompatible_development_schema_is_preserved(tmp_path):
     for number,definition in enumerate(MIGRATIONS[:-1],start=1):
         db.executescript(definition+f'\nPRAGMA user_version={number};')
     db.close();before=(root/'controller.sqlite').read_bytes()
-    with pytest.raises(ContractError,match='fresh --state'):
+    with pytest.raises(ContractError,match='incompatible development state.*admin controller reset'):
         Controller(root,reserve_bytes=0)
     assert (root/'controller.sqlite').read_bytes()==before
     assert not (root/'artifacts').exists()

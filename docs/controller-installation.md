@@ -262,6 +262,152 @@ Run capability checks from the controller shell. An optional development
 container can expose different engines, cgroups and PATH. No daemon,
 firewall or power policy is changed. Build toolchains stay in the isolated builder.
 
+## First local prepared recovery USB
+
+This walkthrough joins development installation, controller pairing readiness and
+USB preparation. Use one selected controller state throughout. Run commands in the
+same host shell/environment that will own the controller; installing an RPM in a
+Distrobox does not install its executable on the host, or vice versa.
+
+1. **Install/update the development command.** For Eric's temporary local workflow,
+   run the [developer updater](#packaging-and-installation) from a clean main checkout.
+   For another controller, use the documented archive installation and invoke its
+   returned runtime's `bin/quirkbench` wherever the commands below say `quirkbench`.
+   Verify the command you are actually using:
+
+   ```sh
+   command -v quirkbench
+   quirkbench --version --json
+   command -v openssl gpg ostree podman
+   openssl version
+   podman --remote=false info
+   ```
+
+   TLS needs the `openssl` executable with OpenSSL 3 capabilities; `openssl-libs`
+   alone is insufficient. On a mutable Fedora controller, install missing tools
+   using `sudo dnf install openssl gnupg2 ostree podman`. On an immutable host,
+   use its supported package/layering workflow, then recheck in the controller shell.
+   A timeout or permission failure is a different problem from a missing package;
+   setup now names the failed OpenSSL operation and cause. Preserve its partial
+   identity and retry with the same request after resolving that cause.
+
+2. **Select state and LAN address, then configure TLS.** Replace the example IP
+   with the controller's actual reachable LAN IP (inspect `ip -brief address`).
+   Keep these values and request IDs for retries; do not regenerate them on every
+   invocation or switch between host and container environments mid-setup.
+
+   ```sh
+   STATE="$HOME/.local/state/quirkbench"
+   CONTROLLER_IP="192.168.1.20"  # replace with your controller's LAN address
+   SETUP_ID="first-local-controller"
+   PUBLICATION_ID="first-local-repository"
+   quirkbench --state "$STATE" setup --request-id "$SETUP_ID" \
+     --host "$CONTROLLER_IP" --port 8443 --allow-lan --configure-controller
+   ```
+
+   An acknowledgment with `Setup complete: no` and `Background work ready: false`
+   is expected at this stage: setup configures the controller but starts no process.
+   Unsigned development installations also retain the compatible-signed-release
+   acceptance gap. A changed IP needs explicit endpoint maintenance (`quirkbench admin connection --help`),
+   not a retry with different setup intent. For incompatible **unused** development
+   state, use the returned explicit reset command, then a new setup request ID.
+   [Reset limits](#start-over-after-unsuccessful-setup) protect used or uncertain state;
+   do not delete it to bypass them.
+
+3. **Configure the first repository while the controller is stopped.** Normal
+   pairing needs this publication endpoint, even before any experiment exists.
+   Select an existing operator signing home and its full uppercase fingerprint.
+   If you need a separate local development key, explicitly create a new home/key:
+
+   ```sh
+   SIGNING_HOME="$HOME/.local/share/quirkbench/local-operator-gnupg"
+   mkdir -m 700 "$SIGNING_HOME"  # new directory; preserve any existing key home
+   gpg --homedir "$SIGNING_HOME" --quick-generate-key \
+     'Quirkbench local development' rsa3072 sign 0
+   gpg --homedir "$SIGNING_HOME" --with-colons --list-secret-keys
+   ```
+
+   Select the `fpr` record for that signing key; do not use a short key ID or
+   automatically select an unrelated first key. This key signs local experimental
+   compositions. It is **not** production publisher trust or a released-image signature.
+   Key creation/passphrase prompts are operator work; configuration creates no keys.
+
+   ```sh
+   SIGNING_FINGERPRINT="REPLACE_WITH_FULL_UPPERCASE_FINGERPRINT"
+   quirkbench --state "$STATE" admin repository configure \
+     --repository local --url "https://$CONTROLLER_IP:8444" \
+     --signing-home "$SIGNING_HOME" --fingerprint "$SIGNING_FINGERPRINT" \
+     --request-id "$PUBLICATION_ID" --json
+   ```
+
+   Both ports must be reachable from the target's LAN. Check the active host firewall
+   zone/interface and permit TCP 8443 and 8444 there using that host's firewall tools.
+   The certificate covers the selected IP; an unrelated hostname/IP will fail trust
+   validation. Publication configuration must use that same IP and a separate port.
+   On interruption, repeat the same publication command and request ID. Preserve
+   retained records and native initialization diagnostics; conflicts require
+   reconciliation rather than hand-editing service JSON.
+
+4. **Start the controller and check current pairing readiness.** Keep this terminal
+   open. Select the exact finished builder image configuration ID already prepared
+   in the chosen local engine, not the Fedora base image or a mutable tag:
+
+   ```sh
+   BUILDER="sha256:REPLACE_WITH_EXACT_FINISHED_BUILDER_CONFIG_ID"
+   quirkbench --state "$STATE" admin controller run \
+     --engine podman --worker-image "$BUILDER"
+   ```
+
+   In a second terminal, set the same `STATE` and run:
+
+   ```sh
+   quirkbench --state "$STATE" status --json
+   quirkbench --state "$STATE" doctor
+   ```
+
+   Inspect `data.readiness.service_ready` and
+   `data.readiness.enrollment_available`; both must be true before expecting pairing.
+   Compute readiness is separate. A missing engine/builder can leave authenticated
+   pairing available while blocking compute; follow the exact reported blocker.
+   Builder preparation is documented in [the builder guide](../environments/README.md).
+   Stop with Ctrl-C before activation or publication maintenance. Closing the
+   terminal, logging out or sleep does not provide unattended execution.
+
+5. **Build a current v3 image, then prepare the selected USB.** Reuse retained
+   acquisition inputs through [the portable bundle workflow](recovery-input-bundles.md)
+   or [RPM replay](recovery-rpm-replay.md). Run `dev recovery prepare`, `verify` and
+   `build` there with fresh output directories. Old bundles/images do not acquire
+   the new prepared-media layout merely by reflashing; prepare a fresh bundle with
+   current software. A successful build reports an image path, not pairing readiness.
+
+   With the controller still running, use a second terminal:
+
+   ```sh
+   IMAGE="/absolute/new-output/recovery.img"
+   USB="/dev/SELECTED_WHOLE_USB"
+   PLAN="$HOME/.local/state/quirkbench-first-usb-plan.json"  # new file
+   quirkbench --state "$STATE" recovery prepare \
+     --image "$IMAGE" --device "$USB" --target my-target \
+     --plan-out "$PLAN" --unsigned-development
+   ```
+
+   Planning writes no USB bytes. Read the selected device identity, old layout and
+   capacities. Save existing USB evidence/data elsewhere before acknowledging loss.
+   Copy the returned `Apply:` command, including its exact confirmation and `--erase`,
+   only after checking that device. This step writes the image **and** final partitions
+   and stages controller trust plus a single-use, non-expiring invitation; no separate
+   flashing step is needed. It uses a narrow sudo helper, not a root controller.
+   See [USB preparation and failure recovery](recovery-operations.md#controller-usb-preparation).
+   Preserve failed staging/diagnostics; an uncertain write requires a fresh plan and
+   explicit erasure acknowledgment, never assuming completion from a readable marker.
+
+Boot the prepared USB on the selected target and use the recovery dashboard to
+connect temporary networking and pair. Keep the controller and both LAN ports
+available. Pairing grants no experiment/run approval. The terminal action (`T`)
+and offline diagnostic export remain available without pairing; diagnostic uploads
+require normal pairing. Controller setup and software fixture checks do not prove
+physical USB preparation, successful boot, storage durability or native commissioning.
+
 ## Installed rootfs worker
 
 For M1b bootstrap, controller service configuration can select
@@ -531,6 +677,8 @@ unknown schemas remain protected. Stop an incompatible running controller in its
 terminal if its live identity cannot be verified by the current CLI.
 It does not upgrade an existing database or reset a previously used controller.
 Reuse the same state directory for the next setup; a second database is unnecessary.
+
+### Configure the first repository
 
 For a fresh empty-registry installation, explicitly provision an existing private
 operator GnuPG home and composition signing key, then configure its first repository:

@@ -16,6 +16,8 @@ from ci.evidence import FILE_LIMIT, ATTACHMENT_LIMIT, capture_stage, redact
     (['schemas/operation.schema.json'], set(SUITES)),
     (['src/quirkbench/new_shared_module.py'], set(SUITES)),
     (['README.md', 'docs/testing-policy.md'], set()),
+    (['development/update-local-install.py'], {'filesystem', 'release-preparation'}),
+    (['update.sh'], {'filesystem', 'release-preparation'}),
 ])
 def test_selection_explains_changes(paths, expected):
     value = select(paths)
@@ -30,8 +32,17 @@ def test_manual_names_and_fallback():
     assert select(['unknown'])['unmapped'] == ['unknown']
     with pytest.raises(ValueError, match='Unknown suites'):
         select([], ['evidence; touch /tmp/unsafe'])
+
     for suite in SUITES.values():
         assert all((ROOT / test.split('::')[0]).is_file() for test in suite['tests'])
+
+
+def test_developer_updater_selects_existing_installation_integration():
+    value = select(['development/update-local-install.py', 'update.sh'])
+    assert value['unmapped'] == []
+    assert 'tests/test_controller_install.py' in value['tests']
+    assert set(value['selected']) == {'filesystem', 'release-preparation'}
+    assert set(select(['schemas/new-boundary.schema.json'])['selected']) == set(SUITES)
 
 
 def test_recovery_boot_change_selects_direct_and_joined_regressions():

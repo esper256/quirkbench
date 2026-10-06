@@ -347,7 +347,9 @@
       "src/quirkbench/controller_reset.py",
       "tests/test_controller_reset.py",
       "schemas/controller-reset*",
-      "examples/controller-reset*"
+      "examples/controller-reset*",
+      "development/update-local-install.py",
+      "update.sh"
     ],
     "tests": [
       "tests/test_build_storage.py",
@@ -415,7 +417,9 @@
       "src/quirkbench/target_payload.py",
       "src/quirkbench/recovery_runtime_revision.py",
       "tests/test_recovery_runtime_revision.py",
-      "src/quirkbench/recovery_initramfs_audit.py"
+      "src/quirkbench/recovery_initramfs_audit.py",
+      "development/update-local-install.py",
+      "update.sh"
     ],
     "tests": [
       "tests/test_release_plan.py",

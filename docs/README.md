@@ -17,6 +17,7 @@ read-through. Superseded plans, run logs and investigation histories live in Git
 | Clone and run, optional manual command symlink | [Source checkout workflow](controller-installation.md#run-from-a-source-checkout) |
 | Signed release preparation and operator gates | [Publication preflight and runbook](release-publication.md) |
 | Controller deployment from a cloud container or Distrobox | [Choosing the controller host](controller-installation.md#choosing-the-controller-host) |
+| First local controller and prepared USB | [Joined setup and USB walkthrough](controller-installation.md#first-local-prepared-recovery-usb) |
 | Recovery inputs, image production and manual target setup | [Acquisition](recovery-acquisition.md), [retained RPM replay](recovery-rpm-replay.md), [recovery operations](recovery-operations.md) |
 | Kernel builds and deployments | [Build and boot](build-and-boot.md), [builder environment](../environments/README.md) |
 | State, cleanup and visibility | [Retention](local-state-maintenance.md), [monitoring](monitoring.md) |

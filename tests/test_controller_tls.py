@@ -1,5 +1,6 @@
 """Initial native TLS software fixtures; no production publisher or target identities."""
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -66,13 +67,35 @@ def test_interruption_retains_generated_keys_and_resumes_same_identity(tmp_path,
 
 def test_tls_links_and_unavailable_tool_fail_closed(tmp_path):
     def unavailable(*args, **kwargs): raise FileNotFoundError('fixture openssl missing')
-    with pytest.raises(ContractError, match='OpenSSL 3 unavailable'):
+    with pytest.raises(ContractError, match="OpenSSL executable not found in this process's PATH"):
         create_identity(tmp_path / 'state', '127.0.0.1', 'missing', run=unavailable)
     directory = next((tmp_path / 'state/private/controller-tls').iterdir())
     assert not (directory / 'identity.json').exists()
     linked = tmp_path / 'linked'; linked.symlink_to(tmp_path / 'state')
     with pytest.raises(ContractError, match='symlinks'):
         create_identity(linked, '127.0.0.1', 'other')
+
+
+@pytest.mark.parametrize('failure,expected', [
+    (PermissionError(13, 'Permission denied'), 'permission denied'),
+    (subprocess.TimeoutExpired(['openssl', 'genpkey'], 15), 'genpkey timed out after 15 seconds'),
+    (OSError(8, 'Exec format error'), 'Exec format error'),
+])
+def test_native_failure_reports_actual_cause_without_completing_identity(tmp_path, failure, expected):
+    def unavailable(*args, **kwargs): raise failure
+    with pytest.raises(ContractError, match=expected) as error:
+        create_identity(tmp_path/'state', '127.0.0.1', 'retryable', run=unavailable)
+    assert 'install' not in str(error.value).lower()
+    directory = next((tmp_path/'state/private/controller-tls').iterdir())
+    assert not (directory/'identity.json').exists()
+
+
+def test_native_nonzero_exit_names_operation_without_exposing_key_output():
+    from quirkbench.tls_primitives import _openssl
+    def rejected(*args, **kwargs): return subprocess.CompletedProcess(args[0], 7, b'private bytes', b'private stderr')
+    with pytest.raises(ContractError, match='OpenSSL verify.*exit 7') as error:
+        _openssl(['verify'], run=rejected)
+    assert 'private' not in str(error.value)
 
 
 def test_keys_can_rely_on_private_store_without_rewriting_modes(tmp_path, native):
