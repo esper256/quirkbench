@@ -9,14 +9,14 @@ import subprocess
 from contextlib import nullcontext
 
 from .contracts import Conflict, ContractError, canonical, digest
-from .controller_install import _idle, _link, verify_installation
+from .controller_install import _idle, verify_installation
 from .controller_service import require_ready
 from .filesystem import _durable_directory, _managed_path
 from .controller_setup import _manifest_digest, _database_present, SetupFilesystem, setup_progress as initial_progress
 from .controller_tls import create_identity, inspect_identity
 from .filesystem import private_lock
 from .setup_contracts import STEPS as INITIAL_STEPS, SetupUnavailable
-from .setup_service_contracts import LIMIT, STEPS, load_progress, validate_progress
+from .setup_service_contracts import LIMIT, STEPS, LEGACY_STEPS, load_progress, validate_progress
 from .state_config import _config_home, discover_state_root
 from .filesystem import read_file
 from .store import atomic_write
@@ -49,15 +49,6 @@ def _same_file(path, raw):
     return False
 
 
-def _public_directory(path):
-    path = Path(path).expanduser().resolve()
-    if path.exists():
-        info = path.stat()
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
-            raise ContractError('service publication directory must be owned')
-    return path
-
-
 def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, tls_run=subprocess.run,
                     ready=require_ready, fault_hook=None):
     root = discover_state_root(config_home=config_home)
@@ -78,7 +69,6 @@ def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, t
             or _manifest_digest(runtime) != choice['runtime_manifest_sha256']):
         raise Conflict('initial setup runtime identity differs')
     home = _config_home(config_home)
-    launchers = _public_directory(bin_home or Path.home() / '.local/bin')
     journal = _journal(home, root); _durable_directory(journal.parent)
     intent = {'initial_intent': choice, 'setup_request_digest': initial['request_digest']}
     fault_hook = fault_hook or (lambda _: None)
@@ -94,8 +84,14 @@ def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, t
         if progress:
             if progress['intent'] != intent or progress['request_id'] != initial['request_id']:
                 raise Conflict('service setup already has another intent/request')
+            if progress['schema_version'] == 2 and progress['completed_steps'] != list(LEGACY_STEPS):
+                # An interrupted v2 has no completed launcher publication to
+                # retain. Its verified TLS/configuration prefix has the same
+                # meaning in v3; retry completes configuration without a link.
+                progress = {**progress, 'schema_version': 3}
+                validate_progress(progress); atomic_write(journal, canonical(progress))
         else:
-            progress = validate_progress({'schema_version':2,'record_type':'controller-service-setup',
+            progress = validate_progress({'schema_version':3,'record_type':'controller-service-setup',
                 'request_id':initial['request_id'],
                 'request_digest':digest(canonical({'kind':'controller_service_setup','arguments':intent})),
                 'intent':intent,'completed_steps':[],'tls_identity_sha256':None})
@@ -106,7 +102,8 @@ def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, t
                 progress['completed_steps'].append(step)
                 validate_progress(progress); atomic_write(journal, canonical(progress))
             fault_hook(step)
-        publishing=progress['completed_steps']!=list(STEPS)
+        steps = LEGACY_STEPS if progress['schema_version'] == 2 else STEPS
+        publishing=progress['completed_steps']!=list(steps)
         def published_inputs():
             tls = (create_identity(root, choice['host'], initial['request_id'], run=tls_run) if publishing else
                    inspect_identity(root / 'private/controller-tls' / ('setup-' + digest(initial['request_id'].encode())[:32]),
@@ -124,18 +121,9 @@ def install_service(*, config_home=None, bin_home=None, runner=subprocess.run, t
                 if not exists:
                     if not publishing or step in progress['completed_steps']:
                         raise Conflict('committed service input is unavailable')
-                    directory = _managed_path(path.parent) if step == 'configuration_published' else _public_directory(path.parent)
+                    directory = _managed_path(path.parent)
                     _durable_directory(directory); atomic_write(path, raw)
                 completed(step)
-            link = launchers / 'quirkbench'; target = runtime / 'bin/quirkbench'
-            if link.is_symlink():
-                if os.readlink(link) != str(target): raise Conflict('existing launcher selects another installation')
-            elif link.exists(): raise Conflict('existing launcher is not an installation symlink')
-            else:
-                if not publishing or 'launcher_published' in progress['completed_steps']:
-                    raise Conflict('committed setup launcher is unavailable')
-                _durable_directory(launchers); _link(link, target)
-            completed('launcher_published')
             return tls
         with private_lock(root/'coordinator.lock') if publishing else nullcontext():
             if publishing:_idle(root)
