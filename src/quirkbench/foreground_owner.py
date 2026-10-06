@@ -74,7 +74,8 @@ a fresh heartbeat or a process that merely opened that file is insufficient.
             if count >= 4096:
                 raise Conflict('controller descriptor inspection exceeds its budget')
             try:
-                actual = Path(f'/proc/{pid}/fd/{info.name}').stat()
+                target = Path(f'/proc/{pid}/fd/{info.name}')
+                actual = target.stat()
                 if (actual.st_dev, actual.st_ino) != (wanted.st_dev, wanted.st_ino):
                     continue
                 raw = _lock_info(info)
@@ -84,8 +85,14 @@ a fresh heartbeat or a process that merely opened that file is insufficient.
                             and parts[2:6] == ['FLOCK', 'ADVISORY', 'WRITE', str(pid)]
                             and parts[-2:] == ['0', 'EOF']):
                         major, minor, inode = parts[6].split(':')
-                        if (int(major, 16), int(minor, 16), int(inode)) == (
-                                os.major(wanted.st_dev), os.minor(wanted.st_dev), wanted.st_ino):
+                        # Btrfs lock records use the superblock device, whereas
+                        # stat may use a subvolume device. The descriptor stat
+                        # already joins the actual file device/inode to the name.
+                        int(major, 16); int(minor, 16)
+                        if int(inode) == wanted.st_ino:
+                            final_fd = target.stat()
+                            if (final_fd.st_dev, final_fd.st_ino) != (wanted.st_dev, wanted.st_ino):
+                                raise Conflict('controller owner descriptor changed during inspection')
                             found = True
             except FileNotFoundError:
                 # Other descriptors may close during inspection.
