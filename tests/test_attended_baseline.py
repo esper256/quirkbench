@@ -254,7 +254,7 @@ def test_human_retry_binding_and_legacy_explicit_output(published,capsys,tmp_pat
     original=json.loads(capsys.readouterr().out)
     assert original==c.decide_attempt(attempt,'approved',request_id='legacy-approve')
     assert cli.main(argv, state_root=str(c.root))==0 and json.loads(capsys.readouterr().out)==original
-    assert cli.main(argv+['--json'])==0
+    assert cli.main(argv+['--json'], state_root=str(c.root))==0
     machine=json.loads(capsys.readouterr().out)
     assert machine['data']['decision']==original and machine['data']['request_id']=='legacy-approve'
     c.startup()

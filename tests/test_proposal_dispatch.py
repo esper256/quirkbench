@@ -193,7 +193,7 @@ def test_real_human_cli_and_machine_replay(published,monkeypatch,capsys):
         assert 'investigation status investigation' in human and 'monitor investigation' in human
         with c.transaction() as db:request=db.execute('SELECT request_id FROM proposal_dispatch_commands').fetchone()[0]
         monkeypatch.setattr('quirkbench.controller_service.require_ready',lambda _:pytest.fail('replay requested readiness'))
-        assert cli.main([*argv,'--request-id',request,'--json'])==0
+        assert cli.main([*argv,'--request-id',request,'--json'], state_root=str(c.root))==0
         replay=json.loads(capsys.readouterr().out)
         assert replay['operation_id']==operation and replay['data']['dispatch_connected']
 

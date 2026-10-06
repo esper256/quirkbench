@@ -234,11 +234,15 @@ def test_failed_submission_releases_generated_proposal_roots(joined):
         assert view['state']=='FAILED' and view['experiment_id'] is None
 
 
-def test_attention_and_next_commands_keep_selected_state(joined):
+def test_attention_and_next_commands_keep_selected_state(joined,monkeypatch):
     from quirkbench.submission_views import attention
     from quirkbench.cli_parser import parser
     import shlex
     c,*_=joined
+    from quirkbench.state_config import configure_state_root,discover_state_root
+    config=c.root.parent/'command-config'
+    configure_state_root(c.root,config_home=config)
+    monkeypatch.setenv('XDG_CONFIG_HOME',str(config))
     with c.lifecycle() as owner:
         c.resume('investigation')
         service.submit(c,'investigation',value('baseline'),'attention',ready=lambda _:None)
@@ -247,6 +251,8 @@ def test_attention_and_next_commands_keep_selected_state(joined):
         items=attention(StateReader(c.root))['items']
         item=next(x for x in items if x['kind']=='submission')
         args=parser().parse_args(shlex.split(item['next_action'])[1:])
-        assert args.state==c.root and args.request_id=='attention'
+        assert args.state is None and args.request_id=='attention'
+        assert discover_state_root(args.state)==c.root
         view=service.status(StateReader(c.root),'investigation','attention')
-        assert parser().parse_args(shlex.split(view['next_action'])[1:]).state==c.root
+        args=parser().parse_args(shlex.split(view['next_action'])[1:])
+        assert args.state is None and discover_state_root(args.state)==c.root

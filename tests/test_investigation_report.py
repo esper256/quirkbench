@@ -58,7 +58,7 @@ def test_cli_human_json_same_facts_and_reads_do_not_initialize_prune_or_pin(lab,
     monkeypatch.setattr('quirkbench.maintenance.prune',forbidden)
     monkeypatch.setattr('quirkbench.retention.pin',forbidden)
     argv=['investigation', 'results', 'show', 'investigation']
-    assert cli.main(argv+['--json'])==0
+    assert cli.main(argv+['--json'], state_root=str(c.root))==0
     machine=json.loads(capsys.readouterr().out)['data']
     assert cli.main(argv, state_root=str(c.root))==0
     human=json.loads(capsys.readouterr().out)
@@ -331,7 +331,7 @@ def test_retention_machine_input_and_receipt_privacy_are_strict(lab,capsys):
     assert cli.main(argv, state_root=str(c.root))==0
     implicit=json.loads(capsys.readouterr().out)['data']
     assert implicit['request_id'].startswith('report-retain-')
-    assert cli.main(argv+['--request-id','cli-retain'])==0
+    assert cli.main(argv+['--request-id','cli-retain'], state_root=str(c.root))==0
     receipt=json.loads(capsys.readouterr().out)['data']
     assert receipt['request_id']=='cli-retain'
     with c.transaction() as db:
