@@ -237,7 +237,12 @@ def save_attended_network(*,input_stream=None,output_stream=None,control=None,pr
 
 
 def main():
-    """Existing native network-state oneshot invokes this before NetworkManager."""
+    """Restore only trusted saved profiles before NetworkManager starts.
+
+    Recovery invokes this in NetworkManager's pre-start phase. Missing boot or
+    binding permits temporary local connections; incomplete secret cleanup does
+    not. Late successful boot checks never replay into a running manager.
+    """
     from .runtime import CONTROL,boot_context
     try:
         _,_,verify=boot_context()

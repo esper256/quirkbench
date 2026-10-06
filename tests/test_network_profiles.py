@@ -158,9 +158,15 @@ def test_native_network_oneshot_orders_binding_replay_before_networkmanager(tmp_
         installer(root,CONFIG) if name=='recovery' else installer(root)
         configuration=root/('etc' if name=='recovery' else 'usr/etc')
         text=(configuration/'systemd/system/quirkbench-network-state.service').read_text()
-        assert 'After='+prerequisite in text and 'Requires='+prerequisite in text
+        if name == 'candidate':
+            assert 'After='+prerequisite in text and 'Requires='+prerequisite in text
+            assert 'ExecStartPost=/usr/bin/python3 -m quirkbench.network_profiles' in text
+        else:
+            assert prerequisite not in text and 'ExecStartPost=' not in text
+            replay=(configuration/'systemd/system/NetworkManager.service.d/quirkbench.conf').read_text()
+            assert 'ExecStartPre=/usr/bin/python3 -m quirkbench.network_profiles' in replay
+            assert 'Environment=PYTHONPATH=/usr/lib/quirkbench' in replay
         assert 'Before=NetworkManager.service' in text
-        assert 'ExecStartPost=/usr/bin/python3 -m quirkbench.network_profiles' in text
         assert 'network-online.target' not in text
 
 

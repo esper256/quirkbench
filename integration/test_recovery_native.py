@@ -146,3 +146,42 @@ def test_packaged_failure_entrypoint_handles_unpublished_boot(native):
     (package/'boot.py').unlink()
     missing = execute(argv, env=environment)
     assert missing.returncode != 0 and 'quirkbench.boot' in missing.stderr
+
+
+def test_staged_independent_network_and_terminal_dependencies(native):
+    from quirkbench.boot import install_runtime
+    from ci.native_recovery import ROOT
+    import sys
+    sys.path.insert(0, str(ROOT/'tests'))
+    from test_boot import CONFIG
+    from quirkbench.recovery_stock_pipeline import audit_console_dependencies
+    audit_console_dependencies(verify(Path(os.environ['QB_NATIVE_RECOVERY_CACHE'])))
+    execute, _, _, overlay = native
+    # The initrd test adapter is not a switch-root generator override.
+    (overlay/WRAPPER.lstrip('/')).unlink()
+    (overlay/'etc/quirkbench-rootfs').write_text('quirkbench-fedora-target-v1')
+    install_runtime(overlay, CONFIG)
+    # Native cache intentionally extracts usr only. Restore the supported
+    # Fedora /etc alias (the actual dbus-broker unit comes from its pinned RPM).
+    (overlay/'etc/systemd/system/dbus.service').symlink_to('/usr/lib/systemd/system/dbus-broker.service')
+    # Consume actual staged units and cached Fedora dependencies, without PID 1.
+    checked = execute(['/usr/bin/systemd-analyze', '--generators=no', '--man=no', 'verify',
+        'quirkbench-console.service', 'quirkbench-terminal.service', 'NetworkManager.service'],
+        env={'SYSTEMD_UNIT_PATH':'/etc/systemd/system:/usr/lib/systemd/system'})
+    assert checked.returncode == 0, checked.stderr
+    imports = execute(['/usr/bin/python3', '-c',
+        'import curses, fcntl, quirkbench.local_terminal; print("console extensions available")'],
+        env={'PYTHONPATH':'/usr/lib/quirkbench'})
+    assert imports.returncode == 0, imports.stderr
+    assert 'console extensions available' in imports.stdout
+    # Actual packaged replay entry point tolerates missing boot/binding. No
+    # caller stub stands in for the replay authorization or cleanup checks.
+    replay = execute(['/usr/bin/python3', '-m', 'quirkbench.network_profiles'],
+        env={'PYTHONPATH':'/usr/lib/quirkbench'})
+    assert replay.returncode == 0 and 'local Network setup remains available' in replay.stdout
+    units = overlay/'etc/systemd/system'
+    (units/'quirkbench-network-state.service').unlink()
+    (units/'quirkbench-network-state.service').symlink_to('/dev/null')
+    broken = execute(['/usr/bin/systemd-analyze', '--generators=no', '--man=no', 'verify',
+        'NetworkManager.service'], env={'SYSTEMD_UNIT_PATH':'/etc/systemd/system:/usr/lib/systemd/system'})
+    assert broken.returncode != 0 and 'quirkbench-network-state.service' in broken.stderr

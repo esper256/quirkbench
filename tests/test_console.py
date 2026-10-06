@@ -17,16 +17,17 @@ def boot_record(path, *, mode='recovery'):
     path.write_text(json.dumps(value))
 
 
-def test_offline_status_is_visible_but_setup_waits_for_verified_recovery(tmp_path):
+def test_offline_status_keeps_temporary_network_available_without_boot(tmp_path):
     record = tmp_path / 'boot.json'
     output = StringIO()
     calls = []
     result = console.run_console(boot_record=record, input_stream=StringIO('1\n2\n'),
                                  output_stream=output,
-                                 run_nmtui=lambda: calls.append('nmtui'))
-    assert result == 0 and calls == []
+                                 profiles_ready=lambda: True,
+                                 run_nmtui=lambda: calls.append('nmtui') or CompletedProcess([], 0))
+    assert result == 0 and calls == ['nmtui']
     assert 'Recovery identity and evidence: pending or blocked' in output.getvalue()
-    assert 'Network setup is blocked' in output.getvalue()
+    assert '1) Configure network with nmtui\n' in output.getvalue()
     assert 'Controller pairing' in output.getvalue()
 
 
@@ -91,16 +92,15 @@ def test_nmtui_requires_private_ram_profile_mount(tmp_path):
     assert 'private RAM profile storage' in output.getvalue()
 
 
-def test_offline_console_routes_attended_capacity_without_network_or_boot_record(tmp_path):
+def test_offline_console_never_dispatches_target_partition_setup(tmp_path):
     record = tmp_path/'boot.json'
     calls = []
     output = StringIO()
     console.run_console(boot_record=record, input_stream=StringIO('3\n'),
                         output_stream=output, profiles_ready=lambda: False,
                         run_capacity_setup=lambda **kwargs: calls.append(kwargs))
-    assert len(calls) == 1
-    assert calls[0]['output_stream'] is output
-    assert 'Review target storage' in output.getvalue()
+    assert calls == []
+    assert 'Prepare this USB with quirkbench recovery prepare on the controller' in output.getvalue()
 
 
 def test_commissioned_high_ram_media_reports_block_without_hiding_recovery(tmp_path):
@@ -127,7 +127,7 @@ def test_recovery_console_unit_owns_tty_without_network_or_login_dependency(tmp_
     install_runtime(recovery, CONFIG)
     units = recovery / 'etc/systemd/system'
     service = (units / 'quirkbench-console.service').read_text()
-    assert 'TTYPath=/dev/tty1' in service and 'StandardInput=tty-fail' in service
+    assert 'TTYPath=/dev/tty2' in service and 'StandardInput=tty-fail' in service
     assert 'NetworkManager.service' not in service and 'network-online.target' not in service
     assert (units / 'multi-user.target.wants/quirkbench-console.service').is_symlink()
     assert (units / 'getty@tty1.service').readlink() == Path('/dev/null')

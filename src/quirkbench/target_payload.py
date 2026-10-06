@@ -40,6 +40,7 @@ TARGET_MODULES = (
     'kernel_policy',
     'library',
     'library_maintenance',
+    'local_terminal',
     'network_profiles',
     'ostree',
     'process_identity',

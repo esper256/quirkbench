@@ -91,15 +91,17 @@ def activate_staged_setup(*, run=subprocess.run):
 def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
                 output_stream=None, run_nmtui=None, profiles_ready=None,
                 run_capacity_setup=None, run_manual_setup=None, system_uuid_reader=None,
-                run_enrollment_setup=None,run_network_save=None,run_evidence_drain=None,run_retarget_setup=None,run_endpoint_setup=None,run_shutdown=None) -> int:
+                run_enrollment_setup=None,run_network_save=None,run_evidence_drain=None,run_retarget_setup=None,run_endpoint_setup=None,run_shutdown=None,run_terminal=None,present=None) -> int:
     """Show the local status even without a cable, controller or enrollment."""
     source = input_stream or sys.stdin
     output = output_stream or sys.stdout
     runner = run_nmtui or (lambda: subprocess.run(['/usr/bin/nmtui'], check=False))
     ready = profiles_ready or network_profiles_ready
-    if run_capacity_setup is None:
-        from .capacity_setup import run_attended_commission
-        run_capacity_setup = run_attended_commission
+    # Kept as an internal test-call parameter only: target startup never dispatches
+    # commissioning, even for historical factory records. Prepare on controller.
+    if run_terminal is None:
+        from .local_terminal import switch_vt
+        run_terminal = lambda: switch_vt(3)
     manual_setup = run_manual_setup or activate_staged_setup
     if run_enrollment_setup is None:
         from .enrollment_console import connect_initial_controller
@@ -124,7 +126,7 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
         target_uuid = (system_uuid_reader or read_system_uuid)()
     except (BindingError, OSError, ValueError):
         target_uuid = None
-    commissioned_here = False
+    presented = False
     while True:
         verified = recovery_verified(boot_record)
         ram_profiles = ready()
@@ -138,13 +140,11 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
             else:
                 print('New experiments blocked: evidence partition is too small for current target RAM.', file=output)
         print('Controller pairing: use Connect to controller for initial pairing, or staged manual setup.', file=output)
-        if commissioned_here:
-            print('Commissioning complete. Reboot the target to continue recovery.', file=output)
-        available = verified and ram_profiles
-        print('1) Configure network with nmtui' + ('' if available else ' (waiting for verified recovery and RAM profile storage)'), file=output)
+        available = ram_profiles
+        print('1) Configure network with nmtui' + ('' if available else ' (waiting for private RAM profile storage)'), file=output)
         print('2) Refresh status', file=output)
-        print('3) Review target storage and confirm first-boot capacity setup'
-              + (' (already commissioned)' if verified else ''), file=output)
+        print('3) USB preparation help — prepare on the controller; no target partition changes', file=output)
+        print('T) Open terminal — exit returns to Quirkbench', file=output)
         print('4) Activate staged initial controller configuration'
               + ('' if verified else ' (waiting for verified recovery)'), file=output)
         print('5) Connect to controller'
@@ -160,6 +160,10 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
         print('Network changes here are temporary until explicitly saved during setup.', file=output)
         print('10) Shut down locally or reconcile an interrupted shutdown'+('' if verified else ' (waiting for verified recovery)'),file=output)
         print('Selection: ', end='', file=output, flush=True)
+        if not presented:
+            if present is not None:
+                present()
+            presented = True
         try:
             choice = source.readline()
         except KeyboardInterrupt:
@@ -167,6 +171,12 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
             continue
         if choice == '':
             return 0
+        if choice.strip().upper() == 'T':
+            try:
+                run_terminal()
+            except OSError:
+                print('Could not switch to the root terminal. Try Ctrl+Alt+F3.', file=output)
+            continue
         if choice.strip()=='10':
             if not verified:
                 print('Shutdown blocked until recovery identity/evidence are verified.',file=output);continue
@@ -180,9 +190,6 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
                 print('Shutdown blocked; retained state remains available: '+str(exc),file=output)
             continue
         if choice.strip() == '1':
-            if not verified:
-                print('Network setup is blocked until recovery identity and evidence are verified.', file=output, flush=True)
-                continue
             if not ram_profiles:
                 print('Network setup is blocked until private RAM profile storage is mounted.', file=output, flush=True)
                 continue
@@ -197,19 +204,9 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
             if result.returncode != 0:
                 print('nmtui ended without a completed network configuration.', file=output, flush=True)
         elif choice.strip() == '3':
-            if commissioned_here:
-                print('Commissioning is complete; reboot the target.', file=output, flush=True)
-                continue
-            if verified:
-                print('Recovery is already commissioned.', file=output, flush=True)
-                continue
-            from .commission import CommissionError
-            try:
-                commissioned_here = bool(run_capacity_setup(input_stream=source, output_stream=output))
-            except (CommissionError, OSError, ValueError) as exc:
-                print('Capacity setup blocked: ' + str(exc), file=output, flush=True)
-            except KeyboardInterrupt:
-                print('Capacity setup cancelled; returning to status.', file=output, flush=True)
+            print('Prepare this USB with quirkbench recovery prepare on the controller. '
+                  'Existing evidence must be uploaded or exported before explicit erasure.',
+                  file=output, flush=True)
         elif choice.strip() == '4':
             if not verified:
                 print('Manual setup is blocked until recovery identity and evidence are verified.', file=output, flush=True)
@@ -278,7 +275,8 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
 
 
 def main() -> int:
-    return run_console()
+    from .local_terminal import present_once
+    return run_console(present=present_once)
 
 
 if __name__ == '__main__':

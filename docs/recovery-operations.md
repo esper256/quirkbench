@@ -15,15 +15,30 @@ that interval to stop the countdown. Select **Quirkbench recovery - verbose boot
 diagnostics** when investigating a failed boot; no kernel command editing is needed.
 This starts the same fixed recovery kernel and initramfs, with verbose kernel,
 dracut, systemd and udev logging. Both recovery entries keep serial output and
-prefer the local screen for console diagnostics. An already armed, identity-checked
+route local boot diagnostics to VT1 rather than the active console. An already armed, identity-checked
 candidate retains its existing one-shot default; selecting diagnostics boots recovery.
 
 The expected destination is the **Quirkbench target recovery** console menu.
-Before first-boot capacity setup, **pending or blocked** is expected there. If boot
+New USB layouts are prepared on the controller; the target menu cannot partition
+or format them. If boot
 stops earlier, photograph the last errors and any dracut timeout/root-device messages;
 kernel USB-event messages alone do not establish successful recovery startup.
 The diagnostic entry grants no experiment approval and changes no storage protections,
 mounts, firmware settings or emergency-shell policy.
+
+The recovery UI owns VT2. The independent local root terminal owns VT3: choose
+**Open terminal** / press **T**, or use Ctrl+Alt+F3. `exit` returns to the running
+UI; if the UI is unavailable, the terminal explains the failure and stays usable.
+This terminal has no password or pairing requirement and commands can modify
+internal disks. Quirkbench's automated actions retain their storage protections;
+opening a shell grants no experiment approval. Boot logs remain on VT1 and serial.
+These are staged-software behaviors; actual VT switching requires physical acceptance.
+
+Temporary **Network** setup requires private RAM profile storage and NetworkManager,
+independently of evidence storage, boot verification or pairing. Saved connections
+remain gated by verified media and target binding. Incomplete secret cleanup blocks
+NetworkManager. If boot checks finish later, no saved secrets are automatically
+replayed into the running manager; explicitly retry saved-profile restoration.
 
 Dracut diagnostic reports, when produced, are in `/run/initramfs/rdsosreport.txt`;
 the boot journal and early reports are held in RAM and may disappear on reboot.

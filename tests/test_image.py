@@ -106,7 +106,7 @@ def test_recovery_diagnostics_preserve_boot_roles_and_candidate_selection(smoke)
     for arguments in lines:
         assert boot_roles(arguments) == roles
         assert [word for word in arguments.split() if word.startswith('console=')] == [
-            'console=ttyS0,115200', 'console=tty0']
+            'console=ttyS0,115200', 'console=tty1']
         assert ('quirkbench.smoke=1' in arguments) == smoke
     assert cfg.count('initrd $esp/initramfs-recovery.img') == 3
     diagnostic_entry = cfg[cfg.index('menuentry \'Quirkbench recovery - verbose'):]

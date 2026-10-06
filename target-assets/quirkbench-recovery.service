@@ -11,8 +11,8 @@ Environment=PYTHONPATH=/usr/lib/quirkbench
 ExecStart=/usr/bin/python3 -m quirkbench.boot --config /etc/quirkbench/boot.json
 RemainAfterExit=yes
 TimeoutStartSec=900
-StandardOutput=kmsg+console
-StandardError=kmsg+console
+StandardOutput=journal+console
+StandardError=journal+console
 NoNewPrivileges=yes
 PrivateTmp=no
 

@@ -23,7 +23,8 @@ PACKAGES = ('bash', 'glibc', 'libgcc', 'libxcrypt', 'openssl-libs', 'python3',
             'util-linux-core', 'zlib-ng-compat', 'libmount', 'libblkid', 'libcap',
             'libselinux', 'pcre2', 'ncurses-libs', 'libseccomp', 'mtools', 'gdisk',
             'e2fsprogs', 'e2fsprogs-libs', 'libcom_err', 'libss', 'libstdc++', 'popt',
-            'libuuid','glibc-gconv-extra','grub2-tools-minimal','xz-libs','device-mapper-libs')
+            'libuuid','glibc-gconv-extra','grub2-tools-minimal','xz-libs','device-mapper-libs',
+            'NetworkManager', 'NetworkManager-tui', 'dbus-broker', 'dbus-common')
 
 # Fedora subpackages are published under their source build, not their RPM name.
 SOURCE_BUILDS = {'libgcc': 'gcc', 'openssl-libs': 'openssl', 'python3': 'python3.14', 'python3-libs': 'python3.14',
@@ -32,7 +33,8 @@ SOURCE_BUILDS = {'libgcc': 'gcc', 'openssl-libs': 'openssl', 'python3': 'python3
                  'zlib-ng-compat': 'zlib-ng', 'ncurses-libs': 'ncurses',
                  'e2fsprogs-libs':'e2fsprogs','libcom_err':'e2fsprogs',
                  'libss':'e2fsprogs','libstdc++':'gcc','libuuid':'util-linux',
-                 'glibc-gconv-extra':'glibc','grub2-tools-minimal':'grub2','xz-libs':'xz','device-mapper-libs':'lvm2'}
+                 'glibc-gconv-extra':'glibc','grub2-tools-minimal':'grub2','xz-libs':'xz','device-mapper-libs':'lvm2',
+                 'NetworkManager-tui':'NetworkManager', 'dbus-common':'dbus'}
 
 
 def rpm_location(package):

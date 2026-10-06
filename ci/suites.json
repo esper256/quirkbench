@@ -362,7 +362,13 @@
       "tests/test_preparation_service.py",
       "tests/test_preparation_helper.py",
       "tests/test_preparation_payload.py",
-      "tests/test_preparation_writer.py"
+      "tests/test_preparation_writer.py",
+      "src/quirkbench/console.py",
+      "src/quirkbench/local_terminal.py",
+      "src/quirkbench/network_profiles.py",
+      "tests/test_console.py",
+      "tests/test_local_terminal.py",
+      "tests/test_network_profiles.py"
     ],
     "tests": [
       "tests/test_recovery_storage.py",
@@ -384,7 +390,11 @@
       "tests/test_preparation_service.py",
       "tests/test_preparation_helper.py",
       "tests/test_preparation_payload.py",
-      "tests/test_preparation_writer.py"
+      "tests/test_preparation_writer.py",
+      "tests/test_console.py",
+      "tests/test_network_profiles.py",
+      "tests/test_local_terminal.py",
+      "tests/test_recovery_stock.py"
     ]
   },
   "recovery-native": {
@@ -433,7 +443,13 @@
       "tests/test_preparation_service.py",
       "tests/test_preparation_helper.py",
       "tests/test_preparation_payload.py",
-      "tests/test_preparation_writer.py"
+      "tests/test_preparation_writer.py",
+      "src/quirkbench/console.py",
+      "src/quirkbench/local_terminal.py",
+      "src/quirkbench/network_profiles.py",
+      "tests/test_console.py",
+      "tests/test_local_terminal.py",
+      "tests/test_network_profiles.py"
     ],
     "tests": [
       "integration/test_recovery_native.py",
