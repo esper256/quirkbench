@@ -47,6 +47,12 @@ runs:
       run: |
         sudo apt-get update -qq
         sudo apt-get install -y --no-install-recommends bubblewrap rpm rpm2cpio
+        # Ubuntu's user-namespace AppArmor restriction can deny Bubblewrap's
+        # loopback setup before the fixture starts. This disposable runner must
+        # support the harness; keep all Bubblewrap namespace/RO mount checks.
+        if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        fi
     - uses: actions/cache@v4
       if: inputs.suite == 'recovery-native'
       with:
