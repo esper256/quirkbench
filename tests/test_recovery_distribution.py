@@ -481,6 +481,10 @@ def test_explicit_prepared_factory_manifest_preserves_old_reader_meaning(tmp_pat
     candidate, image, _ = inputs(tmp_path, monkeypatch)
     manifest = json.loads(Path(str(image)+'.json').read_bytes())
     old = manifest['commissioning']
+    from quirkbench.image import partition_layout
+    expected = partition_layout(candidate['layout']['factory_size_mib'],candidate['layout']['root_mib'],
+                                controller_prepared=True)
+    for part, planned in zip(manifest['partitions'],expected):part.update(planned)
     manifest['commissioning'] = record(old['disk_guid'], old['partition_uuids'], manifest['partitions'])
     manifest.update(schema_version=3, layout_version=3)
     if fault == 'source':manifest['commissioning']['factory_data_end'] += 1

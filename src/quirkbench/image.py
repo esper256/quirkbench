@@ -26,6 +26,7 @@ MIB=1024*1024
 SECTOR=512
 ESP_MIB=256
 STATE_MIB=32
+EMPTY_DATA_MIB=16
 MIN_IMAGE_MIB=2048
 
 @dataclass(frozen=True)
@@ -53,14 +54,17 @@ class ImageInputs:
     def validate(self):
         if type(self.controller_prepared) is not bool:
             raise ImageError('controller-prepared format selection must be boolean')
+        if self.controller_prepared and (self.prepared_data_tree is not None or self.smoke):
+            raise ImageError('prepared recovery factory cannot carry an initial candidate payload')
         if type(self.size_mib) is not int or self.size_mib < MIN_IMAGE_MIB or self.root_mib < 256:
             raise ImageError('image/root partition too small')
         if not self.controller_prepared and any(type(value) is not int or value < 1 for value in (self.experiment_mib,self.library_mib,self.log_budget_mib)):
             raise ImageError('commissioning capacities must be positive integer MiB')
         if not self.controller_prepared and self.size_mib-self.root_mib-ESP_MIB-STATE_MIB-1 > self.experiment_mib:
             raise ImageError('factory experiment partition exceeds commissioned size')
-        if self.size_mib < self.root_mib+ESP_MIB+STATE_MIB+512+2:
-            raise ImageError('image needs at least 512 MiB of data space')
+        minimum_data = EMPTY_DATA_MIB if self.controller_prepared else 512
+        if self.size_mib < self.root_mib+ESP_MIB+STATE_MIB+minimum_data+2:
+            raise ImageError(f'image needs at least {minimum_data} MiB of data space')
         if not self.output.is_absolute() or not self.output.parent.is_dir() or self.output.is_symlink():
             raise ImageError('output must be a new absolute regular-file path')
         for suffix in ('','.json','.sha256'):
@@ -194,14 +198,15 @@ def image_lock(path, *, timeout_s=60):
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 
-def partition_layout(size_mib,root_mib):
+def partition_layout(size_mib,root_mib, *, controller_prepared=False):
     start=2048
     answer=[]
     for number,label,size in ((1,'ESP',ESP_MIB),(2,'RECOVERY',root_mib),(3,'STATE',STATE_MIB)):
         end=start+size*MIB//SECTOR-1
         answer.append({'number':number,'label':'QUIRKBENCH-'+label,'start':start,'end':end})
         start=end+1
-    answer.append({'number':4,'label':'QUIRKBENCH-EXPERIMENTS','start':start,'end':size_mib*MIB//SECTOR-34})
+    end = start+EMPTY_DATA_MIB*MIB//SECTOR-1 if controller_prepared else size_mib*MIB//SECTOR-34
+    answer.append({'number':4,'label':'QUIRKBENCH-EXPERIMENTS','start':start,'end':end})
     return answer
 
 
@@ -469,7 +474,7 @@ def _create_image(inputs: ImageInputs, *, reserve_bytes=20*1024**3) -> Path:
         except BuildError as exc:
             raise ImageError('staged recovery runtime differs from image builder') from exc
     _check_image_space(inputs.output.parent, inputs.size_mib, reserve_bytes)
-    parts=partition_layout(inputs.size_mib,inputs.root_mib)
+    parts=partition_layout(inputs.size_mib,inputs.root_mib,controller_prepared=inputs.controller_prepared)
     disk_guid=str(uuid.uuid4())
     for part in parts:part['partuuid']=str(uuid.uuid4())
     p1,p2,p3,p4=parts

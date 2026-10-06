@@ -108,7 +108,15 @@ def _validate_factory_manifest(manifest: dict, candidate: dict) -> None:
                 or commissioning['factory_data_end'] != partitions[3].get('end')):
             raise BuildError('prepared factory source extent differs from partitions')
     expected = partition_layout(candidate["layout"]["factory_size_mib"],
-                                candidate["layout"]["root_mib"])
+                                candidate["layout"]["root_mib"],controller_prepared=prepared)
+    if prepared:
+        # The authenticated source extent is explicit. Older v3 development
+        # artifacts may carry a larger filesystem; retain it and never shrink.
+        end = commissioning['factory_data_end']
+        if (end < expected[-1]['end']
+                or end > candidate['image_size_bytes']//512-34):
+            raise BuildError('prepared factory data extent does not fit the artifact')
+        expected[-1]['end'] = end
     if expected[-1]["end"] < expected[-1]["start"]:
         raise BuildError("recovery image manifest partition layout differs from recipe")
     id_names = ("esp_partuuid", "root_partuuid", "state_partuuid", "data_partuuid")

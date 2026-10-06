@@ -140,6 +140,13 @@ unversioned historical RAM assessment and factory v2 readers remain separate.
 Stock image production still selects v2 until the controller writer is joined;
 v3 software reader/component tests alone do not make a USB usable.
 
+The v3 assembler uses a minimal empty 16 MiB factory experiment filesystem;
+controller preparation grows a copy, never the signed artifact. Earlier larger
+v3 source extents remain explicit and cannot be shrunk. Regular-file preparation
+adapters verify the complete selected artifact and each copied extent, use the
+existing filesystem/GPT tools, and retain failed scratch components. Scratch
+completion is not device-write authorization or durable USB completion.
+
 Restore only the selected private network profile into RAM after target binding is
 checked. Recovery mounts evidence before optional experiment/library storage; failure
 of those optional mounts must not prevent setup, credential access or uploads.

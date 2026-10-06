@@ -284,3 +284,12 @@ def test_old_rootfs_cannot_publish_an_image_without_new_network_stack(tmp_path, 
     (inputs.rootfs_dir/missing).unlink()
     with pytest.raises(ImageError,match='networking prerequisite missing'):
         inputs.validate()
+
+
+def test_prepared_factory_carries_only_empty_mutable_filesystem_overhead():
+    from quirkbench.image import partition_layout, EMPTY_DATA_MIB
+    old = partition_layout(4096, 2048)
+    prepared = partition_layout(4096, 2048, controller_prepared=True)
+    assert old[:3] == prepared[:3]
+    assert (prepared[3]['end']-prepared[3]['start']+1)*512 == EMPTY_DATA_MIB*1024**2
+    assert prepared[3]['end'] < old[3]['end']
