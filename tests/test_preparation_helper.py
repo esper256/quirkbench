@@ -53,3 +53,27 @@ def test_wrong_process_incarnation_is_rejected():
     with ExitStack() as stack:
         with pytest.raises(CommissionError,match='no longer live'):
             helper.owner_guard(os.getpid(),start+1,os.getuid(),stack)
+
+
+def test_privileged_child_import_does_not_modify_installation_inventory(tmp_path,monkeypatch):
+    import shutil
+    from quirkbench import preparation
+    package_root=tmp_path/'installed/lib';package_root.mkdir(parents=True)
+    shutil.copytree(Path(preparation.__file__).parent,package_root/'quirkbench',
+        ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
+    before={str(p.relative_to(package_root)):p.read_bytes() for p in package_root.rglob('*') if p.is_file()}
+    native=subprocess.run
+    def run(argv,**kwargs):
+        assert argv[:3]==['sudo','-n','--']
+        child=argv[3:]
+        assert '-B' in child and '-I' in child
+        child[child.index('-c')+2]=str(package_root)
+        # Help imports the real packaged helper and dependencies but touches no
+        # device and needs no root or enrollment fixture.
+        result=native(child,**kwargs)
+        assert result.returncode==0 and 'Internal bounded USB' in result.stdout
+        return subprocess.CompletedProcess(argv,0,'{}','')
+    monkeypatch.setattr(preparation.subprocess,'run',run)
+    assert preparation.helper('--help',timeout_s=10)=={}
+    after={str(p.relative_to(package_root)):p.read_bytes() for p in package_root.rglob('*') if p.is_file()}
+    assert after==before
