@@ -14,6 +14,34 @@ from contextvars import ContextVar
 ACTIVE_WORK=ContextVar('quirkbench_storage_work',default=None)
 
 
+def drain_group(process, *, timeout_s=10):
+    """Stop a launched group while its unreaped leader pins the group identity.
+
+    Call before wait/poll reaps the leader. Linux zombies have released file
+    descriptions; a surviving runnable or uninterruptible member is uncertain
+    shutdown, never successful completion.
+    """
+    import signal
+    import time
+    try:os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:return
+    deadline = time.monotonic()+timeout_s
+    while True:
+        live = False
+        for directory in Path('/proc').iterdir():
+            if not directory.name.isdecimal():continue
+            try:raw = (directory/'stat').read_text()
+            except (FileNotFoundError, ProcessLookupError):continue
+            fields = raw[raw.rfind(')')+2:].split()
+            if len(fields) < 3:raise ContractError('process shutdown inventory malformed')
+            if int(fields[2]) == process.pid and fields[0] not in ('Z', 'X'):
+                live = True; break
+        if not live:return
+        if time.monotonic() >= deadline:
+            raise ContractError('owned process group shutdown incomplete; retain work and diagnostics')
+        time.sleep(.01)
+
+
 def record_process(workspace,pid):
     from .store import atomic_write
     from .process_identity import controller_boot_id
