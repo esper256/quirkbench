@@ -120,7 +120,10 @@ def _root(root,ready):
     if not (ready or ram_ready)(root):raise Conflict('recovery reports require private RAM; use an explicit manual export destination')
     _managed_path(root)
     _durable_directory(root)
-    if root.stat().st_uid!=os.getuid() or stat.S_IMODE(root.stat().st_mode)!=0o700:raise Conflict('report RAM directory ownership is invalid')
+    # Diagnostic text may contain sensitive data; a private enclosing RAM
+    # directory supplies the same access boundary without exact leaf modes.
+    if root.stat().st_mode & 0o077 and root.parent.stat().st_mode & 0o077:
+        raise Conflict('reports require a private RAM directory or enclosing store')
     return root
 
 

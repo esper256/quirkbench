@@ -69,4 +69,4 @@ def readiness(root):
         return {'compute_ready': True, 'worker_reconciliation': 'clear', 'compute_instructions': []}
     except (OSError, ValueError, WorkerServiceError, sqlite3.Error) as exc:
         return {'compute_ready': False, 'worker_reconciliation': reconciliation,
-                'compute_instructions': ['Configure a supported local container engine and exact worker image; prepare the signed first builder with setup --builder-archive. ' + str(exc)[:512]]}
+                'compute_instructions': ['Configure a supported local container engine and exact worker image with admin controller run --engine ENGINE --worker-image IMAGE. ' + str(exc)[:512]]}

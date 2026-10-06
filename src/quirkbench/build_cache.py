@@ -71,6 +71,7 @@ def _tree_digest(root: Path) -> str:
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root).as_posix().encode()
         info = path.lstat()
+        # Restored/deployed filesystem access and execution semantics are data.
         mode = stat.S_IMODE(info.st_mode).to_bytes(4, "big")
         if stat.S_ISLNK(info.st_mode):
             content = b"L" + relative + b"\0" + os.readlink(path).encode()

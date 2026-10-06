@@ -96,8 +96,8 @@ def test_candidate_record_strict_schema_and_changed_baseline_binding(setup):
     with pytest.raises(Conflict):inputs.resolve(store,{**value,'rpm_snapshot_sha256':'0'*64})
 
 
-@pytest.mark.parametrize('kind',['symlink','fifo','hardlink','oversize','aggregate'])
-def test_candidate_retained_objects_are_bounded_regular_owned_files(setup,tmp_path,monkeypatch,kind):
+@pytest.mark.parametrize('kind',['symlink','fifo','oversize','aggregate'])
+def test_candidate_retained_objects_are_bounded_regular_files(setup,tmp_path,monkeypatch,kind):
     import os
     from quirkbench import recovery_rootfs
     entry,store,snapshot=setup;identity=snapshot['packages'][0]['sha256'];path=store.path(identity)
@@ -128,4 +128,14 @@ def test_publication_hook_cannot_remove_a_verified_package(setup):
     def mutate(stage):
         if stage=='after_publish':store.path(snapshot['packages'][0]['sha256']).unlink()
     store.fault_hook=mutate
+    with pytest.raises(ContractError):inputs.input_record(store,entry)
+
+
+def test_verified_regular_object_accepts_an_additional_hardlink(setup,tmp_path):
+    import os
+    entry,store,snapshot=setup
+    path=store.path(snapshot['packages'][0]['sha256'])
+    os.link(path,tmp_path/'other-name')
+    inputs.input_record(store,entry)
+    path.write_bytes(b'changed bytes')
     with pytest.raises(ContractError):inputs.input_record(store,entry)

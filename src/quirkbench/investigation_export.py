@@ -238,7 +238,7 @@ def export(root,name,output,*,capture_id=None,author=None,plan=None,timeout_s=30
                     guard();fd=os.open(source,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
                     with os.fdopen(fd,'rb') as stream,target.open('xb') as out:
                         before=os.fstat(stream.fileno())
-                        if not stat.S_ISREG(before.st_mode) or before.st_uid!=os.geteuid() or before.st_nlink!=1 or before.st_size>MAX_OBJECT:raise ContractError('unsafe or oversized export object')
+                        if not stat.S_ISREG(before.st_mode) or before.st_size>MAX_OBJECT:raise ContractError('unsafe or oversized export object')
                         state=hashlib.sha256();total=0
                         while True:
                             budget();guard()

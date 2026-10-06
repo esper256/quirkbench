@@ -49,7 +49,10 @@ def plan(root,*,image,device,target,output,public_key=None,fingerprint=None,
          unsigned_development=False,access=helper,source_reader=_source,controller_reader=_snapshot):
     root=Path(root);output=Path(output).absolute()
     if output.exists() or output.is_symlink():raise CommissionError('select a new preparation plan destination')
-    source=source_reader(Path(image).expanduser().resolve(strict=True),public_key,fingerprint,unsigned_development)
+    try: selected_image=Path(image).expanduser().resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise CommissionError('Recovery image not found: '+str(image)+'; set --image to the completed build output/recovery.img') from exc
+    source=source_reader(selected_image,public_key,fingerprint,unsigned_development)
     controller=controller_reader(root);observed=_current(root,device,access=access)
     # Inspect captured bytes without giving native tools a selected block node.
     work=output.parent/(output.name+'.layout');work.mkdir(mode=0o700)

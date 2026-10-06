@@ -622,7 +622,8 @@ a produced image or prove physical USB preparation/boot.
 Follow the [first-local-USB walkthrough](controller-installation.md#first-local-prepared-recovery-usb)
 for installation, TLS, repository publication and independent pairing readiness.
 Configure and run the controller first. Select its reachable LAN endpoint, then
-plan without writing USB bytes:
+plan without writing USB bytes. Run as your normal user; first use `sudo -v`
+to authorize the narrow device helper. Do not run the whole command with sudo:
 
 ```sh
 quirkbench recovery prepare \
@@ -640,6 +641,9 @@ physical attachment identities, never image/device pathnames. Managed staging
 locations derive from the current handoff directory. Unix path aliases are accepted;
 changed bytes, device incarnation or controller trust require a fresh plan.
 The erase acknowledgement covers **all existing USB data, evidence and credentials**.
+A stale backup GPT left at the physical USB tail by flashing a smaller valid
+factory image is reported in the plan and bound to confirmation. Preparation
+replaces it under explicit erasure; it does not repair or import that old layout.
 Both invocations need access to the narrow sudo device helper; the controller itself
 runs as the user. No prompt selects or approves a device.
 

@@ -56,7 +56,7 @@ def install_requested(client, *, state_dir, cache_root, library_root, verify_sto
             if client.maintenance_status() != intent:
                 raise ContractError('library maintenance fence was removed or replaced')
         guard()
-        cache_root = Path(cache_root)
+        cache_root = Path(cache_root).expanduser().resolve()
         if not cache_root.is_absolute() or cache_root.resolve() != cache_root:
             raise ContractError('maintenance cache cannot contain symlinks')
         cache = ArtifactStore(cache_root, reserve_bytes=reserve_bytes)

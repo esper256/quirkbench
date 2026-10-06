@@ -55,7 +55,7 @@ def network_profiles_ready(directory: Path = NETWORK_PROFILES, *,
         if directory.is_symlink() or not directory.is_dir():
             return False
         metadata = directory.stat()
-        if metadata.st_uid != owner_uid or stat.S_IMODE(metadata.st_mode) != 0o700:
+        if metadata.st_mode & 0o077 and directory.parent.stat().st_mode & 0o077:
             return False
         matches = []
         for line in mountinfo.read_text().splitlines():

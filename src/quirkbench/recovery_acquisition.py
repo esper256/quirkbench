@@ -88,7 +88,7 @@ def stage_spec(spec, generation):
 
 def acquisition_command(destination, spec):
     spec = load_spec(canonical(spec))
-    destination = Path(destination)
+    destination = Path(destination).expanduser().resolve()
     if not destination.is_absolute() or destination.resolve() != destination:
         raise BuildError('acquisition destination must be canonical')
     adapter = selected_adapter(spec['platform_adapter_id'])

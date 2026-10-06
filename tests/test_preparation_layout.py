@@ -77,7 +77,7 @@ def test_layout_deadlines_are_absolute_finite_and_positive(device,deadline):
 
 
 @pytest.mark.parametrize('primary_kind',['none','mbr','old-gpt'])
-def test_conflicting_physical_tail_is_not_hidden_by_layout_view(device,primary_kind):
+def test_stale_physical_tail_is_captured_for_explicit_full_replacement(device,primary_kind):
     fd,path,work=device;size=path.stat().st_size
     if primary_kind=='mbr':
         raw=bytearray(512);raw[510:512]=b'\x55\xaa';raw[450]=0x83
@@ -87,9 +87,16 @@ def test_conflicting_physical_tail_is_not_hidden_by_layout_view(device,primary_k
         os.pwrite(fd,header(1,alternate,2),512)
         os.pwrite(fd,header(alternate,1,alternate-32),alternate*512)
     os.pwrite(fd,header(size//512-1,1,size//512-33),size-512)
-    with pytest.raises(CommissionError,match='conflicting GPT header'):
-        layouts.inspect(fd,size,work,deadline=time.monotonic()+2,guard=lambda:None,
-            runner=lambda *a,**kw:pytest.fail('ambiguity must be rejected before native conversion'))
+    before=path.read_bytes()
+    def inspect_view(*args,**kwargs):
+        assert args[-1] != str(path)
+        return 'No problems found.'
+    result=layouts.inspect(fd,size,work,deadline=time.monotonic()+2,guard=lambda:None,runner=inspect_view)
+    assert result['description']['stale_tail_gpt']
+    assert path.read_bytes()==before
+    observation=result['observation']
+    os.pwrite(fd,b'changed-stale-header',size-512)
+    assert plans.observe_layout(fd,size)!=observation
 
 
 def test_deadline_after_final_live_read_is_not_success(device,monkeypatch):

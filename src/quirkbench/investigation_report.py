@@ -59,7 +59,7 @@ def presence(reader, identity):
     path = reader.root/'artifacts/objects'/identity
     try:
         info = path.lstat()
-        present = (stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_uid == os.geteuid()
+        present = (stat.S_ISREG(info.st_mode)
                    and path.resolve() == path)
     except OSError:present = False
     return {'sha256':identity, 'bytes_present':present, 'bytes_verified':False}

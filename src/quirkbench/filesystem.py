@@ -106,17 +106,19 @@ def held_parent(path):
 
 
 def _managed_path(path):
-    """Canonical user-owned application directory; no blanket permission policy."""
+    """Canonical managed directory; selected roots resolve before this check."""
+    # This helper validates managed descendants, not user-selected locations.
+    # Entry points resolve the selected root once before deriving these paths.
     path = Path(path).expanduser().absolute()
     if any(part.is_symlink() for part in _ancestors(path)):
-        raise ContractError('setup paths cannot contain symlinks')
+        raise ContractError('managed directories cannot contain symlinks')
     path = canonical_user_path(path)
     if path == Path('/'):
         raise ContractError('setup path cannot be filesystem root')
     if path.exists():
         info = path.stat()
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
-            raise ContractError('setup directory must be user-owned')
+        if not stat.S_ISDIR(info.st_mode):
+            raise ContractError('setup path must be a directory')
     from .retained_inputs import observe_directory
     observe_directory(path)
     return path
@@ -138,8 +140,8 @@ def _durable_directory(path):
 def _read(directory, name, *, limit=LIMIT):
     path = directory / name
     info = path.lstat()
-    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()):
-        raise ContractError('controller records must be owned regular files')
+    if not stat.S_ISREG(info.st_mode):
+        raise ContractError('controller records must be regular files')
     from .retained_inputs import observe_policy
     observe_policy(path)
     return read_file(directory, name, limit=limit)

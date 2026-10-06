@@ -45,3 +45,15 @@ def test_cli_setup_check_adds_revision_report_without_initializing_state(monkeyp
     assert report['user_manager']=='available' and not report['background_work_ready']
     assert 'installations' in report
     assert not (tmp_path/'absent').exists()
+
+
+def test_shared_directory_and_readers_accept_user_aliases_without_following_descendants(tmp_path):
+    import pytest
+    from quirkbench.filesystem import _managed_path,read_file,canonical_user_path
+    root=tmp_path/'actual';root.mkdir()
+    alias=tmp_path/'alias';alias.symlink_to(root,target_is_directory=True)
+    (root/'record').write_bytes(b'ordinary data')
+    assert _managed_path(canonical_user_path(alias))==root
+    assert read_file(canonical_user_path(alias),'record')==b'ordinary data'
+    (root/'linked').symlink_to(tmp_path,target_is_directory=True)
+    with pytest.raises(OSError):read_file(canonical_user_path(alias),'linked/outside')

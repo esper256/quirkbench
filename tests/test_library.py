@@ -87,3 +87,14 @@ def test_published_library_contracts_match_examples():
         Draft202012Validator.check_schema(schema)
         Draft202012Validator(schema).validate(example)
         contract.from_dict(example)
+
+
+def test_ordinary_modes_keep_content_identity_but_execution_changes_fail(tmp_path):
+    artifacts,manifest,store,_=fixture(tmp_path)
+    store.install(manifest,artifacts,mode='recovery',paused=True)
+    path=store._path(manifest.sha256)/'content/audio/test.wav'
+    for mode in (0o640,0o644,0o600):
+        path.chmod(mode)
+        assert store.verify(manifest.sha256)==manifest
+    path.chmod(0o755)
+    with pytest.raises(ContractError):store.verify(manifest.sha256)

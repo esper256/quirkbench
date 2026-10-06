@@ -57,3 +57,10 @@ def test_missing_public_choices_never_prompt_or_create_state(tmp_path,monkeypatc
     assert cli.main(['recovery','prepare','--json',*arguments], state_root=str(root))==2
     assert 'requires' in json.loads(capsys.readouterr().out)['error']['message']
     assert not root.exists()
+
+
+def test_missing_selected_image_names_the_actionable_input(tmp_path):
+    with pytest.raises(CommissionError,match='set --image to the completed build'):
+        preparation.plan(tmp_path,image=tmp_path/'missing/recovery.img',device='/dev/not-selected',
+            target='target',output=tmp_path/'plan',unsigned_development=True,
+            access=lambda *a,**k:pytest.fail('missing image cannot inspect a device'))

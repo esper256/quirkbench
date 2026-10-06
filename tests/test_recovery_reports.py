@@ -380,3 +380,12 @@ def test_report_sender_absolute_deadline_retains_ram_and_same_request(snapshot,t
         assert db.execute('SELECT COUNT(*) FROM diagnostic_reports WHERE received IS NOT NULL').fetchone()[0]==0
     clock['elapsed']=0
     assert send(manifest,files,control=control,verify_target=lambda:True,binding_reader=lambda:UUID)['report_id']==answer['report_id']
+
+
+def test_report_store_accepts_private_parent_without_exact_leaf_mode(tmp_path):
+    parent=tmp_path/'private-ram';parent.mkdir(mode=0o700)
+    root=parent/'reports';root.mkdir();root.chmod(0o750)
+    assert reports._root(root,lambda _:True)==root
+    parent.chmod(0o755)
+    with pytest.raises(Conflict,match='private RAM'):
+        reports._root(root,lambda _:True)

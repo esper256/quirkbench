@@ -198,8 +198,10 @@ def _observe(root_fd,name, *,archive=None,verify):
         with _parent(root_fd,name) as (parent,leaf):
             try:info=os.stat(leaf,dir_fd=parent,follow_symlinks=False)
             except FileNotFoundError:return {'path':name,'kind':'deleted'},None
-            if info.st_uid!=os.geteuid() or info.st_mode&0o7000:
-                raise ContractError('source files must be user-owned without special mode bits')
+            # Captured modes become target filesystem metadata; privilege bits
+            # are excluded by this source format, ordinary ownership is not.
+            if info.st_mode&0o7000:
+                raise ContractError('source files cannot carry special mode bits')
             observed=True
             mode=stat.S_IMODE(info.st_mode)
             member=tarfile.TarInfo('source/'+name);member.mode=mode;member.mtime=0
@@ -219,7 +221,7 @@ def _observe(root_fd,name, *,archive=None,verify):
                 entry={'path':name,'kind':'symlink','mode':mode,'target':target}
                 member.type=tarfile.SYMTYPE;member.linkname=target
                 if archive is not None:archive.addfile(member)
-            elif stat.S_ISREG(info.st_mode) and info.st_nlink==1:
+            elif stat.S_ISREG(info.st_mode):
                 fd=os.open(leaf,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=parent)
                 with os.fdopen(fd,'rb') as source:
                     if _identity(os.fstat(source.fileno()))!=_identity(info):raise Conflict('source changed before capture')

@@ -293,6 +293,12 @@ def _main(argv=None, *, state_root=None):
                                     heartbeat=(readiness_heartbeat(owner,args.service_runtime,capabilities=publication.capabilities,generation=getattr(args,'service_configuration_sha256',None))
                                                if jobs is not None and args.service_runtime is not None else nullcontext([]))
                                     with heartbeat as failures:
+                                        if args.service_runtime is not None:
+                                            startup={'event':'controller_started','controller_url':f'https://{args.host}:{server.server_address[1]}','next_command':'quirkbench status --json'}
+                                            if args.json:
+                                                emit(args,startup)
+                                                sys.stdout.flush()
+                                            else: print('Controller started: '+startup['controller_url']+'\nKeep this terminal open. Ctrl-C stops the controller.\nCheck independent readiness: quirkbench status --json',flush=True)
                                         while True:
                                             if failures: raise failures[0]
                                             for result in compute.tick():

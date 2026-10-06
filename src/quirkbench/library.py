@@ -124,7 +124,7 @@ def library_artifacts(store, selection_digest):
 
 class LibraryStore:
     def __init__(self, root, *, verify_storage, set_writable, reserve_bytes=1024**3, event=None, maintenance_lock=None):
-        self.root = Path(root)
+        self.root = Path(root).expanduser().resolve()
         if not self.root.is_absolute() or not self.root.is_dir() or self.root.resolve() != self.root:
             raise ContractError('library requires an existing explicit mount path')
         if verify_storage is None or set_writable is None:
@@ -178,7 +178,7 @@ class LibraryStore:
                         last_report = now
                 actual = checksum.hexdigest()
             if (actual != value['sha256'] or path.stat().st_size != value['size']
-                    or path.stat().st_mode & 0o7777 != (0o555 if value['executable'] else 0o444)):
+                    or bool(path.stat().st_mode & 0o111) != value['executable']):
                 raise ContractError('library file verification failed')
         self.event(phase='library-verify', completed=verified, total=total, unit='bytes')
         return manifest
