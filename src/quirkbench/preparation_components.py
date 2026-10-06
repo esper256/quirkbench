@@ -23,7 +23,7 @@ def require_space(path, *, bytes_needed, inodes_needed):
     available = os.statvfs(path)
     if available.f_bavail*available.f_frsize < bytes_needed:
         raise CommissionError('preparation staging needs more free bytes; select a larger staging destination')
-    if available.f_favail < inodes_needed:
+    if available.f_files > 0 and available.f_favail < inodes_needed:
         raise CommissionError('preparation staging needs more free inodes; select another staging destination')
 
 

@@ -94,7 +94,7 @@ def test_actual_files_and_native_network_adapter_keep_contact_distinct(tmp_path,
 def test_storage_byte_and_inode_exhaustion_are_operation_specific(tmp_path,monkeypatch):
     from types import SimpleNamespace
     for bytes_free,inodes_free in ((0,1),(1,0)):
-        monkeypatch.setattr('os.statvfs',lambda p:SimpleNamespace(f_bavail=bytes_free,f_favail=inodes_free))
+        monkeypatch.setattr('os.statvfs',lambda p:SimpleNamespace(f_bavail=bytes_free,f_files=100,f_favail=inodes_free))
         assert space(tmp_path)=='full'
         f=replace(BASE,evidence='full')
         assert next(a for a in actions(f) if a.id=='upload').enabled
@@ -167,3 +167,11 @@ def test_current_activity_comes_from_real_bound_journal_without_granting_approva
     assert facts.activity==label and 'PRIVATE_CANARY' not in str(facts)
     assert recommendation(facts)[0]==label
     assert not any('approve' in a.id for a in actions(facts))
+
+
+def test_unreported_inode_pool_is_not_full_but_byte_exhaustion_still_is(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr('os.statvfs',lambda _:SimpleNamespace(f_bavail=1,f_files=0,f_favail=0))
+    assert space(tmp_path)=='ready'
+    monkeypatch.setattr('os.statvfs',lambda _:SimpleNamespace(f_bavail=0,f_files=0,f_favail=0))
+    assert space(tmp_path)=='full'

@@ -74,7 +74,7 @@ def test_deadline_before_capture_creates_no_components(source):
 def test_staging_shortage_precedes_component_creation(source, monkeypatch, bytes_available, inodes_available, message):
     fd, raw, identity, record, work = source
     monkeypatch.setattr(components.os,'statvfs',lambda path:SimpleNamespace(
-        f_bavail=bytes_available,f_frsize=1,f_favail=inodes_available))
+        f_bavail=bytes_available,f_frsize=1,f_files=100,f_favail=inodes_available))
     with pytest.raises(CommissionError,match='free '+message):
         components.copy_factory_components(fd, identity, record, work,
             expected_artifact_sha256=record["artifact_sha256"], deadline=time.monotonic()+10,guard=lambda:None)
@@ -170,3 +170,18 @@ def test_changed_copied_source_is_rejected_before_growth(source):
         components.finish_filesystems(identity,record,work,source_checksums=checksums,
             expected_artifact_sha256=record['artifact_sha256'],deadline=time.monotonic()+10,
             runner=lambda *a,**kw:pytest.fail('substituted source reached native tools'))
+
+
+def test_component_copy_accepts_unreported_inode_pool(source,monkeypatch):
+    fd,raw,identity,record,work=source
+    native=os.statvfs(work)
+    monkeypatch.setattr(components.os,'statvfs',lambda _:SimpleNamespace(
+        f_bavail=native.f_bavail,f_frsize=native.f_frsize,f_files=0,f_favail=0))
+    paths,checksums=components.copy_factory_components(fd,identity,record,work,
+        expected_artifact_sha256=record['artifact_sha256'],deadline=time.monotonic()+10,guard=lambda:None)
+    assert len(paths)==len(checksums)==4
+    for path,(start,end),checksum in zip(paths,list(zip(identity.partition_starts[:3],identity.fixed_ends))+[(identity.partition_starts[3],identity.factory_data_end)],checksums):
+        retained=path.read_bytes()[:(end-start+1)*512]
+        assert retained==raw[start*512:(end+1)*512]
+        assert hashlib.sha256(retained).hexdigest()==checksum
+    assert os.pread(fd,len(raw),0)==raw
