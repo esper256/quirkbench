@@ -11,6 +11,7 @@ read-through. Superseded plans, run logs and investigation histories live in Git
 | Local or cloud software development | [Development setup and tests](testing-policy.md#portable-software-development) |
 | Product scope and acceptance | [Roadmap](product-roadmap.md), [acceptance guide](installation-to-patch.md); task status lives in GitHub |
 | Approved CLI redesign and implementation guidance | [CLI redesign plan](cli-redesign-plan.md); approved design; current commands are described in the agent guide and installed help |
+| Approved Unix configuration and path design | [Configuration and path design plan](path-portability-plan.md); implemented in PR #144; current operation is in the controller installation guide |
 | Implementation rules | Relevant [C0–C7 contract](implementation-contracts.md), [C8 interface](product-interface.md) |
 | Current installation and commands | [Controller installation](controller-installation.md), [agent guide](agent-guide.md) |
 | Clone and run, optional manual command symlink | [Source checkout workflow](controller-installation.md#run-from-a-source-checkout) |
