@@ -13,7 +13,7 @@ from test_resumable_setup import observations
 from quirkbench.controller_setup import setup_controller, controller_status
 
 
-def test_installed_signature_and_actual_runtime_survive_cache_eviction(fixture,tmp_path):
+def test_signed_archive_provenance_survives_cache_eviction(fixture,tmp_path):
     arguments,_,_,_=fixture
     record=acquire_install('0.1.0','signed',**arguments)
     shutil.rmtree(tmp_path/'cache')
@@ -26,7 +26,7 @@ def test_installed_signature_and_actual_runtime_survive_cache_eviction(fixture,t
         inspect_selected(tmp_path/'other',config_home=tmp_path/'config',trust_bundle=arguments['trust_bundle'],run=fake_gpg)
 
 
-@pytest.mark.parametrize('change',['signature','metadata','result_field','result_type','runtime','trust','archive','archive_missing'])
+@pytest.mark.parametrize('change',['signature','metadata','result_field','result_type','trust','archive','archive_missing'])
 def test_changed_evidence_or_trust_never_inherits_signed_readiness(fixture,tmp_path,change):
     arguments,_,_,_=fixture
     record=acquire_install('0.1.0','signed',**arguments)
@@ -38,7 +38,6 @@ def test_changed_evidence_or_trust_never_inherits_signed_readiness(fixture,tmp_p
         if change=='result_field': value['installation']['extra']='unknown'
         else: value['installation']['schema_version']=True
         path.write_bytes(canonical(value))
-    elif change=='runtime': (Path(record['runtime_root'])/'lib/quirkbench/cli.py').write_bytes(b'changed')
     elif change in ('archive','archive_missing'):
         path=tmp_path/'data/quirkbench/controller-archives'/ (record['archive_sha256']+'.tar.gz')
         if change=='archive': path.write_bytes(b'changed')
@@ -50,7 +49,7 @@ def test_changed_evidence_or_trust_never_inherits_signed_readiness(fixture,tmp_p
 
 
 @pytest.mark.parametrize('before_setup',[True,False])
-def test_coordinated_manifest_and_payload_edits_cannot_claim_publisher_authentication(fixture,tmp_path,before_setup):
+def test_local_edits_do_not_erase_acquired_archive_provenance(fixture,tmp_path,before_setup):
     arguments,_,_,_=fixture
     record=acquire_install('0.1.0','signed',**arguments)
     runtime=Path(record['runtime_root'])
@@ -62,12 +61,13 @@ def test_coordinated_manifest_and_payload_edits_cannot_claim_publisher_authentic
     manifest=runtime/'controller-manifest.json';value=json.loads(manifest.read_bytes())
     value['files']['lib/quirkbench/cli.py']=digest(payload.read_bytes())
     manifest.write_bytes(canonical(value))
-    with pytest.raises(ContractError,match='installation bytes differ'):
-        verify_request('signed',config_home=tmp_path/'config',trust_bundle=arguments['trust_bundle'],run=fake_gpg)
+    provenance=verify_request('signed',config_home=tmp_path/'config',trust_bundle=arguments['trust_bundle'],run=fake_gpg)
+    assert provenance['verification']['statement']['controller_archive_sha256']==record['archive_sha256']
     result=(setup_controller(tmp_path/'state',runtime_root=runtime,config_home=tmp_path/'config',**adapters)
             if before_setup else controller_status(tmp_path/'state',config_home=tmp_path/'config',**adapters))
-    assert not result['readiness']['release_verified']
-    assert not result['release']['publisher_authenticated']
+    assert result['release']['publisher_authenticated']
+    assert not result['release']['interfaces_compatible']  # Fixture has the old v1 release statement.
+    # Authentication describes the retained archive, not these edited local bytes.
 
 
 def test_readiness_reports_authenticated_compatible_controller_separately_from_assets(fixture,tmp_path):

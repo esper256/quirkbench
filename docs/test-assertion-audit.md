@@ -104,3 +104,12 @@ The two FAT control-store umasks protect pairing credentials; the three finite-p
 inode checks are advisory storage admission (unknown accounting is accepted). Real
 allocation, short-write and sync failures still determine completion. No application
 requirement is added for the user's shell umask.
+
+## Ordinary installed code (#171)
+
+The owner-approved local-code policy supersedes continuous runtime attestation.
+Focused regressions now accept code edits, generated caches and ordinary modes in
+selection/setup/status, while explicit reinstall preserves edited packaged files.
+Signed provenance tests verify the acquired archive, not current local code. CI
+assertions also accept verified read-only hardlinks and no longer police creator
+UIDs; changed retained bytes and unsafe managed traversal remain covered.

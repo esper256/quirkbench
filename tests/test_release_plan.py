@@ -106,7 +106,7 @@ def test_complete_authenticated_compatible_closure_is_readonly_unqualified(publi
     Draft202012Validator.check_schema(schema);Draft202012Validator(schema).validate(answer)
 
 
-@pytest.mark.parametrize('kind',['missing','changed','symlink','hardlink'])
+@pytest.mark.parametrize('kind',['missing','changed','symlink'])
 def test_exact_missing_or_unsafe_rpm_is_actionable_not_complete(publication,tmp_path,kind):
     _,store,_,_,_,snapshot,_=publication
     identity=snapshot['packages'][0]['sha256'];path=store.path(identity)
@@ -309,3 +309,10 @@ def test_cli_authenticated_malformed_archive_has_stable_json_error(publication,m
     assert cli.main(['dev', 'release', 'check', str(directory), '--inputs', str(store.root), '--trust-bundle', str(trust), '--json'])==2
     error=json.loads(capsys.readouterr().out)['error']
     assert error['code']=='INVALID_INPUT' and 'malformed or truncated' in error['message']
+
+
+def test_verified_rpm_with_an_additional_name_is_complete(publication,tmp_path):
+    _,store,_,_,_,snapshot,_=publication
+    path=store.path(snapshot['packages'][0]['sha256'])
+    os.link(path,tmp_path/'same-rpm')
+    assert check(publication)['input_closure_complete']

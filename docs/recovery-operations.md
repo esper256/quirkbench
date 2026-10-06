@@ -50,7 +50,11 @@ Do not expect persistent logs before evidence storage is verified. Retain photog
 or a VM serial log before restarting, and review verbose logs for private details
 before sharing them. Keep the boot USB connected while recovery is running.
 
-Controller preparation reports actual usable experiment/evidence capacities. The
+Controller preparation reports actual usable experiment/evidence capacities.
+Normal output announces when a plan is ready and explicitly says the USB has not
+been changed. Only the returned apply command erases and configures it; success
+ends with “USB preparation completed and verified.” Tool events use structured
+JSON only when `--json` is requested. The
 new prepared layout reserves no hypothetical library payload and splits remaining
 space equally, after fixed recovery and filesystem overhead. There is no RAM
 admission limit or promise that every experiment/dump fits. Historical v2 media

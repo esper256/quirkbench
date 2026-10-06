@@ -115,7 +115,7 @@ with geometry.open('r+b') as stream:stream.truncate(320*1024**2)
 fd=os.open(geometry,os.O_RDWR);view=work/'layout-view';view.mkdir()
 try:
     observed=preparation_layout.inspect(fd,320*1024**2,view,deadline=deadline,guard=lambda:None,runner=run)
-    assert observed['description']=={'kind':'gpt','previous_quirkbench_labels':True,'gpt_source_bytes':256*1024**2}
+    assert observed['description']=={'kind':'gpt','previous_quirkbench_labels':True,'gpt_source_bytes':256*1024**2,'stale_tail_gpt':False}
     assert len(observed['observation'])==3
     os.pwrite(fd,b'EFI PART',320*1024**2-512)
     conflict=work/'conflicting-layout-view';conflict.mkdir()

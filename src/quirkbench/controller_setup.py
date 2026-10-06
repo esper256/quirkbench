@@ -196,12 +196,11 @@ def _runtime(intent, *, config_home=None):
     from .controller_install import selected_runtime
     if intent['runtime_version'] is None:
         return False
-    from .controller_install import verify_installation, selected_runtime
+    from .controller_install import installation_record, selected_runtime
     runtime = selected_runtime(config_home=config_home)
-    record = verify_installation(runtime)
+    record = installation_record(runtime)
     if (record['archive_sha256'] != intent['runtime_archive_sha256']
-            or record['version'] != intent['runtime_version']
-            or _manifest_digest(runtime) != intent['runtime_manifest_sha256']):
+            or record['version'] != intent['runtime_version']):
         raise Conflict('selected runtime identity differs from setup intent')
     return True
 
@@ -256,9 +255,9 @@ def controller_status(root=None, *, config_home=None, filesystem=None,
     if matches or (root / 'private/controller-service.json').exists():
         intent = progress['intent'] if matches else None
         try:
-            from .controller_install import verify_installation
+            from .controller_install import installation_record
             runtime = selected_runtime(config_home=config_home)
-            current = verify_installation(runtime)
+            current = installation_record(runtime)
             runtime_verified = True
             if (root / 'private/controller-service.json').exists():
                 from .controller_service import configuration, software_identity
@@ -378,7 +377,7 @@ def setup_controller(root=None, *, request_id=None, runtime_root=None, cache_gib
     """Persist intent before synchronous setup effects and reconcile on every retry."""
     from .controller_install import selected_runtime
     from .filesystem import private_lock
-    from .controller_install import configuration, verify_installation
+    from .controller_install import configuration, installation_record
     filesystem = filesystem or SetupFilesystem()
     fault_hook = fault_hook or (lambda _: None)
     state = _managed_path(discover_state_root(root, config_home=config_home))
@@ -401,7 +400,7 @@ def setup_controller(root=None, *, request_id=None, runtime_root=None, cache_gib
             except FileNotFoundError:
                 installed = Path(__file__).resolve().parents[2]
                 if (installed/'installation.json').exists(): runtime = installed
-        runtime_record = verify_installation(canonical_user_path(runtime)) if runtime is not None else None
+        runtime_record = installation_record(canonical_user_path(runtime)) if runtime is not None else None
         values = {'cache_gib': cache_gib, 'reserve_gib': reserve_gib, 'host': host,
                   'port': port, 'allow_lan': allow_lan, 'logout_policy': logout_policy}
         defaults = {'cache_gib': 50, 'reserve_gib': 20.0, 'host': '127.0.0.1',
@@ -409,7 +408,8 @@ def setup_controller(root=None, *, request_id=None, runtime_root=None, cache_gib
         intent = validate_intent({
             'runtime_version': runtime_record['version'] if runtime_record else None,
             'runtime_archive_sha256': runtime_record['archive_sha256'] if runtime_record else None,
-            'runtime_manifest_sha256': _manifest_digest(runtime) if runtime_record else None,
+            # Historical acquisition metadata only; replay never re-attests local code.
+            'runtime_manifest_sha256': saved['runtime_manifest_sha256'] if progress else (_manifest_digest(runtime) if runtime_record else None),
             **{name: value if value is not None else saved.get(name, defaults[name]) for name, value in values.items()},
         })
         identifier(request_id) if request_id is not None else None
@@ -431,7 +431,7 @@ def setup_controller(root=None, *, request_id=None, runtime_root=None, cache_gib
             filesystem.database(state)
             filesystem.preferences(state, intent, completed=True)
             if runtime is not None and (state / 'private/controller-service.json').exists():
-                if _manifest_digest(Path(configuration(state)['runtime']).parent.parent) != intent['runtime_manifest_sha256']:
+                if configuration(state)['software'] != {'version':intent['runtime_version'],'archive_sha256':intent['runtime_archive_sha256']}:
                     raise Conflict('configured service differs from selected runtime')
             return controller_status(state, config_home=config_home, filesystem=filesystem, **status_adapters)
         if 'state_selected' in progress['completed_steps'] and not selected.exists():
@@ -458,7 +458,7 @@ def setup_controller(root=None, *, request_id=None, runtime_root=None, cache_gib
                 _idle(state)
                 if runtime is not None and (state / 'private/controller-service.json').exists():
                     configured = configuration(state)
-                    if _manifest_digest(Path(configured['runtime']).parent.parent) != intent['runtime_manifest_sha256']:
+                    if configured['software'] != {'version':intent['runtime_version'],'archive_sha256':intent['runtime_archive_sha256']}:
                         raise Conflict('configured service differs from selected runtime')
                 filesystem.preferences(state, intent, completed='preferences_recorded' in progress['completed_steps'])
                 fault_hook('preferences_recorded')

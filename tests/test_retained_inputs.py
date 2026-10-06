@@ -134,7 +134,7 @@ def test_byte_observations_preserve_read_budget_and_tail_semantics(tmp_path):
 
 
 @pytest.mark.parametrize('changed', ['directory', 'file'])
-def test_proof_rechecks_ownership_on_reuse(tmp_path, monkeypatch, changed):
+def test_proof_does_not_police_creator_uid_on_reuse(tmp_path, monkeypatch, changed):
     path = tmp_path / 'source.json'; path.write_bytes(b'original')
     inputs = proof(tmp_path)
     target = tmp_path if changed == 'directory' else path
@@ -143,5 +143,6 @@ def test_proof_rechecks_ownership_on_reuse(tmp_path, monkeypatch, changed):
         info = native(self, *args, **kwargs)
         return stat_with(info, st_uid=os.geteuid() + 1) if self == target else info
     monkeypatch.setattr(Path, 'stat' if changed == 'directory' else 'lstat', foreign)
-    with pytest.raises(ContractError, match='owned'):
-        inputs.check()
+    inputs.check()
+    path.write_bytes(b'changed!')
+    with pytest.raises(Conflict,match='bytes changed'):inputs.check()

@@ -182,6 +182,19 @@ def install(archive, *, data_home=None, expected_archive_sha256=None, expected_v
     return {**record, 'runtime_root': str(runtime)}
 
 
+def installation_record(runtime):
+    """Read declared local provenance; ordinary execution does not attest code."""
+    runtime=canonical_user_path(runtime)
+    record=_json(read_file(runtime,'installation.json',limit=4096))
+    if (set(record)!={'schema_version','version','archive_sha256','signed','qualified'}
+            or record['schema_version']!=1 or not isinstance(record['version'],str)
+            or not re.fullmatch('[0-9][A-Za-z0-9.+-]{0,63}',record['version'])
+            or not isinstance(record['archive_sha256'],str)
+            or not re.fullmatch('[0-9a-f]{64}',record['archive_sha256'])):
+        raise ContractError('invalid local installation record')
+    return {**record,'runtime_root':str(runtime)}
+
+
 def verify_installation(runtime, expected_files=None):
     runtime = canonical_user_path(runtime)
     if not runtime.is_dir():
@@ -198,20 +211,8 @@ def verify_installation(runtime, expected_files=None):
     names = set(manifest['files']) | {'controller-manifest.json','installation.json'}
     if expected_files is not None and names != set(expected_files):
         raise ContractError('installation contents differ from authenticated archive')
-    actual = set()
-    for directory, dirs, entries in os.walk(runtime, followlinks=False):
-        for name in dirs:
-            if (Path(directory) / name).is_symlink():
-                raise ContractError('installation contains linked directory')
-        for name in entries:
-            actual.add(str((Path(directory) / name).relative_to(runtime)))
-    if actual != names:
-        raise ContractError('installation contents differ; refusing replacement')
     for name in names:
         raw = read_file(runtime, name, limit=LIMIT)
-        mode = stat.S_IMODE((runtime/name).stat().st_mode)
-        if mode != (0o755 if name == 'install' or name.startswith('bin/') else 0o644):
-            raise ContractError('installation file mode differs')
         if name in manifest['files'] and hashlib.sha256(raw).hexdigest() != manifest['files'][name]:
             raise ContractError('installation bytes differ; refusing replacement')
         if expected_files is not None and raw != expected_files[name]:
@@ -261,7 +262,7 @@ def configure_installation_locations(*, config_home=None, owner_locked=False, **
 
 
 def select_runtime(runtime, *, config_home=None, owner_locked=False):
-    record = verify_installation(runtime)
+    record = installation_record(runtime)
     directory = _managed(_home(config_home,'XDG_CONFIG_HOME','.config')/'quirkbench')
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     with nullcontext() if owner_locked else _lock(directory/'.installation.lock'):
@@ -276,7 +277,7 @@ def selected_runtime(*, config_home=None):
     settings=installation_settings(config_home=config_home)
     data = _home(settings.get('data_home'),'XDG_DATA_HOME','.local/share')
     runtime = data/'quirkbench/controller'/(record['version']+'-'+record['archive_sha256'])
-    if installation_identity(verify_installation(runtime)) != record:
+    if installation_identity(installation_record(runtime)) != record:
         raise Conflict('selected installation content differs')
     return runtime
 
@@ -340,7 +341,7 @@ def activate(record, root, *, config_home=None, bin_home=None,
              runner=subprocess.run, ready=require_ready, fault_hook=lambda _:None):
     root = canonical_user_path(Path(root))
     runtime = Path(record['runtime_root'])
-    verify_installation(runtime)
+    installation_record(runtime)
     config = _home(config_home,'XDG_CONFIG_HOME','.config')
     launchers = _managed(canonical_user_path(Path(bin_home or Path.home()/'.local/bin').resolve()))
     directory = _managed(config/'quirkbench')
