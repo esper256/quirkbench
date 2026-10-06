@@ -44,6 +44,11 @@ The native suite requires a separately prepared dependency cache; see
 CI acquires/caches it before the timed test step; ordinary Python suites remain portable.
 
 Selectors deduplicate suites/files; separate suite jobs keep their own evidence.
+The investigation checks are split into `investigation-product` (source, build and
+proposal processing), `investigation-attended` (baseline, approval and deployment),
+and `investigation-results` (observation, export and joined submissions). They retain
+the same test modules and conservative joined triggers, with independent unchanged
+deadlines; this keeps measured suite cost within the budget tracked in #130.
 Shared contracts, schemas and fixtures deliberately select all named focused suites.
 Unmapped non-documentation changes also select all focused suites **and report the
 unmapped paths**. This is a coverage aid, not complete dependency analysis. Review
