@@ -44,17 +44,17 @@ def test_confirmation_and_actual_cli(tmp_path, monkeypatch, capsys):
     assert not (root / 'controller.sqlite').exists()
 
 
-@pytest.mark.parametrize('version', [len(MIGRATIONS)])
+@pytest.mark.parametrize('version', [32, 35, len(MIGRATIONS)])
 def test_old_schema_reset_fresh_setup_and_opaque_gc_roots(tmp_path, version):
     root, config = fixture(tmp_path)
     setup_controller(root, config_home=config, request_id='old-setup', **observations())
     c = Controller(root, reserve_bytes=0)
     artifact = c.store.put(b'{"arbitrary": "old evidence"}')
-    if version == 32:
+    if version != len(MIGRATIONS):
         for path in root.glob('controller.sqlite*'): path.unlink()
         from contextlib import closing
         with closing(sqlite3.connect(root / 'controller.sqlite')) as db:
-            for number, migration in enumerate(MIGRATIONS[:32], 1):
+            for number, migration in enumerate(MIGRATIONS[:version], 1):
                 db.executescript('BEGIN IMMEDIATE;\n' + migration + f'\nPRAGMA user_version={number};\nCOMMIT;')
     preserved = ['output/recovery.img', 'inputs/rpms/a.rpm', 'private/controller-tls/key.pem',
                  'repositories/repo/data', 'build/log.txt']
@@ -124,6 +124,77 @@ def test_unknown_schema_refused(tmp_path, version):
     with sqlite3.connect(root / 'controller.sqlite') as db: db.execute(f'PRAGMA user_version={version}')
     with pytest.raises(Conflict, match='incompatible development database'): run(root, config)
     assert not (root / FENCE).exists()
+
+
+@pytest.mark.parametrize('legacy_storage', [False, True])
+def test_older_database_reset_without_conversion(tmp_path, legacy_storage):
+    root, config = fixture(tmp_path)
+    with sqlite3.connect(root / 'controller.sqlite') as db:
+        db.execute('PRAGMA user_version=35')
+        if legacy_storage:
+            db.execute('DROP TABLE storage_groups')
+            db.execute('CREATE TABLE storage_groups(owner TEXT PRIMARY KEY, kind TEXT, created REAL, updated REAL, state TEXT, paths TEXT, stop_proof TEXT)')
+    before = (root / 'controller.sqlite').read_bytes()
+    result = run(root, config)
+    assert (Path(result['archive']) / '0').read_bytes() == before
+    assert not (root / 'controller.sqlite').exists()
+    Controller(root, reserve_bytes=0)
+    fresh = (root / 'controller.sqlite').read_bytes()
+    assert run(root, config)['replayed']
+    assert (root / 'controller.sqlite').read_bytes() == fresh
+
+
+@pytest.mark.parametrize('sql', [
+    "INSERT INTO devices(id,boot,generation,report) VALUES('target','boot',1,'{}')",
+    "INSERT INTO operations(id,kind,input_digest,request_digest,state,created,updated,request_id) VALUES('work','build','hash','hash','WAITING',0,0,'request')",
+    'ALTER TABLE operations DROP COLUMN worker_unit',
+    'DROP TABLE enrollment_requests',
+    'DROP TABLE enrollment_requests; CREATE VIEW enrollment_requests AS SELECT 1 AS request_id',
+    'ALTER TABLE storage_groups DROP COLUMN stage_retained',
+    "DROP TABLE storage_groups; CREATE TABLE storage_groups(state TEXT,stop_proof TEXT,paths TEXT); INSERT INTO storage_groups VALUES('COMPLETED','{}','[]')",
+])
+def test_old_database_missing_safety_or_used_state_preserved(tmp_path, sql):
+    root, config = fixture(tmp_path)
+    with sqlite3.connect(root / 'controller.sqlite') as db:
+        db.executescript(sql)
+        db.execute('PRAGMA user_version=35')
+    before = (root / 'controller.sqlite').read_bytes()
+    with pytest.raises(Conflict): run(root, config)
+    assert (root / 'controller.sqlite').read_bytes() == before
+
+
+def test_incompatible_status_only_recommends_recovery(tmp_path, monkeypatch):
+    from quirkbench.controller_setup import controller_status
+    root, config = fixture(tmp_path)
+    with sqlite3.connect(root / 'controller.sqlite') as db: db.execute('PRAGMA user_version=35')
+    before = (root / 'controller.sqlite').read_bytes()
+    report = controller_status(root, config_home=config,
+        service_inspector=lambda: {'service_installation': 'unverified', 'background_work_ready': False, 'instructions': [
+            'Start the configured controller with quirkbench admin controller run and keep that terminal open.']},
+        ready=lambda _: pytest.fail('incompatible database is not ready for startup'),
+        installation_inspector=lambda *args, **kw: {'installations': {'mismatch': False}})
+    assert not report['readiness']['database_available']
+    assert any('admin controller reset' in item for item in report['instructions'])
+    assert not any(item.startswith('Start the configured controller') for item in report['instructions'])
+    assert (root / 'controller.sqlite').read_bytes() == before
+    assert not (root / FENCE).exists()
+
+
+def test_incompatible_cli_names_database_and_reset_without_housekeeping(tmp_path, monkeypatch, capsys):
+    from quirkbench import maintenance
+    root, config = fixture(tmp_path)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(config))
+    with sqlite3.connect(root / 'controller.sqlite') as db:
+        db.execute('PRAGMA user_version=35')
+    before = (root / 'controller.sqlite').read_bytes()
+    monkeypatch.setattr(maintenance, 'prune', lambda _: pytest.fail('failed admission must not run housekeeping'))
+    assert cli.main(['--state', str(root), 'run', 'approve', 'unused-attempt']) != 0
+    output = capsys.readouterr()
+    assert str(root / 'controller.sqlite') in output.err
+    assert 'schema 35, required '+str(len(MIGRATIONS)) in output.err
+    assert 'admin controller reset' in output.err
+    assert 'Housekeeping deferred' not in output.err
+    assert (root / 'controller.sqlite').read_bytes() == before
 
 
 def test_wal_committed_bytes_retained(tmp_path):

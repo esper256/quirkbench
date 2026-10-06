@@ -215,9 +215,12 @@ must still be visible to the process and container engine that use it. Explicit
 state/build/output selections may be inside a checkout. System trees remain
 protected and admission grants no recursive deletion of user-selected output.
 
-The revised development formats require fresh state. Preserve an incompatible
-existing directory and choose a new `--state`; there is no conversion or automatic
-reset. Current-format backup/restore retains content integrity and leaves scheduling
+The revised development formats require fresh initialization. For an unused
+controller, explicitly [reset it in place](#start-over-after-unsuccessful-setup),
+then repeat setup. Used or unknown incompatible state must be preserved for explicit
+recovery; a new directory is an optional separate fresh start, not an automatic
+workaround. There is no conversion or automatic reset.
+Current-format backup/restore retains content integrity and leaves scheduling
 paused. Restore private configuration and required external selections separately.
 Moving stopped managed data does not authorize resuming work or running a target;
 recorded active workers must still be reconciled.
@@ -504,7 +507,12 @@ Retained installation/publication transactions, unknown/corrupt schemas, substit
 files and active or unreconciled work are refused; do not delete the whole state tree
 to bypass these checks. Reset currently supports database schemas 32 through current,
 at most 128 MiB per retained file, 10000 CAS objects and 64 local reset archives.
+Known older unused databases can be reset without upgrading their format. Missing
+safety fields or historical pathname-bearing storage rows require explicit recovery;
+unknown schemas remain protected. Stop an incompatible running controller in its
+terminal if its live identity cannot be verified by the current CLI.
 It does not upgrade an existing database or reset a previously used controller.
+Reuse the same state directory for the next setup; a second database is unnecessary.
 
 For a fresh empty-registry installation, explicitly provision an existing private
 operator GnuPG home and composition signing key, then configure its first repository:

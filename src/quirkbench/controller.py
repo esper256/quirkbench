@@ -578,7 +578,15 @@ def require_current_schema(db):
               'controller_job_service':{'software_sha256','configuration_sha256'}}
     if (db.execute('PRAGMA user_version').fetchone()[0]!=len(MIGRATIONS) or
             any(not fields <= {row[1] for row in db.execute('PRAGMA table_info('+table+')')} for table,fields in expected.items())):
-        raise ContractError('incompatible development state; initialize a fresh --state directory and preserve existing files')
+        import shlex
+        location = next((row[2] for row in db.execute('PRAGMA database_list') if row[1] == 'main'), '')
+        command = shlex.join(['quirkbench', '--state', str(Path(location).parent),
+                             'admin', 'controller', 'reset', '--request-id',
+                             'CHOOSE_NEW_RESET_ID', '--confirm-reset'])
+        raise ContractError('incompatible development state: '+location+
+                            '; schema '+str(db.execute('PRAGMA user_version').fetchone()[0])+
+                            ', required '+str(len(MIGRATIONS))+
+                            '. No migration is supported. To explicitly archive and reset an unused controller: '+command)
 
 
 class Controller(OperatorApprovals):
