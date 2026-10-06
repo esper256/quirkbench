@@ -628,7 +628,9 @@ Follow the [first-local-USB walkthrough](controller-installation.md#first-local-
 for installation, TLS, repository publication and independent pairing readiness.
 Configure and run the controller first. Select its reachable LAN endpoint, then
 plan without writing USB bytes. Run as your normal user; first use `sudo -v`
-to authorize the narrow device helper. Do not run the whole command with sudo:
+in the same terminal to authorize the narrow device helper. The helper keeps that
+terminal session while owning a separate process group for cancellation and cleanup.
+Do not run the whole command with sudo:
 
 ```sh
 quirkbench recovery prepare \

@@ -73,7 +73,10 @@ def test_privileged_child_import_does_not_modify_installation_inventory(tmp_path
         result=native(child,capture_output=True,text=True,timeout=10)
         assert result.returncode==0 and 'Internal bounded USB' in result.stdout
         return '{}'
-    monkeypatch.setattr('quirkbench.ostree.CommandRunner.__call__',lambda self,argv:run(argv))
+    def invoke(self,argv):
+        assert self.preserve_session and self.cooperative_stdin
+        return run(argv)
+    monkeypatch.setattr('quirkbench.ostree.CommandRunner.__call__',invoke)
     assert preparation.helper('--help',timeout_s=10)=={}
     after={str(p.relative_to(package_root)):p.read_bytes() for p in package_root.rglob('*') if p.is_file()}
     assert after==before
