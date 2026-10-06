@@ -315,3 +315,29 @@ def test_maintenance_lock_wait_is_nonblocking_and_keeps_supervisor_alive(tmp_pat
         assert agent.journal_path.read_bytes() == initial
     assert len(client.claims) == 1 and not client.results
     assert len(notifications) >= 37
+
+
+@pytest.mark.parametrize('failure',['evidence_enospc','journal_quota','evidence_short_write'])
+def test_real_capture_storage_failure_preserves_prior_unuploaded_evidence(tmp_path,monkeypatch,failure):
+    import errno,json
+    from quirkbench import store
+    from quirkbench.contracts import canonical,digest
+    client=FakeClient();agent=TargetAgent(client,tmp_path/'agent',report())
+    pending={'evidence':[],'stage':'started'};agent._journal['pending']=pending;agent._save()
+    agent._seal(pending,'original',b'retained old evidence')
+    previous=agent.journal_path.read_bytes();old=agent.blob_dir/digest(b'retained old evidence')
+    write=store.write_all
+    def fail(stream,raw):
+        blob=b'new evidence bytes'==bytes(raw)
+        if failure=='evidence_enospc' and blob:raise OSError(errno.ENOSPC,'injected full evidence')
+        if failure=='journal_quota' and not blob:raise OSError(errno.EDQUOT,'injected full control metadata')
+        if failure=='evidence_short_write' and blob:
+            stream.write(bytes(raw)[:3]);raise OSError(errno.ENOSPC,'injected interrupted short write')
+        return write(stream,raw)
+    monkeypatch.setattr(store,'write_all',fail)
+    with pytest.raises(OSError):agent._seal(pending,'new',b'new evidence bytes')
+    assert old.read_bytes()==b'retained old evidence' and agent.journal_path.read_bytes()==previous
+    assert json.loads(previous)['pending']['stage']=='started'
+    assert not client.evidence_refs and not client.results
+    if failure=='journal_quota':assert (agent.blob_dir/digest(b'new evidence bytes')).read_bytes()==b'new evidence bytes'
+    else:assert not (agent.blob_dir/digest(b'new evidence bytes')).exists()

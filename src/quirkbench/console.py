@@ -281,6 +281,7 @@ def main() -> int:
     services=RecoveryActions()
     def fallback():
         print('Quirkbench recovery: dashboard unavailable.\n'
+              'Offline reports: python3 -m quirkbench.recovery_reports --help.\n'
               'Boot logs: journalctl -b. T opens the independent root terminal.\n'
               'Ctrl+Alt+F3 also opens the terminal; commands can modify internal disks.',flush=True)
         present_once()

@@ -14,17 +14,9 @@ from .preparation_completion import prove_component
 from .store import atomic_write,sync_directory
 
 
-def populate(plan,work,invitation,certificate_pem,*,deadline,runner=_run):
-    """The existing controller has issued this one-use non-expiring invitation.
-
-    This is disposable normal-user scratch. debugfs sets target root ownership
-    only within the regular ext4 component, never on the controller filesystem.
-    """
-    work=Path(work);native=runner
-    def run(*argv):
-        remaining=deadline-time.monotonic()
-        if remaining<=0:raise CommissionError('USB enrollment staging deadline exceeded')
-        return native(*argv,timeout_s=remaining)
+def stage_enrollment(plan,work,invitation,certificate_pem):
+    """Stage exact public trust and initial credentials before filesystem assembly."""
+    work=Path(work)
     expected=plan['controller'];record=invitation['record'];code=invitation['code']
     if record.get('name')!=plan['target']:
         raise CommissionError('prepared invitation target differs from confirmed plan')
@@ -46,6 +38,21 @@ def populate(plan,work,invitation,certificate_pem,*,deadline,runner=_run):
     atomic_write(control/CERTIFICATE,files[CERTIFICATE])
     files['runtime-config.lock']=b''
     sync_directory(control);sync_directory(payload)
+    return metadata,payload,control,files
+
+
+def populate(plan,work,invitation,certificate_pem,*,deadline,runner=_run):
+    """The existing controller has issued this one-use non-expiring invitation.
+
+    This is disposable normal-user scratch. debugfs sets target root ownership
+    only within the regular ext4 component, never on the controller filesystem.
+    """
+    work=Path(work);native=runner
+    def run(*argv):
+        remaining=deadline-time.monotonic()
+        if remaining<=0:raise CommissionError('USB enrollment staging deadline exceeded')
+        return native(*argv,timeout_s=remaining)
+    metadata,payload,control,files=stage_enrollment(plan,work,invitation,certificate_pem)
     # Format only mutable regular-file scratch, using existing image machinery.
     state=work/'partition-3';document=work/'prepared-media.json'
     atomic_write(document,canonical(plan['prepared_media']))

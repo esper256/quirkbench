@@ -92,7 +92,8 @@ def test_initial_activation_happens_once_not_after_restart(tmp_path):
     assert calls == [2]
 
 
-def test_actual_console_entrypoint_paints_before_first_vt_switch_without_input(tmp_path):
+@pytest.mark.parametrize("withhold_first_render",[False,True])
+def test_actual_console_entrypoint_paints_before_first_vt_switch_without_input(tmp_path,withhold_first_render):
     import json
     master, slave=pty.openpty()
     code=('import runpy; import quirkbench.local_terminal as t; original=t.present_once; '
@@ -100,6 +101,8 @@ def test_actual_console_entrypoint_paints_before_first_vt_switch_without_input(t
           't.present_once=lambda:original(marker=Path('+repr(str(tmp_path/'presented'))+'), '
           'switch=lambda n:print("INITIAL_VT",n,flush=True)); '
           'runpy.run_module("quirkbench.console",run_name="__main__")')
+    if withhold_first_render:
+        code='import quirkbench.recovery_dashboard as d; original_draw=d.draw; calls=[]; d.draw=lambda *a:original_draw(*a) if calls else calls.append(True); '+code
     process=subprocess.Popen([sys.executable,'-c',code], stdin=slave,stdout=slave,stderr=slave,
         start_new_session=True,env=dict(os.environ,TERM='linux',PYTHONPATH=str(Path(__file__).parents[1]/'src')))
     os.close(slave); raw=bytearray(); deadline=time.monotonic()+5
@@ -109,10 +112,25 @@ def test_actual_console_entrypoint_paints_before_first_vt_switch_without_input(t
             assert remaining>0, raw.decode(errors='replace')
             assert select.select([master],[],[],remaining)[0]
             raw.extend(os.read(master,65536))
-        assert raw.index(b'QUIRKBENCH')<raw.index(b'INITIAL_VT 2')
+        if withhold_first_render:
+            assert b'QUIRKBENCH' not in raw[:raw.index(b'INITIAL_VT 2')]
+        else:assert raw.index(b'QUIRKBENCH')<raw.index(b'INITIAL_VT 2')
         os.write(master,b'\x04')
         assert process.wait(timeout=2)==0
     finally:
         if process.poll() is None:
             os.killpg(process.pid,signal.SIGKILL);process.wait(timeout=2)
         os.close(master)
+
+
+def test_actual_boot_arguments_reject_active_vt_routing_mutation():
+    from quirkbench.image import grub_config
+    ids=['864fad97-1557-41e0-9f9a-ed27c4f1725'+str(i) for i in range(6)]
+    text=grub_config(ids[1],esp_uuid=ids[0],root_uuid=ids[1],state_uuid=ids[2],
+        data_uuid=ids[3],library_uuid=ids[4],evidence_uuid=ids[5],stock_recovery=True)
+    def fixed_logs(value):
+        lines=[line for line in value.splitlines() if line.strip().startswith('linux ')]
+        assert lines and all('console=tty1' in line and 'console=tty0' not in line for line in lines)
+        assert all('console=ttyS0' in line for line in lines)
+    fixed_logs(text)
+    with pytest.raises(AssertionError):fixed_logs(text.replace('console=tty1','console=tty0'))

@@ -6,11 +6,12 @@ from .contracts import Conflict
 
 
 class RecoveryActions:
-    def __init__(self, *, control=None, context=None, run=subprocess.run, profiles_ready=None):
+    def __init__(self, *, control=None, context=None, run=subprocess.run, profiles_ready=None, report_root=None, report_ready=None, report_sources=None):
         from .runtime import CONTROL, boot_context
         from .console import network_profiles_ready
         self.control=Path(control or CONTROL);self.context=context or boot_context
         self.run=run;self.profiles_ready=profiles_ready or network_profiles_ready
+        self.report_root=report_root;self.report_ready=report_ready;self.report_sources=report_sources
 
     def native(self,argv,timeout=45):
         result=self.run(argv,check=False,capture_output=True,text=True,timeout=timeout)
@@ -28,6 +29,17 @@ class RecoveryActions:
         switch_vt(3)
 
     def dispatch(self,name,stream):
+        if name=='details':
+            from .recovery_status import read_status
+            facts=read_status(control=self.control)
+            for label,value in (('Computer',facts.target or 'not paired'),('Hardware UUID',facts.system_uuid or 'unavailable'),
+                    ('Controller endpoint',facts.endpoint or 'unconfigured'),
+                    ('Prepared public trust SHA256',facts.prepared_fingerprint or 'unavailable'),
+                    ('Boot checks',facts.boot),('USB',facts.usb),('Binding',facts.binding),
+                    ('Authenticated contact',facts.controller),('Current recorded activity',facts.activity or 'none')):
+                stream.write(label+': '+value+'\n')
+            stream.write('Connected/pairing never grants a target run. Temporary connections need explicit remembering.\n')
+            return {'read_only':True}
         if name=='logs':
             from .ostree import CommandRunner
             command=CommandRunner(lambda *a:None,lambda:None,timeout_s=5,operation='recovery log view')
@@ -86,11 +98,39 @@ class RecoveryActions:
             stream.write('Local OS '+selected+' requested; preservation and physical completion remain unconfirmed.\n')
             return {'local_os_requested':selected,'evidence_preservation_confirmed':False}
         if name in ('collect','export','upload'):
-            from .recovery_reports import attended
-            return attended(name,input_stream=stream,output_stream=stream)
+            from .recovery_reports import attended, ROOT
+            options={}
+            if name=='upload':
+                _,report_boot,report_verify=self.context()
+                if report_boot.get('quirkbench.mode')!='recovery':raise Conflict('recovery report upload requires current recovery')
+                options={'control':self.control,'verify_target':report_verify}
+            if name=='collect' and self.report_sources is not None:options['source_root']=self.report_sources
+            return attended(name,input_stream=stream,output_stream=stream,root=self.report_root or ROOT,ready=self.report_ready,**options)
         config,boot,verify=self.context()
         if boot.get('quirkbench.mode')!='recovery':raise Conflict('attended action requires current recovery')
         verify()
+        if name=='setup_file':
+            from .retarget_local import require_runtime_available
+            from .endpoint_local import require_available
+            from .enrollment_target import _storage
+            _, storage_verify = _storage(self.control,verify)
+            storage_verify();require_runtime_available(self.control);require_available(self.control)
+            stream.write('Apply the private setup bundle staged at '+str(self.control/'setup')+'. This stops the existing target supervisor and does not approve experiments. Type APPLY SETUP (empty cancels): ')
+            if stream.readline().strip()!='APPLY SETUP':return {'cancelled':True}
+            from .shutdown_local import _stop, _service, UNIT
+            from .provisioning import activate_bundle
+            _service(self.run,self_owned=False,before_stop=True)
+            def current():
+                storage_verify();require_runtime_available(self.control);require_available(self.control)
+            try:
+                _stop(self.run,Path('/sys/fs/cgroup'))
+                current()
+                result=activate_bundle(self.control/'setup',self.control,verify_target=current)
+                stream.write('Validated controller setup activated. Exact-run approval is still required.\n')
+                return result
+            finally:
+                # A stop client interruption can still have submitted its manager job.
+                self.native(['/usr/bin/systemctl','start',UNIT],120)
         if name=='pair':
             from .prepared_enrollment import connect
             capacity=boot.get('quirkbench.capacity',{})

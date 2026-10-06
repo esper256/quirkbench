@@ -107,3 +107,30 @@ def test_inode_exhaustion_rejects_new_artifact_without_losing_existing(tmp_path,
     monkeypatch.setattr('os.statvfs',lambda _:SimpleNamespace(f_favail=0))
     with pytest.raises(StoragePressure,match='inodes'):store.put(b'new')
     assert store.get(old.sha256)==b'previous-unuploaded'
+
+
+@pytest.mark.parametrize('fault',['short','no_progress','enospc'])
+def test_actual_file_cas_publication_handles_short_writes_and_keeps_prior_artifacts(tmp_path,monkeypatch,fault):
+    import os,errno
+    from quirkbench.contracts import digest
+    store=ArtifactStore(tmp_path/'cas',reserve_bytes=0);prior=store.put(b'retained unuploaded')
+    source=tmp_path/'source';source.write_bytes(b'new exact candidate bytes')
+    original=os.fdopen
+    class Writer:
+        def __init__(self,handle):self.handle=handle
+        def __enter__(self):return self
+        def __exit__(self,*args):self.handle.close()
+        def __getattr__(self,name):return getattr(self.handle,name)
+        def write(self,data):
+            if fault=='no_progress':return 0
+            if fault=='enospc':raise OSError(errno.ENOSPC,'injected full CAS')
+            return self.handle.write(data[:max(1,len(data)//2)])
+    monkeypatch.setattr(os,'fdopen',lambda *a,**k:Writer(original(*a,**k)))
+    if fault=='short':
+        value=store.put_file(source);assert value.size==len(source.read_bytes())
+        assert store.get(value.sha256)==source.read_bytes()
+    else:
+        with pytest.raises(OSError):store.put_file(source)
+        assert not store.path(digest(source.read_bytes())).exists()
+    assert store.get(prior.sha256)==b'retained unuploaded'
+    assert not list(store.objects.glob('.pending-*'))

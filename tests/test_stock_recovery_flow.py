@@ -192,3 +192,13 @@ def test_v3_stock_stages_select_existing_prepared_assembler_without_image_build(
     assert not inputs.output.exists()
     assert (stage/'rootfs/etc/systemd/system/quirkbench-terminal.service').is_file()
     assert not (stage/'rootfs/usr/lib/quirkbench/quirkbench/capacity_setup.py').exists()
+
+
+@pytest.mark.parametrize('missing',['usr/bin/bash','usr/bin/nmtui','_curses','fcntl'])
+def test_actual_staged_console_dependency_audit_rejects_missing_payload(tmp_path,missing):
+    from quirkbench.recovery_stock_pipeline import audit_console_dependencies
+    _,_,_,stage,_,_=prepared(tmp_path,version=3)
+    root=stage/'rootfs';audit_console_dependencies(root)
+    path=root/missing if '/' in missing else next(root.glob('usr/lib*/python3.*/lib-dynload/'+missing+'.*.so'))
+    path.unlink()
+    with pytest.raises(BuildError,match='stock console'):audit_console_dependencies(root)

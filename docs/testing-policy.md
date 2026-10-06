@@ -368,3 +368,16 @@ actual mounts, device discovery, firmware, kernel behavior or successful boot.
 Continue using explicitly requested end-to-end operations for those properties.
 When adding coverage, connect real producers and consumers and substitute only the
 physical/expensive effect; do not grow a general boot simulator or a full version matrix.
+
+
+### Recovery console and diagnostic software gate
+
+`python -m ci.run run --suite recovery-console-reports --output OUTSIDE_CHECKOUT` runs the
+real PTY dashboard/shell, state/action table, prepared enrollment-to-report TLS
+journey and focused write failures. It has a 60-second hard ceiling (30 seconds is
+the target); dependencies come from the pinned development environment, not from
+test-time acquisition. `recovery-native` uses the separately acquired pinned cache
+and validates staged units, generators and target imports against actual Fedora
+tools. Both are selected for affected preparation, console, boot arguments,
+networking, diagnostic transport and dependency changes. Neither builds an image
+or qualifies physical hardware. See [the accepted console checks](recovery-console-ux-plan.md#integration-gates-before-producing-the-next-image).

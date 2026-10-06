@@ -501,13 +501,25 @@
       "src/quirkbench/boot.py",
       "src/quirkbench/recovery_inputs.py",
       "src/quirkbench/recovery_runtime_revision.py",
-      "schemas/recovery-debug-report.*.schema.json"
+      "schemas/recovery-debug-report.*.schema.json",
+      "tests/test_recovery_console_journey.py",
+      "src/quirkbench/console.py",
+      "src/quirkbench/local_terminal.py",
+      "tests/test_local_terminal.py",
+      "tests/test_store.py",
+      "tests/test_target.py",
+      "tests/test_candidate_rootfs_operation.py"
     ],
     "tests": [
       "tests/test_recovery_dashboard.py",
       "tests/test_recovery_status.py",
       "tests/test_recovery_actions.py",
-      "tests/test_recovery_reports.py"
+      "tests/test_recovery_reports.py",
+      "tests/test_recovery_console_journey.py",
+      "tests/test_local_terminal.py",
+      "tests/test_store.py::test_actual_file_cas_publication_handles_short_writes_and_keeps_prior_artifacts",
+      "tests/test_target.py::test_real_capture_storage_failure_preserves_prior_unuploaded_evidence",
+      "tests/test_candidate_rootfs_operation.py::test_actual_candidate_cas_enospc_never_publishes_completion"
     ]
   }
 }

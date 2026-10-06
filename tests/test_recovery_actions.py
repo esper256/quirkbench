@@ -55,3 +55,10 @@ def test_local_os_power_requires_typed_confirmation_and_retains_records(tmp_path
     stream=IO('LOCAL RESTART\n');answer=actions.dispatch('local_power',stream)
     assert answer['evidence_preservation_confirmed'] is False and 'unconfirmed' in stream.text
     assert record.read_bytes()==b'original' and calls==[['/usr/bin/systemctl','reboot']]
+
+
+def test_report_adapter_refuses_candidate_mode_before_private_report_access(tmp_path):
+    actions=RecoveryActions(control=tmp_path,context=lambda:(CONFIG,{'quirkbench.mode':'candidate'},lambda:True),
+        report_root=tmp_path/'missing-report',report_ready=lambda _:pytest.fail('candidate must not read reports'))
+    with pytest.raises(Conflict,match='requires current recovery'):actions.dispatch('upload',io.StringIO())
+    assert not list(tmp_path.iterdir())

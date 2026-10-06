@@ -10,8 +10,8 @@ from quirkbench.recovery_status import Facts, actions, recommendation, read_stat
 BASE = Facts(boot='verified', usb='prepared', evidence='ready', experiments='ready',
              binding='current', network='connected', ram_network=True,network_service=True,
              paired=True,prepared_trust=True,controller='connected',target='different-computer')
-ALWAYS={'controller','diagnostics','terminal','power','retry_checks','retry_network','reset_network','collect','export','local_power'}
-CURRENT={'network','save_network','replay_network','retarget','endpoint','drain','upload','shutdown','restart'}
+ALWAYS={'details','controller','diagnostics','terminal','power','retry_checks','retry_network','reset_network','collect','export','local_power'}
+CURRENT={'setup_file','network','save_network','replay_network','retarget','endpoint','drain','upload','shutdown','restart'}
 
 
 @pytest.mark.parametrize('changes, recommended, extra', [
@@ -31,7 +31,7 @@ CURRENT={'network','save_network','replay_network','retarget','endpoint','drain'
     ({'network':'radio-blocked','controller':'disconnected'},'network',CURRENT-{'upload'}),
     ({'network':'failed','network_service':False,'controller':'disconnected'},'network',CURRENT-{'network','save_network','replay_network','upload'}),
     ({'network':'blocked','ram_network':False,'controller':'disconnected'},'network',CURRENT-{'network','save_network','replay_network','upload'}),
-    ({'paired':False,'binding':'unpaired','controller':'configured'},'controller',{'network','pair','shutdown','restart'}),
+    ({'paired':False,'binding':'unpaired','controller':'configured'},'controller',{'setup_file','network','pair','shutdown','restart'}),
     ({'controller':'disconnected'},'controller',CURRENT),
 ])
 def test_complete_state_and_action_table(changes,recommended,extra):
@@ -142,3 +142,27 @@ def test_real_tls_connection_checks_binding_after_handshake_before_auth(paired,m
             paired_contact(control,lambda:True,lambda:current[0],deadline=time.monotonic()+5)
         with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0]==0
     finally:server.shutdown();server.server_close();thread.join(timeout=2)
+
+
+@pytest.mark.parametrize('stage,label',[('awaiting_approval','Waiting for exact-run approval'),('preparing','Departure preparation recorded; completion unconfirmed'),
+    ('observed','Retained evidence pending transfer'),('boot_pending','Candidate boot requested; completion unconfirmed')])
+def test_current_activity_comes_from_real_bound_journal_without_granting_approval(tmp_path,stage,label):
+    from test_boot import CONFIG
+    from test_shutdown import UUID
+    control=tmp_path/'control';(control/'agent').mkdir(parents=True)
+    (control/'runtime.json').write_text(json.dumps({'device_id':'different-computer','controller_url':'https://192.0.2.9',
+        'target_binding':{'schema_version':1,'system_uuid':UUID}}))
+    (control/'agent/journal.json').write_text(json.dumps({'schema_version':1,'device_id':'different-computer',
+        'pending':{'stage':stage,'token':'PRIVATE_CANARY'},'claim_request_id':None}))
+    record=tmp_path/'boot';record.write_text('{}')
+    def command(argv):
+        if argv[1]=='show':return 'ActiveState=active'
+        if argv[1]=='is-active':return 'active'
+        if 'device' in argv:return 'ethernet:connected'
+        return 'enabled:enabled'
+    facts=read_status(boot_record=record,control=control,experiments=tmp_path,command=command,
+        verify_boot=lambda _:(CONFIG,{'quirkbench.mode':'recovery','quirkbench.capacity':{'record_type':'prepared-capacity'}},lambda:True),
+        profiles_ready=lambda:True,binding_reader=lambda:UUID,contact=lambda:True)
+    assert facts.activity==label and 'PRIVATE_CANARY' not in str(facts)
+    assert recommendation(facts)[0]==label
+    assert not any('approve' in a.id for a in actions(facts))

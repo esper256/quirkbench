@@ -276,3 +276,94 @@ def test_complete_diagnostics_survive_existing_backup_restore(snapshot,tls,tmp_p
     assert service.show(StateReader(restored.root),receipt['report_id'])['manifest']==manifest
     service.export(StateReader(restored.root),receipt['report_id'],tmp_path/'restored-export')
     for name,raw in files.items():assert (tmp_path/'restored-export'/name).read_bytes()==raw
+
+
+def test_real_server_restart_replays_durable_receipt_without_duplicate(snapshot,tls,tmp_path):
+    _,_,_,manifest,files=snapshot;c,control,_,_,old=tls
+    receipt=send(manifest,files,control=control,verify_target=lambda:True,binding_reader=lambda:UUID)
+    old.shutdown();old.server_close()
+    from quirkbench.controller import Controller
+    reopened=Controller(c.root,clock=c.clock,reserve_bytes=0)
+    config=json.loads((c.root/'private/controller-service.json').read_bytes())
+    server=make_server(reopened,certfile=config['cert'],keyfile=config['key'],credential_registry=CredentialRegistry(c.root,clock=c.clock))
+    thread=threading.Thread(target=lambda:server.serve_forever(poll_interval=.05),daemon=True);thread.start()
+    runtime=json.loads((control/'runtime.json').read_bytes());runtime['controller_url']='https://127.0.0.1:'+str(server.server_address[1]);atomic_write(control/'runtime.json',canonical(runtime))
+    try:
+        assert send(manifest,files,control=control,verify_target=lambda:True,binding_reader=lambda:UUID)==receipt
+        with reopened.transaction() as db:assert db.execute('SELECT COUNT(*) FROM diagnostic_reports').fetchone()[0]==1
+    finally:server.shutdown();server.server_close();thread.join(timeout=2)
+
+
+def test_valid_wrong_controller_trust_and_chunk_space_failure_never_receipt(snapshot,tls,monkeypatch):
+    _,_,_,manifest,files=snapshot;c,control,result,report,server=tls
+    runtime=json.loads((control/'runtime.json').read_bytes());ca=control/runtime['ca'];original=ca.read_bytes()
+    ca.write_text(result['repository_certificate_pem'])
+    with pytest.raises(TransportError):send(manifest,files,control=control,verify_target=lambda:True,binding_reader=lambda:UUID)
+    with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM diagnostic_reports').fetchone()[0]==0
+    ca.write_bytes(original)
+    from quirkbench import store
+    write=store.write_all
+    def full(stream,raw):
+        if str(getattr(stream,'name','')).endswith('.part'):raise OSError(28,'injected ENOSPC')
+        return write(stream,raw)
+    monkeypatch.setattr(store,'write_all',full)
+    with pytest.raises(TransportError):send(manifest,files,control=control,verify_target=lambda:True,binding_reader=lambda:UUID)
+    with c.transaction() as db:
+        rows=db.execute('SELECT received FROM diagnostic_reports').fetchall()
+        assert len(rows)==1 and rows[0][0] is None
+    assert reports.load(report_id(manifest),root=snapshot[0],ready=lambda _:True)[1]==files
+
+
+def test_actual_https_rejects_malformed_oversized_changed_chunks_and_static_auth(snapshot,tls):
+    import http.client
+    from urllib.parse import urlsplit
+    from quirkbench.transport import MAX_BODY,MAX_CHUNK
+    _,_,_,manifest,files=snapshot;c,control,_,_,_=tls
+    runtime=json.loads((control/'runtime.json').read_bytes())
+    token=(control/runtime['token_file']).read_text().strip()
+    client=HTTPSDeviceClient(runtime['controller_url'],runtime['device_id'],token,str(control/runtime['ca']))
+    url=urlsplit(runtime['controller_url'])
+    def post(action,raw,*,length=None,credential=token):
+        conn=http.client.HTTPSConnection(url.hostname,url.port,context=client.context,timeout=2)
+        try:
+            conn.request('POST','/v1/recovery-reports/'+action,raw,{
+                'Content-Type':'application/json','Content-Length':str(len(raw) if length is None else length),
+                'X-Device-ID':runtime['device_id'],'Authorization':'Bearer '+credential})
+            response=conn.getresponse();status=response.status;response.read();return status
+        finally:conn.close()
+    assert post('begin',b'{malformed')==400
+    assert post('begin',canonical({'schema_version':1,'manifest':manifest|{'unknown':'PRIVATE_CANARY'}}))==400
+    assert post('begin',b'',length=MAX_BODY+1)==413
+    assert post('begin',canonical({'schema_version':1,'manifest':manifest}),credential='s'*64)==403
+    with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM diagnostic_reports').fetchone()[0]==0
+    client._request('/v1/recovery-reports/begin',{'manifest':manifest})
+    name=next(name for name,raw in files.items() if raw);raw=files[name]
+    payload={'request_id':manifest['request_id'],'file':name,'offset':0,'data_b64':base64.b64encode(raw).decode()}
+    client._request('/v1/recovery-reports/chunk',payload)
+    with pytest.raises(TransportError,match='HTTP 409'):
+        client._request('/v1/recovery-reports/chunk',payload|{'data_b64':base64.b64encode(b'!'+raw[1:]).decode()})
+    oversized=payload|{'data_b64':'A'*(((MAX_CHUNK+2)//3)*4+4)}
+    with pytest.raises(TransportError,match='HTTP 400'):client._request('/v1/recovery-reports/chunk',oversized)
+    with pytest.raises(TransportError):client._request('/v1/recovery-reports/finish',{'request_id':manifest['request_id']})
+    with c.transaction() as db:assert db.execute('SELECT COUNT(*) FROM diagnostic_reports WHERE received IS NOT NULL').fetchone()[0]==0
+    # Existing valid chunk and RAM snapshot survive rejected requests; ordinary
+    # sender resumes the same identity and obtains exactly one durable receipt.
+    assert send(manifest,files,control=control,verify_target=lambda:True,binding_reader=lambda:UUID)['report_id']==report_id(manifest)
+
+
+def test_report_sender_absolute_deadline_retains_ram_and_same_request(snapshot,tls,monkeypatch):
+    from types import SimpleNamespace
+    from quirkbench import recovery_report_client
+    root,_,answer,manifest,files=snapshot;c,control,_,_,_=tls
+    clock={'elapsed':0};real=time.monotonic
+    monkeypatch.setattr(recovery_report_client,'time',SimpleNamespace(monotonic=lambda:real()+clock['elapsed']))
+    def progress(_):clock['elapsed']=46
+    with pytest.raises((TransportError,TimeoutError)) as failure:
+        send(manifest,files,control=control,verify_target=lambda:True,binding_reader=lambda:UUID,progress=progress)
+    assert 'recovery report upload' in str(failure.value) or 'recovery report upload' in str(failure.value.__cause__)
+    assert reports.load(answer['report_id'],root=root,ready=lambda _:True)==(manifest,files)
+    with c.transaction() as db:
+        assert db.execute('SELECT COUNT(*) FROM diagnostic_reports').fetchone()[0]==1
+        assert db.execute('SELECT COUNT(*) FROM diagnostic_reports WHERE received IS NOT NULL').fetchone()[0]==0
+    clock['elapsed']=0
+    assert send(manifest,files,control=control,verify_target=lambda:True,binding_reader=lambda:UUID)['report_id']==answer['report_id']

@@ -170,16 +170,36 @@ def test_staged_independent_network_and_terminal_dependencies(native):
         env={'SYSTEMD_UNIT_PATH':'/etc/systemd/system:/usr/lib/systemd/system'})
     assert checked.returncode == 0, checked.stderr
     imports = execute(['/usr/bin/python3', '-c',
-        'import curses, fcntl, quirkbench.local_terminal; print("console extensions available")'],
+        'import curses, fcntl, quirkbench.local_terminal, quirkbench.recovery_dashboard, quirkbench.recovery_actions, quirkbench.recovery_report_client; print("console extensions available")'],
         env={'PYTHONPATH':'/usr/lib/quirkbench'})
     assert imports.returncode == 0, imports.stderr
     assert 'console extensions available' in imports.stdout
+    reports = execute(['/usr/bin/python3','-m','quirkbench.recovery_reports','--help'],
+        env={'PYTHONPATH':'/usr/lib/quirkbench'})
+    assert reports.returncode==0 and 'Offline recovery diagnostics' in reports.stdout
+    assert 'send' in reports.stdout and 'export' in reports.stdout
+    assert not (overlay/'usr/lib/quirkbench/quirkbench/capacity_setup.py').exists()
     # Actual packaged replay entry point tolerates missing boot/binding. No
     # caller stub stands in for the replay authorization or cleanup checks.
     replay = execute(['/usr/bin/python3', '-m', 'quirkbench.network_profiles'],
         env={'PYTHONPATH':'/usr/lib/quirkbench'})
     assert replay.returncode == 0 and 'local Network setup remains available' in replay.stdout
     units = overlay/'etc/systemd/system'
+    # Consumer verification alone accepts an existing evidence prerequisite;
+    # the independent-network policy assertion must reject that regression.
+    dropin=units/'NetworkManager.service.d/quirkbench.conf'
+    if not dropin.exists():
+        dropin=next((units/'NetworkManager.service.d').glob('*.conf'))
+    original=dropin.read_text()
+    def independent_network():
+        text=dropin.read_text()
+        assert 'Requires=quirkbench-network-state.service' in text
+        assert 'Requires=quirkbench-recovery.service' not in text
+        assert 'After=quirkbench-recovery.service' not in text
+    independent_network()
+    dropin.write_text(original+'\n[Unit]\nRequires=quirkbench-recovery.service\n')
+    with pytest.raises(AssertionError):independent_network()
+    dropin.write_text(original)
     (units/'quirkbench-network-state.service').unlink()
     (units/'quirkbench-network-state.service').symlink_to('/dev/null')
     broken = execute(['/usr/bin/systemd-analyze', '--generators=no', '--man=no', 'verify',

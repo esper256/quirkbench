@@ -205,11 +205,12 @@ key and matching TLS client certificate/key. Recovery-only configuration can hav
 an empty repository mapping; experiments require a usable repository.
 
 For first setup without a shell, record the target system UUID shown on the
-recovery console and use it in the bundle's `target_binding`. After commissioning,
+recovery console and use it in the bundle's `target_binding`. After controller preparation,
 shut down the target and
 stage the complete bundle under `control/setup` on its explicitly selected evidence
 partition using the controller. Keep files private. Safely unmount that medium,
-boot recovery, configure networking with menu item 1, then select menu item 4.
+boot recovery, open **Wi-Fi & Ethernet**, then **Troubleshooting → Apply controller setup from USB file**.
+Confirm `APPLY SETUP`; cancellation performs no service stop.
 That action stops the existing supervisor, runs the same validated activation
 against `/var/lib/quirkbench/evidence/control/setup`, and restarts recovery-only
 reporting. It rejects a changed generation requiring maintenance; it is not an
@@ -406,7 +407,7 @@ commands. Then `quirkbench target evidence approve TARGET --file PLAN --request-
 produces a private credential file. Stage that exact file privately as
 `evidence/control/setup/GRANT_ID.json` (a credential: use a private file or
 its enclosing secret store). Enter
-`drain REQUEST_ID GRANT_ID` in choice 7 to use only its selected manifest and original
+`drain REQUEST_ID GRANT_ID` in **Connection details → Review original evidence** to use only its selected manifest and original
 attribution. Each invocation has a 120-second batch deadline; interruptions retry
 the same selection/grant without widening or extending authorization.
 
@@ -429,8 +430,8 @@ certificate fingerprint through the independently attended path. Retarget-only
 exchange returns an authenticated v2 reply carrying exact old/new scope; initial
 console pairing/activation refuses that reply. This controller prerequisite alone
 does not implement local retarget activation, clear one-shot state, move old evidence
-or transfer reset/watchdog/attempt approval. The full paused local transaction remains
-unavailable pending its implementation and native commissioning.
+or transfer reset/watchdog/attempt approval. The paused local transaction below is implemented in software; physical commissioning
+remains a separate acceptance check.
 
 The implemented attended recovery menu now offers **Explicitly retarget enrolled
 media to this hardware**. Confirm the exact old target and actual new UUID, then
@@ -653,3 +654,17 @@ invitations are never silently renewed; cancel unwanted ones using the existing
 `target pairing cancel` action. Preparation is not a secure erase or physical boot
 qualification. The software gates use regular-file destinations and explicit test
 trust; actual USB writing/boot remains separately authorized acceptance.
+
+
+Connection details show the computer's public hardware UUID, configured controller
+address and the public trust fingerprint staged during preparation. The welcome
+screen does not expose raw record identities. Recorded target-journal activity is
+shown separately from live authenticated controller contact; neither proves run
+completion or grants approval.
+
+Space errors name the affected operation. Existing unuploaded evidence stays on
+USB, and an incomplete candidate or diagnostic upload is never reported complete.
+Upload/export retained data or use existing explicit eligible cleanup before a
+retry. A full control filesystem may also prevent durable error metadata; retain
+RAM diagnostics or a photograph before reboot. No automatic eviction or target
+partition repair is performed.

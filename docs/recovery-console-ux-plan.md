@@ -1,6 +1,9 @@
 # Make recovery feel like a finished Quirkbench product
 
-Status: implementation in progress on `codex/recovery-console-ux` (#137). Controller preparation, non-expiring initial invitations, independent networking/VTs, dashboard, local restart and paired diagnostic collection/receipt/retention are implemented in software. Fresh stock-input selection is implemented; final joined acceptance remains in progress; physical acceptance remains outstanding.
+Status: all five implementation steps and applicable software checks are complete
+locally on `codex/recovery-console-ux` (#137). Required independent boundary reviews
+passed. No push/merge, installed-controller activation, image production or physical
+acceptance was performed. Existing images do not acquire these changes automatically.
 
 Owner-approved direction: prepare the final USB layout and controller connection on the controller; never repartition on the target. Reserve library space only for actual shipped contents (currently zero), split remaining capacity between experiments and evidence, and handle space shortages at the affected operation rather than imposing a RAM-based admission limit. Debug uploads require normal pairing; collection and local export do not. A selectable terminal action must work without function keys.
 
@@ -263,30 +266,53 @@ Select these gates when console code, controller preparation/layout policy, acti
 At the next separately requested physical boot, use a short acceptance checklist: the dashboard appears without Enter; late boot logs stay off VT2; Wi-Fi works even when persistent USB storage is unavailable; the menu opens the real terminal and `exit` returns without function keys; a recovery report reaches the controller and can be exported; prepared media connects normally and reaches truthful readiness without partition changes. Pseudo-terminals and staged-unit checks cannot prove real VT switching, graphics-driver behavior, Wi-Fi drivers or actual PID 1 startup ordering. Software tests alone must not be presented as physical-console qualification. Feed failures back into the narrowest fast regression that can faithfully detect them.
 
 
-Latest local software evidence: focused dashboard/action/storage gate, 80 passed
-(`/tmp/quirkbench-dashboard-action-storage-first.log`); authentication/receipt faults,
-5 passed (`/tmp/quirkbench-recovery-reports-auth-faults-corrected.log`); selected
-retention/backup, 4 passed (`/tmp/quirkbench-report-selected-deletion-backup.log`);
-collector process/deadline, 2 passed (`/tmp/quirkbench-report-owned-child-corrected.log`);
-post-TLS binding check, 1 passed (`/tmp/quirkbench-status-tls-explicit.log`). Independent
-higher-reasoning review: `prepared_media_design_review`, gpt-6-astra/high, uncommitted
-slice over 610ce8dc3a4d4b91a86daecd24ac523742e0052a; source boundaries approved after
-retention, process ownership, sanitization and deadline corrections. Final joined
-portable/native gates will record matching evidence before completion. No image,
-USB, QEMU, physical networking/VT or release qualification was performed.
+Completed software acceptance:
 
-Reviewed console/report gate: `timeout 60s .venv/bin/python -m pytest -q tests/test_recovery_dashboard.py tests/test_recovery_status.py tests/test_recovery_actions.py tests/test_recovery_reports.py`, 58 passed in 29.18s (`/tmp/quirkbench-console-reports-reviewed-gate.log`). Help/CI selection: 49 passed in 0.97s after adding diagnostic pagination help (`/tmp/quirkbench-console-gate-selection-help-corrected.log`). Manifest schema assertion passed (`/tmp/quirkbench-report-manifest-schema.log`).
+| Acceptance group | Implemented and checked |
+| --- | --- |
+| Preparation/layout | Exact device-bound plan/erase/apply; v3 final geometry; zero library payload plus minimum filesystem overhead; equal remainder split; nominal 32 GB actual-byte case; no RAM gate or target startup partitioning; signed fixed-byte preservation, replacement/interruption/mutation rejection and completion-last publication. Native GPT/filesystem adapters use disposable regular files. |
+| Enrollment/trust | Controller-staged public trust and USB-specific invitation; normal non-expiring single-use initial pairing with revocation, long-delay, duplicate/lost-reply and interrupted activation coverage; bootstrap secret erased after durable activation; historical readers preserved; no new execution authority. |
+| Networking/terminal | Private RAM networking independent of persistent storage; saved-profile restoration requires current verified binding; uncertain cleanup fails closed; candidate semantics unchanged. Actual packaged root shell exits to UI/fallback; VT2 UI, VT1/serial logs and independent VT3 terminal. |
+| Dashboard/actions | Independent complete state/action table including storage, moved media, missing identity, radio/hardware/service failures and disconnected pairing. Real PTY tests cover first paint without Enter, keyboard/help, resize, refresh/focus, slow/late completion, tool return, fallback/monochrome, EOF/signals and restart. Setup-file activation repeats storage/mount/binding/maintenance checks around existing supervisor ownership; power actions retain existing confirmations and evidence fences. Journal activity is explicitly recorded/pending, never inferred active execution. |
+| Reports | Offline bounded collection/preview/export and packaged terminal entry point; reviewed sanitized sources, secret canaries, truncation/control characters, deadline and descendant cleanup. Real paired HTTPS round trip, exact consent, durable receipt and replay across actual server restart; malformed/oversized/changed input, static/expired/revoked authorization, wrong certificate, disconnect/lost reply, collection and upload deadlines, ENOSPC and quota failures. Existing DB/CAS retention, selected deletion and completed-report backup/restore; no fabricated experiment/attempt or readiness. |
+| Joined/packaged journey | Production staged enrollment handoff → real status/action dispatch → temporary networking → normal pairing → collect/review → authenticated TLS upload → controller export, plus unpaired offline refusal/export. Fresh stock v3 recipe/foreground/durable worker and candidate joins; historical v2 readers retained; superseded target partition entry point omitted. Actual pinned Fedora units, generator consumers, extensions and payload entry points checked. |
+| Sensitivity | Targeted fixture mutations detect missing executables/extensions, masked native prerequisite, erroneous evidence-network dependency, active-VT log routing, withheld first paint and lost upload acknowledgement. No global mutation framework. |
 
+Final evidence (dependencies acquired separately; no image/physical operations):
 
-Stock-v3 software slice: strict new three-field layout and zero shipped payload,
-existing foreground/durable worker dispatch, v3 candidate/factory joins and preserved
-v2 readers. Native partitioning entry point `capacity_setup` is absent from fresh
-target payloads. Evidence: 102 passed in 14.19s
-(`/tmp/quirkbench-stock-v3-unit-inventory.log`); 182 passed, one optional GPG socket
-test skipped, in 13.49s (`/tmp/quirkbench-stock-v3-compatibility-first.log`); 37 worker/
-reader tests passed (two staged tests corrected separately), then two isolated
-staged checks passed (`/tmp/quirkbench-staged-payload-no-editable-leak.log`). Independent
-review gpt-6-astra/high approved corrections over 49f3f5b after fixing missed worker
-v3 checks and excluding editable-install module leakage from the staged test.
-No image was built. Remaining work: final joined preparation-to-report software
-journey and directly affected UX/packaging acceptance; physical checks still pending.
+- Portable selected gate: `python -m ci.run run --suite recovery-console-reports
+  --output /tmp/quirkbench-final-console-report-gate --timeout 60`, **88 passed in
+  41.88s** (42.24s including evidence capture). This is above the 30s target and
+  within the unchanged 60s hard limit. The later setup eligibility correction
+  passed all 30 affected portable state tests; its unchanged TLS check passed in
+  the selected gate. Evidence: `/tmp/quirkbench-final-setup-eligibility-portable.log`.
+- Cached native gate: `QB_NATIVE_RECOVERY_CACHE=/tmp/quirkbench-console-native-cache-v6
+  python -m ci.run run --suite recovery-native --output /tmp/quirkbench-final-native-gate
+  --timeout 60`, **10 passed in 15.37s** (15.82s including evidence capture).
+  The preceding native integration evidence remains in
+  `/tmp/quirkbench-final-console-preparation-native.log`.
+- Additional dependency/routing/terminal sensitivity: 13 passed in 0.81s
+  (`/tmp/quirkbench-final-packaging-mutations.log`); CI selection and storage checks:
+  39 passed in 0.47s (`/tmp/quirkbench-final-selection-storage.log`).
+- Prior matching bounded-slice evidence remains at the paths recorded in the
+  preceding commits: preparation, invitation and native prefix checks; stock-v3
+  compatibility and durable-worker checks; report retention/backup and shutdown.
+  First-failure diagnostics are retained; they were not overwritten.
+- Source/dependency hashes: `/tmp/quirkbench-console-final-source-identities.json`.
+  CI evidence records base commit, dirty checkout, runtime/dependency versions,
+  exact selection, JUnit and bounded diagnostics. These source checks must not be
+  confused with a built image's identities.
+- Independent review: `prepared_media_design_review`, **gpt-6-astra/high**,
+  all bounded slices including final integration over
+  `7eb173e2520c218a7b6702818e365d90e9aecc8b`. Storage mount fences, recorded activity
+  labels and upload recovery-mode admission findings were corrected and reviewed;
+  final setup eligibility correction approved. No remaining source blockers.
+
+Physical acceptance remains the separately requested checklist above: actual USB
+preparation/interruption, boot readiness without Enter or partition changes, late
+logs staying off VT2, Wi-Fi with unavailable persistent storage, real VT3 shell/exit,
+normal prepared pairing and controller receipt/export. No software result proves
+physical VT switching, graphics/Wi-Fi drivers or PID 1 ordering. Production publisher
+provisioning/publication remains an independent release gate. RAM reports survive
+UI restart but disappear on reboot; full filesystems may prevent durable failure
+metadata. No automatic eviction, repartitioning or diagnostic authentication bypass.

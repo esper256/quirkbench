@@ -29,6 +29,9 @@ class Facts:
     controller: str = 'unconfigured'
     target: str = ''
     endpoint: str = ''
+    system_uuid: str = ''
+    prepared_fingerprint: str = ''
+    activity: str = ''
     prepared_media_sha256: str = ''
 
 
@@ -52,6 +55,10 @@ def actions(f: Facts) -> tuple[Action, ...]:
         Action('network', 'Wi-Fi & Ethernet', network,
                'Private RAM profiles or NetworkManager are unavailable.', 'Retry local networking; inspect its service log.'),
         Action('controller', 'Connection details' if f.paired else 'Connect to controller'),
+        Action('details','View connection and recovery details'),
+        Action('setup_file','Apply controller setup from USB file',writable and f.binding in ('current','unpaired'),
+               'Manual setup requires verified writable USB control storage and a current or unpaired hardware identity.',
+               'Stage the exact private bundle under control/setup on the controller and retry recovery checks.'),
         Action('diagnostics', 'Troubleshooting'), Action('terminal', 'Open terminal'), Action('power', 'Power'),
         Action('retry_checks', 'Retry recovery checks'), Action('retry_network', 'Restart local networking'),
         Action('reset_network', 'Reset temporary connections (forget this session)'),
@@ -96,6 +103,8 @@ def recommendation(f: Facts) -> tuple[str, str, str]:
         return 'Computer binding needs attention', 'Review binding or the existing explicit retarget/endpoint workflow.', 'diagnostics'
     if f.network != 'connected':
         return "Let's get this computer connected", f.network_detail, 'network'
+    if f.activity:
+        return f.activity, 'This is recorded target activity, not a new run approval or proof of completion.', 'controller'
     if f.controller == 'connected':
         return 'Connected — ready for your next step', 'Continue your investigation on the controller. Each target run requires its own approval.', 'controller'
     return 'Connect to your controller', ('Paired, but no current authenticated contact. Retry the connection.' if f.paired
@@ -218,13 +227,17 @@ def read_status(*, boot_record=Path('/run/quirkbench-boot.json'),
             value['experiments'] = 'unavailable' if boot.get('quirkbench.experiments_unavailable') else space(experiments)
         except (OSError,ValueError,RuntimeError,TypeError,KeyError):
             value.update(boot='failed',boot_detail='The boot record or current USB verification failed. Review logs; prepare incomplete media on the controller.')
-    try: value['binding'] = 'unpaired' if binding_reader() else 'unavailable'
+    try:
+        from .binding import system_uuid
+        value['system_uuid']=system_uuid(binding_reader())
+        value['binding']='unpaired'
     except (OSError,ValueError,RuntimeError): pass
     # No persistent secret store is read when its mounted identity is unverified.
     if value['boot'] == 'verified' and value['evidence'] != 'unavailable':
         try:
             metadata = validate_metadata(_document(read_file(control, METADATA, limit=65536)))
             value.update(prepared_trust=True, endpoint=metadata['invitation']['controller_url'],
+                         prepared_fingerprint=metadata['invitation']['certificate_sha256'],
                          pairing_pending=(control/'prepared-enrollment.code').exists())
         except (OSError,ValueError,RuntimeError): pass
         if (control/'runtime.json').exists() or (control/'runtime.json').is_symlink():
@@ -251,6 +264,26 @@ def read_status(*, boot_record=Path('/run/quirkbench-boot.json'),
                     except (OSError,ValueError,RuntimeError): value['binding'] = 'maintenance'
             except (OSError,ValueError,RuntimeError,TypeError,KeyError):
                 value['binding'] = 'unavailable'
+    if value['boot']=='verified' and value['binding']=='current':
+        try:
+            from .shutdown_local import _existing_json
+            journal=_existing_json(read_file(control,'agent/journal.json',limit=4*1024**2))
+            if (not isinstance(journal,dict) or set(journal)!={'schema_version','device_id','pending','claim_request_id'}
+                    or type(journal['schema_version']) is not int or journal['schema_version']!=1
+                    or journal['device_id']!=value['target']):raise ValueError('unrecognized journal')
+            pending=journal['pending']
+            if pending is not None:
+                if not isinstance(pending,dict):raise ValueError('unrecognized pending activity')
+                value['activity']={'awaiting_approval':'Waiting for exact-run approval',
+                    'preparing':'Departure preparation recorded; completion unconfirmed','arming':'Departure preparation recorded; completion unconfirmed',
+                    'boot_pending':'Candidate boot requested; completion unconfirmed',
+                    'observed':'Retained evidence pending transfer','returning':'Recovery return recorded; completion unconfirmed',
+                    'started':'Experiment execution recorded; completion unconfirmed',
+                    'starting':'Experiment start recorded; completion unconfirmed',
+                    'claimed':'Work claimed; preparation pending'}.get(pending.get('stage'),'Target activity needs attention')
+            elif journal['claim_request_id'] is not None:value['activity']='Reconciling a retained work claim'
+        except FileNotFoundError:pass
+        except (OSError,ValueError,RuntimeError,TypeError,KeyError):value['activity']='Target activity needs attention'
     try: value['ram_network'] = profiles_ready()
     except (OSError,ValueError,RuntimeError): pass
     try:

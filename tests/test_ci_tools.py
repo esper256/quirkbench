@@ -94,3 +94,13 @@ def test_redaction_across_lines_and_truncated_private_keys():
     result = redact(text)
     assert all(s not in result for s in ['secret bytes', 'ABC', 'long secret', 'user:password'])
     assert 'unfinished' not in redact('-----BEGIN RSA PRIVATE KEY-----\nunfinished')
+
+
+@pytest.mark.parametrize('path',['src/quirkbench/console.py','src/quirkbench/local_terminal.py',
+    'tests/test_recovery_console_journey.py','src/quirkbench/preparation_payload.py',
+    'src/quirkbench/recovery_reports.py','target-assets/quirkbench-console.service','development/constraints.txt'])
+def test_console_changes_select_joined_journey_and_native_gate(path):
+    value=select([path]);assert 'recovery-console-reports' in value['selected']
+    if not path.startswith('tests/'):
+        assert 'recovery-native' in value['selected']
+    assert 'tests/test_recovery_console_journey.py' in value['tests']

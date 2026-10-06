@@ -174,7 +174,7 @@ class ArtifactStore:
                 with path.open('rb') as source,os.fdopen(fd,'wb') as output:
                     while block:=source.read(1024*1024):
                         self.check_space(len(block))
-                        output.write(block);state.update(block);size+=len(block)
+                        write_all(output,block);state.update(block);size+=len(block)
                     output.flush();os.fsync(output.fileno())
                 value=state.hexdigest()
                 if expected_digest is not None and value!=expected_digest:

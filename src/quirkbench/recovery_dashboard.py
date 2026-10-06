@@ -12,8 +12,8 @@ from .recovery_status import Facts, actions, recommendation, text
 
 MENUS = {
     'home': ('network','controller','diagnostics','terminal','power'),
-    'controller': ('pair','save_network','replay_network','endpoint','retarget','drain'),
-    'diagnostics': ('logs','retry_checks','retry_network','reset_network','collect','export','upload'),
+    'controller': ('details','pair','save_network','replay_network','endpoint','retarget','drain'),
+    'diagnostics': ('setup_file','logs','retry_checks','retry_network','reset_network','collect','export','upload'),
     'power': ('shutdown','restart','local_power'),
 }
 
@@ -67,6 +67,14 @@ class Task:
             chain=[];cause=exc
             while cause is not None and len(chain)<8:
                 chain.append(cause);cause=cause.__cause__
+            if any(isinstance(e,OSError) and e.errno in (errno.ENOSPC,errno.EDQUOT) for e in chain):
+                self.error=self.label+': USB/controller space or quota exhausted. Retained evidence/report is not discarded; export or use explicit cleanup before retrying.'
+            elif any(isinstance(e,ssl.SSLError) for e in chain):
+                self.error=self.label+': controller TLS trust failed. Repair the selected controller trust; verification was not bypassed.'
+            elif any(isinstance(e,TimeoutError) for e in chain):
+                self.error=self.label+': request deadline reached. Retry the retained request; initial pairing does not expire.'
+            elif isinstance(exc,TransportError) and str(exc).endswith(('HTTP 401','HTTP 403')):
+                self.error=self.label+': paired authorization was refused. Repair normal pairing or export the report locally.'
             self.retryable=(isinstance(exc,TransportError) and not any(isinstance(e,ssl.SSLError) for e in chain)
                 and any(isinstance(e,(TimeoutError,ConnectionError,socket.gaierror))
                         or isinstance(e,OSError) and e.errno in (errno.ENETUNREACH,errno.EHOSTUNREACH,errno.ETIMEDOUT) for e in chain))
@@ -148,13 +156,13 @@ def draw(window,state):
         labels=[('USB',facts.usb),('Network',facts.network),('Controller',facts.controller),('Computer',facts.target or facts.binding)]
         for y,(name,value) in enumerate(labels,7):line(y,f'{name:<14}{value}')
         if state.view!='home':line(12,{'controller':'Controller connection','diagnostics':'Troubleshooting','power':'Power'}[state.view],curses.A_BOLD)
-        for y,action in enumerate(rows(state),14):
+        for y,action in enumerate(rows(state),13):
             selected=state.focus[state.view]==action.id
             label=('> ' if selected else '  ')+action.label+(' (unavailable)' if not action.enabled else '')
             line(y,label,curses.A_REVERSE if selected else 0)
         if state.task and not state.task.done:
-            line(height-4,state.task.label+' is running. Enter its progress screen to answer prompts.')
-        elif state.notice:line(height-4,state.notice)
+            line(height-3,state.task.label+' is running. Enter its progress screen to answer prompts.')
+        elif state.notice:line(height-3,state.notice)
         line(height-2,'Up/Down Move   Enter Open   ? Help   L Logs   T Terminal   Esc Back')
     window.noutrefresh();curses.doupdate()
 

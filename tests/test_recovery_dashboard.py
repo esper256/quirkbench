@@ -140,7 +140,7 @@ def test_nmtui_subprogram_return_redraws_actual_dashboard(console):
 def test_slow_real_action_dispatch_remains_accessible_and_is_not_duplicated(console):
     c=console;c.see("Let's get this computer connected")
     c.send(b'\x1b[B\x1b[B\r');c.see('Troubleshooting')
-    c.send(b'\x1b[B\r');c.see('Retrying existing recovery checks')
+    c.send(b'\x1b[B\x1b[B\r');c.see('Retrying existing recovery checks')
     assert (c.root/'actions').read_text()=='1'
     c.send(b'T');c.until(lambda:b'HOST_VT_EVENT 3' in c.events)
     c.send(b'\x1b');c.see('> Troubleshooting')
@@ -167,3 +167,37 @@ def test_failing_boot_and_ui_restart_keep_terminal_and_focus_available(console):
         assert b'HOST_VT_EVENT 2' not in restarted.events
         restarted.send(b'T');restarted.until(lambda:b'HOST_VT_EVENT 3' in restarted.events)
     finally:restarted.close()
+
+
+def test_packaged_monochrome_terminal_and_sigterm_keep_emergency_path(console):
+    console.see('QUIRKBENCH');console.send(b'\x04');assert console.process.wait(timeout=2)==0;console.close()
+    c=Console(console.root,term='vt100')
+    try:
+        c.see('QUIRKBENCH');c.see('Open terminal');c.send(b'T')
+        c.until(lambda:b'HOST_VT_EVENT 3' in c.events)
+        os.kill(c.process.pid,signal.SIGTERM)
+        assert c.process.wait(timeout=2) in (-signal.SIGTERM,1)  # ncurses may restore the tty and exit(1)
+    finally:c.close()
+
+
+def test_unsupported_terminal_fallback_has_offline_reporting_and_real_terminal(console):
+    console.see('QUIRKBENCH');console.send(b'\x04');assert console.process.wait(timeout=2)==0;console.close()
+    c=Console(console.root,term='unknown-quirkbench-terminal')
+    try:
+        c.see('dashboard unavailable');c.send(b'T\n')
+        c.until(lambda:b'HOST_VT_EVENT 3' in c.events)
+        c.send(b'\x04');assert c.process.wait(timeout=2)==0
+    finally:c.close()
+
+
+@pytest.mark.parametrize('error,description,retryable',[
+    (TimeoutError('PRIVATE_CANARY'),'request deadline',False),
+    (OSError(28,'PRIVATE_CANARY'),'space or quota',False),
+])
+def test_action_errors_explain_known_failures_without_private_exception_data(error,description,retryable):
+    from quirkbench.recovery_dashboard import Task
+    task=Task('upload','Recovery report')
+    def fail(*a):raise error
+    task.run(fail)
+    assert task.done and description in task.error and 'PRIVATE_CANARY' not in task.error
+    assert task.retryable==retryable
