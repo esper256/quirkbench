@@ -12,6 +12,18 @@ from quirkbench.commission import CommissionError
 from quirkbench.contracts import digest
 
 
+@pytest.mark.parametrize('preserve_session',[False,True])
+def test_runner_session_and_independent_group(preserve_session):
+    import json
+    from quirkbench.ostree import CommandRunner
+    script='import os,json;print(json.dumps([os.getpid(),os.getsid(0),os.getpgrp()]))'
+    raw=CommandRunner(lambda *_:None,lambda:None,timeout_s=5,
+        preserve_session=preserve_session,cooperative_stdin=True)([sys.executable,'-c',script])
+    pid,session,group=json.loads(raw)
+    assert group==pid and group!=os.getpgrp()
+    assert session==(os.getsid(0) if preserve_session else pid)
+
+
 @pytest.fixture
 def files(tmp_path):
     source = tmp_path/'source'; target = tmp_path/'target'
@@ -209,7 +221,8 @@ def test_runner_accepts_corrected_filesystem_exit_only_when_requested(allowed):
         with pytest.raises(ContractError,match='exit status 1'):runner(argv)
 
 
-def test_cooperative_helper_cancellation_drains_nested_native_group(tmp_path):
+@pytest.mark.parametrize('preserve_session',[False,True])
+def test_cooperative_helper_cancellation_drains_nested_native_group(tmp_path,preserve_session):
     import sys
     from pathlib import Path
     from quirkbench.ostree import CommandRunner
@@ -234,7 +247,7 @@ with ExitStack() as stack:
     def cancel(raw):
         if b'native-ready' in raw:raise KeyboardInterrupt
     with pytest.raises(KeyboardInterrupt):
-        CommandRunner(lambda *_:None,lambda:None,timeout_s=5,stderr_event=cancel,cooperative_stdin=True)(
+        CommandRunner(lambda *_:None,lambda:None,timeout_s=5,stderr_event=cancel,cooperative_stdin=True,preserve_session=preserve_session)(
             [sys.executable,'-c',script,str(os.getpid()),str(start),child,str(pid_file),str(stopped)])
     assert stopped.read_text()=='nested group drained'
     pid=int(pid_file.read_text());path=Path('/proc')/str(pid)/'stat'

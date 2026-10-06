@@ -62,7 +62,7 @@ class CommandRunner:
     """Bounded output and live activity for slow pulls and deployment commands."""
     def __init__(self, progress, guard, timeout_s=1800, diagnostic=None, *,
                  operation='OSTree command', phase='deployment-command',
-                 failure_guidance='deployment remains unarmed', pass_fds=(), stderr_event=None, success_codes=(0,), cooperative_stdin=False):
+                 failure_guidance='deployment remains unarmed', pass_fds=(), stderr_event=None, success_codes=(0,), cooperative_stdin=False, preserve_session=False):
         if (isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float))
                 or not math.isfinite(timeout_s) or timeout_s <= 0):
             raise ContractError('command timeout must be finite and positive')
@@ -74,13 +74,18 @@ class CommandRunner:
         self.stderr_event = stderr_event
         self.success_codes = tuple(success_codes)
         self.cooperative_stdin = cooperative_stdin
+        self.preserve_session = preserve_session
 
     def __call__(self, argv):
         start = time.monotonic()
         from .process_ownership import launch, drain_group
         try:
             process = launch(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             start_new_session=True, pass_fds=self.pass_fds,
+                             # sudo's cached authorization belongs to the
+                             # terminal session. A separate process group still
+                             # gives the runner ownership of its descendants.
+                             **({'process_group':0} if self.preserve_session else {'start_new_session':True}),
+                             pass_fds=self.pass_fds,
                              **({'stdin':subprocess.PIPE} if self.cooperative_stdin else {}))
         except OSError as exc:
             log = self.diagnostic(str(exc).encode())
