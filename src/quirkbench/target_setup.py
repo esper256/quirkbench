@@ -46,7 +46,8 @@ def _add_target(root,name,request_id, *, ttl_seconds,ready,tls_inspector,clock,f
             directory=root/'private/enrollment/codes'/digest(request_id.encode())
             try:retained=validate_code(_document(_read(directory,'issuance.json'))['record'])
             except FileNotFoundError:pass
-        ttl_seconds=retained['expires_at']-retained['created_at'] if retained else 300
+        ttl_seconds=(retained['expires_at']-retained['created_at']
+                     if retained and retained['expires_at'] is not None else None)
     controller=Controller(root)
     return create_code(controller,name,request_id,ttl_seconds=ttl_seconds,ready=ready,
                        tls_inspector=tls_inspector,clock=clock,fault_hook=fault_hook)
@@ -124,7 +125,7 @@ def show_target(root,target, *, clock=time.time,version=1,reader=None):
         if selected:
             code,bound,_=selected
             state=bound['state'] if bound is not None else code['state']
-            if state=='ACTIVE' and now>=code['expires_at']:state='EXPIRED'
+            if state=='ACTIVE' and code['expires_at'] is not None and now>=code['expires_at']:state='EXPIRED'
         live=bool(generation is not None and generation['revoked']==0 and now<generation['expires_at'])
         if generation is not None and generation['revoked']:state='REVOKED'
         elif generation is not None and now>=generation['expires_at']:state='EXPIRED'

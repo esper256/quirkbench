@@ -124,6 +124,8 @@ from .experiment_submissions import MIGRATION as SUBMISSION_MIGRATION
 MIGRATIONS.append(SUBMISSION_MIGRATION)
 MIGRATIONS.append("ALTER TABLE experiment_submissions ADD COLUMN candidate_operation TEXT REFERENCES operations(id);")
 MIGRATIONS.append("ALTER TABLE experiment_submissions ADD COLUMN public_document TEXT;")
+from .enrollment import NONEXPIRING_MIGRATION
+MIGRATIONS.append(NONEXPIRING_MIGRATION)
 
 
 def uid():

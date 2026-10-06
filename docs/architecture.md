@@ -149,7 +149,18 @@ changed devices block storage operations and show a local diagnostic. Never fall
 back to the first USB disk. Initramfs must apply this identity rule before mounting
 the recovery root; later privileged tools revalidate before mutation. Explicit
 commissioning can alter only the confirmed boot device through the existing
-journaled geometry plan. A privileged maintenance shell is operator administration,
+historical journaled geometry plan. Those records remain readable for compatibility,
+not authorization for a continuing target-side partitioning workflow.
+New preparation is a destructive,
+explicit controller operation bound to the selected whole USB, artifact and actual
+capacity. Revalidate device identity/use and expected phase geometry before each
+write. The target validates completed prepared geometry and never automatically
+partitions, formats, grows or repairs it. Preserve historical record interpretation.
+New layout policy budgets actual fixed recovery extents and shipped library payload
+(currently zero plus minimum six-role filesystem overhead), splitting remaining
+aligned capacity equally between experiments/evidence without a target-RAM gate.
+Space failure blocks the affected operation; preserve unuploaded evidence and report
+incomplete writes honestly. A privileged maintenance shell is operator administration,
 not a policy bypass or proof of containment; its actions remain within this scope.
 
 **Experiments: restricted kernels and approved execution.** Retain internal-controller

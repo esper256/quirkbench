@@ -509,7 +509,11 @@ Manual setup assigns and durably retains a distinct media-instance ID before
 authentication. Later automated enrollment also generates a random enrollment
 request ID before exchange. Preserve applicable identities across retries.
 
-Recovery setup operates only after boot/protection and evidence-mount verification.
+Persistent recovery setup operates only after boot/protection and evidence-mount verification.
+Temporary local connectivity and offline diagnostic collection do not require
+pairing, a boot marker or evidence storage. Private RAM network storage must be
+usable before NetworkManager starts; saved secrets still require verified media
+and target binding, with fail-closed cleanup on incomplete restoration.
 Never scan/mount internal OS partitions for Wi-Fi passwords or hardware discovery.
 Use NetworkManager as the only network manager, with nmtui for attended connection
 configuration. Disable systemd-networkd in assembled images. Stage connection files
@@ -526,13 +530,19 @@ Unknown clocks, invalid certificates, bad endpoint SANs and expired credentials 
 specific blocking states, not reasons to disable TLS verification. LAN connectivity
 is sufficient; target public internet access is optional.
 
-Pairing uses an operator-created short-lived, high-entropy one-use enrollment code
-and out-of-band controller certificate fingerprint verification. The recovery screen
-must show the endpoint and fingerprint for comparison before transmitting the code.
+New initial pairing uses an operator-created, high-entropy one-use enrollment code
+valid until redemption or explicit cancellation/revocation. Enrollment-code v2
+represents this with `expires_at: null`; v1 retains its historical deadline.
+Prepared USB trust is authorized by explicit controller preparation; manual initial
+pairing requires out-of-band controller certificate fingerprint verification.
+The manual recovery screen must show the endpoint and fingerprint for comparison
+before transmitting the code. Controller preparation never grants retarget or run authority.
 The TLS bootstrap client may inspect the server certificate without transmitting any
 secret; the authenticated exchange must pin that exact approved certificate and then
 install controller CA/endpoint trust. No TOFU auto-accept, HTTP enrollment or permanent
-verification bypass. Enforce expiry, rate limits, bounded payloads and request IDs.
+verification bypass. Enforce certificate validity, short-lived proof challenges,
+rate limits, bounded payloads and request IDs. A network timeout does not invalidate
+an invitation; retry with the same retained request/key and a fresh challenge.
 
 Before exchange, persist a target-generated keypair and request ID privately. Bind
 code redemption to that request and public key in one controller transaction. A lost

@@ -234,11 +234,13 @@ advertised current-owner publication capability reports enrollment availability;
 it requires explicit repository publication and verified current TLS identity.
 Full setup acceptance and native commissioning remain pending.
 
-Target pairing uses target pair NAME with an optional request ID and invitation
-lifetime. Human and JSON calls retain the same name-derived retry identity when it
-is omitted; expired or redeemed invitations require a new explicit ID. The full
-controller fingerprint must be compared on the recovery console before transmitting
-the one-use code. Target show resolves an unambiguous recorded name or exact target
+Target pairing uses target pair NAME with an optional request ID. New initial
+invitations do not expire; they are single-use and explicitly cancellable/revocable.
+Human and JSON calls retain the same name-derived retry identity when it is omitted;
+redeemed/cancelled invitations and expired historical v1 invitations require a new
+explicit ID. Manual pairing compares the full controller fingerprint on the recovery
+console before transmitting the one-use code; explicit controller preparation stages
+that trust for the normal USB journey. Target show resolves an unambiguous recorded name or exact target
 ID and exposes the current v2 status in both presentation modes. Historical v1
 record readers remain internal. The status includes a 30-second advisory contact
 window, separate from readiness or execution permission.
@@ -474,14 +476,16 @@ when controller trust identity changes. Never bypass TLS or silently replace tru
 Recommend a stable DHCP reservation where available; address changes do not require
 reflashing media.
 
-Before the first partition mutation, recovery shows a read-only external-device identity,
-capacity/RAM check, proposed geometry and supported advanced sizing choices. Run this
-screen from recovery/RAM before evidence exists. Persist the confirmed geometry in the
-existing boot-state commissioning journal before changes; retry the same plan, observe
-completed steps and never reformat an existing filesystem on a missing acknowledgement.
-No credentials are needed for this step. Recheck evidence/log/dump capacity when moved
-to a target with different RAM; insufficient capacity blocks affected operations, never
-automatically repartitions enrolled media. Later resizing is not a v1 repair shortcut.
+New USB preparation is controller-side: read-only planning binds the explicitly
+selected whole USB, artifact, observed capacity/layout and attachment identity.
+Apply requires that exact plan and erase acknowledgement, with revalidation before
+every destructive phase. Stage the selected LAN endpoint/public fingerprint and
+single-use initial invitation outside the fixed recovery root; never copy controller
+private keys or bind the USB to controller hardware. Only verified completion reports
+prepared media. Retain historical records without automatic target-side partitioning.
+Budget actual recovery/library content and split remaining aligned capacity equally
+between experiments/evidence, without target RAM admission. Space failure blocks the
+affected operation and preserves unuploaded evidence, with no implicit resize/eviction.
 
 ## Backup completeness
 

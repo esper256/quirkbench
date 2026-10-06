@@ -187,17 +187,22 @@ The synthesis stages are:
 6. **Assemble regular-file media.** Feed the validated root tree, kernel, initramfs and
    provenance to the existing `quirkbench image` adapter. It uses sgdisk, filesystem
    tools and grub-mkimage for the compact GPT image, fixed recovery and SMBIOS-bound
-   one-shot loader. The established commissioning code creates the final six roles
-   on first boot after explicit local device/geometry confirmation is journaled.
-   The implemented capacity screen offers reviewed sizing choices and records the
-   confirmed geometry. Confirmation runs from RAM before evidence exists;
-   retries preserve the same plan and existing filesystems. No installer resize service
-   or automatic enrolled-media repartition is introduced.
+   one-shot loader. New media preparation creates the final six roles on the
+   controller after explicit selected-device/geometry confirmation, and publishes
+   a versioned completion record outside the fixed recovery root. The target
+   validates this geometry without partitioning or formatting. Retain historical
+   commissioning readers without making first-boot partitioning a normal setup
+   path. Zero shipped library payload reserves only filesystem overhead; remaining
+   aligned capacity is split equally between experiments and evidence. No RAM-based
+   admission limit applies to prepared media. Shortage blocks the affected write
+   and retains unuploaded evidence; neither resize nor silent eviction is a remedy.
 7. **Publish.** Verify complete staged output and provenance, synchronize, then publish
    `.img` (optionally `.img.xz`), checksum and release manifest. Sign distribution
    metadata with a release key kept on the controller. Factory media has no controller
    trust pin, enrollment authorization, device credentials or experimental deployment
-   requirement. Etcher performs physical writing/verification.
+   requirement. Controller preparation writes/verifies the selected USB and stages
+   public trust and a single-use initial enrollment secret in mutable control
+   storage. Generic flashing alone does not provide a prepared enrollment handoff.
 
 The release manifest binds recipe/schema revision, architecture, source/RPM/toolchain
 identities, SELinux/protection policy, runtime and firmware packages, kernel/initramfs
