@@ -69,7 +69,10 @@ class ArtifactStore:
             yield
 
     def check_space(self, needed=0):
-        if os.statvfs(self.root).f_favail==0:raise StoragePressure('artifact storage has no available inodes')
+        available = os.statvfs(self.root)
+        # Zero total inodes means this filesystem does not report a fixed pool.
+        if available.f_files > 0 and available.f_favail == 0:
+            raise StoragePressure('artifact storage has no available inodes')
         if shutil.disk_usage(self.root).free - needed < self.reserve_bytes:
             raise StoragePressure('free-space reserve reached')
 

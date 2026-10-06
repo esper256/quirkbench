@@ -34,7 +34,9 @@ Choose the source-date epoch for your selected input snapshot. `prepare` verifie
 every RPM against the specification's fingerprint, creates the existing lock and
 recipe, and writes `manifest.json` last. Interrupted preparation retains its input
 bytes and signature diagnostics but has no completed manifest. Use a fresh output
-path for a retry. Ordinary directory modes are accepted; no read-only permission
+path for a retry. Inode admission checks apply when the filesystem reports a fixed
+inode pool; zero total inodes is treated as unavailable accounting. Byte reserves
+and actual write failures remain enforced. Ordinary directory modes are accepted; no read-only permission
 bits are used to pretend that files are immutable.
 
 `verify` hashes the full declared closure, reports all missing/changed objects,

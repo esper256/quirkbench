@@ -104,7 +104,7 @@ def test_inode_exhaustion_rejects_new_artifact_without_losing_existing(tmp_path,
     from types import SimpleNamespace
     from quirkbench.store import StoragePressure
     store=ArtifactStore(tmp_path,reserve_bytes=0);old=store.put(b'previous-unuploaded')
-    monkeypatch.setattr('os.statvfs',lambda _:SimpleNamespace(f_favail=0))
+    monkeypatch.setattr('os.statvfs',lambda _:SimpleNamespace(f_files=100,f_favail=0))
     with pytest.raises(StoragePressure,match='inodes'):store.put(b'new')
     assert store.get(old.sha256)==b'previous-unuploaded'
 
@@ -134,3 +134,17 @@ def test_actual_file_cas_publication_handles_short_writes_and_keeps_prior_artifa
         assert not store.path(digest(source.read_bytes())).exists()
     assert store.get(prior.sha256)==b'retained unuploaded'
     assert not list(store.objects.glob('.pending-*'))
+
+
+def test_unreported_inode_pool_allows_verified_publication_and_preserves_byte_reserve(tmp_path,monkeypatch):
+    from quirkbench.store import StoragePressure
+    store=ArtifactStore(tmp_path,reserve_bytes=0)
+    import os
+    values=list(os.statvfs(tmp_path));values[5:8]=[0,0,0]
+    monkeypatch.setattr('os.statvfs',lambda _:os.statvfs_result(values))
+    artifact=store.put(b'exact recovery input')
+    assert store.get(artifact.sha256)==b'exact recovery input'
+    assert store.verify(artifact.sha256)==len(b'exact recovery input')
+    store.reserve_bytes=10**30
+    with pytest.raises(StoragePressure,match='reserve'):store.put(b'another input')
+    assert store.get(artifact.sha256)==b'exact recovery input'

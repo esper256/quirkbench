@@ -119,7 +119,7 @@ def text(value: str, maximum=160) -> str:
 def space(path: Path) -> str:
     try:
         result = os.statvfs(path)
-        return 'full' if result.f_bavail == 0 or result.f_favail == 0 else 'ready'
+        return 'full' if result.f_bavail == 0 or (result.f_files > 0 and result.f_favail == 0) else 'ready'
     except OSError:
         return 'unavailable'
 
