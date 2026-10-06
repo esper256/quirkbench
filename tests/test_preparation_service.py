@@ -91,7 +91,8 @@ def test_real_plan_progress_is_human_unless_json_requested(tmp_path,artifact,sel
         assert all(isinstance(json.loads(line),dict) for line in captured.err.splitlines())
     else:
         assert 'Plan ready. The USB has not been changed.' in captured.out
-        assert 'GiB' in captured.out and 'Apply:' in captured.out
+        assert 'GiB' in captured.out
+        assert 'Apply: sudo -v && quirkbench recovery prepare --plan ' in captured.out
         assert '{' not in captured.out+captured.err
 
 
