@@ -119,6 +119,23 @@ qualification or proof that a configured controller is running the same code.
 
 ## Packaging and installation
 
+For Eric's current local development workflow, use this temporary repository
+script from the host, with a clean `main` checkout:
+
+```sh
+python3 /var/home/eric/dev/quirkbench/development/update-local-install.py
+```
+
+It pulls main, packages the current code using the existing development environment
+when present, retains the archive and packaging log outside Git, and installs the
+command in `~/.local/bin`. Existing configured installations use guarded activation;
+the controller must be stopped and work reconciled. Fresh installation selects the
+runtime and command without initializing a database or configuring a controller.
+An incompatible database produces a complete copyable explicit reset command;
+reset archives an unused controller, never silently deletes state. Rerun the updater
+after reset. This developer convenience does not select a future distribution format.
+Packaging still requires setuptools and wheel; see the development testing guide.
+
 The controller can now be packaged as an unsigned development archive, with
 Python code, target assets, schemas, examples and the agent guide. It runs from
 an extracted directory without a checkout or virtualenv. Python 3.11+ must
@@ -301,8 +318,9 @@ The archive supplies the CLI and fixed worker entry points. The historical
 `bin/quirkbench-controller-service` executable remains a foreground compatibility
 entry point. No controller unit template is installed. Use guarded activation
 while the foreground controller is stopped.
-`setup --configure-controller` publishes local TLS, configuration and the CLI
-launcher; start execution separately with `admin controller run`.
+`setup --configure-controller` publishes local TLS and controller configuration.
+It leaves command installation and any user-selected CLI link unchanged; start
+execution separately with `admin controller run`.
 
 Use `setup --configure-controller` to create `STATE/private/controller-service.json`
 and its managed TLS identity. The service record contains software version/archive
@@ -459,8 +477,8 @@ bin/quirkbench setup --request-id INITIAL_SETUP --configure-controller --json
 ```
 
 This creates a private local controller CA/server certificate for the specific
-bind IP and publishes the configuration and launcher. It starts no process and
-requires no service manager. `--configure-controller` remains a compatibility alias for
+bind IP and publishes the configuration. It leaves PATH commands unchanged, starts
+no process and requires no service manager. `--configure-controller` remains a compatibility alias for
 this configuration step. Use the returned `next_command` to start the controller,
 selecting a pinned worker image as described above. OpenSSL 3 is required for TLS.
 LAN binding still requires `--allow-lan`. No target credentials or execution approval

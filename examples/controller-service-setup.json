@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "record_type": "controller-service-setup",
   "request_id": "initial-setup",
   "request_digest": "a930413b98e90b5a4bea2ee62dfb3918d7bcc58b82856885ae83edee037f1090",

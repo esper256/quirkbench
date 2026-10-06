@@ -234,6 +234,10 @@ scheduler or second database. Its schema records software identity (including
 archive and manifest digests), resource/connection/logout choices and ordered completed
 steps. Locations are derived from the current root and selected installation; runtime
 validation checks current content, ownership, addresses and digest relationships.
+Controller-service setup records version 3 require TLS and configuration publication,
+not interactive command installation. Setup leaves existing PATH commands untouched.
+Completed version-2 launcher publication remains historical evidence; interrupted
+version-2 setup continues with the equivalent TLS/configuration prefix in version 3.
 Readiness retains existing service fields and separately reports database, resources,
 runtime, release, builder, enrollment and target count. Accepted setup is still partial:
 controller configuration is published with explicit `--configure-controller`; start

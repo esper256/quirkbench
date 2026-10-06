@@ -15,4 +15,4 @@ def build(root):
     p.add_argument('--logout-policy', choices=['session'], help='foreground session lifetime; daemon packaging is separate')
     p.add_argument('--builder-archive', type=Path, help='admit signed OCI capture/import to the existing worker')
     p.add_argument('--builder-request-id', help='builder retry identity; defaults to the setup request ID plus -builder')
-    p.add_argument('--configure-controller', dest='start_service', action='store_true', help='Configure TLS and the controller launcher; start it with admin controller run')
+    p.add_argument('--configure-controller', dest='start_service', action='store_true', help='Configure controller TLS and connection settings; leaves your CLI link unchanged; start with admin controller run')

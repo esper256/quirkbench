@@ -35,6 +35,88 @@ def make_archive(directory, payload=b'fixture'):
     return output
 
 
+def local_updater():
+    import runpy
+    return runpy.run_path(str(Path(__file__).resolve().parents[1] / 'development/update-local-install.py'))
+
+
+def test_development_updater_installs_command_without_controller_setup(tmp_path, archive, monkeypatch):
+    from quirkbench.state_config import configure_state_root
+    from quirkbench.controller_install import selected_runtime
+    monkeypatch.setenv('HOME', str(tmp_path/'home'))
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path/'data'))
+    root = tmp_path/'state'; configure_state_root(root)
+    updater = local_updater(); record = updater['refresh'](archive)
+    command = tmp_path/'home/.local/bin/quirkbench'
+    assert command.resolve() == Path(record['runtime_root'])/'bin/quirkbench'
+    assert selected_runtime() == Path(record['runtime_root'])
+    assert not (root/'controller.sqlite').exists()
+    assert not (root/'private/controller-service.json').exists()
+    assert updater['refresh'](archive)['archive_sha256'] == record['archive_sha256']
+
+
+def test_development_updater_preserves_incompatible_state_and_names_reset(tmp_path, archive, monkeypatch):
+    import sqlite3
+    import shlex
+    from quirkbench.state_config import configure_state_root
+    from quirkbench.contracts import ContractError
+    monkeypatch.setenv('HOME', str(tmp_path/'home'))
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path/'data'))
+    root = tmp_path/'state'; Controller(root, reserve_bytes=0); configure_state_root(root)
+    with sqlite3.connect(root/'controller.sqlite') as db: db.execute('PRAGMA user_version=35')
+    before = (root/'controller.sqlite').read_bytes()
+    updater = local_updater()
+    with pytest.raises(ContractError, match='incompatible development'): updater['refresh'](archive)
+    assert (root/'controller.sqlite').read_bytes() == before
+    assert not (tmp_path/'home/.local/bin/quirkbench').exists()
+    command = shlex.split(updater['reset_command'](root))
+    assert command[1:6] == ['--state', str(root), 'admin', 'controller', 'reset']
+    assert command[-1] == '--confirm-reset' and 'dev-reset-' in command[-2]
+
+
+def test_development_updater_refuses_live_owner_before_command_selection(tmp_path, archive, monkeypatch):
+    from quirkbench.state_config import configure_state_root
+    from quirkbench.filesystem import private_lock
+    monkeypatch.setenv('HOME', str(tmp_path/'home'))
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path/'data'))
+    root = tmp_path/'state'; configure_state_root(root)
+    with private_lock(root/'coordinator.lock'), pytest.raises(Conflict):
+        local_updater()['refresh'](archive)
+    assert not (tmp_path/'home/.local/bin/quirkbench').exists()
+    assert not (tmp_path/'config/quirkbench/installation.json').exists()
+
+
+def test_development_updater_error_prints_copyable_reset_command(tmp_path, archive, monkeypatch, capsys):
+    import sqlite3
+    import shutil
+    import shlex
+    from quirkbench.state_config import configure_state_root
+    monkeypatch.setenv('HOME', str(tmp_path/'home'))
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path/'data'))
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path/'cache'))
+    root = tmp_path/'state'; Controller(root, reserve_bytes=0); configure_state_root(root)
+    with sqlite3.connect(root/'controller.sqlite') as db: db.execute('PRAGMA user_version=35')
+    before = (root/'controller.sqlite').read_bytes()
+    updater = local_updater()
+    # Git/network and packaging are acquisition prerequisites, not the reset
+    # behavior under test. Feed their outputs into the real installer/admission.
+    def git_output(argv, **kwargs):
+        return 'main\n' if 'branch' in argv else ''
+    def acquisition(argv, **kwargs):
+        if '--output' in argv: shutil.copyfile(archive, argv[argv.index('--output')+1])
+        return subprocess.CompletedProcess(argv, 0)
+    monkeypatch.setattr(subprocess, 'check_output', git_output)
+    monkeypatch.setattr(subprocess, 'run', acquisition)
+    assert updater['main']() == 1
+    output = capsys.readouterr()
+    command = next(line for line in output.err.splitlines() if '--confirm-reset' in line)
+    argv = shlex.split(command)
+    assert argv[1:6] == ['--state', str(root), 'admin', 'controller', 'reset']
+    assert argv[-1] == '--confirm-reset' and 'dev-reset-' in argv[-2]
+    assert 'CHOOSE_NEW_RESET_ID' not in command
+    assert (root/'controller.sqlite').read_bytes() == before
+
+
 @pytest.fixture(autouse=True)
 def local_configuration(tmp_path,monkeypatch):
     monkeypatch.setenv('XDG_CONFIG_HOME',str(tmp_path/'config'))

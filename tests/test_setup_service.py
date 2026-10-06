@@ -67,7 +67,7 @@ def start(tmp_path, services, **kwargs):
 
 def test_versioned_service_progress_schema_matches_strict_reader():
     value=json.loads((ROOT/'examples/controller-service-setup.json').read_text())
-    schema=json.loads((ROOT/'schemas/controller-service-setup.v1.schema.json').read_text())
+    schema=json.loads((ROOT/'schemas/controller-service-setup.v3.schema.json').read_text())
     Draft202012Validator.check_schema(schema);Draft202012Validator(schema).validate(value)
     assert load_progress(canonical(value))==value
     for patch in ({'schema_version':True},{'extra':1},{'completed_steps':['service_started']},{'request_digest':'0'*64}):
@@ -76,11 +76,11 @@ def test_versioned_service_progress_schema_matches_strict_reader():
 
 def test_zero_target_foreground_publication_and_read_only_active_replay(tmp_path, initialized):
     services=Services();result=start(tmp_path,services)
-    assert result['service_progress']['schema_version']==2
+    assert result['service_progress']['schema_version']==3
     assert result['service_progress']['completed_steps']==list(STEPS)
     cfg=configuration(tmp_path/'state')
     assert cfg['credential_registry'] and 'tokens_file' not in cfg and cfg['reserve_gib']==0
-    assert (tmp_path/'bin/quirkbench').resolve()==initialized/'bin/quirkbench'
+    assert not (tmp_path/'bin').exists()
     assert not (tmp_path/'config/systemd').exists()
     assert services.calls==[]
     with StateReader(tmp_path/'state').connection() as db:
@@ -99,6 +99,37 @@ def test_configuration_does_not_claim_a_controller_was_started(tmp_path,initiali
     assert result['next_command'].endswith('admin controller run')
 
 
+@pytest.mark.parametrize('kind', ['checkout_link', 'regular_file'])
+def test_configuration_preserves_operator_command(tmp_path, initialized, kind):
+    link = tmp_path / 'bin/quirkbench'; link.parent.mkdir()
+    if kind == 'checkout_link': link.symlink_to(ROOT/'quirkbench')
+    else: link.write_bytes(b'operator command')
+    before = link.lstat(); content = link.read_bytes()
+    result = start(tmp_path, Services())
+    assert result['service_progress']['schema_version'] == 3
+    assert link.lstat().st_ino == before.st_ino and link.read_bytes() == content
+    assert configuration(tmp_path/'state')['runtime'] == str(initialized/'bin/quirkbench-controller-service')
+
+
+@pytest.mark.parametrize('completed', [[], ['tls_ready'], list(STEPS), [*STEPS, 'launcher_published']])
+def test_historical_setup_replay_does_not_take_over_command(tmp_path, initialized, completed):
+    services = Services(); result = start(tmp_path, services)
+    journal = tmp_path/'state/private/setup-service.json'
+    historical = {**result['service_progress'], 'schema_version': 2, 'completed_steps': completed}
+    if not completed: historical['tls_identity_sha256'] = None
+    journal.write_bytes(canonical(historical))
+    command = tmp_path/'bin/quirkbench'; command.parent.mkdir(); command.symlink_to(ROOT/'quirkbench')
+    before = command.lstat()
+    replay = start(tmp_path, services)
+    assert command.lstat().st_ino == before.st_ino and command.resolve() == ROOT/'quirkbench'
+    if completed == [*STEPS, 'launcher_published']:
+        assert replay['service_progress'] == historical
+        assert journal.read_bytes() == canonical(historical)
+    else:
+        assert replay['service_progress']['schema_version'] == 3
+        assert replay['service_progress']['completed_steps'] == list(STEPS)
+
+
 @pytest.mark.parametrize('step',['intent_recorded',*STEPS])
 def test_each_service_ack_boundary_replays_same_private_identity(tmp_path,initialized,step):
     services=Services()
@@ -112,12 +143,10 @@ def test_each_service_ack_boundary_replays_same_private_identity(tmp_path,initia
     assert all(p.read_bytes()==raw for p,raw in keys.items())
 
 
-@pytest.mark.parametrize('change',['launcher','configuration','owner'])
+@pytest.mark.parametrize('change',['configuration','owner'])
 def test_foreign_inputs_and_owner_are_preserved(tmp_path,initialized,change):
     services=Services()
-    if change=='launcher':
-        path=tmp_path/'bin/quirkbench';path.parent.mkdir();path.write_bytes(b'foreign launcher')
-    elif change=='configuration':
+    if change=='configuration':
         path=tmp_path/'state/private/controller-service.json';path.parent.mkdir(exist_ok=True);path.write_bytes(b'foreign config')
     else:
         with private_lock(tmp_path/'state/coordinator.lock'):
@@ -181,6 +210,7 @@ def test_unused_reset_preserves_runtime_launcher_and_tls_then_reconfigures(tmp_p
     original_config = configuration(root)
     tls = {path: path.read_bytes() for path in (root / 'private/controller-tls').rglob('*') if path.is_file()}
     link = tmp_path / 'bin/quirkbench'; selected = config / 'quirkbench/installation.json'
+    link.parent.mkdir(); link.symlink_to(ROOT/'quirkbench')
     before_link = os.readlink(link); before_selection = selected.read_bytes()
     reset(root, config_home=config, request_id='fresh-start', confirm_reset=True)
     verify_installation(initialized)
