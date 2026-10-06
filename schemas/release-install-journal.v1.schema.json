@@ -10,9 +10,7 @@
         "version",
         "request_id",
         "release_base_url",
-        "trust_bundle_sha256",
-        "data_home",
-        "cache_root"
+        "trust_bundle_sha256"
       ],
       "properties": {
         "schema_version": {
@@ -35,16 +33,6 @@
         "trust_bundle_sha256": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
-        },
-        "data_home": {
-          "type": "string",
-          "maxLength": 4096,
-          "pattern": "^/"
-        },
-        "cache_root": {
-          "type": "string",
-          "maxLength": 4096,
-          "pattern": "^/"
         }
       }
     },
@@ -99,7 +87,6 @@
             "schema_version",
             "version",
             "archive_sha256",
-            "runtime_root",
             "signed",
             "qualified",
             "request_id",
@@ -117,11 +104,6 @@
             "archive_sha256": {
               "type": "string",
               "pattern": "^[0-9a-f]{64}$"
-            },
-            "runtime_root": {
-              "type": "string",
-              "pattern": "^/",
-              "maxLength": 4096
             },
             "signed": {
               "const": false

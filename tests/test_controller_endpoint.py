@@ -11,14 +11,16 @@ from tls_command_fixture import TLSCommands
 
 
 @pytest.fixture
-def configured(tmp_path):
+def configured(tmp_path,monkeypatch):
     root=tmp_path/'state';Controller(root)
     native=TLSCommands();source=tls.create_identity(root,'127.0.0.1','initial',run=native)
-    runtime=tmp_path/'runtime/bin';runtime.mkdir(parents=True)
-    for name in ('quirkbench-controller-service','quirkbench-job-worker'):
-        path=runtime/name;path.write_text('#!/bin/sh\n');path.chmod(0o755)
-    config={'runtime':str(runtime/'quirkbench-controller-service'),'job_worker':str(runtime/'quirkbench-job-worker'),
-        'cert':source['certificate'],'key':source['key'],'credential_registry':True,'host':'127.0.0.1','port':8443}
+    from test_controller_install import make_archive
+    from quirkbench.controller_install import install,select_runtime
+    config_home=tmp_path/'config';monkeypatch.setenv('XDG_CONFIG_HOME',str(config_home))
+    installed=install(make_archive(tmp_path),data_home=tmp_path/'data')
+    select_runtime(installed['runtime_root'],config_home=config_home)
+    config={'software':{key:installed[key] for key in ('version','archive_sha256')},
+        'tls_identity':{'kind':'setup','request_id':'initial'},'credential_registry':True,'host':'127.0.0.1','port':8443}
     atomic_write(root/'private/controller-service.json',canonical(config))
     return root,source,native
 

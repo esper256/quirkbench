@@ -33,17 +33,19 @@ def acquire_install(version, request_id, *, trust_bundle=None, cache_home=None, 
     identifier(request_id)
     trust = load_bundle(trust_bundle)
     bundle = trust['bundle']
-    destination = canonical_user_path(Path(data_home or os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share').expanduser().resolve())
-    base = _managed_path(Path(cache_home or os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') /
-                         'quirkbench/releases')
+    from .controller_install import configure_installation_locations,installation_settings,_home
+    if data_home is not None or cache_home is not None:
+        configure_installation_locations(config_home=config_home,data_home=data_home,cache_home=cache_home)
+    locations=installation_settings(config_home=config_home)
+    destination=_home(locations.get('data_home'),'XDG_DATA_HOME','.local/share')
+    base=_managed_path(_home(locations.get('cache_home'),'XDG_CACHE_HOME','.cache')/'quirkbench/releases')
     _durable_directory(base)
     stage = _managed_path(base / request_id); _durable_directory(stage)
     records = _managed_path(_config_home(config_home) / 'quirkbench/release-install' / request_id)
     _durable_directory(records)
     fault_hook = fault_hook or (lambda _: None)
     intent = {'schema_version': 1, 'version': version, 'request_id': request_id,
-              'release_base_url': bundle['release_base_url'], 'trust_bundle_sha256': trust['bundle_sha256'],
-              'data_home': str(destination), 'cache_root': str(base)}
+              'release_base_url': bundle['release_base_url'], 'trust_bundle_sha256': trust['bundle_sha256']}
     with private_lock(records / 'request.lock'):
         journal = records / 'intent.json'
         if journal.exists():
@@ -107,7 +109,7 @@ def acquire_install(version, request_id, *, trust_bundle=None, cache_home=None, 
         result = {**result, 'request_id': request_id, 'distribution_verification': {
             **receipt, 'controller_archive_authenticated': True, 'other_release_assets_verified': False}}
         document = {'schema_version': 1, 'record_type': 'signed-release-installation',
-                    'request_id': request_id, 'installation': result}
+                    'request_id': request_id, 'installation': {key:value for key,value in result.items() if key!='runtime_root'}}
         atomic_write(records / 'result.json', canonical(document))
         atomic_write(records.parent.parent / 'signed-release-installation.json', canonical(document))
         return result

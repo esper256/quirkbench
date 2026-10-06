@@ -9,7 +9,7 @@ import time
 from .contracts import Conflict,ContractError,canonical,digest,identifier,sha256
 from .filesystem import _managed_path, _durable_directory
 from .controller_setup import _database_present
-from .controller_tls import FILES, validate_identity, load_identity, inspect_identity, _lineage, _generate_material, _inspect_material
+from .controller_tls import tls_directory, FILES, validate_identity, load_identity, inspect_identity, _lineage, _generate_material, _inspect_material
 from .tls_primitives import _openssl
 from .filesystem import _read
 from .enrollment_records import _document, _now
@@ -20,7 +20,7 @@ from .store import atomic_write
 
 
 def validate_intent(value):
-    fields={'schema_version','record_type','request_id','host','previous_directory','previous_identity_sha256',
+    fields={'schema_version','record_type','request_id','host','previous_identity','previous_identity_sha256',
         'configuration_sha256','created_at','days'}
     version=value.get('schema_version') if isinstance(value,dict) else None
     if version==3:fields.add('source_mode')
@@ -28,7 +28,7 @@ def validate_intent(value):
             or version not in (2,3) or value['record_type']!='controller-tls-intent'):
         raise ContractError('invalid endpoint TLS intent')
     if version==3 and value['source_mode']!='expired-leaf-renewal':raise ContractError('invalid explicit TLS renewal source mode')
-    validate_identity({key:value[key] for key in ('request_id','host','previous_directory','previous_identity_sha256')}
+    validate_identity({key:value[key] for key in ('request_id','host','previous_identity','previous_identity_sha256')}
         |{'schema_version':2,'record_type':'controller-tls-identity','files':{name:'0'*64 for name in FILES}})
     sha256(value['configuration_sha256'])
     if type(value['days']) is not int or not 1<=value['days']<=365 or type(value['created_at']) is not int:
@@ -73,7 +73,7 @@ def _stage(root,host,request_id,expected_identity_sha256, *,run,fault_hook,clock
     identifier(request_id);sha256(expected_identity_sha256)
     validate_identity({'schema_version':1,'record_type':'controller-tls-identity','request_id':request_id,
         'host':host,'files':{name:'0'*64 for name in FILES}})
-    root=_managed_path(root);deadline=monotonic()+180;fault=fault_hook or (lambda _:None)
+    root=_managed_path(Path(root).expanduser().resolve());deadline=monotonic()+180;fault=fault_hook or (lambda _:None)
     if not _database_present(root):raise SetupUnavailable('controller setup required before endpoint maintenance')
     from .controller_install import _idle
     from .controller_service import configuration
@@ -102,7 +102,7 @@ def _stage(root,host,request_id,expected_identity_sha256, *,run,fault_hook,clock
         directory=_managed_path(root/'private/controller-tls'/('endpoint-'+digest(request_id.encode())[:32]))
         guard();_durable_directory(directory)
         intent_path=directory/'intent.json'
-        fields={'host':host,'request_id':request_id,'previous_directory':previous.name,
+        fields={'host':host,'request_id':request_id,'previous_identity':config['tls_identity'],
             'previous_identity_sha256':expected_identity_sha256,'configuration_sha256':digest(config_raw)}
         if expired_source:fields['source_mode']='expired-leaf-renewal'
         if intent_path.exists() or intent_path.is_symlink():
@@ -139,7 +139,7 @@ def _stage(root,host,request_id,expected_identity_sha256, *,run,fault_hook,clock
             new=_generate_material(directory,host,run=run,fault_hook=fault,guard=native_guard,
                 retained_ca={name:captured[name] for name in ('ca.key','ca.crt')},days=intent['days'])
             value=validate_identity({'schema_version':2,'record_type':'controller-tls-identity',
-                'request_id':request_id,'host':host,'previous_directory':previous.name,
+                'request_id':request_id,'host':host,'previous_identity':config['tls_identity'],
                 'previous_identity_sha256':expected_identity_sha256,'files':{name:digest(raw) for name,raw in new.items()}})
         if (value['schema_version']!=2 or any(value[key]!=choice for key,choice in fields.items() if key not in ('configuration_sha256','source_mode'))
                 or any(digest(raw)!=value['files'][name] for name,raw in new.items())

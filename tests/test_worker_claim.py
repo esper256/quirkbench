@@ -4,7 +4,7 @@ import stat
 
 import pytest
 
-from quirkbench.contracts import Conflict
+from quirkbench.contracts import Conflict, ContractError
 from quirkbench.controller import Controller
 from quirkbench.worker_claim import WorkerClaimError, read_active_worker_claim
 
@@ -141,13 +141,12 @@ def test_reused_rootfs_request_cannot_switch_derived_builder(tmp_path):
                                    input_refs=refs)
 
 
-@pytest.mark.parametrize('arguments,paths', [({}, True), ({'path': '/tmp/live'}, False)])
-def test_interrupted_image_with_mutable_input_cannot_resume(tmp_path, arguments, paths):
+@pytest.mark.parametrize('arguments', [{'path': '/tmp/live'}])
+def test_interrupted_image_with_mutable_input_cannot_resume(tmp_path, arguments):
     controller = Controller(tmp_path / 'state', reserve_bytes=0)
     with controller.lifecycle() as owner:
         operation = controller.admit_operation(
-            'request', 'image_prepare', arguments,
-            local_paths={'tree': tmp_path / 'tree'} if paths else None)
+            'request', 'image_prepare', arguments)
         first = owner.claim(operation['id'], stage='recovery_rootfs',
                             deadline=controller.clock() + 30)
     with controller.lifecycle() as owner:
@@ -186,3 +185,45 @@ def test_resume_refuses_generation_changed_during_input_check(tmp_path, monkeypa
         with pytest.raises(Conflict, match='changed before explicit resume'):
             owner.resume_operation(first['id'])
         assert controller.operation_status(first['id'])['data']['state'] == 'INTERRUPTED'
+
+
+def test_retained_stage_cleanup_requires_exact_stopped_generation_and_input(tmp_path,monkeypatch):
+    from quirkbench import retention
+    from quirkbench.contracts import canonical
+    import json
+    controller=Controller(tmp_path/'state',reserve_bytes=0)
+    with controller.lifecycle() as owner:
+        row=controller.admit_operation('request','image_prepare',{})
+        first=owner.claim(row['id'],stage='recovery_rootfs',deadline=controller.clock()+30)
+    with controller.lifecycle() as owner:
+        class Stopped:
+            def stop_and_verify(self,unit,boot):return 'stopped'
+        owner.reconcile_units(Stopped())
+        # Generic immutable operation resume uses the same obsolete-stage layout.
+        owner.resume_operation(first['id'])
+        with controller.transaction() as db:
+            proof={key:first[key] for key in ('stage_nonce','worker_generation','input_digest')}
+            group='job-stage-'+first['id']+'-'+str(first['worker_generation'])
+            db.execute("INSERT INTO storage_groups VALUES(?,'build',0,0,'FAILED',NULL,NULL,1,?)",(group,canonical(proof).decode()))
+            retained=dict(db.execute('SELECT * FROM storage_groups WHERE owner=?',(group,)).fetchone())
+        assert retention.group_paths(controller.root,retained)==[Path(first['stage_dir'])]
+        forged={**retained,'stop_proof':canonical({**proof,'input_digest':'0'*64}).decode()}
+        with pytest.raises(ContractError,match='exact durable worker-stop'):
+            retention.group_paths(controller.root,forged)
+        second=owner.claim(first['id'],stage='recovery_rootfs',deadline=controller.clock()+30)
+        assert second['stage_dir']!=first['stage_dir']
+        # Retired cleanup survives interruption after removing the old directory.
+        with controller.transaction() as db:db.execute("INSERT INTO storage_retired VALUES(?,0)",(group,))
+        monkeypatch.setattr(retention,'_retire_candidates',lambda *args:set())
+        native=__import__('quirkbench.maintenance',fromlist=['remove_tree']).remove_tree
+        def interrupted(path,root):
+            native(path,root)
+            raise KeyboardInterrupt()
+        monkeypatch.setattr('quirkbench.maintenance.remove_tree',interrupted)
+        with pytest.raises(KeyboardInterrupt):retention.collect(controller.root)
+        assert Path(second['stage_dir']).is_dir()
+        monkeypatch.setattr('quirkbench.maintenance.remove_tree',native)
+        retention.collect(controller.root)
+        assert Path(second['stage_dir']).is_dir()
+        with controller.transaction() as db:
+            assert db.execute('SELECT stage_retained FROM storage_groups WHERE owner=?',(group,)).fetchone()[0]==0

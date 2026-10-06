@@ -79,17 +79,13 @@ def _source(control,binding_reader):
 
 
 def validate_record(value):
-    fields={'schema_version','record_type','request_id','control_root','boot_id','boot_config_sha256',
+    fields={'schema_version','record_type','request_id','boot_id','boot_config_sha256',
         'source_sha256','controller_intent','local_attended','completed_steps','preparation'}
     if (not isinstance(value,dict) or set(value)!=fields or type(value['schema_version']) is not int
             or value['schema_version']!=1 or value['record_type']!='recovery-shutdown'):
         raise ContractError('invalid recovery shutdown continuation')
     identifier(value['request_id']);identifier(value['boot_id'])
     if type(value['local_attended']) is not bool:raise ContractError('invalid attended shutdown decision')
-    if (not isinstance(value['control_root'],str) or len(value['control_root'])>4096 or not Path(value['control_root']).is_absolute()
-            or str(Path(value['control_root']))!=value['control_root'] or '..' in Path(value['control_root']).parts
-            or value['control_root']=='/'):
-        raise ContractError('shutdown needs canonical private control root')
     sha256(value['boot_config_sha256'])
     if not isinstance(value['source_sha256'],dict) or len(value['source_sha256'])>39:raise ContractError('invalid shutdown runtime snapshot')
     for name,identity in value['source_sha256'].items():
@@ -103,7 +99,7 @@ def validate_record(value):
     if value['preparation'] is not None:
         preparation=validate_preparation(value['preparation'])
         if preparation['request_id']!=value['request_id'] or preparation['boot_id']!=value['boot_id']:raise Conflict('shutdown preparation binding differs')
-        expected=value['controller_intent'] or {'request_id':value['request_id'],'boot_id':value['boot_id'],'control_root':value['control_root'],'boot_config_sha256':value['boot_config_sha256']}
+        expected=value['controller_intent'] or {'request_id':value['request_id'],'boot_id':value['boot_id'],'boot_config_sha256':value['boot_config_sha256']}
         if preparation['intent_sha256']!=digest(canonical(expected)):raise Conflict('shutdown preparation intent differs')
     if (len(value['completed_steps'])>=3)!=(value['preparation'] is not None):raise ContractError('shutdown preparation progress differs')
     return value
@@ -131,7 +127,6 @@ def pending(control):
     # The complete continuation is itself the atomic authoritative writer fence.
     # Optional history publication can fail without releasing restart admission.
     saved=validate_record(_document(read_file(control,'shutdown/active.json',limit=LIMIT)))
-    if saved['control_root']!=str(control):raise Conflict('shutdown fence identity differs')
     return saved
 
 
@@ -156,7 +151,7 @@ def retain(control,config,request, *,verify_target,binding_reader=read_system_uu
                 runtime['target_binding']!=controller_intent['target_binding'] or media['media_instance_id']!=controller_intent['media_instance_id']
                 or current_boot!=controller_intent['boot_id'] or request!=controller_intent['request_id']):
             raise Conflict('delivered shutdown differs from current recovery/target/media')
-    value={'schema_version':1,'record_type':'recovery-shutdown','request_id':request,'control_root':str(control),
+    value={'schema_version':1,'record_type':'recovery-shutdown','request_id':request,
         'boot_id':current_boot,'boot_config_sha256':digest(canonical(asdict(config))),
         'source_sha256':{name:digest(raw) for name,raw in captured.items()},'controller_intent':controller_intent,
         'local_attended':controller_intent is None,'completed_steps':['retained'],'preparation':None}
@@ -317,7 +312,7 @@ def execute(control,config,request, *,verify_target,binding_reader=read_system_u
         else:clearer(config)
         fence();completed('one_shot_cleared')
         journal_sha,sealed,backlog,backlog_bytes,evidence_identities=_sealed(control,fence,clock()+120,clock);fence()
-        intent=saved['controller_intent'] or {'request_id':request,'boot_id':saved['boot_id'],'control_root':str(control),'boot_config_sha256':saved['boot_config_sha256']}
+        intent=saved['controller_intent'] or {'request_id':request,'boot_id':saved['boot_id'],'boot_config_sha256':saved['boot_config_sha256']}
         preparation=validate_preparation({'schema_version':1,'record_type':'target-shutdown-preparation','request_id':request,
             'intent_sha256':digest(canonical(intent)),'boot_id':saved['boot_id'],'journal_sha256':journal_sha,
             'one_shot_cleared':True,'local_evidence_durable':True,'sealed_records':sealed,'pending_upload_records':backlog,

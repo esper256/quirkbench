@@ -59,8 +59,8 @@ def validate(value):
 
 
 def binding(intent):
-    args=intent.get('arguments');fields={'schema_version','join_input_sha256','publication','excluded_roots'}|BUILDER
-    if (intent.get('kind') not in ('build','compose') or intent.get('local_paths')!={} or intent.get('source_refs')!=[]
+    args=intent.get('arguments');fields={'schema_version','join_input_sha256','publication'}|BUILDER
+    if (intent.get('kind') not in ('build','compose') or 'local_paths' in intent or intent.get('source_refs')!=[]
             or intent.get('campaign_id') is None or intent.get('device_id') is None or not isinstance(args,dict)
             or set(args)!=fields or type(args['schema_version']) is not int or args['schema_version']!=3):
         raise ContractError('invalid versioned investigation job binding')
@@ -68,17 +68,13 @@ def binding(intent):
     for key in ('builder_image_digest','builder_config_digest'):
         if not isinstance(args[key],str) or not args[key].startswith('sha256:'):raise ContractError('pinned investigation builder required')
         sha256(args[key][7:])
-    roots=args['excluded_roots']
-    if not isinstance(roots,list) or len(roots)>16 or any(not isinstance(p,str) or not Path(p).is_absolute() for p in roots):
-        raise ContractError('invalid trusted input exclusions')
     if intent['kind']=='build':
         if args['publication'] is not None:raise ContractError('build cannot select signing/publication')
-    elif not isinstance(args['publication'],dict) or set(args['publication'])!={'repository','signing_home','signing_key'}:
+    elif not isinstance(args['publication'],dict) or set(args['publication'])!={'repository','signing_key'}:
         raise ContractError('composition requires configured signing/publication')
     if intent['kind']=='compose':
         publication=args['publication']
-        if any(not isinstance(publication[k],str) or not Path(publication[k]).is_absolute() for k in ('repository','signing_home')):
-            raise ContractError('absolute configured publication paths required')
+        identifier(publication['repository'])
         import re
         if not isinstance(publication['signing_key'],str) or not re.fullmatch('[A-Fa-f0-9]{40}|[A-Fa-f0-9]{64}',publication['signing_key']):
             raise ContractError('full publication fingerprint required')
@@ -235,18 +231,14 @@ def submit(controller,name,kind,request_id, *,source=None,candidate=None,build=N
             from .retention import managed_path
             destination=Path(destination);managed_path(controller.root,destination)
             if not destination.is_relative_to(controller.root/'repositories'):raise ContractError('publish repository must be beneath state/repositories')
-            publication={'repository':str(destination),'signing_home':signing['home'],'signing_key':signing['fingerprint']}
+            publication={'repository':alias,'signing_key':signing['fingerprint']}
             value=validate({'schema_version':1,'record_type':'investigation-compose-input','investigation_id':name,
                 'baseline_sha256':build_input['baseline_sha256'],'build_operation_id':build,'build_input_sha256':previous['join_input_sha256'],'build_outputs_index_sha256':row['final_output_digest'],
                 'repository':alias,'signing_fingerprint':signing['fingerprint'],**{k:build_input[k] for k in BUILDER}})
         else:raise ContractError('unsupported investigation job')
     config=configuration(controller.root)
-    excluded={str(controller.root/'private'),str(controller.root/'controller.sqlite'),config['key']}
-    for key in ('tokens_file','recovery_signing_home'):
-        if config.get(key):excluded.add(config[key])
-    if config.get('composition_signing'):excluded.add(config['composition_signing']['home'])
     artifact=controller.store.put(canonical(value));refs.add(artifact.sha256)
-    args={'schema_version':3,'join_input_sha256':artifact.sha256,'publication':publication,'excluded_roots':sorted(excluded),**{k:value[k] for k in BUILDER}}
+    args={'schema_version':3,'join_input_sha256':artifact.sha256,'publication':publication,**{k:value[k] for k in BUILDER}}
     device=None
     with controller.transaction() as db:device=controller._campaign(db,name)['device']
     intent,raw,request_digest=operation_intent(kind,args,campaign_id=name,device_id=device,input_refs=sorted({artifact.sha256,value['builder_archive_sha256']}))
@@ -447,8 +439,8 @@ def publication_fence(coordinator,claim,args, *,outputs=(),index=None,link=None,
         from .controller_service import configuration
         config=configuration(c.root);value=input_record(c.root,original,'compose')[1]
         publication=original['publication']
-        if (config.get('repositories',{}).get(value['repository'])!=publication['repository'] or
-                config.get('composition_signing')!={'home':publication['signing_home'],'fingerprint':publication['signing_key']}):
+        if (value['repository']!=publication['repository'] or publication['repository'] not in config.get('repositories',{}) or
+                config.get('composition_signing',{}).get('fingerprint')!=publication['signing_key']):
             raise Conflict('joined publication configuration changed')
     coordinator.verify(claim)
 

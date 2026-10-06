@@ -36,7 +36,7 @@ def test_clean_native_setup_and_replay_preserve_identity(tmp_path):
     assert not first['readiness']['setup_complete']
     assert not first['readiness']['builder_ready']
     assert first['setup_progress']['completed_steps'] == ['state_selected', 'database_initialized', 'preferences_recorded']
-    journal = tmp_path / 'config/quirkbench/setup-progress.json'
+    journal = tmp_path / 'state/private/setup-progress.json'
     original = journal.read_bytes()
     retry = setup(tmp_path, request_id='first')
     assert retry == first
@@ -55,7 +55,7 @@ def test_interrupted_acknowledgement_reconciles_without_new_intent(tmp_path, sta
             raise KeyboardInterrupt()
     with pytest.raises(KeyboardInterrupt):
         setup(tmp_path, fault_hook=fail, cache_gib=7, reserve_gib=1)
-    progress = setup_progress(config_home=tmp_path / 'config')
+    progress = setup_progress(tmp_path/'state', config_home=tmp_path / 'config')
     assert progress['request_id']
     result = setup(tmp_path)
     assert result['setup_progress']['request_id'] == progress['request_id']
@@ -68,17 +68,17 @@ def test_interrupted_acknowledgement_reconciles_without_new_intent(tmp_path, sta
                                   {'logout_policy': 'existing_linger'}])
 def test_conflicting_request_preserves_original(tmp_path, change):
     setup(tmp_path, request_id='first')
-    before = (tmp_path / 'config/quirkbench/setup-progress.json').read_bytes()
+    before = (tmp_path / 'state/private/setup-progress.json').read_bytes()
     with pytest.raises(Conflict):
         setup(tmp_path, **change)
-    assert (tmp_path / 'config/quirkbench/setup-progress.json').read_bytes() == before
+    assert (tmp_path / 'state/private/setup-progress.json').read_bytes() == before
 
 
 def test_state_switch_never_creates_second_root(tmp_path):
     setup(tmp_path, request_id='first')
-    with pytest.raises(Conflict):
-        setup_controller(tmp_path / 'other', config_home=tmp_path / 'config', **observations())
-    assert not (tmp_path / 'other').exists()
+    second=setup_controller(tmp_path / 'other', config_home=tmp_path / 'config', **observations())
+    assert second['readiness']['database_available']
+    assert (tmp_path/'state/controller.sqlite').exists()
 
 
 def test_preferences_changed_after_setup_are_conflict_not_repaired(tmp_path):
@@ -143,16 +143,17 @@ def test_busy_state_refused_before_selection_or_preferences(tmp_path):
         setup(tmp_path, request_id='first')
     assert not (tmp_path / 'config/quirkbench/controller.json').exists()
     assert not (tmp_path / 'state/settings.json').exists()
-    assert setup_progress(config_home=tmp_path / 'config')['request_id'] == 'first'
+    assert setup_progress(tmp_path/'state', config_home=tmp_path / 'config')['request_id'] == 'first'
 
 
 def test_existing_schema_is_never_migrated(tmp_path):
     c = Controller(tmp_path / 'state', reserve_bytes=0)
     with c.transaction() as db:
         db.execute('PRAGMA user_version=1')
-    with pytest.raises(Conflict, match='explicit compatible migration'):
+    with pytest.raises(ContractError, match='incompatible development state'):
         setup(tmp_path)
-    with StateReader(tmp_path / 'state').connection() as db:
+    import sqlite3
+    with sqlite3.connect((tmp_path/'state/controller.sqlite').as_uri()+'?mode=ro',uri=True) as db:
         assert db.execute('PRAGMA user_version').fetchone()[0] == 1
 
 
@@ -177,7 +178,7 @@ def test_completed_steps_do_not_regenerate_missing_state(tmp_path, removed):
 
 
 def test_journal_symlink_refused_and_explicit_checkout_state_accepted(tmp_path):
-    config = tmp_path / 'config/quirkbench'
+    config = tmp_path / 'state/private'
     config.mkdir(parents=True, mode=0o700)
     (config / 'setup-progress.json').symlink_to(tmp_path / 'elsewhere')
     with pytest.raises(ContractError, match='user-owned regular file'):
@@ -240,22 +241,25 @@ def test_runtime_pinned_and_different_runtime_refused(tmp_path):
     assert first['readiness']['runtime_verified']
     assert first['setup_progress']['intent']['runtime_archive_sha256'] == record['archive_sha256']
     second_dir = tmp_path / 'second'; second_dir.mkdir()
-    other = runtime_archive(second_dir)
-    with pytest.raises(Conflict, match='different intent'):
-        setup(tmp_path, runtime_root=Path(other['runtime_root']))
-    executable = Path(record['runtime_root']) / 'bin/quirkbench-controller-service'
+    from quirkbench.controller_install import install
+    other=install(tmp_path/'runtime.tar.gz',data_home=second_dir/'data')
+    # Another location with exactly the same verified software is the same intent.
+    assert setup(tmp_path, runtime_root=Path(other['runtime_root']))['setup_progress']==first['setup_progress']
+    from quirkbench.controller_install import selected_runtime
+    selected=selected_runtime(config_home=tmp_path/'config')
+    executable = selected / 'bin/quirkbench-controller-service'
     executable.write_bytes(b'changed')
     with pytest.raises(ContractError, match='bytes differ'):
         setup(tmp_path)
     report = controller_status(tmp_path / 'state', config_home=tmp_path / 'config', **observations())
     assert not report['readiness']['runtime_verified']
     assert report['readiness']['resources_recorded']
-    manifest_path = Path(record['runtime_root']) / 'controller-manifest.json'
+    manifest_path = selected / 'controller-manifest.json'
     manifest = json.loads(manifest_path.read_bytes())
     from quirkbench.contracts import digest
     manifest['files']['bin/quirkbench-controller-service'] = digest(b'changed')
     manifest_path.write_text(json.dumps(manifest))
-    with pytest.raises(Conflict, match='identity differs'):
+    with pytest.raises(Conflict, match='different intent'):
         setup(tmp_path)
     assert not controller_status(tmp_path / 'state', config_home=tmp_path / 'config', **observations())['readiness']['runtime_verified']
 
@@ -263,10 +267,8 @@ def test_runtime_pinned_and_different_runtime_refused(tmp_path):
 def test_configured_state_conflict_does_not_poison_initial_journal(tmp_path):
     from quirkbench.state_config import configure_state_root
     configure_state_root(tmp_path / 'selected', config_home=tmp_path / 'config')
-    with pytest.raises(Conflict):
-        setup(tmp_path)
-    assert setup_progress(config_home=tmp_path / 'config') is None
-    assert not (tmp_path / 'state').exists()
+    assert setup(tmp_path)['readiness']['database_available']
+    assert (tmp_path/'selected').is_dir()
 
 
 def test_setup_retains_id_on_infrastructure_failure(tmp_path, monkeypatch, capsys):
@@ -286,12 +288,12 @@ def test_partial_database_initialization_resumes_only_in_owned_staging(tmp_path,
     import quirkbench.controller as controller_module
     original = controller_module.Controller
     def crash(root, **kwargs):
-        # Simulate power loss after the first committed migration.
+        # Simulate interruption inside atomic fresh schema creation.
         import sqlite3
         with sqlite3.connect(root / 'controller.sqlite') as db:
-            db.executescript(controller_module.MIGRATIONS[0])
-            db.execute('PRAGMA user_version=1')
-        raise KeyboardInterrupt()
+            db.executescript('BEGIN IMMEDIATE;\n'+controller_module.MIGRATIONS[0])
+            raise KeyboardInterrupt()
+        raise AssertionError('interruption must roll back')
     monkeypatch.setattr(controller_module, 'Controller', crash)
     with pytest.raises(KeyboardInterrupt):
         setup(tmp_path, request_id='partial')

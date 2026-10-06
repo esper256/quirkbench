@@ -58,6 +58,7 @@ def joined(candidate_setup,observations,monkeypatch,tmp_path):
     monkeypatch.setattr(baseline_catalog,'installed_catalog',lambda:catalog)
     c.register(report(collect(observations),mode='recovery'))
     investigations.start(c,'investigation','target-1','start',workspace='kernel')
+    (c.root/'private/signing').mkdir(parents=True,exist_ok=True)
     config={**builder,'key':str(c.root/'private/controller.key'),'reserve_gib':0,
         'composition_signing':{'home':str(c.root/'private/signing'),'fingerprint':'A'*40},
         'repositories':{'lab':str(c.root/'repositories/lab')}}
@@ -226,7 +227,11 @@ def configure_compose(joined,monkeypatch):
         if argv[0]!='ostree':return native_run(argv,**kw)
         calls.append(('owner',argv))
         repo=Path(argv[1].split('=',1)[1])
-        if 'checkout' in argv:checkout(repo.parent,Path(argv[-1]))
+        if 'checkout' in argv:
+            parent=repo.parent
+            if repo.name=='repository':
+                parent=next(p for p in (repo.parent.parent/'work').iterdir() if p.name.startswith('compose-'))
+            checkout(parent,Path(argv[-1]))
         if 'init' in argv:repo.mkdir();(repo/'config').write_text('[core]\nrepo_version=1\nmode=archive\n')
         return SimpleNamespace(stdout='',returncode=0)
     def owner_output(argv,**kw):
@@ -358,7 +363,8 @@ def test_adoption_checks_retained_sysroot_and_excludes_shadow(joined,bounded_bui
     def forge(claim,coordinator):
         if claim['stage']!='job_inputs':return
         record_path=Path(claim['stage_dir'])/'diagnostics/stage-result.json';record=json.loads(record_path.read_bytes())
-        item=record['result']['files']['target_sysroot'];path=Path(claim['stage_dir'])/item['path'];good=path.read_bytes()
+        from quirkbench import job_worker
+        item=record['result']['files']['target_sysroot'];path=Path(claim['stage_dir'])/job_worker.captured_input('target_sysroot');good=path.read_bytes()
         with tarfile.open(path,'a') as archive:
             member=tarfile.TarInfo(member_name);member.size=6;member.mode=0o600;archive.addfile(member,io.BytesIO(b'secret'))
         item['sha256']=digest(path.read_bytes());record_path.write_bytes(canonical(record))
@@ -384,7 +390,7 @@ def test_owner_rejects_forged_dependency_evidence_before_signing(joined,bounded_
     def forge(claim,coordinator):
         if claim['stage']!='os_compose':return
         record_path=Path(claim['stage_dir'])/'diagnostics/stage-result.json';record=json.loads(record_path.read_bytes())
-        data=record['result'];item=data['evidence'][role];path=Path(claim['stage_dir'])/item['path']
+        data=record['result'];item=data['evidence'][role];path=Path(claim['stage_dir'])/'output/artifacts/objects'/item['sha256']
         if role=='compose_dependency_rpms':
             with tarfile.open(path,'r:') as archive:
                 members=[(member,archive.extractfile(member).read()) for member in archive]
@@ -393,7 +399,7 @@ def test_owner_rejects_forged_dependency_evidence_before_signing(joined,bounded_
         elif role=='compose_dependency_lock':path.write_bytes(canonical({'packages':{}}))
         else:
             tree=json.loads(path.read_bytes());tree['repos'].append('unreviewed-external');path.write_bytes(canonical(tree))
-        item['sha256']=digest(path.read_bytes());provenance=data['deployment']['provenance']
+        item['sha256']=digest(path.read_bytes());path.rename(path.with_name(item['sha256']));provenance=data['deployment']['provenance']
         provenance['build_evidence']['artifacts'][role]=item['sha256']
         if role=='compose_dependency_lock':provenance['dependency_lock_sha256']=item['sha256']
         if role=='compose_tree':provenance['treefile_sha256']=item['sha256']

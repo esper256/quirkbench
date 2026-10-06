@@ -5,8 +5,7 @@
   "additionalProperties": false,
   "required": [
     "schema_version",
-    "request_id",
-    "archive"
+    "request_id"
   ],
   "properties": {
     "schema_version": {
@@ -16,10 +15,6 @@
     "request_id": {
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
-    },
-    "archive": {
-      "type": "string",
-      "pattern": "^/.+"
     }
   }
 }

@@ -147,6 +147,9 @@ class DevelopmentServices(ContainerWorkerServices):
         return 'stopped'
 
     def run(self,run,values):
+        from .development_run import validate_run
+        validate_run(run)
+        run={**run,'log':'build.log','status':'build.status'}
         deadline=time.time()+86400
         if os.geteuid()==0:raise ContractError('rootless user required')
         self.cgroup_manager=self.backend.select_manager(self.manager_override)

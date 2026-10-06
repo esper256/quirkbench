@@ -7,7 +7,7 @@ from .contracts import Conflict,ContractError,canonical,digest,identifier
 from .filesystem import _managed_path, _durable_directory
 from .controller_setup import _database_present
 from .filesystem import _strict_read
-from .controller_service import configuration,validate_configuration
+from .controller_service import configuration,validate_configuration,configuration_document,materialize_configuration
 from .enrollment_records import _document
 from .enrollment import _snapshot
 from .enrollment_client import endpoint
@@ -31,11 +31,11 @@ def history(root):
     if not journal.exists() and not journal.is_symlink():return None
     saved=load(_strict_read(directory,'journal.json'));intent=saved['intent']
     captured={key:_strict_read(directory,name) for key,name in FILES.items()}
-    if intent['state_root']!=str(root) or any(digest(raw)!=intent[key] for key,raw in captured.items()):
+    if any(digest(raw)!=intent[key] for key,raw in captured.items()):
         raise Conflict('publication setup retained inputs differ')
-    old=_document(captured['source_configuration_sha256']);new=_document(captured['destination_configuration_sha256'])
-    expected=destination(root,old,intent['repository_alias'],intent['repository_url'],intent['signing_home'],intent['signing_fingerprint'])
-    if expected!=new or captured['destination_configuration_sha256']!=canonical(new):
+    old=materialize_configuration(root,_document(captured['source_configuration_sha256']));new=materialize_configuration(root,_document(captured['destination_configuration_sha256']))
+    expected=destination(root,old,intent['repository_alias'],intent['repository_url'],new['composition_signing']['home'],intent['signing_fingerprint'])
+    if expected!=new or captured['destination_configuration_sha256']!=canonical(configuration_document(new)):
         raise Conflict('publication setup delta differs from explicit choices')
     tls_directory=Path(old['cert']).parent
     identity_raw=tls_read(tls_directory,'identity.json');identity=load_identity(identity_raw)
@@ -87,12 +87,12 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
     """Configure only a stopped, idle initial service; no keys, start or target grant."""
     from .controller_install import _idle
     identifier(request_id);identifier(alias)
-    root=_managed_path(root);signing_home=_managed_path(signing_home)
+    root=_managed_path(Path(root).expanduser().resolve());signing_home=_managed_path(signing_home)
     if not signing_home.is_dir():raise SetupUnavailable('provision an existing private composition signing home first')
     if not _database_present(root):raise SetupUnavailable('complete initial controller setup first')
     fault=fault_hook or (lambda _:None)
     directory=root/'private/publication-setup'
-    choices={'repository_alias':alias,'repository_url':url,'signing_home':str(signing_home),
+    choices={'repository_alias':alias,'repository_url':url,
         'signing_fingerprint':fingerprint}
     previous=history(root)
     if previous:
@@ -106,7 +106,7 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
     with private_lock(root/'command.lock') as command_fd,private_lock(root/'coordinator.lock') as owner_fd:
         _idle(root)
         config=configuration(root);current=_strict_read(root/'private','controller-service.json')
-        if current!=canonical(config):raise ContractError('publication setup requires canonical service configuration')
+        if current!=canonical(configuration_document(config)):raise ContractError('publication setup requires canonical service configuration')
         previous=history(root)
         if previous:
             saved,captured,old,new=previous
@@ -120,7 +120,7 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
                 return response(saved)
         else:
             old=config;new=destination(root,old,alias,url,signing_home,fingerprint)
-            captured={'source_configuration_sha256':current,'destination_configuration_sha256':canonical(new)}
+            captured={'source_configuration_sha256':current,'destination_configuration_sha256':canonical(configuration_document(new))}
             saved=None
         runtime=Path(old['runtime']).parent.parent
         tls_directory=Path(old['cert']).parent
@@ -151,7 +151,7 @@ def configure(root,alias,url,signing_home,fingerprint,request_id, *,unit=None,ru
             captured['public_key_sha256']=public_key
             repo=root/'repositories'/alias
             if repo.exists() or repo.is_symlink():raise Conflict('initial publication repository already exists; select a fresh explicit alias')
-            intent={'state_root':str(root),'repository_alias':alias,'repository_url':url,'signing_home':str(signing_home),
+            intent={'repository_alias':alias,'repository_url':url,
                 'signing_fingerprint':fingerprint,**{key:digest(raw) for key,raw in captured.items()},
                 'controller_tls_identity_sha256':digest(tls_material['identity.json']),'controller_certificate_sha256':snapshot['certificate_sha256']}
             saved=validate({'schema_version':2,'record_type':'publication-setup','request_id':request_id,

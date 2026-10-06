@@ -231,16 +231,9 @@ def execute(root,args, *,ready=None):
         if db.execute("SELECT 1 FROM sqlite_master WHERE name='attended_baseline_commands'").fetchone():
             old=replay(db,identifier(request),request_digest)
             if old is not None:return old
-    config=Path(args.repositories).expanduser().absolute() if args.repositories else Path(root)/'repositories.json'
-    raw=read_file(config.parent,config.name,limit=65536)
-    try:mapping=json.loads(raw,object_pairs_hook=_pairs,parse_constant=lambda _:(_ for _ in ()).throw(ContractError('nonfinite repository config')))
-    except (ValueError,UnicodeError,RecursionError) as exc:raise ContractError('invalid repository configuration') from exc
-    _depth(mapping)
-    if not isinstance(mapping,dict) or not mapping or len(mapping)>64:raise ContractError('bounded configured repository aliases required')
-    for alias,path in mapping.items():
-        identifier(alias)
-        if not isinstance(path,str) or not Path(path).is_absolute() or Path(path).resolve()!=Path(path):
-            raise ContractError('repository aliases require absolute canonical directory paths')
+    from .ostree_repository import configured_repositories
+    mapping=configured_repositories(root,args.repositories)
+    if not mapping:raise ContractError('configured repository aliases required')
     if args.reserve_gib<0:raise ContractError('reserve must be nonnegative')
     repository=OstreeRepository(mapping)
     with private_lock(Path(root)/'command.lock',shared=True):

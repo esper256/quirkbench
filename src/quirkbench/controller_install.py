@@ -5,7 +5,7 @@ preserves the unsigned development archive status and never installs host packag
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import fcntl
 import hashlib
 import gzip
@@ -15,6 +15,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import sqlite3
 import stat
 import subprocess
 import tarfile
@@ -44,10 +45,7 @@ def _home(explicit, env, suffix):
 
 
 def _managed(path):
-    path = Path(path)
-    if any(p.is_symlink() for p in (path, *path.parents)):
-        raise ContractError('managed installation paths cannot contain symlinks')
-    return path
+    return canonical_user_path(path)
 
 
 @contextmanager
@@ -163,7 +161,7 @@ def install(archive, *, data_home=None, expected_archive_sha256=None, expected_v
     base.mkdir(parents=True, exist_ok=True, mode=0o700)
     runtime = base / (manifest['version'] + '-' + archive_digest)
     record = {'schema_version':1,'version':manifest['version'],'archive_sha256':archive_digest,
-              'runtime_root':str(runtime),'signed':False,'qualified':False}
+              'signed':False,'qualified':False}
     expected_files = {**files, 'installation.json':canonical(record)}
     with _lock(base / '.install.lock'):
         if runtime.exists() or runtime.is_symlink():
@@ -181,18 +179,18 @@ def install(archive, *, data_home=None, expected_archive_sha256=None, expected_v
             finally:
                 if stage.exists(): shutil.rmtree(stage)
         atomic_write(base / 'last-installed.json', canonical(record))
-    return record
+    return {**record, 'runtime_root': str(runtime)}
 
 
 def verify_installation(runtime, expected_files=None):
-    runtime = Path(runtime)
-    if runtime.is_symlink() or runtime.resolve() != runtime or not runtime.is_dir():
-        raise ContractError('installation must be an existing canonical directory')
+    runtime = canonical_user_path(runtime)
+    if not runtime.is_dir():
+        raise ContractError('installation must be an existing directory')
     manifest_raw = read_file(runtime, 'controller-manifest.json', limit=LIMIT)
     manifest = _json(manifest_raw)
     record_raw = read_file(runtime, 'installation.json', limit=4096)
     record = _json(record_raw)
-    if (record.get('schema_version') != 1 or record.get('runtime_root') != str(runtime)
+    if (set(record) != {'schema_version','version','archive_sha256','signed','qualified'} or record.get('schema_version') != 1
             or record.get('version') != manifest.get('version')
             or not re.fullmatch('[0-9a-f]{64}', record.get('archive_sha256',''))
             or runtime.name != record['version'] + '-' + record['archive_sha256']):
@@ -218,7 +216,69 @@ def verify_installation(runtime, expected_files=None):
             raise ContractError('installation bytes differ; refusing replacement')
         if expected_files is not None and raw != expected_files[name]:
             raise ContractError('installation bytes differ; refusing replacement')
-    return record
+    return {**record, 'runtime_root': str(runtime)}
+
+
+def installation_identity(record):
+    """Receipt fields identify bytes; a returned lookup is only an observation."""
+    return {key: record[key] for key in ('schema_version','version','archive_sha256','signed','qualified')}
+
+
+def installation_settings(*, config_home=None):
+    directory = _managed(_home(config_home,'XDG_CONFIG_HOME','.config')/'quirkbench')
+    try: value=_json(read_file(directory,'installation-settings.json',limit=4096))
+    except FileNotFoundError: return {}
+    if not isinstance(value,dict) or set(value)-{'data_home','bin_home','cache_home'}:
+        raise ContractError('invalid installation settings')
+    for choice in value.values():
+        if not isinstance(choice,str) or not (Path(choice).is_absolute() or choice.startswith('~/')):
+            raise ContractError('installation locations must be absolute or home-relative')
+    return value
+
+
+def installation_location_choices(value,choices):
+    value=dict(value)
+    defaults={'data_home':_home(None,'XDG_DATA_HOME','.local/share'),
+          'cache_home':_home(None,'XDG_CACHE_HOME','.cache'),
+          'bin_home':canonical_user_path(Path.home()/'.local/bin')}
+    for name,choice in choices.items():
+        if name not in defaults:raise ContractError('unknown installation location')
+        if choice is None:continue
+        path=canonical_user_path(choice)
+        if path==defaults[name]:value.pop(name,None)
+        else:value[name]=str(choice) if str(choice).startswith('~/') else str(path)
+    return value
+
+
+def configure_installation_locations(*, config_home=None, owner_locked=False, **choices):
+    directory = _managed(_home(config_home,'XDG_CONFIG_HOME','.config')/'quirkbench')
+    directory.mkdir(parents=True,exist_ok=True,mode=0o700)
+    with nullcontext() if owner_locked else _lock(directory/'.installation.lock'):
+        value=installation_settings(config_home=config_home)
+        value=installation_location_choices(value,choices)
+        atomic_write(directory/'installation-settings.json',canonical(value))
+    return value
+
+
+def select_runtime(runtime, *, config_home=None, owner_locked=False):
+    record = verify_installation(runtime)
+    directory = _managed(_home(config_home,'XDG_CONFIG_HOME','.config')/'quirkbench')
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with nullcontext() if owner_locked else _lock(directory/'.installation.lock'):
+        configure_installation_locations(config_home=config_home,owner_locked=True,data_home=Path(record['runtime_root']).parents[2])
+        atomic_write(directory/'installation.json',canonical(installation_identity(record)))
+    return Path(record['runtime_root'])
+
+
+def selected_runtime(*, config_home=None):
+    directory = _managed(_home(config_home,'XDG_CONFIG_HOME','.config')/'quirkbench')
+    record = _json(read_file(directory,'installation.json',limit=4096))
+    settings=installation_settings(config_home=config_home)
+    data = _home(settings.get('data_home'),'XDG_DATA_HOME','.local/share')
+    runtime = data/'quirkbench/controller'/(record['version']+'-'+record['archive_sha256'])
+    if installation_identity(verify_installation(runtime)) != record:
+        raise Conflict('selected installation content differs')
+    return runtime
 
 
 def runtime_identity(executable):
@@ -244,9 +304,11 @@ def installation_report(root, *, cli_executable=None, service_ready=False):
     except (OSError,ValueError): pass
     try:
         with StateReader(root).connection() as db:
-            row = db.execute('SELECT runtime FROM controller_job_service WHERE id=1').fetchone()
-            if row: active = row['runtime']
-    except (OSError,ValueError,__import__('sqlite3').Error): pass
+            row = db.execute('SELECT software_sha256 FROM controller_job_service WHERE id=1').fetchone()
+            if row and configured:
+                from .controller_service import software_identity
+                if row['software_sha256']==software_identity(configuration(root)): active=configured
+    except (OSError,ValueError,sqlite3.Error): pass
     cli_executable = cli_executable or Path(__file__).resolve().parents[2]/'bin/quirkbench'
     cli_id, configured_id, active_id = (runtime_identity(x) for x in (cli_executable,configured,active))
     identities = [i for i in (cli_id,configured_id,active_id) if i]
@@ -283,25 +345,28 @@ def activate(record, root, *, config_home=None, bin_home=None,
     launchers = _managed(canonical_user_path(Path(bin_home or Path.home()/'.local/bin').resolve()))
     directory = _managed(config/'quirkbench')
     directory.mkdir(parents=True,exist_ok=True,mode=0o700)
-    journal = directory/'installation-activation.json'
+    journal = root/'private/installation-activation.json'
     link = launchers/'quirkbench'
     selection = directory/'installation.json'
     with _lock(directory/'.installation.lock'), _lock(root/'command.lock'):
         from .controller_reset import require_no_reset
         require_no_reset(root)
         if journal.exists(): raise Conflict('unfinished activation; run quirkbench dev install --rollback first')
-        old_config = configuration(root)
+        from .controller_service import configuration_document, materialize_configuration
+        old_config = materialize_configuration(root,_json(read_file(root,'private/controller-service.json',limit=65536)),runtime=selected_runtime(config_home=config))
         _idle(root)
         # Refuse to overwrite a user-written executable or a different unit contract.
         if link.exists() and not link.is_symlink(): raise Conflict('launcher is not an installation symlink')
-        saved = {'schema_version':2,'state_root':str(root),'launcher':str(link),
-                 'old_config':old_config,
+        saved = {'schema_version':2,                 'old_config':configuration_document(old_config),
                  'old_link':os.readlink(link) if link.is_symlink() else None,
                  'old_selection':selection.read_text() if selection.exists() else None,
-                 'new_record':record,'phase':'PREPARED'}
+                 'old_settings':(directory/'installation-settings.json').read_text() if (directory/'installation-settings.json').exists() else None,
+                 'attempted_settings':installation_location_choices(installation_settings(config_home=config),{'bin_home':launchers,'data_home':runtime.parents[2]}),
+                 'new_record':installation_identity(record),'phase':'PREPARED'}
         atomic_write(journal,canonical(saved))
         try:
             fault_hook('intent_recorded')
+            atomic_write(directory/'installation-settings.json',canonical(saved['attempted_settings']))
             with _lock(root/'coordinator.lock'):
                 # No startup, epoch advance or work-state mutation by the installer.
                 _idle(root)
@@ -310,46 +375,49 @@ def activate(record, root, *, config_home=None, bin_home=None,
                                          ('job_worker','quirkbench-job-worker'),('recovery_worker','quirkbench-worker')):
                     if name == 'recovery_worker' and name not in old_config: continue
                     new_config[name] = str(runtime/'bin'/executable)
-                atomic_write(root/'private/controller-service.json',canonical(new_config))
+                from .controller_service import configuration_document
+                new_config['software']={key:record[key] for key in ('version','archive_sha256')}
+                atomic_write(root/'private/controller-service.json',canonical(configuration_document(new_config)))
                 fault_hook('configuration_published')
                 launchers.mkdir(parents=True,exist_ok=True,mode=0o700)
                 _link(link,runtime/'bin/quirkbench')
-                atomic_write(selection,canonical(record))
+                select_runtime(runtime, config_home=config, owner_locked=True)
                 fault_hook('selection_published')
             status = {'background_work_ready':False,'controller_start_required':True,'next_command':'quirkbench admin controller run'}
             saved['phase']='VERIFIED';atomic_write(journal,canonical(saved))
             atomic_write(directory/'last-activation.json',canonical(saved))
-            journal.unlink();sync_directory(directory)
+            journal.unlink();sync_directory(journal.parent)
             return {**record,**status,'activated':True,'launcher':str(link)}
         except Exception:
             if journal.exists():
-                _rollback(journal,root,runner,ready)
+                _rollback(journal,root,runner,ready,directory)
             raise
 
 
-def _rollback(journal,root,runner,ready):
+def _rollback(journal,root,runner,ready,directory):
     saved = _json(read_file(journal.parent,journal.name,limit=65536))
-    if saved.get('schema_version') not in (1,2):raise ContractError('unsupported activation journal')
-    _managed(Path(saved['launcher']).parent)
-    if saved['state_root'] != str(root): raise Conflict('rollback belongs to another controller state')
+    if saved.get('schema_version') != 2:raise ContractError('unsupported activation journal')
+    options=installation_settings(config_home=directory.parent)
+    old_options=_json(saved['old_settings'].encode()) if saved['old_settings'] else {}
+    if options not in (old_options,saved['attempted_settings']):raise Conflict('installation settings superseded activation; preserve the journal')
+    launchers=_managed(canonical_user_path(saved['attempted_settings'].get('bin_home',Path.home()/'.local/bin')))
     _idle(root)
     with _lock(root/'coordinator.lock'):
         _idle(root)
         atomic_write(root/'private/controller-service.json',canonical(saved['old_config']))
-        if saved['schema_version']==1:
-            # Restore historical bytes for rollback compatibility, never start a daemon.
-            unit=_managed(Path(saved['unit']))
-            atomic_write(unit,saved['old_unit'].encode())
-        link = Path(saved['launcher'])
+        link = launchers/'quirkbench'
         if saved['old_link'] is None:
             link.unlink(missing_ok=True)
             if link.parent.exists(): sync_directory(link.parent)
         else: _link(link,saved['old_link'])
-        selection = journal.parent/'installation.json'
+        settings=directory/'installation-settings.json'
+        if saved['old_settings'] is None:settings.unlink(missing_ok=True)
+        else:atomic_write(settings,saved['old_settings'].encode())
+        selection = directory/'installation.json'
         if saved['old_selection'] is None: selection.unlink(missing_ok=True)
         else: atomic_write(selection,saved['old_selection'].encode())
     status = {'background_work_ready':False,'controller_start_required':True,'next_command':'quirkbench admin controller run'}
-    saved['phase']='ROLLED_BACK';atomic_write(journal.parent/'last-activation.json',canonical(saved))
+    saved['phase']='ROLLED_BACK';atomic_write(directory/'last-activation.json',canonical(saved))
     journal.unlink();sync_directory(journal.parent)
     return {**status,'rolled_back':True}
 
@@ -359,4 +427,4 @@ def rollback(root, *, config_home=None, runner=subprocess.run, ready=require_rea
     with _lock(directory/'.installation.lock'), _lock(Path(root)/'command.lock'):
         from .controller_reset import require_no_reset
         require_no_reset(root)
-        return _rollback(directory/'installation-activation.json',Path(root).resolve(),runner,ready)
+        return _rollback(Path(root).resolve()/'private/installation-activation.json',Path(root).resolve(),runner,ready,directory)

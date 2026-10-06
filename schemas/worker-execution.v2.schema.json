@@ -52,16 +52,16 @@
           "type": "string",
           "format": "uuid"
         },
-        "stage_dir": {
-          "type": "string",
-          "pattern": "^/"
-        },
         "input_digest": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
         },
         "deadline": {
           "type": "number"
+        },
+        "stage_nonce": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
         }
       },
       "required": [
@@ -72,7 +72,7 @@
         "worker_generation",
         "worker_unit",
         "worker_boot_id",
-        "stage_dir",
+        "stage_nonce",
         "input_digest",
         "deadline"
       ]

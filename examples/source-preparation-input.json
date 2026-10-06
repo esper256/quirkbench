@@ -7,8 +7,5 @@
   "allowed_untracked": [
     "new.c"
   ],
-  "provenance": {},
-  "root_device": 1,
-  "root_inode": 2,
-  "source_root": "/home/operator/src/linux"
+  "provenance": {}
 }

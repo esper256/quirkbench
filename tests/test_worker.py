@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 import quirkbench.controller as controller_module
-from quirkbench.contracts import CapabilityReport, Conflict
+from quirkbench.contracts import CapabilityReport, Conflict,ContractError
 from quirkbench.controller import Controller, MIGRATIONS
 
 
@@ -21,22 +21,16 @@ def epoch(c):
         return db.execute('SELECT epoch FROM controller_lifecycle WHERE id=1').fetchone()[0]
 
 
-def test_schema_upgrade_refuses_an_active_coordinator_lock(tmp_path):
-    root = tmp_path / 'old-state'
-    root.mkdir()
-    db = sqlite3.connect(root / 'controller.sqlite')
-    for number, migration in enumerate(MIGRATIONS[:-1], start=1):
-        db.executescript(migration + f'\nPRAGMA user_version={number};')
-    db.close()
-    fd = os.open(root / 'coordinator.lock', os.O_RDWR | os.O_CREAT, 0o600)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        with pytest.raises(Conflict, match='active controller'):
-            Controller(root, reserve_bytes=0)
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
-    assert epoch(Controller(root, reserve_bytes=0)) == 0
+def test_incompatible_development_schema_is_preserved(tmp_path):
+    root=tmp_path/'old-state';root.mkdir()
+    db=sqlite3.connect(root/'controller.sqlite')
+    for number,definition in enumerate(MIGRATIONS[:-1],start=1):
+        db.executescript(definition+f'\nPRAGMA user_version={number};')
+    db.close();before=(root/'controller.sqlite').read_bytes()
+    with pytest.raises(ContractError,match='fresh --state'):
+        Controller(root,reserve_bytes=0)
+    assert (root/'controller.sqlite').read_bytes()==before
+    assert not (root/'artifacts').exists()
 
 
 def test_exactly_one_lifecycle_owner_and_read_only_query_preserves_epoch(tmp_path):

@@ -76,27 +76,24 @@ def test_descriptor_reuse_cannot_substitute_an_unrelated_lock(tmp_path, monkeypa
         assert changed
 
 
-def test_controller_readiness_uses_foreground_owner_and_expires_on_exit(tmp_path):
+def test_controller_readiness_uses_foreground_owner_and_expires_on_exit(tmp_path,monkeypatch):
     from quirkbench.controller import Controller
     from quirkbench.controller_service import advertise, require_ready
     from quirkbench.contracts import canonical
     root = tmp_path/'state'
     controller = Controller(root, reserve_bytes=0)
-    runtime = tmp_path/'bin'
-    runtime.mkdir()
-    launcher = runtime/'quirkbench-controller-service'
-    worker = runtime/'quirkbench-job-worker'
-    for path in (launcher, worker):
-        path.write_text('#!/bin/sh\nexit 0\n')
-        path.chmod(0o755)
-    private = root/'private'
-    private.mkdir(exist_ok=True)
-    certificate, key = private/'cert.pem', private/'key.pem'
-    certificate.write_text('disposable test certificate')
-    key.write_text('disposable test key')
-    (private/'controller-service.json').write_bytes(canonical({
-        'runtime':str(launcher),'job_worker':str(worker), 'cert':str(certificate),
-        'key':str(key),'credential_registry':True}))
+    from test_controller_install import make_archive
+    from quirkbench.controller_install import install,select_runtime
+    from quirkbench.contracts import digest
+    monkeypatch.setenv('XDG_CONFIG_HOME',str(tmp_path/'config'))
+    record=install(make_archive(tmp_path),data_home=tmp_path/'data')
+    runtime=select_runtime(record['runtime_root'])
+    launcher=runtime/'bin/quirkbench-controller-service'
+    tls=root/'private/controller-tls'/('setup-'+digest(b'fixture')[:32]);tls.mkdir(parents=True)
+    for name in ('controller.crt','controller.key'):(tls/name).write_bytes(b'disposable test trust')
+    (root/'private/controller-service.json').write_bytes(canonical({
+        'software':{key:record[key] for key in ('version','archive_sha256')},
+        'tls_identity':{'kind':'setup','request_id':'fixture'},'credential_registry':True}))
     def no_manager(*args, **kwargs):
         pytest.fail('readiness must not invoke a service manager')
     with controller.lifecycle() as active:

@@ -36,7 +36,7 @@ def validate_result(value):
 
 def binding(intent):
     args=intent.get('arguments')
-    if (intent.get('kind')!=KIND or intent.get('local_paths')!={} or intent.get('source_refs')!=[]
+    if (intent.get('kind')!=KIND or 'local_paths' in intent or intent.get('source_refs')!=[]
             or intent.get('campaign_id') is not None or intent.get('device_id') is not None
             or not isinstance(args,dict) or set(args)!=BUILDER_FIELDS|{'schema_version','candidate_input_sha256'}
             or type(args['schema_version']) is not int or args['schema_version']!=1):

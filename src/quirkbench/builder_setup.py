@@ -13,6 +13,7 @@ import time
 from .contracts import ContractError, Conflict, canonical, digest, sha256
 from .state_reader import StateReader
 from .filesystem import read_file
+from .store import atomic_write
 
 KIND = 'builder_prepare'
 STAGES = {'builder_capture', 'builder_import'}
@@ -30,21 +31,18 @@ def arguments(statement, statement_sha256):
 
 def binding(intent):
     args = intent.get('arguments')
-    paths = intent.get('local_paths')
+    paths = 'local_paths' in intent
     if (intent.get('kind') != KIND or intent.get('campaign_id') is not None
             or intent.get('device_id') is not None or intent.get('source_refs') != []
             or intent.get('input_refs') != [] or not isinstance(args, dict) or set(args) != FIELDS
             or type(args['schema_version']) is not int or args['schema_version'] != 1
-            or not isinstance(paths, dict) or set(paths) != {'builder_archive'}):
+            or paths):
         raise ContractError('invalid fixed builder preparation intent')
     for name in ('release_statement_sha256', 'builder_archive_sha256'):
         sha256(args[name])
     for name in ('builder_image_digest', 'builder_config_digest'):
         if not isinstance(args[name], str) or not re.fullmatch(r'sha256:[0-9a-f]{64}', args[name]):
             raise ContractError('invalid builder preparation image identity')
-    path = paths['builder_archive']
-    if not isinstance(path, str) or len(path) > 4096 or not Path(path).is_absolute() or str(Path(path)) != path:
-        raise ContractError('invalid builder preparation archive path')
     return args
 
 
@@ -58,7 +56,7 @@ def prepare(root, runtime, archive, request_id, *, config_home=None, release_ins
     from .installed_release import inspect_selected
     from .filesystem import private_lock
     from .job_operations import envelope
-    root = _managed_path(root)
+    root = _managed_path(Path(root).expanduser().resolve())
     if not _database_present(root):
         raise ContractError('complete controller setup before builder preparation')
     (ready or require_ready)(root)
@@ -72,7 +70,7 @@ def prepare(root, runtime, archive, request_id, *, config_home=None, release_ins
     if (which or shutil.which)(engine) is None:
         from .setup_contracts import SetupUnavailable
         raise SetupUnavailable('Install the configured local container engine, then retry builder preparation; setup installs no host packages.')
-    archive = Path(archive).expanduser().absolute()
+    archive = Path(archive).expanduser().resolve()
     if archive.resolve() != archive or not archive.is_file() or archive.is_symlink():
         raise ContractError('builder archive must be an existing canonical regular file')
     if (archive.is_relative_to(root / 'private') or archive == root / 'controller.sqlite'
@@ -82,8 +80,21 @@ def prepare(root, runtime, archive, request_id, *, config_home=None, release_ins
     # starts a process; the immutable signed digest fences changing loose input.
     with private_lock(root / 'command.lock', shared=True):
         c = Controller(root, reserve_bytes=int(config.get('reserve_gib', 20) * 1024**3))
-        row = c.admit_operation(request_id, KIND, args, local_paths={'builder_archive': str(archive)})
+        select_archive(root,archive)
+        row = c.admit_operation(request_id, KIND, args)
         return envelope(root, row, request_id)
+
+
+def select_archive(root,archive):
+    atomic_write(Path(root)/'builder-input.json',canonical({'archive':str(archive)}))
+
+
+def selected_archive(root):
+    from .contracts import identifier
+    value=json.loads(read_file(Path(root),'builder-input.json',limit=8192))
+    if set(value)!={'archive'} or not isinstance(value['archive'],str):raise ContractError('configure the external builder archive')
+    path=Path(value['archive']).expanduser().absolute()
+    return path.parent.resolve()/path.name
 
 
 def reserve_bytes(root):
@@ -103,7 +114,7 @@ def check_space(path, amount, reserve):
 
 def capture(intent, stage, verify, report, *, state_root):
     args = binding(intent)
-    source = Path(intent['local_paths']['builder_archive'])
+    source = selected_archive(state_root)
     if source.parent.resolve() != source.parent:
         raise ContractError('builder archive parent is linked')
     fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -133,8 +144,7 @@ def capture(intent, stage, verify, report, *, state_root):
         with destination.open('rb') as stream:
             inspect_builder_archive(stream, args['builder_config_digest'], require_no_entrypoint=True, verify=verify)
         verify()
-        return {'schema_version': 1, 'archive_path': 'output/builder.tar',
-                'archive_sha256': args['builder_archive_sha256'], 'size_bytes': total}
+        return {'schema_version': 1, 'archive_sha256': args['builder_archive_sha256'], 'size_bytes': total}
     finally:
         os.close(fd)
 
@@ -192,12 +202,12 @@ def consume(coordinator, claim, intent, data):
     from .job_operations import adopt_inputs
     args = binding(intent); c = coordinator.owner.controller
     if claim['stage'] == 'builder_capture':
-        if (not isinstance(data, dict) or set(data) != {'schema_version', 'archive_path', 'archive_sha256', 'size_bytes'}
+        if (not isinstance(data, dict) or set(data) != {'schema_version', 'archive_sha256', 'size_bytes'}
                 or type(data['schema_version']) is not int or data['schema_version'] != 1
-                or data['archive_path'] != 'output/builder.tar' or data['archive_sha256'] != args['builder_archive_sha256']
+                or data['archive_sha256'] != args['builder_archive_sha256']
                 or type(data['size_bytes']) is not int or not 0 < data['size_bytes'] <= MAX_ARCHIVE):
             raise ContractError('invalid captured builder result')
-        value = coordinator.staged(claim, data['archive_path'], args['builder_archive_sha256'])
+        value = coordinator.staged(claim, 'output/builder.tar', args['builder_archive_sha256'])
         if value.size != data['size_bytes']:
             raise ContractError('captured builder size differs')
         from .recovery_podman import _verify_retained_builder_archive

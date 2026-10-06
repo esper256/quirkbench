@@ -54,7 +54,7 @@ def test_ordinary_shutdown_state_preserves_permissions_and_blocks_writers(tmp_pa
     agent=TargetAgent(client,control/'agent',report)
     directory=control/'shutdown';directory.mkdir();directory.chmod(0o755)
     value={'schema_version':1,'record_type':'recovery-shutdown','request_id':'shutdown',
-        'control_root':str(control),'boot_id':'original-boot','boot_config_sha256':'a'*64,
+        'boot_id':'original-boot','boot_config_sha256':'a'*64,
         'source_sha256':{},'controller_intent':None,'local_attended':True,
         'completed_steps':['retained'],'preparation':None}
     path=directory/'active.json';path.write_bytes(canonical(value));path.chmod(0o644)
@@ -67,12 +67,12 @@ def test_ordinary_shutdown_state_preserves_permissions_and_blocks_writers(tmp_pa
     assert {p:p.stat().st_mode for p in modes}==modes
 
 
-@pytest.mark.parametrize('change',['symlink','directory-link','oversized','invalid','wrong-root'])
+@pytest.mark.parametrize('change',['symlink','directory-link','oversized','invalid','obsolete-root'])
 def test_shutdown_lookup_rejects_unusable_or_misattributed_fence(tmp_path,change):
     control=tmp_path/'control';control.mkdir()
     directory=control/'shutdown';directory.mkdir()
     value={'schema_version':1,'record_type':'recovery-shutdown','request_id':'shutdown',
-        'control_root':str(control),'boot_id':'original-boot','boot_config_sha256':'a'*64,
+        'boot_id':'original-boot','boot_config_sha256':'a'*64,
         'source_sha256':{},'controller_intent':None,'local_attended':True,
         'completed_steps':['retained'],'preparation':None}
     path=directory/'active.json';path.write_bytes(canonical(value))
@@ -129,7 +129,8 @@ def test_controller_pauses_all_work_preserves_outcomes_and_reconciles_before_del
 
 def test_real_authenticated_https_agent_delivery_and_local_preparation_ack(paired):
     c,control,result,report=paired
-    config=json.loads((c.root/'private/controller-service.json').read_bytes())
+    from quirkbench.controller_service import configuration
+    config=configuration(c.root)
     server=make_server(c,certfile=config['cert'],keyfile=config['key'],credential_registry=CredentialRegistry(c.root))
     thread=threading.Thread(target=server.serve_forever,daemon=True)
     native=NativeCommands();retained=[]

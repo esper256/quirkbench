@@ -63,12 +63,11 @@ def _git_metadata(workspace):
 
 
 def validate(value):
-    fields={'schema_version','record_type','workspace_id','base_oid','capture_sha256','workspace_path','allowed_untracked','provenance'}
+    fields={'schema_version','record_type','workspace_id','base_oid','capture_sha256','allowed_untracked','provenance'}
     if (not isinstance(value,dict) or set(value)!=fields or type(value['schema_version']) is not int
             or value['schema_version']!=1 or value['record_type']!='source-workspace-preparation'):
         raise ContractError('invalid private workspace preparation')
     identifier(value['workspace_id']);sha256(value['capture_sha256'])
-    if value['workspace_path']!='output/workspace':raise ContractError('workspace must be the fixed private stage output')
     validate_capture({'schema_version':1,'record_type':'source-capture','base_oid':value['base_oid'],
         'archive_sha256':'0'*64,'manifest_sha256':'0'*64,'file_count':1,'allowed_untracked':value['allowed_untracked'],
         'provenance':value['provenance'],'complete':True})
@@ -131,5 +130,5 @@ def prepare(repository,base_oid,allowed_untracked,stage,store,workspace_id, *,wr
             stage_guard();output_guard();source_guard();workspace_guard()
             # The owner independently verifies this stopped stage before selection.
             return validate({'schema_version':1,'record_type':'source-workspace-preparation','workspace_id':workspace_id,
-                'base_oid':base_oid,'capture_sha256':original_receipt.sha256,'workspace_path':'output/workspace',
+                'base_oid':base_oid,'capture_sha256':original_receipt.sha256,
                 'allowed_untracked':original['allowed_untracked'],'provenance':original['provenance']})

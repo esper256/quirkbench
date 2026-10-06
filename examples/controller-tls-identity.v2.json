@@ -9,6 +9,9 @@
     "controller.key": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "controller.crt": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
   },
-  "previous_directory": "setup-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "previous_identity_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  "previous_identity_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "previous_identity": {
+    "kind": "setup",
+    "request_id": "initial-controller"
+  }
 }

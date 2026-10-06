@@ -17,7 +17,7 @@ from quirkbench.contracts import Conflict, canonical
 from quirkbench.store import atomic_write
 
 
-def make_archive(directory):
+def make_archive(directory, payload=b'fixture'):
     """Build the small software archive at an explicitly supplied destination."""
     wheel=directory/'input.whl'
     names=('cli.py','job_worker.py','job_operations.py','job_coordinator.py','job_cache.py',
@@ -27,12 +27,17 @@ def make_archive(directory):
             'guide/controller-installation.md','guide/recovery-acquisition.md','guide/build-and-boot.md')
     with zipfile.ZipFile(wheel,'w') as out:
         for name in names:
-            raw=b'fixture'
+            raw=payload
             out.writestr('quirkbench/'+name,raw)
         out.writestr('quirkbench-0.1.0.dist-info/METADATA','Name: quirkbench\nVersion: 0.1.0\n')
     output=directory/'arbitrary-name.tar.gz'
     build_controller_archive(wheel,output)
     return output
+
+
+@pytest.fixture(autouse=True)
+def local_configuration(tmp_path,monkeypatch):
+    monkeypatch.setenv('XDG_CONFIG_HOME',str(tmp_path/'config'))
 
 
 @pytest.fixture
@@ -125,18 +130,20 @@ class Services:
 
 def configured(tmp_path,archive):
     record=install(archive,data_home=tmp_path/'data')
-    old=tmp_path/'old-runtime/bin';old.mkdir(parents=True)
-    for name in ('quirkbench','quirkbench-controller-service','quirkbench-job-worker','quirkbench-worker'):
-        path=old/name;path.write_text('old');path.chmod(0o755)
+    old_dir=tmp_path/'old-archive';old_dir.mkdir()
+    old_record=install(make_archive(old_dir,payload=b'old'),data_home=tmp_path/'data')
+    old=Path(old_record['runtime_root'])/'bin'
     root=tmp_path/'state';controller=Controller(root,reserve_bytes=0)
-    (root/'private').mkdir(exist_ok=True,mode=0o700)
-    for name in ('cert','key','tokens'): atomic_write(root/'private'/name,b'private')
-    config={'runtime':str(old/'quirkbench-controller-service'),'job_worker':str(old/'quirkbench-job-worker'),
-            'recovery_worker':str(old/'quirkbench-worker'),'cert':str(root/'private/cert'),
-            'key':str(root/'private/key'),'tokens_file':str(root/'private/tokens')}
+    tls=root/'private/controller-tls'/('setup-'+__import__('hashlib').sha256(b'fixture').hexdigest()[:32])
+    tls.mkdir(parents=True,mode=0o700)
+    for name in ('controller.crt','controller.key'):atomic_write(tls/name,b'private')
+    config={'software':{key:old_record[key] for key in ('version','archive_sha256')},
+            'tls_identity':{'kind':'setup','request_id':'fixture'},'credential_registry':True,'recovery_enabled':True}
     atomic_write(root/'private/controller-service.json',canonical(config))
     conf=tmp_path/'config';unit=conf/'systemd/user/quirkbench-controller.service';unit.parent.mkdir(parents=True)
-    atomic_write(unit,('[Service]\nExecStart='+config['runtime']+' --state '+str(root)+'\nKillMode=control-group\n').encode())
+    atomic_write(unit,('[Service]\nExecStart='+str(old/'quirkbench-controller-service')+' --state '+str(root)+'\nKillMode=control-group\n').encode())
+    from quirkbench.controller_install import select_runtime
+    select_runtime(Path(old_record['runtime_root']),config_home=conf)
     binary=tmp_path/'bin';binary.mkdir();(binary/'quirkbench').symlink_to(old/'quirkbench')
     return record,root,controller,conf,binary,config
 
@@ -152,12 +159,13 @@ def test_activation_aligns_all_paths_and_preserves_private_settings(tmp_path,arc
     assert answer['controller_start_required'] and services.calls==[]
     config=json.loads((root/'private/controller-service.json').read_bytes())
     runtime=Path(record['runtime_root'])
-    for key in ('runtime','job_worker','recovery_worker'):assert Path(config[key]).parent==runtime/'bin'
-    for key in ('cert','key','tokens_file'):assert config[key]==old[key]
+    assert config['software']=={key:record[key] for key in ('version','archive_sha256')}
+    assert not {'runtime','job_worker','recovery_worker','cert','key'} & set(config)
+    for key in ('tls_identity','credential_registry','recovery_enabled'):assert config[key]==old[key]
     assert (binary/'quirkbench').resolve()==runtime/'bin/quirkbench'
     assert 'archive_sha256' in json.loads((conf/'quirkbench/installation.json').read_bytes())
-    assert not (conf/'quirkbench/installation-activation.json').exists()
-    assert (Path(old['runtime'])).read_text()=='old'
+    assert not (root/'private/installation-activation.json').exists()
+    assert (tmp_path/'data/quirkbench/controller'/('0.1.0-'+old['software']['archive_sha256'])/'lib/quirkbench/cli.py').read_bytes()==b'old'
 
 
 def test_configured_builder_survives_activation_restart_and_retention(tmp_path,archive):
@@ -230,7 +238,7 @@ def test_failed_publication_restores_old_configuration_and_launcher(tmp_path,arc
     with pytest.raises(Conflict,match='publication interrupted'):
         activate(record,root,config_home=conf,bin_home=binary,fault_hook=fail)
     assert json.loads((root/'private/controller-service.json').read_bytes())==old
-    assert (binary/'quirkbench').resolve()==Path(old['runtime']).with_name('quirkbench')
+    assert (binary/'quirkbench').resolve()==tmp_path/'data/quirkbench/controller'/('0.1.0-'+old['software']['archive_sha256'])/'bin/quirkbench'
     assert json.loads((conf/'quirkbench/last-activation.json').read_bytes())['phase']=='ROLLED_BACK'
 
 
@@ -239,7 +247,7 @@ def test_interrupted_activation_requires_explicit_rollback(tmp_path,archive):
     def crash(_):raise KeyboardInterrupt()
     with pytest.raises(KeyboardInterrupt):
         activate(record,root,config_home=conf,bin_home=binary,runner=Services(root,record),fault_hook=crash)
-    assert (conf/'quirkbench/installation-activation.json').exists()
+    assert (root/'private/installation-activation.json').exists()
     with pytest.raises(Conflict,match='unfinished'):
         activate(record,root,config_home=conf,bin_home=binary,runner=Services(root,record),ready=ready)
     assert rollback(root,config_home=conf,runner=Services(root,record),ready=ready)['rolled_back']
@@ -257,11 +265,12 @@ def test_failed_initial_activation_preserves_absent_launcher_directory(tmp_path,
     assert json.loads((root/'private/controller-service.json').read_bytes())==old
 
 
-def test_managed_installation_parent_symlink_cannot_redirect_into_checkout(tmp_path,archive):
+def test_selected_installation_directory_accepts_ordinary_alias(tmp_path,archive):
     checkout=tmp_path/'checkout';checkout.mkdir();(checkout/'.git').mkdir()
     data=tmp_path/'data';data.mkdir();(data/'quirkbench').symlink_to(checkout,target_is_directory=True)
-    with pytest.raises(ValueError,match='symlink'):install(archive,data_home=data)
-    assert list(checkout.iterdir())==[checkout/'.git']
+    record=install(archive,data_home=data)
+    assert Path(record['runtime_root']).is_relative_to(checkout)
+    assert (checkout/'.git').is_dir()
 
 
 def test_cli_activation_does_not_take_outer_shared_lock(tmp_path,archive,monkeypatch,capsys):
@@ -285,4 +294,4 @@ def test_rollback_refuses_new_work_after_interruption_before_stopping(tmp_path,a
     with pytest.raises(Conflict,match='outstanding'):
         rollback(root,config_home=conf,runner=services,ready=ready)
     assert services.calls==[]
-    assert (conf/'quirkbench/installation-activation.json').exists()
+    assert (root/'private/installation-activation.json').exists()

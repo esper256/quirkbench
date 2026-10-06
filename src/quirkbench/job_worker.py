@@ -30,6 +30,12 @@ def object_file(root,value):
     return path
 
 
+def captured_input(role):
+    """Stable file role within one owned capture stage, never a retained locator."""
+    from .contracts import digest
+    return 'output/inputs/'+digest(role.encode())
+
+
 def input_files(kind,raw):
     """Declared file/hash pairs; never add arbitrary commands to the job."""
     if kind=='build':
@@ -81,12 +87,12 @@ def capture(kind,raw,stage,verify,report,*,state_root=None,excluded_roots=(),res
         if any(part in ('.gnupg','.ssh','credentials') for part in path.parts): raise ValueError('credential path is not a build input')
         _reject_credentials(path)
         if sha256_file(path)!=sha256(expected): raise ValueError('declared input changed: '+role)
-        destination=files/str(number)
+        destination=stage/captured_input(role)
         from .build_cache import _copy_file
         _copy_file(str(path),str(destination),reserve_bytes=reserve_bytes)
         if sha256_file(destination)!=sha256(expected) or sha256_file(path)!=expected:
             raise ValueError('declared input changed: '+role)
-        retained[role]={'path':str(destination.relative_to(stage)),'sha256':expected}
+        retained[role]={'sha256':expected}
         paths[role]=str(destination)
     if kind=='build':
         source=Path(raw['target_sysroot']); _safe_build_path(source); _reject_credentials(source)
@@ -98,13 +104,13 @@ def capture(kind,raw,stage,verify,report,*,state_root=None,excluded_roots=(),res
         copy=stage/'captured-sysroot'; shutil.copytree(source,copy,symlinks=True,ignore=ignore,copy_function=partial(_copy_file,reserve_bytes=reserve_bytes))
         if _tree_hash(copy)!=raw['target_tree_sha256'] or _tree_hash(source)!=raw['target_tree_sha256']:
             raise ValueError('target sysroot changed during capture')
-        archive=files/'sysroot.tar'
+        archive=stage/captured_input('target_sysroot')
         # No hardlinks or special nodes; validation rejects unsafe symlink targets.
         with tarfile.open(archive,'w',dereference=False) as stream:
             for path in sorted(copy.rglob('*')):
                 verify()
                 stream.add(path,arcname=path.relative_to(copy).as_posix(),recursive=False)
-        retained['target_sysroot']={'path':str(archive.relative_to(stage)),'sha256':sha256_file(archive)}
+        retained['target_sysroot']={'sha256':sha256_file(archive)}
         adjusted=dict(raw); adjusted.update({k:paths[k] for k in paths}); adjusted['target_sysroot']=str(copy)
         BuildInputs.from_mapping(adjusted).validate()
     verify()
@@ -149,6 +155,7 @@ def run_worker(root,operation,epoch,generation,stage,*,prepare_only=False):
     verify=heartbeat_writer(stage,claim,verify)
     report=StageProgress(output,claim.input_digest)
     stop=threading.Event(); lost=[]
+    from .worker_container_plan import private_inputs
     def pulse():
         while not stop.wait(2):
             try: verify()
@@ -174,7 +181,7 @@ def run_worker(root,operation,epoch,generation,stage,*,prepare_only=False):
         elif claim.kind=='recovery_download':
             from .recovery_download import capture as capture_download
             from .builder_setup import reserve_bytes
-            result=capture_download(intent,stage,verify,report,deadline=claim.deadline,reserve=reserve_bytes(root))
+            result=capture_download(intent,stage,verify,report,state_root=root,deadline=claim.deadline,reserve=reserve_bytes(root))
         elif claim.kind=='builder_prepare':
             from .builder_setup import capture as capture_builder, import_builder
             if claim.stage=='builder_capture':
@@ -188,16 +195,18 @@ def run_worker(root,operation,epoch,generation,stage,*,prepare_only=False):
                 payload_pending=prepare_only
         elif claim.stage=='job_inputs':
             _verify_retained_builder_archive(root,args['builder_archive_sha256'],args['builder_config_digest'])
-            raw=args.get('manifest')
+            from .job_operations import current_manifest
+            raw=None if args.get('schema_version')==3 else current_manifest(root,{'id':operation,'kind':claim.kind},args)
             if args.get('schema_version')==3:
                 from .investigation_pipeline import manifest
                 raw=manifest(root,args,claim.kind,stage=stage,verify=verify)
-            result=capture(claim.kind,raw,stage,verify,report,state_root=root,excluded_roots=args['excluded_roots'],reserve_bytes=reserve)
+            result=capture(claim.kind,raw,stage,verify,report,state_root=root,excluded_roots=([root/'private',root/'controller.sqlite'] if os.environ.get('QUIRKBENCH_WORKER_RECORD') else private_inputs(root)),reserve_bytes=reserve)
         else:
             _verify_retained_builder_archive(root,args['builder_archive_sha256'],args['builder_config_digest'])
             if not row['prepared_digest']: raise ValueError('retained inputs required before build')
             prepared=document(root,'artifacts/objects/'+row['prepared_digest'])
-            raw=args.get('manifest')
+            from .job_operations import current_manifest
+            raw=None if args.get('schema_version')==3 else current_manifest(root,{'id':operation,'kind':claim.kind},args)
             if args.get('schema_version')==3:
                 from .investigation_pipeline import manifest
                 raw=manifest(root,args,claim.kind,prepared=prepared)
@@ -264,13 +273,15 @@ def inner(kind,stage,cache,*,reserve_bytes=20*1024**3):
             from .worker_progress import ReportingRunner
             pipeline.runner=ReportingRunner(pipeline.runner,report)
             values=pipeline.build(BuildInputs.from_mapping(raw))
-            result={'outputs':{role:{'path':str((output/'artifacts/objects'/artifact.sha256).relative_to(stage)),**asdict(artifact)} for role,artifact in values.items()}}
+            result={'outputs':{role:asdict(artifact) for role,artifact in values.items()}}
         else:
             composer=FedoraComposer(stage/'work',stage/'unsigned-publication',controller_state=stage/'private-state',
                 event=compose_event,stage_only=True,reserve_bytes=reserve_bytes)
             manifest=composer.compose(ComposeInputs.from_mapping(raw))
-            result={'deployment':manifest.to_dict(),'repo':str(composer.staged_repo.relative_to(stage)),
-                    'evidence':{role:{'path':str(path.relative_to(stage)),'sha256':manifest.provenance['build_evidence']['artifacts'][role]} for role,path in composer.evidence_files.items()}}
+            os.rename(composer.staged_repo,output/'repository')
+            evidence_store=ArtifactStore(output/'artifacts',reserve_bytes=reserve_bytes)
+            result={'deployment':manifest.to_dict(),
+                    'evidence':{role:{'sha256':evidence_store.put_file(path).sha256} for role,path in composer.evidence_files.items()}}
         atomic_write(output/'outputs.json',canonical(result))
         return 0
     finally:

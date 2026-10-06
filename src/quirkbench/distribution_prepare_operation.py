@@ -81,7 +81,7 @@ def submit(controller,campaign_id,workspace_id,entry,builder,request_id, *,sourc
         binding(intent); retained = controller.store.put(raw)
         row = controller._admit_operation_db(db,request_id,'source_prepare',intent,request_digest,retained.sha256,refs,
             campaign_id=campaign_id,device_id=device)
-        if not saved: db.execute('INSERT INTO source_preparations VALUES(?,?,?,?)',(workspace_id,campaign_id,row['id'],artifact.sha256))
+        if not saved: db.execute('INSERT INTO source_preparations(workspace_id,campaign,operation,input_digest) VALUES(?,?,?,?)',(workspace_id,campaign_id,row['id'],artifact.sha256))
     return envelope(controller.root,row,request_id)
 
 
@@ -138,7 +138,7 @@ def pending(root,operation_id,value):
     if len(rows) != 1: raise Conflict('distribution source selection is ambiguous')
     event = json.loads(rows[0][0]); workspace = validate(event['workspace'])
     result = {'schema_version':1,'record_type':'source-workspace-preparation','workspace_id':workspace['workspace_id'],
-        'base_oid':workspace['base_oid'],'capture_sha256':event['capture_sha256'],'workspace_path':'output/workspace',
+        'base_oid':workspace['base_oid'],'capture_sha256':event['capture_sha256'],
         'allowed_untracked':workspace['allowed_untracked'],'provenance':workspace['provenance']}
     approved,capture,metadata = scope(reader.store,value,result)
     return selection(root,operation_id,approved),approved,result
@@ -229,19 +229,20 @@ def sync_parent(path,expected,verify):
 
 def verify_origin(coordinator,claim,intent,value,result):
     """Independent stopped-owner origin and exact reconstruction verification."""
+    from .worker_execution import stage_path
     from .distribution_source import snapshot,prepared_hash,import_git_policy
     from .source_capture import _git,_identity
     from .source_prepare_operation import selection
     c = coordinator.owner.controller
     approved,capture,metadata = scope(c.store,value,result)
     retained = selection(c.root,claim['id'],approved)
-    origin_stage = Path(retained[0]['source_stage'] if retained else claim['stage_dir'])/'distribution'
+    origin_stage = (stage_path(c.root,retained[0]['worker_stop'],claim['id']) if retained else Path(claim['stage_dir']))/'distribution'
     original = origin_stage/'source'
     def guard(): coordinator.verify(claim)
     entry = baseline(c.store,value)
     prepared_bytes = read_file(origin_stage,'prepared.json',limit=65536)
     expected = {'schema_version':1,'kernel_srpm_sha256':value['kernel_srpm_sha256'],'kernel_source_nevra':entry['kernel_source_nevra'],
-        'spec_sha256':metadata['spec_sha256'],'source':str(original),'source_tree_sha256':metadata['prepared_source_tree_sha256'],
+        'spec_sha256':metadata['spec_sha256'],'source_tree_sha256':metadata['prepared_source_tree_sha256'],
         'source_date_epoch':value['source_date_epoch']}
     if prepared_bytes != canonical(expected): raise ContractError('distribution origin differs from retained provenance')
     observed = snapshot(original,guard,git=True)

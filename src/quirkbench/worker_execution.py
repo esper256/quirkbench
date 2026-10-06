@@ -9,10 +9,24 @@ from .product_contracts import _pairs, _depth
 
 UNIT = re.compile(r'qb-worker-v2-[0-9a-f]{32}-[1-9][0-9]*\Z')
 CLAIM_FIELDS = ('id', 'kind', 'stage', 'worker_epoch', 'worker_generation',
-                'worker_unit', 'worker_boot_id', 'stage_dir', 'input_digest', 'deadline')
+                'worker_unit', 'worker_boot_id', 'stage_nonce', 'input_digest', 'deadline')
 PHASES = ('reserved', 'prepare', 'build', 'compose', 'candidate', 'recovery', 'builder-marker',
           'distribution', 'distribution-import')
 LIMIT = 65536
+
+
+def stage_path(root, claim, operation_id=None):
+    operation=operation_id or claim['id']
+    nonce=claim['stage_nonce'];generation=claim['worker_generation']
+    if (not isinstance(operation,str) or not re.fullmatch('[0-9a-f]{32}',operation)
+            or not isinstance(nonce,str) or not re.fullmatch('[0-9a-f]{32}',nonce)
+            or type(generation) is not int or generation<1):
+        raise ContractError('invalid worker stage identity')
+    return Path(root)/'workers'/operation/(str(generation)+'-'+nonce)
+
+
+def document(record):
+    return {**record,'claim':{key:value for key,value in record['claim'].items() if key!='stage_dir'}}
 
 
 def validate(record, root):
@@ -51,7 +65,7 @@ def validate(record, root):
         raise ContractError('invalid fixed payload parameters')
     if args: sha256(args['recipe_sha256'])
     claim=record['claim']
-    if not isinstance(claim,dict) or set(claim)!=set(CLAIM_FIELDS):
+    if not isinstance(claim,dict) or set(claim) not in (set(CLAIM_FIELDS),set(CLAIM_FIELDS)|{'stage_dir'}):
         raise ContractError('invalid recorded worker claim')
     if bootstrap and (claim['kind'] != 'builder_prepare' or claim['stage'] not in ('builder_capture','builder_import')):
         raise ContractError('bootstrap is restricted to signed builder preparation')
@@ -67,10 +81,9 @@ def validate(record, root):
             or record['unit'] != f"qb-worker-v2-{claim['id']}-{claim['worker_generation']}"
             or claim['worker_unit']!=record['unit']):
         raise ContractError('execution differs from claim identity')
-    stage=Path(claim['stage_dir'])
-    if (not stage.is_absolute() or stage.parent!=Path(root)/'workers'/claim['id']
-            or not re.fullmatch(str(claim['worker_generation'])+r'-[0-9a-f]{32}',stage.name)):
-        raise ContractError('worker stage escapes its claim')
+    stage=stage_path(root,claim)
+    if 'stage_dir' in claim and claim['stage_dir']!=str(stage):
+        raise ContractError('worker stage differs from its derived claim')
     executions=record['executions']
     if not isinstance(executions,list) or len(executions)>3:
         raise ContractError('invalid fixed execution phases')
@@ -118,7 +131,7 @@ def validate(record, root):
     if (executions and record['phase']!=executions[-1]['phase']) or (not executions and record['phase']!='reserved'):
         raise ContractError('execution phase differs from its journal')
     _depth(record)
-    if len(canonical(record))>LIMIT: raise ContractError('execution journal exceeds byte limit')
+    if len(canonical(document(record)))>LIMIT: raise ContractError('execution journal exceeds byte limit')
     return record
 
 
@@ -127,6 +140,9 @@ def load(raw,root):
     try:
         record=json.loads(raw,object_pairs_hook=_pairs,
                           parse_constant=lambda _: (_ for _ in ()).throw(ContractError('nonfinite execution JSON')))
-        return validate(record,root)
+        if 'stage_dir' in record.get('claim',{}):raise ContractError('obsolete worker path record')
+        validate(record,root)
+        record['claim']['stage_dir']=str(stage_path(root,record['claim']))
+        return record
     except (UnicodeError,json.JSONDecodeError,RecursionError) as exc:
         raise ContractError('invalid execution journal JSON') from exc

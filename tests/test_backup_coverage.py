@@ -34,7 +34,7 @@ def completed_capture(setup,monkeypatch):
 
 def test_dirty_stopped_capture_bytes_and_missing_private_identity_restore_paused(setup,monkeypatch,tmp_path):
     c,source,operation=completed_capture(setup,monkeypatch)
-    secret=c.root/'private/identity';secret.parent.mkdir(mode=0o700);secret.write_text('private fixture only')
+    secret=c.root/'private/identity';secret.parent.mkdir(mode=0o700,exist_ok=True);secret.write_text('private fixture only')
     c.checkpoint(Checkpoint('campaign',[],{'unfinished':'checkpoint intent'}))
     backup=tmp_path/'backup';c.backup(backup,coverage=True)
     report=coverage.verify_if_present(backup);item=report['source_workspaces'][0]

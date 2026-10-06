@@ -44,6 +44,7 @@ def inner(stage, *,runner=None,limits=None,reserve=20*1024**3):
         raise ContractError('injected distribution runner requires explicit limits')
     result = run_recovery_source_stage(srpm=stage/'input.src.rpm',entry=value['entry'],stage=stage,
         runner=runner,limits=limits,source_date_epoch=value['source_date_epoch'])
+    result={key:value for key,value in result.items() if key!='source'}
     atomic_write(stage/'prepared.json',canonical(result))
     return result
 

@@ -54,29 +54,53 @@ def private_inputs(root):
     config=configuration(root)
     paths=[root/'private']
     for key in ('key','tokens_file','recovery_signing_home'):
-        if config.get(key): paths.append(Path(config[key]))
-    if config.get('composition_signing'): paths.append(Path(config['composition_signing']['home']))
+        if config.get(key): paths.append(Path(config[key]).expanduser().resolve())
+    if config.get('composition_signing'): paths.append(Path(config['composition_signing']['home']).expanduser().resolve())
+    paths=[Path(path).expanduser().resolve() for path in paths]
     for path in paths:
         if not path.is_absolute() or path.resolve()!=path or path.is_symlink():
             raise Conflict('configured private input must be canonical')
     return paths
 
 
-def _inputs(root, intent):
+def _inputs(root, intent,claim):
     """Allow only the immutable intent's declared input locations."""
     from .job_worker import input_files, reject_private_inputs
     kind=intent['kind']; args=intent['arguments']
     paths=[]
-    if kind=='builder_prepare': paths.append(Path(intent['local_paths']['builder_archive']))
+    if kind=='builder_prepare':
+        from .builder_setup import selected_archive
+        paths.append(selected_archive(root))
     if kind=='source_prepare' and args['schema_version']==1:
         from .recovery_podman import _metadata_object
-        from .source_prepare_operation import validate_input
+        from .source_prepare_operation import validate_input,source_selection
         value=validate_input(json.loads(_metadata_object(root/'artifacts',args['preparation_sha256'],1024**2)))
-        paths.append(Path(value['source_root']))
+        paths.append(source_selection(root,value['workspace_id']))
+    if kind=='recovery_download':
+        from .state_config import _config_home
+        from .controller_install import installation_settings,_home,selected_runtime
+        from .recovery_download import ROLES
+        from .package_resources import target_assets_dir
+        choices=json.loads(read_file(root,'recovery-input.json',limit=8192))
+        config_home=_config_home(choices.get('config_home'));directory=config_home/'quirkbench'
+        paths.append(selected_runtime(config_home=config_home))
+        paths.append(_home(installation_settings(config_home=config_home).get('data_home'),'XDG_DATA_HOME','.local/share')/'quirkbench/controller-archives'/(args['controller_archive_sha256']+'.tar.gz'))
+        paths.extend(directory/name for name in ('installation.json','signed-release-installation.json'))
+        if (directory/'installation-settings.json').exists():paths.append(directory/'installation-settings.json')
+        selected=json.loads(read_file(directory,'signed-release-installation.json',limit=65536))
+        from .contracts import identifier
+        request=identifier(selected['request_id'])
+        paths.extend(directory/'release-install'/request/name for name in ('intent.json','metadata.json','result.json','release.json','release.sig'))
+        trust=Path(choices['trust_bundle']).expanduser().resolve() if choices.get('trust_bundle') else target_assets_dir()/'production-release-trust.json'
+        from .release_trust import load_bundle
+        verified=load_bundle(trust)
+        paths.extend((trust,verified['public_key']))
     if kind in ('build','compose') and args.get('manifest'):
-        reject_private_inputs(kind,args['manifest'],[root/'private',*args.get('excluded_roots',[])])
-        paths.extend(Path(path) for path,_ in input_files(kind,args['manifest']).values())
-        if kind=='build': paths.append(Path(args['manifest']['target_sysroot']))
+        from .job_operations import current_manifest
+        raw=current_manifest(root,claim,args)
+        reject_private_inputs(kind,raw,private_inputs(root))
+        paths.extend(Path(path) for path,_ in input_files(kind,raw).values())
+        if kind=='build': paths.append(Path(raw['target_sysroot']))
     for path in paths:
         if not path.is_absolute() or path.resolve()!=path or path.is_symlink() or not path.exists():
             raise Conflict('declared worker input is unavailable or linked')
@@ -103,12 +127,17 @@ def plan(services, record, phase):
     spec={'image':record['worker_image'],'pythonpath':pythonpath,'mounts':mounts,
           'payload':[phase,str(root),str(stage)],'network':'none','options':['--cap-drop=ALL']}
     if phase in ('prepare','distribution-import'):
+        from .state_config import _config_home
+        from .controller_install import _home
+        spec['options'] += ['--env=HOME='+str(Path.home()),'--env=XDG_CONFIG_HOME='+str(_config_home(None)),
+                            '--env=XDG_DATA_HOME='+str(_home(None,'XDG_DATA_HOME','.local/share')),
+                            '--env=XDG_CACHE_HOME='+str(_home(None,'XDG_CACHE_HOME','.cache'))]
         mounts += [(root,root,'ro,z'),(stage,stage,'rw,z'),
                    (root/'artifacts',root/'artifacts','rw,z')]
         # Hide the private configuration/credential tree even from trusted
         # preparation tools. The selected reserve is supplied in the journal.
         secrets=private_inputs(root)
-        inputs=_inputs(root,intent)
+        inputs=_inputs(root,intent,claim)
         for source,_,_ in inputs:
             if any(source.is_relative_to(secret) or secret.is_relative_to(source) for secret in secrets):
                 raise Conflict('declared source overlaps configured private input')
@@ -273,8 +302,7 @@ def completed(services, record, code):
         if _read_installed_lock(output/'usr/lib/quirkbench/recovery-rootfs-lock.json')!=canonical(_document(stage/'inputs/rootfs-lock.json'))+b'\n':
             raise Conflict('rootfs output does not contain its exact staged lock')
         result={**_job_record(claim,'COMPLETED'),'worker_unit':claim['worker_unit'],
-                'operation_complete':False,'unit_reconciled':False,'exit_code':0,
-                'output_path':str(output),'log_path':str(stage/'diagnostics/recovery.log')}
+                'operation_complete':False,'unit_reconciled':False,'exit_code':0}
         atomic_write(path,canonical(result));return None
     else: raise Conflict('unsupported completed payload')
     atomic_write(path,canonical(_job_record(claim,'COMPLETE',result=result)))

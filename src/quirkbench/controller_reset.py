@@ -22,8 +22,9 @@ LIMIT = 128 * 1024**2
 MAX_OBJECTS = 10000
 HASH = re.compile(r'[0-9a-f]{64}')
 STATE_FILES = ('controller.sqlite', 'controller.sqlite-wal', 'controller.sqlite-shm',
-               'controller.sqlite-journal', 'settings.json', 'private/controller-service.json')
-CONFIG_FILES = ('setup-progress.json', 'setup-service.json')
+               'controller.sqlite-journal', 'settings.json', 'private/controller-service.json',
+               'private/setup-progress.json','private/setup-service.json','source-selections.json','builder-input.json','recovery-input.json')
+CONFIG_FILES = ()
 FENCE = 'controller-reset.json'
 
 
@@ -73,16 +74,15 @@ def _json(path):
 def _matching_fence(path, request_id, archive):
     value = _json(path)
     return (isinstance(value, dict) and type(value.get('schema_version')) is int and
-            value == {'schema_version': 1, 'request_id': request_id, 'archive': str(archive)})
+            value == {'schema_version': 1, 'request_id': request_id})
 
 
 def _validate(record, root, config):
-    fields = {'schema_version', 'record_type', 'request_id', 'state_root', 'config_root',
+    fields = {'schema_version', 'record_type', 'request_id',
               'files', 'objects', 'complete'}
     if (not isinstance(record, dict) or set(record) != fields or
             type(record['schema_version']) is not int or record['schema_version'] != 1 or
             record['record_type'] != 'unused-controller-reset' or
-            record['state_root'] != str(root) or record['config_root'] != str(config) or
             not config.is_absolute() or config == Path('/') or '..' in config.parts or
             type(record['complete']) is not bool or not isinstance(record['files'], dict)):
         raise ContractError('invalid controller reset record')
@@ -106,7 +106,7 @@ def _validate(record, root, config):
 
 def _admit(captured):
     """Query disposable copies: SQLite cannot alter the retained source sidecars."""
-    from .controller import MIGRATIONS
+    from .controller import require_current_schema
     with tempfile.TemporaryDirectory(prefix='quirkbench-reset-') as temporary:
         for name in STATE_FILES[:4]:
             snapshot = captured['state/' + name]
@@ -114,9 +114,8 @@ def _admit(captured):
         database = Path(temporary) / 'controller.sqlite'
         if not database.exists(): raise Conflict('no controller database to reset')
         with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True)) as db:
-            version = db.execute('PRAGMA user_version').fetchone()[0]
-            if not 32 <= version <= len(MIGRATIONS):
-                raise Conflict('reset supports known schemas 32 through current; use explicit recovery for other schemas')
+            try: require_current_schema(db)
+            except ContractError as exc: raise Conflict('incompatible development database; preserve it and initialize fresh state') from exc
             if db.execute('PRAGMA quick_check').fetchall() != [('ok',)]:
                 raise Conflict('database integrity unavailable; preserve it for explicit recovery')
             for table in ('devices', 'attempts', 'credential_generations', 'enrollment_requests'):
@@ -125,7 +124,7 @@ def _admit(captured):
             for query in (
                 "SELECT 1 FROM operations WHERE state IN ('QUEUED','RUNNING','WAITING') OR worker_unit IS NOT NULL LIMIT 1",
                 "SELECT 1 FROM jobs WHERE state IN ('QUEUED','ACTIVE') LIMIT 1",
-                "SELECT 1 FROM storage_groups WHERE stop_proof IS NULL AND (state IN ('RUNNING','WAITING','FAILED','INTERRUPTED') OR paths != '[]') LIMIT 1"):
+                "SELECT 1 FROM storage_groups WHERE stop_proof IS NULL AND (state IN ('RUNNING','WAITING','FAILED','INTERRUPTED') OR workspace_id IS NOT NULL OR input_generation IS NOT NULL OR stage_retained!=0) LIMIT 1"):
                 if db.execute(query).fetchone(): raise Conflict('stop and reconcile outstanding work before reset')
 
 
@@ -155,8 +154,7 @@ def archived_artifacts(root):
         if index >= 64 or not HASH.fullmatch(archive.name): raise ContractError('invalid reset archive directory')
         _managed_path(archive)
         record = _json(archive / 'record.json')
-        config = Path(record.get('config_root', '')) if isinstance(record, dict) else Path('.')
-        _validate(record, root, config)
+        _validate(record, root, root)
         if archive.name != digest(record['request_id'].encode()): raise ContractError('reset archive identity differs')
         values.update(record['objects'])
     return values
@@ -165,10 +163,11 @@ def archived_artifacts(root):
 def reset(root, *, request_id, confirm_reset=False, config_home=None, fault_hook=None):
     if not confirm_reset: raise ContractError('reset requires --confirm-reset; issued invitations will be invalidated')
     identifier(request_id)
-    root = _managed_path(root)
+    root = _managed_path(Path(root).expanduser().resolve())
     config = _managed_path(_config_home(config_home) / 'quirkbench')
     if not root.is_dir(): raise Conflict('controller state unavailable')
     _durable_directory(config)
+    _durable_directory(root/'private')
     fault_hook = fault_hook or (lambda _: None)
     archive = root / 'private/controller-resets' / digest(request_id.encode())
     paths = {'state/' + p: root / p for p in STATE_FILES}
@@ -181,7 +180,7 @@ def reset(root, *, request_id, confirm_reset=False, config_home=None, fault_hook
             except Conflict as exc:
                 raise Conflict(description + '; reset has not removed database files') from exc
             lock_records.append((lock, fd, os.fstat(fd)))
-        for lock in (config / '.setup-progress.lock', config / '.installation.lock', config / '.setup.lock'):
+        for lock in (root / 'private/.setup-progress.lock', config / '.installation.lock'):
             acquire(lock, 'Another setup or installation command is running; wait for it to finish')
         if (config / 'controller.json').exists():
             selected = discover_state_root(config_home=config.parent)
@@ -211,7 +210,7 @@ def reset(root, *, request_id, confirm_reset=False, config_home=None, fault_hook
         if (config / 'controller.json').exists():
             selected = discover_state_root(config_home=config.parent)
             if not os.path.samefile(selected, root): raise Conflict('reset state differs from selected controller')
-        for path in (config / 'installation-activation.json', root / 'private/publication-setup'):
+        for path in (root / 'private/installation-activation.json', root / 'private/publication-setup'):
             if path.exists() or path.is_symlink(): raise Conflict('reconcile installation/publication setup before reset')
         _managed_path(root / 'artifacts')
         _durable_directory(root / 'artifacts')
@@ -277,17 +276,8 @@ def reset(root, *, request_id, confirm_reset=False, config_home=None, fault_hook
             except Conflict as exc:
                 if stopped: raise Conflict('Controller stopped, but reset is blocked: ' + str(exc)) from exc
                 raise
-            for name in CONFIG_FILES:
-                saved = captured['config/' + name]
-                if saved:
-                    from .setup_contracts import load_progress as initial_progress
-                    from .setup_service_contracts import load_progress as service_progress
-                    value = (initial_progress if name == 'setup-progress.json' else service_progress)(saved[1])
-                    intent = value.get('intent', {})
-                    bound = intent.get('initial_intent', intent).get('state_root')
-                    if bound != str(root): raise Conflict('setup record belongs to another state; reset will not remove it')
             record = {'schema_version': 1, 'record_type': 'unused-controller-reset', 'request_id': request_id,
-                      'state_root': str(root), 'config_root': str(config), 'files': {
+                      'files': {
                           name: saved[0] if saved else None for name, saved in captured.items()},
                       'objects': _objects(root), 'complete': False}
             _validate(record, root, config)
@@ -295,7 +285,7 @@ def reset(root, *, request_id, confirm_reset=False, config_home=None, fault_hook
             archive_checks.append(locks.enter_context(held_parent(journal)))
             guard(); atomic_write(journal, canonical(record))
             fault_hook('intent_recorded'); guard()
-        atomic_write(fence, canonical({'schema_version': 1, 'request_id': request_id, 'archive': str(archive)}))
+        atomic_write(fence, canonical({'schema_version': 1, 'request_id': request_id}))
         fault_hook('fenced'); guard()
         for index, (name, path) in enumerate(paths.items()):
             expected = record['files'][name]

@@ -115,10 +115,7 @@ class BuildStageCache:
         from .resource_budget import disk_reserve
         self.reserve_bytes=disk_reserve(reserve_bytes,RESERVE)
         from .filesystem import canonical_user_path
-        self.root = Path(root)
-        if self.root.is_symlink():
-            raise BuildError("build cache root cannot be linked")
-        self.root=canonical_user_path(self.root)
+        self.root=canonical_user_path(Path(root))
         self.root.mkdir(parents=True, mode=0o700, exist_ok=True)
         _directory(self.root)
         if self.root.stat().st_uid != os.getuid():

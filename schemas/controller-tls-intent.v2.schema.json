@@ -7,7 +7,7 @@
     "record_type",
     "request_id",
     "host",
-    "previous_directory",
+    "previous_identity",
     "previous_identity_sha256",
     "configuration_sha256",
     "created_at",
@@ -29,10 +29,6 @@
       "type": "string",
       "maxLength": 45
     },
-    "previous_directory": {
-      "type": "string",
-      "pattern": "^(setup|endpoint)-[0-9a-f]{32}$"
-    },
     "previous_identity_sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
@@ -50,6 +46,26 @@
       "type": "integer",
       "minimum": 1,
       "maximum": 365
+    },
+    "previous_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "setup",
+            "endpoint"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        }
+      },
+      "required": [
+        "kind",
+        "request_id"
+      ]
     }
   },
   "$id": "https://quirkbench.invalid/schemas/controller-tls-intent.v2.schema.json"

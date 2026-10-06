@@ -3,9 +3,18 @@
   "title": "Controller state selection v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "state_root"],
+  "required": [
+    "schema_version"
+  ],
   "properties": {
-    "schema_version": {"const": 1},
-    "state_root": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/"}
+    "schema_version": {
+      "const": 1
+    },
+    "state_root": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(/|~/)"
+    }
   }
 }

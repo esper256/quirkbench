@@ -7,8 +7,6 @@
     "schema_version",
     "record_type",
     "request_id",
-    "state_root",
-    "config_root",
     "files",
     "objects",
     "complete"
@@ -25,14 +23,6 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
     },
-    "state_root": {
-      "type": "string",
-      "pattern": "^/.+"
-    },
-    "config_root": {
-      "type": "string",
-      "pattern": "^/.+"
-    },
     "files": {
       "type": "object",
       "additionalProperties": false,
@@ -43,8 +33,11 @@
         "state/controller.sqlite-journal",
         "state/settings.json",
         "state/private/controller-service.json",
-        "config/setup-progress.json",
-        "config/setup-service.json"
+        "state/private/setup-progress.json",
+        "state/private/setup-service.json",
+        "state/source-selections.json",
+        "state/builder-input.json",
+        "state/recovery-input.json"
       ],
       "properties": {
         "state/controller.sqlite": {
@@ -107,7 +100,7 @@
             }
           ]
         },
-        "config/setup-progress.json": {
+        "state/private/setup-progress.json": {
           "anyOf": [
             {
               "type": "null"
@@ -117,7 +110,37 @@
             }
           ]
         },
-        "config/setup-service.json": {
+        "state/private/setup-service.json": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/source"
+            }
+          ]
+        },
+        "state/source-selections.json": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/source"
+            }
+          ]
+        },
+        "state/builder-input.json": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/source"
+            }
+          ]
+        },
+        "state/recovery-input.json": {
           "anyOf": [
             {
               "type": "null"

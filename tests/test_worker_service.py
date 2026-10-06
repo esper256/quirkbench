@@ -2,7 +2,7 @@
 from pathlib import Path
 import sqlite3
 import pytest
-from quirkbench.contracts import Conflict
+from quirkbench.contracts import Conflict, ContractError
 from quirkbench.controller import Controller, MIGRATIONS
 from quirkbench.worker_service import WorkerServiceError
 BOOT = '11111111-1111-4111-8111-111111111111'
@@ -61,7 +61,7 @@ def test_schema_upgrade_refuses_unresolved_terminal_unit(tmp_path):
                 f'quirkbench-worker-{operation}-1.service'))
     db.commit()
     db.close()
-    with pytest.raises(Conflict, match='active workers'):
+    with pytest.raises(ContractError, match='incompatible development state'):
         Controller(root, reserve_bytes=0)
 
 

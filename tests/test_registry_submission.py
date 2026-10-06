@@ -2,6 +2,7 @@
 from dataclasses import asdict
 from pathlib import Path
 import json
+import sqlite3
 
 import pytest
 
@@ -22,18 +23,38 @@ def test_registry_submission_has_no_static_token_requirement_or_source_relaxatio
     archive=controller.store.put(builder_archive()).sha256
     cfg=controller_service.configuration(controller.root)
     cfg.update(builder_image_digest='sha256:'+'a'*64,builder_config_digest=IMAGE,builder_archive_sha256=archive)
-    atomic_write(controller.root/'private/controller-service.json',canonical(cfg))
+    atomic_write(controller.root/'private/controller-service.json',canonical(controller_service.configuration_document(cfg)))
     inputs=tmp_path/'declared-inputs';inputs.mkdir()
     raw=json.loads(json.dumps(asdict(_inputs(inputs)),default=str))
+    alias=tmp_path/'source-alias';alias.symlink_to(inputs,target_is_directory=True)
+    raw['kernel_source_tar']=str(alias/Path(raw['kernel_source_tar']).name)
+    from quirkbench import job_operations
+    select=job_operations.select_manifest
+    def serialized(*args):
+        probe=sqlite3.connect(controller.db_path,timeout=0)
+        try:
+            with pytest.raises(sqlite3.OperationalError,match='locked'):
+                probe.execute('BEGIN IMMEDIATE')
+        finally:probe.close()
+        return select(*args)
+    monkeypatch.setattr(job_operations,'select_manifest',serialized)
     result=submission(controller,'build',raw,'first-build')
     assert result['ok'] and result['data']['accepted']
     # Operations store canonical kind/arguments in CAS; inspect the immutable intent.
     row=controller.operation_status(result['operation_id'])['data']
     intent=json.loads(controller.store.get(row['input_digest']))
-    exclusions=intent['arguments']['excluded_roots']
-    assert str(controller.root/'private') in exclusions
-    assert str(controller.root/'controller.sqlite') in exclusions
-    assert cfg['key'] in exclusions
+    assert 'local_paths' not in intent
+    assert 'excluded_roots' not in intent['arguments']
+    assert 'kernel_source_tar' not in intent['arguments']['manifest']
+    selections=json.loads((controller.root/'job-inputs/first-build.json').read_bytes())
+    assert selections['kernel_source_tar']==raw['kernel_source_tar']
+    located=job_operations.current_manifest(controller.root,row,intent['arguments'])
+    assert located['kernel_source_tar']==str(inputs/Path(raw['kernel_source_tar']).name)
+    assert located['kernel_source_sha256']==raw['kernel_source_sha256']
+    assert submission(controller,'build',located,'first-build')['operation_id']==result['operation_id']
+    assert submission(controller,'build',raw,'first-build')['operation_id']==result['operation_id']
+    with pytest.raises(Conflict,match='different external job inputs'):
+        submission(controller,'build',{**raw,'kernel_source_tar':raw['userspace_source_tar']},'first-build')
     bad={**raw,'kernel_source_tar':cfg['key']}
     with pytest.raises(ValueError,match='private signing/control input'):
         submission(controller,'build',bad,'private-input')
@@ -60,7 +81,7 @@ def test_signed_builder_fallback_is_coherent_and_complete_manual_binding_is_pres
     elif override=='archive': kwargs['builder_archive']='b'*64
     elif override=='partial_config':
         cfg=controller_service.configuration(controller.root);cfg['builder_image_digest']='sha256:'+'b'*64
-        atomic_write(controller.root/'private/controller-service.json',canonical(cfg))
+        atomic_write(controller.root/'private/controller-service.json',canonical(controller_service.configuration_document(cfg)))
     elif override=='complete_manual':
         kwargs.update(image=raw['base_image_digest'],builder_archive=archive,builder_config=IMAGE)
     elif override=='malformed': raw=[]

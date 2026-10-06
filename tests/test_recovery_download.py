@@ -174,8 +174,10 @@ def signed_factory(fixture,asset_set,monkeypatch,tmp_path):
 def admitted(c,signed_factory,request='download'):
     arguments,record,*_=signed_factory;trust=acquisition.load_bundle(arguments['trust_bundle'])
     args={'schema_version':1,'version':'0.1.0','controller_archive_sha256':record['archive_sha256'],'trust_bundle_sha256':trust['bundle_sha256']}
-    return c.admit_operation(request,'recovery_download',args,local_paths={
-        'runtime':record['runtime_root'],'trust_bundle':str(arguments['trust_bundle']),'config_home':str(arguments['config_home'])})
+    from quirkbench.controller_install import select_runtime
+    select_runtime(record['runtime_root'],config_home=arguments['config_home'])
+    acquisition.select_inputs(c.root,trust_bundle=arguments['trust_bundle'],config_home=arguments['config_home'])
+    return c.admit_operation(request,'recovery_download',args)
 
 
 def execute(c,claim,captured,monkeypatch):
@@ -281,8 +283,14 @@ def test_admission_is_prompt_local_only_and_exactly_replayable(signed_factory,tm
     runtime=Path(record['runtime_root'])/'bin'
     cert=tmp_path/'cert';cert.write_bytes(b'fixture certificate')
     key=tmp_path/'key';key.write_bytes(b'fixture key')
-    atomic_write(root/'private/controller-service.json',canonical({'runtime':str(runtime/'quirkbench'),
-        'job_worker':str(runtime/'quirkbench-job-worker'),'cert':str(cert),'key':str(key),'credential_registry':True,'reserve_gib':0}))
+    from quirkbench.controller_install import select_runtime
+    select_runtime(record['runtime_root'],config_home=arguments['config_home'])
+    monkeypatch.setenv('XDG_CONFIG_HOME',str(arguments['config_home']))
+    identity={'kind':'setup','request_id':'fixture'}
+    from quirkbench.contracts import digest
+    tls=root/'private/controller-tls'/('setup-'+digest(b'fixture')[:32]);tls.mkdir(parents=True)
+    (tls/'controller.crt').write_bytes(cert.read_bytes());(tls/'controller.key').write_bytes(key.read_bytes())
+    atomic_write(root/'private/controller-service.json',canonical({'software':{k:record[k] for k in ('version','archive_sha256')},'tls_identity':identity,'credential_registry':True,'reserve_gib':0}))
     monkeypatch.setattr(acquisition,'_trusted',lambda *a,**kw:pytest.fail('authentication belongs in worker'))
     def submit(request=None):
         return acquisition.submit(root,request,trust_bundle=arguments['trust_bundle'],config_home=arguments['config_home'],ready=lambda path:None)
@@ -293,7 +301,7 @@ def test_admission_is_prompt_local_only_and_exactly_replayable(signed_factory,tm
         for table in ('devices','campaigns','jobs','attempts'):assert db.execute('SELECT COUNT(*) FROM '+table).fetchone()[0]==0
     installation=Path(record['runtime_root'])/'installation.json'
     installation.write_bytes(b'{}')
-    with pytest.raises(ContractError,match='record fields'):submit('malformed')
+    with pytest.raises(ContractError,match='installed software identity'):submit('malformed')
 
 
 def test_released_recovery_schema_and_cli_frozen_fixtures():

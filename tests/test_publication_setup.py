@@ -10,7 +10,7 @@ import pytest
 
 from quirkbench import publication_setup as publication,cli
 from quirkbench.contracts import Conflict,ContractError,canonical
-from quirkbench.controller_service import configuration
+from quirkbench.controller_service import configuration,configuration_document
 from quirkbench.controller_tls import inspect_identity
 from quirkbench.enrollment_credentials import publication as publication_receipt
 from test_setup_service import Services,start
@@ -34,7 +34,8 @@ def packaged_archive(tmp_path_factory):
 
 
 @pytest.fixture
-def initialized(tmp_path,packaged_archive):
+def initialized(tmp_path,packaged_archive,monkeypatch):
+    monkeypatch.setenv('XDG_CONFIG_HOME',str(tmp_path/'config'))
     from quirkbench.controller_install import install
     from quirkbench.controller_setup import setup_controller
     runtime=Path(install(packaged_archive,data_home=tmp_path/'data')['runtime_root'])
@@ -124,7 +125,7 @@ from cryptography.exceptions import InvalidSignature
 from quirkbench import publication_setup as publication, cli, controller_service
 from quirkbench.contracts import Conflict, ContractError, canonical, digest
 from quirkbench.commission import CommissionIdentity, ProbePaths, plan_commission, confirm_commission, execute_commission
-from quirkbench.controller_service import configuration, UNIT
+from quirkbench.controller_service import configuration, configuration_document, UNIT
 from quirkbench.controller_setup import setup_controller
 from quirkbench.controller_tls import inspect_identity
 from quirkbench.setup_service import install_service
@@ -162,7 +163,8 @@ BOOT='11111111-1111-4111-8111-111111111111'
     remote=tmp_path/'joined-release-assets';remote.mkdir()
     for name,raw in payloads.items():(remote/name).write_bytes(raw)
     adapters+='\n'+f'''\
-def initialized(tmp_path,packaged_archive):
+def initialized(tmp_path,packaged_archive,monkeypatch):
+    monkeypatch.setenv('XDG_CONFIG_HOME',str(tmp_path/'config'))
     from quirkbench.release_install import acquire_install
     remote=Path({str(remote)!r})
     def fetch(url,limit):
@@ -222,10 +224,12 @@ def acquire_factory(root,patch):
     from quirkbench.controller_install import install
     bootstrap=Path(install(packaged_archive,data_home=tmp_path/'bootstrap')['runtime_root'])
     harness=tmp_path/'installed-journey.py'
-    harness.write_text('import sys\nfrom pathlib import Path\nsys.path.insert(0,'+repr(str(bootstrap/'lib'))+')\n'+adapters+'\n'+'''\
+    harness.write_text('import sys\nsys.dont_write_bytecode=True\nfrom pathlib import Path\nsys.path.insert(0,'+repr(str(bootstrap/'lib'))+')\n'+adapters+'\n'+'''\
 root=Path(sys.argv[1]);root.mkdir(mode=0o700)
 archive=Path(sys.argv[2])
-native=installed(root,initialized(root,archive))
+with pytest.MonkeyPatch.context() as setup_patch:
+    native=installed(root,initialized(root,archive,setup_patch))
+    os.environ['XDG_CONFIG_HOME']=str(root/'config')
 with pytest.MonkeyPatch.context() as patch:
     acquire_factory(native[0],patch)
 with pytest.MonkeyPatch.context() as patch:
@@ -387,7 +391,7 @@ def test_changed_configuration_during_native_key_callback_is_preserved(installed
         result=native(argv,**kwargs)
         if not changed:
             changed=True;config=configuration(root);config['port']=8445
-            (root/'private/controller-service.json').write_bytes(canonical(config))
+            (root/'private/controller-service.json').write_bytes(canonical(configuration_document(config)))
         return result
     with pytest.raises(Conflict,match='changed'):setup(installed,run=run)
     assert configuration(root)['port']==8445 and not (root/'repositories').exists()
@@ -460,7 +464,7 @@ def test_interrupted_native_init_after_config_resumes_complete_owned_repository(
 def test_setup_replay_cannot_accept_unjournaled_additional_settings(installed,tmp_path):
     root,services,signing,options,calls=installed
     config=configuration(root);config['repositories']={'lab':str(root/'repositories/lab')}
-    (root/'private/controller-service.json').write_bytes(canonical(config))
+    (root/'private/controller-service.json').write_bytes(canonical(configuration_document(config)))
     with pytest.raises(Conflict,match='differ'):start(tmp_path,services)
 
 

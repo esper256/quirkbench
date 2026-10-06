@@ -23,17 +23,6 @@
     "started": {
       "type": "number"
     },
-    "log": {
-      "type": "string",
-      "pattern": "^[a-z][a-z0-9.-]+$"
-    },
-    "status": {
-      "type": "string",
-      "pattern": "^[a-z][a-z0-9.-]+$"
-    },
-    "work": {
-      "const": "work"
-    },
     "command_sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
@@ -45,9 +34,6 @@
     "unit",
     "boot_id",
     "started",
-    "log",
-    "status",
-    "work",
     "command_sha256"
   ]
 }

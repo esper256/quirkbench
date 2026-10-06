@@ -1,18 +1,15 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "record_type": "publication-setup",
   "request_id": "publication-1",
-  "request_digest": "8a8fb384f8dacb52cbce1981b90eb2f4b9e2f6bfd873f041fce5b46bbd1e166a",
+  "request_digest": "893f07fd94adf24c5e559111377d450015d34c103d937b358fd8d13d53773360",
   "intent": {
-    "state_root": "/home/operator/state/quirkbench",
     "repository_alias": "lab",
     "repository_url": "https://127.0.0.1:8444",
-    "signing_home": "/home/operator/signing",
     "signing_fingerprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     "source_configuration_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
     "destination_configuration_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
     "public_key_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
-    "unit": "/home/operator/.config/systemd/user/quirkbench-controller.service",
     "controller_tls_identity_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
     "controller_certificate_sha256": "5555555555555555555555555555555555555555555555555555555555555555"
   },

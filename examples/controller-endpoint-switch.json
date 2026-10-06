@@ -1,26 +1,33 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "record_type": "controller-endpoint-switch",
   "request_id": "endpoint-maintenance-1",
   "source_configuration": {
-    "runtime": "/home/operator/.local/share/quirkbench/controller/runtime/bin/quirkbench-controller-service",
-    "job_worker": "/home/operator/.local/share/quirkbench/controller/runtime/bin/quirkbench-job-worker",
-    "cert": "/home/operator/.local/state/quirkbench/private/controller-tls/setup-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/controller.crt",
-    "key": "/home/operator/.local/state/quirkbench/private/controller-tls/setup-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/controller.key",
     "host": "192.0.2.10",
     "credential_registry": true,
-    "allow_lan": true
+    "allow_lan": true,
+    "software": {
+      "version": "0.1.0",
+      "archive_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "tls_identity": {
+      "kind": "setup",
+      "request_id": "example"
+    }
   },
   "destination_configuration": {
-    "runtime": "/home/operator/.local/share/quirkbench/controller/runtime/bin/quirkbench-controller-service",
-    "job_worker": "/home/operator/.local/share/quirkbench/controller/runtime/bin/quirkbench-job-worker",
-    "cert": "/home/operator/.local/state/quirkbench/private/controller-tls/endpoint-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/controller.crt",
-    "key": "/home/operator/.local/state/quirkbench/private/controller-tls/endpoint-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/controller.key",
     "host": "192.0.2.11",
     "credential_registry": true,
-    "allow_lan": true
+    "allow_lan": true,
+    "software": {
+      "version": "0.1.0",
+      "archive_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "tls_identity": {
+      "kind": "endpoint",
+      "request_id": "example"
+    }
   },
-  "unit": "/home/operator/.config/systemd/user/quirkbench-controller.service",
   "tls_intent_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
   "source_identity_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
   "destination_identity_sha256": "0000000000000000000000000000000000000000000000000000000000000000",

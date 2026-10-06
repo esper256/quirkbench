@@ -10,9 +10,7 @@
     "campaign_id",
     "base_oid",
     "allowed_untracked",
-    "provenance",
-    "root_device",
-    "root_inode"
+    "provenance"
   ],
   "properties": {
     "schema_version": {
@@ -60,16 +58,6 @@
           "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"
         }
       }
-    },
-    "root_device": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 18446744073709551615
-    },
-    "root_inode": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 18446744073709551615
     }
   }
 }

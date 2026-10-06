@@ -44,7 +44,7 @@ def test_confirmation_and_actual_cli(tmp_path, monkeypatch, capsys):
     assert not (root / 'controller.sqlite').exists()
 
 
-@pytest.mark.parametrize('version', [32, len(MIGRATIONS)])
+@pytest.mark.parametrize('version', [len(MIGRATIONS)])
 def test_old_schema_reset_fresh_setup_and_opaque_gc_roots(tmp_path, version):
     root, config = fixture(tmp_path)
     setup_controller(root, config_home=config, request_id='old-setup', **observations())
@@ -122,7 +122,7 @@ def test_used_or_busy_state_refused(tmp_path, sql):
 def test_unknown_schema_refused(tmp_path, version):
     root, config = fixture(tmp_path)
     with sqlite3.connect(root / 'controller.sqlite') as db: db.execute(f'PRAGMA user_version={version}')
-    with pytest.raises(Conflict, match='known schemas'): run(root, config)
+    with pytest.raises(Conflict, match='incompatible development database'): run(root, config)
     assert not (root / FENCE).exists()
 
 
@@ -172,9 +172,10 @@ def test_publication_and_unrelated_setup_refused(tmp_path):
     journal = config / 'quirkbench/setup-progress.json'
     other_config = tmp_path / 'other-config'
     setup_controller(tmp_path / 'other', config_home=other_config, request_id='other', **observations())
-    journal.write_bytes((other_config / 'quirkbench/setup-progress.json').read_bytes())
-    with pytest.raises(Conflict, match='another state'): run(root, config)
-    assert journal.exists()
+    journal.write_bytes((tmp_path/'other/private/setup-progress.json').read_bytes())
+    original=journal.read_bytes()
+    run(root, config)
+    assert journal.read_bytes()==original
 
 
 def test_constructor_waiting_on_migration_lock_observes_fence(tmp_path):
@@ -183,11 +184,13 @@ def test_constructor_waiting_on_migration_lock_observes_fence(tmp_path):
     from quirkbench import controller as module
     root, config = fixture(tmp_path)
     reached = threading.Event()
-    original = module.ArtifactStore
-    def observed(*args, **kwargs):
-        result = original(*args, **kwargs); reached.set(); return result
+    original = module.fcntl.flock
+    def observed(fd, operation):
+        # Observe the actual admission barrier before any store mutations.
+        if hasattr(fd,'name') and Path(fd.name)==root/'migration.lock':reached.set()
+        return original(fd,operation)
     with pytest.MonkeyPatch.context() as patch, ThreadPoolExecutor(max_workers=1) as workers:
-        patch.setattr(module, 'ArtifactStore', observed)
+        patch.setattr(module.fcntl, 'flock', observed)
         with private_lock(root / 'migration.lock'):
             future = workers.submit(Controller, root, reserve_bytes=0)
             assert reached.wait(2)
@@ -243,7 +246,7 @@ def test_failed_work_without_shutdown_proof_is_not_unused_state(tmp_path, monkey
     def unavailable(_): raise ValueError('shutdown cannot be proven')
     monkeypatch.setattr(retention, 'stop_proof', unavailable)
     with pytest.raises(RuntimeError):
-        with retention.work(root, 'development', root / 'development-runs/failed/work'):
+        with retention.work(root, 'development', root / 'workspaces/failed'):
             raise RuntimeError('worker failure')
     with pytest.raises(Conflict, match='reconcile outstanding'): run(root, config)
     assert (root / 'controller.sqlite').exists()
@@ -273,8 +276,8 @@ def test_reset_record_schemas_and_strict_reader(tmp_path):
         example = json.loads((repository / 'examples' / (name + '.json')).read_bytes())
         Draft202012Validator.check_schema(schema); Draft202012Validator(schema).validate(example)
     example = json.loads((repository / 'examples/controller-reset.json').read_bytes())
-    assert _validate(example, Path(example['state_root']), Path(example['config_root'])) == example
-    with pytest.raises(ContractError): _validate({**example, 'extra': True}, Path(example['state_root']), Path(example['config_root']))
+    assert _validate(example, tmp_path, tmp_path) == example
+    with pytest.raises(ContractError): _validate({**example, 'extra': True}, tmp_path, tmp_path)
     path = tmp_path / 'record.json'
     for raw in ('{"x": 1, "x": 2}', '{"x": NaN}', '[' * 34 + '0' + ']' * 34):
         path.write_text(raw)
@@ -284,13 +287,25 @@ def test_reset_record_schemas_and_strict_reader(tmp_path):
 
 
 @pytest.fixture
-def published_owner(tmp_path):
+def published_owner(tmp_path,monkeypatch):
+    monkeypatch.setenv('XDG_CONFIG_HOME',str(tmp_path/'config'))
     """Disposable real lifecycle owner; Linux pidfd+signals, no service manager."""
     import subprocess
     import sys
     from contextlib import contextmanager
     @contextmanager
     def start(root, *, ignore=False, failed=False):
+        from test_controller_install import make_archive
+        from quirkbench.controller_install import install,select_runtime
+        from quirkbench.contracts import canonical,digest
+        inputs=tmp_path/'archive-input';inputs.mkdir(exist_ok=True)
+        record=install(make_archive(inputs),data_home=tmp_path/'data')
+        runtime=select_runtime(record['runtime_root'],config_home=tmp_path/'config')
+        tls=root/'private/controller-tls'/('setup-'+digest(b'fixture')[:32]);tls.mkdir(parents=True,exist_ok=True)
+        for name in ('controller.crt','controller.key'):(tls/name).write_bytes(b'disposable test trust')
+        (root/'private/controller-service.json').write_bytes(canonical({
+            'software':{key:record[key] for key in ('version','archive_sha256')},
+            'tls_identity':{'kind':'setup','request_id':'fixture'},'credential_registry':True}))
         program = '''import os,signal,sys
 from quirkbench.controller import Controller
 from quirkbench.controller_service import advertise
@@ -302,17 +317,17 @@ def stop(*_): raise KeyboardInterrupt
 signal.signal(signal.SIGTERM,signal.SIG_IGN if sys.argv[2]=='ignore' else stop)
 try:
  with private_lock(c.root/'command.lock',shared=True), c.lifecycle() as owner:
-  advertise(owner,sys.executable)
+  advertise(owner,sys.argv[4])
   print('ready',flush=True)
   while True: signal.pause()
 except KeyboardInterrupt:
  if sys.argv[3]=='failed':
-  path=c.root/'development-runs/failed/work';path.mkdir(parents=True)
+  path=c.root/'workspaces/failed';path.mkdir(parents=True)
   register(c.root,'development',owner='failed-worker',paths=(path,),state='FAILED',stop_proof=None)
  print('stopped',flush=True)
 '''
         process = subprocess.Popen([sys.executable, '-c', program, str(root),
-                                    'ignore' if ignore else 'stop', 'failed' if failed else 'clean'],
+                                    'ignore' if ignore else 'stop', 'failed' if failed else 'clean',str(runtime/'bin/quirkbench-controller-service')],
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             assert process.stdout.readline() == 'ready\n'

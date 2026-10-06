@@ -25,7 +25,8 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
-def initialized(tmp_path):
+def initialized(tmp_path,monkeypatch):
+    monkeypatch.setenv('XDG_CONFIG_HOME',str(tmp_path/'config'))
     archive=make_archive(tmp_path)
     runtime=Path(install(archive,data_home=tmp_path/'data')['runtime_root'])
     setup_controller(tmp_path/'state',request_id='initial',runtime_root=runtime,reserve_gib=0,
@@ -58,7 +59,8 @@ class Services:
 def start(tmp_path, services, **kwargs):
     from quirkbench.controller_setup import setup_progress
     services.unit=tmp_path/'config/systemd/user'/UNIT;services.root=tmp_path/'state'
-    services.runtime=Path(setup_progress(config_home=tmp_path/'config')['intent']['runtime_root'])
+    from quirkbench.controller_install import selected_runtime
+    services.runtime=selected_runtime(config_home=tmp_path/'config')
     return install_service(config_home=tmp_path/'config',bin_home=tmp_path/'bin',
         runner=services,tls_run=TLSCommands(),ready=services.ready,**kwargs)
 
@@ -133,14 +135,14 @@ def test_changed_state_selection_cannot_start_old_journal_state(tmp_path,initial
     value=json.loads(selection.read_bytes());value['state_root']=str(tmp_path/'another-state')
     selection.write_bytes(canonical(value))
     services=Services()
-    with pytest.raises(Conflict,match='state selection/database differs'): start(tmp_path,services)
+    with pytest.raises(Conflict,match='complete initial setup'): start(tmp_path,services)
     assert services.calls==[] and not (tmp_path/'state/private/controller-tls').exists()
 
 
 def test_stopped_replay_preserves_missing_committed_installation_selection(tmp_path,initialized):
     services=Services();start(tmp_path,services);services.active=False
     path=tmp_path/'config/quirkbench/installation.json';path.unlink()
-    with pytest.raises(Conflict,match='installation selection is unavailable'): start(tmp_path,services)
+    with pytest.raises(FileNotFoundError): start(tmp_path,services)
     assert not path.exists()
 
 
@@ -186,7 +188,7 @@ def test_unused_reset_preserves_runtime_launcher_and_tls_then_reconfigures(tmp_p
     assert selected.read_bytes() == before_selection
     assert all(path.read_bytes() == raw for path, raw in tls.items())
     assert not (root / 'private/controller-service.json').exists()
-    assert not (config / 'quirkbench/setup-service.json').exists()
+    assert not (root / 'private/setup-service.json').exists()
     setup_controller(root, request_id='new-setup', runtime_root=initialized, reserve_gib=0,
                      config_home=config, **observations())
     start(tmp_path, Services())

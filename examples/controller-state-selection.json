@@ -1,4 +1,4 @@
 {
   "schema_version": 1,
-  "state_root": "/home/operator/.local/state/quirkbench"
+  "state_root": "~/work/quirkbench-state"
 }

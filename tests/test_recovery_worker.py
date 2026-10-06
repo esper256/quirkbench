@@ -48,7 +48,8 @@ def run(controller, claim, executor):
 
 def complete(argv, log, *, verify, deadline):
     verify()
-    assert '--network=none' in argv and '--cgroups=enabled' in argv and '--memory=4294967296' in argv
+    assert '--network=none' in argv and '--workload=recovery' in argv
+    assert 'quirkbench.container_command' in argv and any(arg.startswith('--deadline=') for arg in argv)
     assert argv[-1] == '/workspace/output/rootfs'
     stage = log.parent.parent
     record = stage / 'output/rootfs/usr/lib/quirkbench/recovery-rootfs-lock.json'
@@ -70,6 +71,7 @@ def test_worker_completes_private_stage_without_publishing_or_finishing_operatio
         assert json.loads(saved.read_bytes()) == record
         assert saved.stat().st_mode & 0o077 == 0
         assert record['input_digest'] == claim['input_digest']
+        assert not {'output_path','log_path'} & set(record)
 
 
 def test_worker_lost_owner_after_exit_cannot_report_completion(tmp_path):

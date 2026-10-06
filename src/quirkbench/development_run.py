@@ -19,21 +19,18 @@ from .development_container import DevelopmentServices
 
 
 def validate_run(record):
-    fields={'schema_version','run_id','unit','boot_id','started','log','status','work','command_sha256'}
+    fields={'schema_version','run_id','unit','boot_id','started','command_sha256'}
     if (not isinstance(record,dict) or set(record)!=fields or type(record['schema_version']) is not int
             or record['schema_version']!=2):raise ContractError('invalid foreground development run')
     run_id=record['run_id'];identifier(run_id)
     if not re.fullmatch(r'quirkbench-build-[a-z0-9-]+',run_id):raise ContractError('invalid development run name')
-    if record['unit']!='qb-development-v2-'+run_id or record['work']!='work':
+    if record['unit']!='qb-development-v2-'+run_id:
         raise ContractError('development run identity differs')
     from .process_identity import validate_boot_id
     import math
     validate_boot_id(record['boot_id']);sha256(record['command_sha256'])
     if type(record['started']) not in (int,float) or not math.isfinite(record['started']):
         raise ContractError('invalid development start time')
-    for name in ('log','status'):
-        if not isinstance(record[name],str) or not re.fullmatch(r'[a-z][a-z0-9.-]+',record[name]):
-            raise ContractError('invalid development diagnostic filename')
     if len(canonical(record))>8192:raise ContractError('development run exceeds read budget')
     return record
 
@@ -53,12 +50,13 @@ def prepare(unit, stage, log, status, arguments=()):
         raise ContractError('development run directory must be canonical')
     if (directory / 'run.json').exists():
         raise ContractError('development run identity already used')
+    if (log,status)!=('build.log','build.status'):raise ContractError('development diagnostics use build.log and build.status')
     for name in (log, status):
         if not re.fullmatch(r'[a-z][a-z0-9.-]+', name) or (directory / name).exists():
             raise ContractError('development log/status must be new plain filenames')
     atomic_write(directory / 'run.json', canonical(validate_run({'schema_version': 2, 'run_id': run_id,
         'unit': 'qb-development-v2-'+run_id, 'boot_id': controller_boot_id(), 'started': time.time(),
-        'log': log, 'status': status, 'work': 'work','command_sha256':digest(canonical(list(arguments)))})))
+        'command_sha256':digest(canonical(list(arguments)))})))
     atomic_write(directory/'command.json',canonical({'podman_arguments':list(arguments)}))
     atomic_write(directory / status, b'queued\n')
     return {'run_id': run_id, 'state_root': str(root), 'log': str(directory / log),
@@ -69,7 +67,7 @@ def retain(root, run_id, *, outputs=(), abandon=False):
     """Explicitly preserve ad hoc outputs before making their work disposable."""
     root = canonical_user_path(root)
     record = development_run(root, run_id)
-    expected=(run_id+'.service' if record.get('schema_version')==1 else 'qb-development-v2-'+run_id)
+    expected='qb-development-v2-'+run_id
     if record['unit'] != expected:
         raise ContractError('development service differs from run identity')
     services = DevelopmentServices(root)
@@ -114,7 +112,7 @@ def retain(root, run_id, *, outputs=(), abandon=False):
     refs = {}
     for name,path in paths.items():
         refs[name] = store.put_file(path).sha256
-    publication={'schema_version':1,'run':record,'outputs':refs,'abandoned':abandon,'terminal_state':record['state']}
+    publication={'schema_version':1,'run':{key:value for key,value in record.items() if key not in ('log','status','work')},'outputs':refs,'abandoned':abandon,'terminal_state':record['state']}
     manifest=store.put(canonical(publication))
     # Existing refs make both outputs and their role map survive ordinary backups.
     db=sqlite3.connect((root/'controller.sqlite').as_uri()+'?mode=rw',uri=True)

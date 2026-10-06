@@ -108,7 +108,7 @@ def source_coverage(root,db,refs):
 
 
 def require_stopped_cut(root):
-    root=Path(root).expanduser().absolute()
+    root=Path(root).expanduser().resolve()
     # A backup is a stopped SQLite copy, not a live WAL database. Ignoring a
     # later WAL here then copying it into restored state would attest one cut
     # while opening another. No auxiliary journal is part of the manifest.
@@ -163,7 +163,7 @@ def derive(root,manifest, *,manifest_sha=None):
 
 def verify_if_present(root):
     """Legacy absence is unknown; a present new companion must match its exact cut."""
-    root=Path(root).expanduser().absolute()
+    root=Path(root).expanduser().resolve()
     require_stopped_cut(root)
     try:raw=read_file(root,NAME,limit=1024**2)
     except FileNotFoundError:return None
@@ -189,7 +189,7 @@ def summary(value):
 
 def load_summary(root):
     """Render after successful creation/restore validation; no live coverage claim."""
-    root=Path(root).expanduser().absolute()
+    root=Path(root).expanduser().resolve()
     try:value=load(read_file(root,NAME,limit=1024**2))
     except FileNotFoundError:value=None
     return summary(value)

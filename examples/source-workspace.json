@@ -7,7 +7,5 @@
   "allowed_untracked": [
     "new.c"
   ],
-  "provenance": {},
-  "root_device": 1,
-  "root_inode": 2
+  "provenance": {}
 }

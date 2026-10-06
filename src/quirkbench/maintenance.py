@@ -134,18 +134,18 @@ def _prune(root, *, dry_run=False, owner=None):
     failed_seconds=config['failed_staging_days']*86400
     with reader.connection() as db:
         terminal = [dict(row) for row in db.execute(
-            "SELECT id,state,updated,result_digest,error_digest,worker_generation,input_digest,stage_dir FROM operations "
+            "SELECT id,state,updated,result_digest,error_digest,worker_generation,input_digest,stage_nonce FROM operations "
             "WHERE state IN ('SUCCEEDED','FAILED') AND worker_unit IS NULL")]
         pending_source_stages={}
         for event in db.execute("SELECT e.operation,e.document FROM operation_events e JOIN operations o ON o.id=e.operation WHERE o.kind='source_prepare' AND o.state!='SUCCEEDED' AND e.kind='source_workspace_selection'"):
             selection=json.loads(event['document'])
-            pending_source_stages.setdefault(event['operation'],set()).add(selection.get('source_stage'))
+            pending_source_stages.setdefault(event['operation'],set()).add(selection.get('source_stage_nonce'))
         claims = {}
         for row in terminal:
             for event in db.execute("SELECT document FROM operation_events WHERE operation=? AND kind='worker_stopped' ORDER BY id DESC", (row['id'],)):
                 proof=json.loads(event[0])
                 if (proof.get('worker_generation')==row['worker_generation'] and proof.get('input_digest')==row['input_digest']
-                        and proof.get('stage_dir')==row['stage_dir'] and isinstance(proof.get('stage_dir'),str)
+                        and proof.get('stage_nonce')==row['stage_nonce'] and isinstance(proof.get('stage_nonce'),str)
                         and proof.get('stop_kind') in ('stopped','previous_boot')):
                     claims[row['id']]=proof
                     break
@@ -156,8 +156,9 @@ def _prune(root, *, dry_run=False, owner=None):
             continue
         if row['state'] == 'FAILED' and now - row['updated'] < failed_seconds:
             continue
-        stage = Path(proof['stage_dir'])
-        if str(stage) in pending_source_stages.get(row['id'],set()):
+        from .worker_execution import stage_path
+        stage = stage_path(root,proof,row['id'])
+        if proof['stage_nonce'] in pending_source_stages.get(row['id'],set()):
             blocked.append(row['id']+': private source selection awaits workspace grant')
             continue
         if not stage.exists():
@@ -183,15 +184,16 @@ def _prune(root, *, dry_run=False, owner=None):
     with reader.connection() as db:
         captured=db.execute("SELECT operation,document FROM operation_events WHERE kind='inputs_retained' ORDER BY id").fetchall()
         stopped=db.execute("SELECT operation,document FROM operation_events WHERE kind='worker_stopped'").fetchall()
-    proofs={(r['operation'],json.loads(r['document']).get('stage_dir'),json.loads(r['document']).get('worker_generation')) for r in stopped
+    proofs={(r['operation'],json.loads(r['document']).get('stage_nonce'),json.loads(r['document']).get('worker_generation')) for r in stopped
             if json.loads(r['document']).get('stop_kind') in ('stopped','previous_boot')}
     for event in captured:
-        record=json.loads(event['document']);name=record.get('stage_dir');generation=record.get('worker_generation')
+        record=json.loads(event['document']);name=record.get('stage_nonce');generation=record.get('worker_generation')
         if not isinstance(name,str) or (event['operation'],name,generation) not in proofs: continue
-        path=Path(name)
+        from .worker_execution import stage_path
+        path=stage_path(root,{'stage_nonce':name,'worker_generation':generation},event['operation'])
         if not path.is_relative_to(root/'workers'/event['operation']) or not path.exists(): continue
         row=reader.operation_status(event['operation'])['data']
-        if row.get('stage_dir')==name and row.get('worker_unit') is not None: continue
+        if row.get('stage_nonce')==name and row.get('worker_unit') is not None: continue
         value=record.get('prepared_digest')
         if value not in row['references']['input'] or not (root/'artifacts/objects'/value).is_file():
             blocked.append(event['operation']+': captured inputs unavailable');continue

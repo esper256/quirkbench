@@ -4,7 +4,6 @@
   "workspace_id": "kernel-1",
   "base_oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "capture_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-  "workspace_path": "output/workspace",
   "allowed_untracked": [
     "new.c"
   ],

@@ -13,7 +13,6 @@
   ],
   "properties": {
     "schema_version": {
-      "type": "integer",
       "const": 2
     },
     "record_type": {
@@ -31,10 +30,8 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "state_root",
         "repository_alias",
         "repository_url",
-        "signing_home",
         "signing_fingerprint",
         "source_configuration_sha256",
         "destination_configuration_sha256",
@@ -43,12 +40,6 @@
         "controller_certificate_sha256"
       ],
       "properties": {
-        "state_root": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 4096,
-          "pattern": "^/(?!$)(?!.*(?:/\\.\\.?(/|$)|//))[^\\x00]*[^/]$"
-        },
         "repository_alias": {
           "type": "string",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
@@ -58,12 +49,6 @@
           "minLength": 1,
           "maxLength": 4096,
           "pattern": "^https://"
-        },
-        "signing_home": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 4096,
-          "pattern": "^/(?!$)(?!.*(?:/\\.\\.?(/|$)|//))[^\\x00]*[^/]$"
         },
         "signing_fingerprint": {
           "type": "string",

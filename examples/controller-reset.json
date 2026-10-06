@@ -2,8 +2,6 @@
   "schema_version": 1,
   "record_type": "unused-controller-reset",
   "request_id": "fresh-start-1",
-  "state_root": "/home/example/state",
-  "config_root": "/home/example/config/quirkbench",
   "files": {
     "state/controller.sqlite": {
       "identity": [
@@ -21,8 +19,11 @@
     "state/controller.sqlite-journal": null,
     "state/settings.json": null,
     "state/private/controller-service.json": null,
-    "config/setup-progress.json": null,
-    "config/setup-service.json": null
+    "state/private/setup-progress.json": null,
+    "state/private/setup-service.json": null,
+    "state/source-selections.json": null,
+    "state/builder-input.json": null,
+    "state/recovery-input.json": null
   },
   "objects": [],
   "complete": false

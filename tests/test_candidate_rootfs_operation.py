@@ -126,7 +126,7 @@ def test_joined_worker_stops_and_publishes_retained_sysroot_without_attempt_auth
         with c.transaction() as db:
             assert db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0]==0
             assert db.execute('SELECT COUNT(*) FROM campaigns').fetchone()[0]==0
-            assert db.execute('SELECT kind,state,paths FROM storage_groups WHERE owner=?',(claim['id'],)).fetchone()[:]==('input','SUCCEEDED','[]')
+            assert db.execute('SELECT kind,state,workspace_id,input_generation,stage_retained FROM storage_groups WHERE owner=?',(claim['id'],)).fetchone()[:]==('input','SUCCEEDED',None,None,0)
 
 
 @pytest.mark.parametrize('mutation',['input','result','tree','link','external-hardlink','special'])

@@ -97,7 +97,7 @@ product decision.
 
 Ordinary state, setup records, worker directories, locks, source workspaces and
 capture outputs, build caches and target evidence have no private-mode admission
-rule. Canonical paths, ownership, correct-device checks, locks, immutable digests
+rule. Current containment, ownership, correct-device checks, locks, immutable digests
 and bounded stable reads still serve their original purposes. Atomic updates
 preserve an existing regular file's mode; newly created records and the controller
 database retain private defaults. The database can contain attempt tokens, so keep
@@ -122,6 +122,30 @@ Permission changes on newly created artifacts preserve the required source/image
 modes or establish secret defaults. Cleanup may restore owner access only inside
 an explicitly disposable, stopped, application-owned snapshot; it never normalizes
 user source or ordinary state as a precondition for use.
+
+## Local locations and durable identity
+
+Current managed files are located from the selected root and existing domain IDs,
+not retained absolute or relative path copies. XDG defaults are discovered at
+startup. Necessary external selections belong once in ordinary local configuration;
+user-selected Unix aliases are resolved at entry. Content, trust and domain identity
+exclude local placement. Active process/configuration observations remain separate
+from durable capability identity. Current capture, no-follow traversal beneath
+managed roots, worker fencing and scoped destructive checks remain required.
+
+The owner-approved location simplification in [#143](https://github.com/esper256/quirkbench/issues/143) directly replaces
+affected development formats and fixtures. No migration or legacy reader is required;
+existing incompatible state must remain untouched and require fresh initialization.
+Managed workspaces use workspace IDs; worker stages use operation IDs, generations
+and stage nonces. Workspace device/inode observations belong only to a live
+quiesced writer/capture handoff and clear when that handoff is released. Worker
+stop evidence must match the exact generation, nonce and input digest before
+publication or disposal. Historical activation/reset capture observations and
+source-tree filenames retain their existing meanings.
+
+The target shutdown continuation derives its current control directory; boot,
+boot-configuration, source/trust, lock and sealed-evidence checks retain authority.
+Recovery worker results derive output/log locations from the exact claim layout.
 
 ## C0 — Shared contract and authority rules
 
@@ -243,8 +267,10 @@ to imply that an actual build or boot has passed protection checks.
 New CLI mutations use `--request-id`; interactive calls may generate and print one.
 Scope uniqueness by controller plus request ID, and hash canonical operation kind,
 campaign/target identity and immutable arguments. Exact replay returns the same
-operation; different reuse is `CONFLICT`. Normalize local paths before intent is
-recorded. Status/query commands never invoke controller startup recovery.
+operation; different reuse is `CONFLICT`. Managed locations are derived, and
+external input choices live once in their owning configuration. Equivalent aliases
+do not change semantic intent; different external sources cannot overwrite an
+existing request selection. Status/query commands never invoke controller startup recovery.
 
 New `--json` responses have `{schema_version, ok, operation_id, data, error}`.
 Unused values are null; an error has a stable code, bounded message and retryable
@@ -261,7 +287,7 @@ does not stop a freshly initialized controller.
 
 An explicit unused-controller reset is synchronous maintenance under the existing
 setup, installation, command, coordinator, build, migration and CAS locks. It reads
-known schemas without migration, refuses enrolled targets, all attempts, credential
+the current schema without conversion, refuses enrolled targets, all attempts, credential
 generations, bound enrollment and unreconciled work, and archives an exact allowlist
 of database/sidecar/configuration/setup files. Admission grants no recursive deletion.
 A version-1 local reset inventory records exact source identities and digests before
@@ -327,8 +353,9 @@ resume. Never automatically replay a physical attempt or an interrupted agent ed
 
 Use short SQLite transactions with the existing durability settings. Never hold a
 transaction while compiling, waiting for an agent, hashing an image, making network
-requests or rebooting. Serialize schema migrations under a migration lock; refuse
-an upgrade while an older active worker can still mutate state. Backup includes
+requests or rebooting. Serialize fresh schema initialization under the existing
+initialization lock. Reject incompatible development state without conversion or
+modification; preserve it and select fresh state. Backup includes
 operation rows and all referenced public input/output/source artifacts. Restored running
 operations are interrupted and scheduling is paused; no service PID or lock is
 restored as live ownership. Private configuration is restored separately.

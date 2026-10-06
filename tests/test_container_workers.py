@@ -6,7 +6,7 @@ import pytest
 from quirkbench.contracts import Conflict, ContractError, canonical
 from quirkbench.controller import Controller
 from quirkbench.worker_service import ContainerWorkerServices, WorkerServiceError, LABEL
-from quirkbench.worker_execution import load, validate
+from quirkbench.worker_execution import load, validate,document
 
 IMAGE='sha256:'+'1'*64
 BOOT='11111111-1111-4111-8111-111111111111'
@@ -125,11 +125,11 @@ def test_journal_rejects_wrong_stage_unknown_fields_duplicate_keys(worker):
         from jsonschema import Draft202012Validator
         schema=json.loads((Path(__file__).resolve().parents[1]/'schemas/worker-execution.v2.schema.json').read_text())
         Draft202012Validator.check_schema(schema)
-        Draft202012Validator(schema).validate(record)
+        Draft202012Validator(schema).validate(document(record))
         with pytest.raises(ContractError):validate({**record,'undocumented':True},c.root)
         bad={**record,'claim':{**record['claim'],'stage_dir':'/tmp/unrelated'}}
         with pytest.raises(ContractError):validate(bad,c.root)
-        raw=canonical(record)
+        raw=canonical(document(record))
         with pytest.raises(ContractError):load(b'{"unit":"other",'+raw[1:],c.root)
         service.stop_and_verify(claim['worker_unit'],BOOT)
 

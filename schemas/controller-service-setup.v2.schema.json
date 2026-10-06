@@ -13,7 +13,6 @@
   ],
   "properties": {
     "schema_version": {
-      "type": "integer",
       "const": 2
     },
     "record_type": {
@@ -32,17 +31,13 @@
       "additionalProperties": false,
       "required": [
         "initial_intent",
-        "setup_request_digest",
-        "config_home",
-        "bin_home"
+        "setup_request_digest"
       ],
       "properties": {
         "initial_intent": {
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "state_root",
-            "runtime_root",
             "cache_gib",
             "reserve_gib",
             "host",
@@ -50,28 +45,10 @@
             "allow_lan",
             "logout_policy",
             "runtime_archive_sha256",
-            "runtime_manifest_sha256"
+            "runtime_manifest_sha256",
+            "runtime_version"
           ],
           "properties": {
-            "state_root": {
-              "type": "string",
-              "minLength": 2,
-              "maxLength": 4096,
-              "pattern": "^/(?!$)(?!.*(?:/\\.\\.?(/|$)|//))[^\\x00]*[^/]$"
-            },
-            "runtime_root": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "minLength": 2,
-                  "maxLength": 4096,
-                  "pattern": "^/(?!$)(?!.*(?:/\\.\\.?(/|$)|//))[^\\x00]*[^/]$"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
             "cache_gib": {
               "type": "integer",
               "minimum": 0,
@@ -129,17 +106,17 @@
                   "pattern": "^[0-9a-f]{64}$"
                 }
               ]
+            },
+            "runtime_version": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[0-9][A-Za-z0-9.+-]{0,63}$"
             }
           },
           "allOf": [
             {
-              "if": {
-                "properties": {
-                  "runtime_root": {
-                    "type": "null"
-                  }
-                }
-              },
               "then": {
                 "properties": {
                   "runtime_archive_sha256": {
@@ -191,16 +168,6 @@
         "setup_request_digest": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
-        },
-        "config_home": {
-          "type": "string",
-          "maxLength": 4096,
-          "pattern": "^/"
-        },
-        "bin_home": {
-          "type": "string",
-          "maxLength": 4096,
-          "pattern": "^/"
         }
       }
     },

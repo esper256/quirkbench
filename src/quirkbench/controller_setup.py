@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .filesystem import _managed_path, _durable_directory
+import json
 import os
 import re
 import shutil
@@ -96,13 +97,13 @@ def _unlinked_tree(root):
                 raise ContractError('setup staging must contain only owned files/directories without links')
 
 
-def _journal(config_home):
-    directory = _managed_path(_config_home(config_home) / 'quirkbench')
+def _journal(config_home, root=None):
+    directory = discover_state_root(root, config_home=config_home) / 'private'
     return directory / 'setup-progress.json'
 
 
-def setup_progress(*, config_home=None):
-    path = _journal(config_home)
+def setup_progress(root=None, *, config_home=None):
+    path = _journal(config_home, root)
     try:
         info = path.lstat()
     except FileNotFoundError:
@@ -115,14 +116,14 @@ def setup_progress(*, config_home=None):
 class SetupFilesystem:
     """Injectable native state adapter; no startup, services or implicit upgrades."""
 
-    def select(self, intent, config_home):
-        return configure_state_root(Path(intent['state_root']), config_home=config_home)
+    def select(self, root, config_home):
+        return configure_state_root(root, config_home=config_home)
 
     def database(self, root):
         from .controller import MIGRATIONS
         with StateReader(root).connection() as db:
             if db.execute('PRAGMA user_version').fetchone()[0] != len(MIGRATIONS):
-                raise Conflict('existing database requires explicit compatible migration before setup')
+                raise Conflict('incompatible development database; initialize fresh state without deleting existing files')
             return db.execute('SELECT count(*) FROM devices').fetchone()[0]
 
     def initialize(self, root, intent):
@@ -130,8 +131,8 @@ class SetupFilesystem:
         if not _database_present(root):
             from .controller import Controller
             # Only a complete database is published at the selected state root.
-            # Interrupted migrations in this setup-owned staging root can resume;
-            # preexisting databases at the selected root are never migrated here.
+            # Atomic fresh initialization can retry empty setup-owned staging;
+            # incompatible preexisting databases are never converted here.
             _durable_directory(stage)
             _unlinked_tree(stage)
             marker = stage / 'setup-intent.json'
@@ -191,13 +192,16 @@ class SetupFilesystem:
             set_setting(root, 'cache_gib', intent['cache_gib'])
 
 
-def _runtime(intent):
-    if intent['runtime_root'] is None:
+def _runtime(intent, *, config_home=None):
+    from .controller_install import selected_runtime
+    if intent['runtime_version'] is None:
         return False
-    from .controller_install import verify_installation
-    record = verify_installation(Path(intent['runtime_root']))
+    from .controller_install import verify_installation, selected_runtime
+    runtime = selected_runtime(config_home=config_home)
+    record = verify_installation(runtime)
     if (record['archive_sha256'] != intent['runtime_archive_sha256']
-            or _manifest_digest(intent['runtime_root']) != intent['runtime_manifest_sha256']):
+            or record['version'] != intent['runtime_version']
+            or _manifest_digest(runtime) != intent['runtime_manifest_sha256']):
         raise Conflict('selected runtime identity differs from setup intent')
     return True
 
@@ -205,18 +209,19 @@ def _runtime(intent):
 def _manifest_digest(runtime):
     from .product_contracts import _pairs
     raw = read_file(Path(runtime), 'controller-manifest.json', limit=64 * 1024**2)
-    return digest(canonical(__import__('json').loads(raw, object_pairs_hook=_pairs)))
+    return digest(canonical(json.loads(raw, object_pairs_hook=_pairs)))
 
 
 def controller_status(root=None, *, config_home=None, filesystem=None,
                       service_inspector=None, ready=None, installation_inspector=None,
                       connection_inspector=None, release_inspector=None, builder_inspector=None,enrollment_inspector=None):
     """Observe existing configuration; never initialize a database or lifecycle."""
+    from .controller_install import selected_runtime
     from .controller_install import installation_report
     from .controller_service import require_ready
     filesystem = filesystem or SetupFilesystem()
-    progress = setup_progress(config_home=config_home)
-    root = discover_state_root(root, config_home=config_home).expanduser().absolute()
+    root = discover_state_root(root, config_home=config_home)
+    progress = setup_progress(root, config_home=config_home)
     report = (service_inspector or inspect_user_manager)()
     try:
         report.update((ready or require_ready)(root))
@@ -237,14 +242,14 @@ def controller_status(root=None, *, config_home=None, filesystem=None,
             report['instructions'].append(str(exc)[:512])
     selection = _config_home(config_home) / 'quirkbench/controller.json'
     selected = selection.exists() and discover_state_root(config_home=config_home) == root
-    matches = progress is not None and progress['intent']['state_root'] == str(root)
+    matches = progress is not None
     runtime_verified = False
     preferences_match = False
     connection = None
     if matches:
         intent = progress['intent']
         try:
-            runtime_verified = _runtime(intent)
+            runtime_verified = _runtime(intent, config_home=config_home)
         except (OSError, ValueError) as exc:
             report['instructions'].append(str(exc)[:512])
         from .retention_settings import settings
@@ -263,7 +268,7 @@ def controller_status(root=None, *, config_home=None, filesystem=None,
     service_setup = None
     try:
         from .setup_service import service_progress
-        service_setup = service_progress(config_home=config_home)
+        service_setup = service_progress(root, config_home=config_home)
     except (OSError, ValueError) as exc:
         report['instructions'].append(str(exc)[:512])
     release = {'publisher_authenticated': False, 'interfaces_compatible': False,
@@ -273,7 +278,7 @@ def controller_status(root=None, *, config_home=None, filesystem=None,
     if runtime_verified:
         try:
             from .installed_release import inspect_selected
-            observed = (release_inspector or inspect_selected)(progress['intent']['runtime_root'], config_home=config_home)
+            observed = (release_inspector or inspect_selected)(selected_runtime(config_home=config_home), config_home=config_home)
             release.update(publisher_authenticated=True, interfaces_compatible=observed['verification']['statement']['schema_version'] == 2,
                            request_id=observed['request_id'], statement_sha256=observed['verification']['statement_sha256'])
             if database_available and release['interfaces_compatible']:
@@ -342,45 +347,40 @@ def setup_controller(root=None, *, request_id=None, runtime_root=None, cache_gib
                      reserve_gib=None, host=None, port=None, allow_lan=None, logout_policy=None,
                      config_home=None, filesystem=None, fault_hook=None, **status_adapters):
     """Persist intent before synchronous setup effects and reconcile on every retry."""
+    from .controller_install import selected_runtime
     from .filesystem import private_lock
     from .controller_install import configuration, verify_installation
     filesystem = filesystem or SetupFilesystem()
     fault_hook = fault_hook or (lambda _: None)
-    journal = _journal(config_home)
+    state = _managed_path(discover_state_root(root, config_home=config_home))
+    journal = _journal(config_home, state)
     _durable_directory(journal.parent)
     with private_lock(journal.parent / '.setup-progress.lock'):
-        progress = setup_progress(config_home=config_home)
+        progress = setup_progress(state, config_home=config_home)
         saved = progress['intent'] if progress else {}
-        if progress:
-            _runtime(saved)
-        selected = journal.parent / 'controller.json'
-        state = root if root is not None else saved.get('state_root')
-        if state is None:
-            state = discover_state_root(config_home=config_home) if selected.exists() else default_state_root()
-            if state.exists() and not selected.exists() and any(state.iterdir()):
-                raise Conflict('existing default state requires explicit --state selection')
-        state = _managed_path(state)
+        selected = _config_home(config_home) / 'quirkbench/controller.json'
         from .controller_reset import require_no_reset
         require_no_reset(state)
-        runtime = runtime_root if runtime_root is not None else saved.get('runtime_root')
-        if runtime is None and not progress:
-            installed = Path(__file__).resolve().parents[2]
-            if (installed / 'installation.json').exists() and (installed / 'controller-manifest.json').exists():
-                runtime = installed
-        runtime_record = verify_installation(canonical_user_path(Path(runtime))) if runtime is not None else None
+        from .controller_install import selected_runtime, select_runtime
+        runtime = runtime_root
+        if runtime is None:
+            try:
+                runtime = selected_runtime(config_home=config_home)
+            except FileNotFoundError:
+                installed = Path(__file__).resolve().parents[2]
+                if (installed/'installation.json').exists(): runtime = installed
+        runtime_record = verify_installation(canonical_user_path(runtime)) if runtime is not None else None
         values = {'cache_gib': cache_gib, 'reserve_gib': reserve_gib, 'host': host,
                   'port': port, 'allow_lan': allow_lan, 'logout_policy': logout_policy}
         defaults = {'cache_gib': 50, 'reserve_gib': 20.0, 'host': '127.0.0.1',
                     'port': 8443, 'allow_lan': False, 'logout_policy': 'session'}
         intent = validate_intent({
-            'state_root': str(state), 'runtime_root': str(Path(runtime).resolve()) if runtime else None,
+            'runtime_version': runtime_record['version'] if runtime_record else None,
             'runtime_archive_sha256': runtime_record['archive_sha256'] if runtime_record else None,
-            'runtime_manifest_sha256': _manifest_digest(runtime_record['runtime_root']) if runtime_record else None,
+            'runtime_manifest_sha256': _manifest_digest(runtime) if runtime_record else None,
             **{name: value if value is not None else saved.get(name, defaults[name]) for name, value in values.items()},
         })
         identifier(request_id) if request_id is not None else None
-        if selected.exists() and discover_state_root(config_home=config_home) != state:
-            raise Conflict('controller state differs from requested setup intent')
         if progress:
             if intent != saved or (request_id is not None and request_id != progress['request_id']):
                 raise Conflict('setup already has a different intent/request; use its recorded request ID')
@@ -399,7 +399,7 @@ def setup_controller(root=None, *, request_id=None, runtime_root=None, cache_gib
             filesystem.database(state)
             filesystem.preferences(state, intent, completed=True)
             if runtime is not None and (state / 'private/controller-service.json').exists():
-                if Path(configuration(state)['runtime']).parent.parent != Path(intent['runtime_root']):
+                if _manifest_digest(Path(configuration(state)['runtime']).parent.parent) != intent['runtime_manifest_sha256']:
                     raise Conflict('configured service differs from selected runtime')
             return controller_status(state, config_home=config_home, filesystem=filesystem, **status_adapters)
         if 'state_selected' in progress['completed_steps'] and not selected.exists():
@@ -408,7 +408,8 @@ def setup_controller(root=None, *, request_id=None, runtime_root=None, cache_gib
         _durable_directory(state)
         _managed_path(state)
         with _state_guard(state, filesystem) as owner_locked:
-            filesystem.select(intent, config_home)
+            filesystem.select(state, config_home)
+            if runtime is not None: select_runtime(runtime, config_home=config_home)
             fault_hook('state_selected')
             if not progress['completed_steps']:
                 progress['completed_steps'].append('state_selected')
@@ -425,7 +426,7 @@ def setup_controller(root=None, *, request_id=None, runtime_root=None, cache_gib
                 _idle(state)
                 if runtime is not None and (state / 'private/controller-service.json').exists():
                     configured = configuration(state)
-                    if Path(configured['runtime']).parent.parent != Path(intent['runtime_root']):
+                    if _manifest_digest(Path(configured['runtime']).parent.parent) != intent['runtime_manifest_sha256']:
                         raise Conflict('configured service differs from selected runtime')
                 filesystem.preferences(state, intent, completed='preferences_recorded' in progress['completed_steps'])
                 fault_hook('preferences_recorded')

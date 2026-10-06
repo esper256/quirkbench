@@ -36,8 +36,8 @@ def publication(bound):
     repo=c.root/'repositories/lab';repo.mkdir(parents=True);(repo/'config').write_bytes(b'[core]\nmode=archive\n')
     signing=c.root/'private/gnupg';signing.mkdir(mode=0o700)
     path=c.root/'private/controller-service.json';config=json.loads(path.read_bytes())
-    config.update({'repository_endpoint':{'url':'https://127.0.0.1:8444'},'repositories':{'lab':str(repo)},
-                   'composition_signing':{'home':str(signing),'fingerprint':FPR}})
+    config.update({'repository_endpoint':{'url':'https://127.0.0.1:8444'},'repositories':['lab'],
+                   'composition_signing':{'fingerprint':FPR}})
     path.write_bytes(canonical(config))
     return c,req,code,kwargs
 

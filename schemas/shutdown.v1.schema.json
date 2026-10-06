@@ -418,7 +418,6 @@
         "schema_version",
         "record_type",
         "request_id",
-        "control_root",
         "boot_id",
         "boot_config_sha256",
         "source_sha256",
@@ -437,11 +436,6 @@
         "request_id": {
           "type": "string",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
-        },
-        "control_root": {
-          "type": "string",
-          "pattern": "^/(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$)).*[^/]$",
-          "maxLength": 4096
         },
         "boot_id": {
           "type": "string",
