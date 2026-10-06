@@ -40,11 +40,9 @@ def recovery_capacity(path: Path = BOOT_RECORD) -> dict | None:
         return None
     try:
         capacity = json.loads(path.read_bytes())['boot'].get('quirkbench.capacity')
-        if (isinstance(capacity, dict)
-                and set(capacity) == {'eligible', 'current_ram_mib', 'evidence_mib', 'required_evidence_mib'}
-                and type(capacity['eligible']) is bool):
-            return capacity
-    except (OSError, ValueError, KeyError, TypeError):
+        from .boot import validate_capacity
+        return validate_capacity(capacity)
+    except (OSError, ValueError, KeyError, TypeError, BootError):
         pass
     return None
 

@@ -48,13 +48,16 @@ class ImageInputs:
     recovery_kernel_release: str | None=None
     recovery_module_files_digest: str | None=None
     recovery_storage_policy: Path | None=None
+    controller_prepared: bool=False
 
     def validate(self):
+        if type(self.controller_prepared) is not bool:
+            raise ImageError('controller-prepared format selection must be boolean')
         if type(self.size_mib) is not int or self.size_mib < MIN_IMAGE_MIB or self.root_mib < 256:
             raise ImageError('image/root partition too small')
-        if any(type(value) is not int or value < 1 for value in (self.experiment_mib,self.library_mib,self.log_budget_mib)):
+        if not self.controller_prepared and any(type(value) is not int or value < 1 for value in (self.experiment_mib,self.library_mib,self.log_budget_mib)):
             raise ImageError('commissioning capacities must be positive integer MiB')
-        if self.size_mib-self.root_mib-ESP_MIB-STATE_MIB-1 > self.experiment_mib:
+        if not self.controller_prepared and self.size_mib-self.root_mib-ESP_MIB-STATE_MIB-1 > self.experiment_mib:
             raise ImageError('factory experiment partition exceeds commissioned size')
         if self.size_mib < self.root_mib+ESP_MIB+STATE_MIB+512+2:
             raise ImageError('image needs at least 512 MiB of data space')
@@ -200,6 +203,29 @@ def partition_layout(size_mib,root_mib):
         start=end+1
     answer.append({'number':4,'label':'QUIRKBENCH-EXPERIMENTS','start':start,'end':size_mib*MIB//SECTOR-34})
     return answer
+
+
+def create_gpt(image, parts, disk_guid, *, runner=_run):
+    """Shared regular-file GPT assembly for factory and prepared components."""
+    if image.is_symlink() or not image.is_file():
+        raise ImageError('GPT assembly requires a regular-file component')
+    commands=['sgdisk','--clear','--disk-guid='+disk_guid]
+    for part in parts:
+        number=part['number'];kind='ef00' if number==1 else '0700' if number==3 else '8300'
+        commands += [f'--new={number}:{part["start"]}:{part["end"]}',f'--typecode={number}:{kind}',
+                     f'--change-name={number}:{part["label"]}',f'--partition-guid={number}:{part["partuuid"]}']
+    runner(*commands,str(image))
+
+
+def create_ext4_component(path, size_bytes, label, filesystem_uuid, *, source=None, runner=_run):
+    """Shared filesystem component creation, never a native device formatter."""
+    if (type(size_bytes) is not int or size_bytes <= 0 or size_bytes % 4096
+            or path.is_symlink() or path.exists()):
+        raise ImageError('ext4 component requires new aligned regular-file output')
+    with path.open('xb') as stream:stream.truncate(size_bytes)
+    arguments=['mkfs.ext4','-q','-F','-L',label,'-U',filesystem_uuid,'-O','^metadata_csum_seed']
+    if source is not None:arguments += ['-d',str(source)]
+    runner(*arguments,str(path))
 
 
 def grub_config(partuuid: str, *, esp_uuid=None,root_uuid=None,state_uuid=None,data_uuid=None,library_uuid=None,evidence_uuid=None,smoke=False,stock_recovery=False):
@@ -453,14 +479,13 @@ def _create_image(inputs: ImageInputs, *, reserve_bytes=20*1024**3) -> Path:
     with tempfile.TemporaryDirectory(prefix='.quirkbench-image-',dir=inputs.output.parent) as name:
         work=Path(name);image=work/'image.img'
         with image.open('xb') as stream:stream.truncate(inputs.size_mib*MIB)
-        commands=['sgdisk','--clear','--disk-guid='+disk_guid]
-        for part in parts:
-            number=part['number'];kind='ef00' if number==1 else '0700' if number==3 else '8300'
-            commands += [f'--new={number}:{part["start"]}:{part["end"]}',f'--typecode={number}:{kind}',f'--change-name={number}:{part["label"]}',f'--partition-guid={number}:{part["partuuid"]}']
-        _run(*commands,str(image))
+        create_gpt(image,parts,disk_guid,runner=_run)
         root=work/'rootfs';_copy_tree(inputs.rootfs_dir,root)
         install_runtime(root,config)
         commissioned={'schema_version':2,'disk_guid':disk_guid,'partition_uuids':[p['partuuid'] for p in parts]+extra_uuids,'partition_starts':[p['start'] for p in parts],'fixed_ends':[p['end'] for p in parts[:3]],'experiment_mib':inputs.experiment_mib,'library_mib':inputs.library_mib,'log_budget_mib':inputs.log_budget_mib}
+        if inputs.controller_prepared:
+            from .prepared_factory import record as factory_record
+            commissioned=factory_record(disk_guid,[p['partuuid'] for p in parts]+extra_uuids,parts)
         (root/'etc/quirkbench/commission.json').write_bytes(canonical(commissioned))
         (root/'etc/quirkbench/commission.json').chmod(0o600)
         payload=work/'data'
@@ -470,8 +495,8 @@ def _create_image(inputs: ImageInputs, *, reserve_bytes=20*1024**3) -> Path:
         for part in parts:
             fs=work/f'p{part["number"]}.img'
             fs_size=((part['end']-part['start']+1)*SECTOR//4096)*4096
-            with fs.open('wb') as stream:stream.truncate(fs_size)
             if part['number'] in (1,3):
+                with fs.open('xb') as stream:stream.truncate(fs_size)
                 label='QBESP' if part['number']==1 else 'QBSTATE'
                 _run('mformat','-i',str(fs),'-F' if part['number']==1 else '-v',*([ '-v',label] if part['number']==1 else [label]),'::')
                 marker=work/'marker';marker.write_text(part['partuuid']+'\n')
@@ -492,12 +517,14 @@ def _create_image(inputs: ImageInputs, *, reserve_bytes=20*1024**3) -> Path:
                     _run('mcopy','-i',str(fs),str(env),'::/quirkbench/next.env')
             else:
                 source=root if part['number']==2 else payload
-                _run('mkfs.ext4','-q','-F','-L','QBRECOVERY' if part['number']==2 else 'QBEXPERIMENTS','-U',str(uuid.uuid4()),'-O','^metadata_csum_seed','-d',str(source),str(fs))
+                create_ext4_component(fs,fs_size,'QBRECOVERY' if part['number']==2 else 'QBEXPERIMENTS',
+                                      str(uuid.uuid4()),source=source,runner=_run)
             _copy_slice(fs,image,part['start']*SECTOR)
         _emit('image-hash',status='running',total_bytes=image.stat().st_size)
         checksum=sha256_file(image)
         _emit('image-hash',status='complete',total_bytes=image.stat().st_size)
         record={'schema_version':2,'layout_version':2,'commissioned':False,'commissioning':commissioned,'image_sha256':checksum,'size_bytes':image.stat().st_size,'partitions':parts,'identity':config,'candidate_id':candidate_id,'smoke':inputs.smoke,'boot_policy':'fixed recovery; same-disk consumed one-shot; matching SMBIOS UUID; no EFI writes','recovery_kernel_sha256':sha256_file(inputs.recovery_kernel),'recovery_initramfs_sha256':sha256_file(inputs.recovery_initramfs),'candidate_revision':candidate_revision,'candidate_kernel_release':candidate_kernel_release,'candidate_health_sha256':candidate_health_sha256,'panic_candidate_id':panic_candidate_id,'load_failure_candidate_id':load_failure_candidate_id,'deployment_backend':'ostree'}
+        if inputs.controller_prepared:record.update(schema_version=3,layout_version=3)
         if inputs.recovery_profile_digest is not None:
             record.update(recovery_profile_digest=inputs.recovery_profile_digest,
                           recovery_kernel_release=inputs.recovery_kernel_release)
@@ -538,6 +565,7 @@ def _input_identity(inputs):
         values['recovery_storage_policy'] = sha256_file(inputs.recovery_storage_policy)
     values['prepared_data_tree']=_tree_hash(inputs.prepared_data_tree) if inputs.prepared_data_tree is not None else None
     values.update(rootfs=_tree_hash(inputs.rootfs_dir),size_mib=inputs.size_mib,root_mib=inputs.root_mib,experiment_mib=inputs.experiment_mib,library_mib=inputs.library_mib,log_budget_mib=inputs.log_budget_mib,smoke=inputs.smoke,stock_recovery=inputs.recovery_storage_policy is not None)
+    if inputs.controller_prepared:values['controller_prepared']=True
     if inputs.recovery_profile_digest is not None:
         values.update(recovery_profile_id=inputs.recovery_profile_id,
                       recovery_profile_digest=inputs.recovery_profile_digest,

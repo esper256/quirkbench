@@ -29,6 +29,9 @@ def run_attended_commission(*, identity_path: Path = IDENTITY,
     source = sys.stdin if input_stream is None else input_stream
     output = sys.stdout if output_stream is None else output_stream
     identity = _load_commission_identity(identity_path)
+    from .prepared_factory import PreparedFactoryIdentity
+    if isinstance(identity, PreparedFactoryIdentity):
+        raise CommissionError('controller-prepared USB cannot be partitioned on the target; reprepare on the controller')
     boot = verify_boot_identity(identity, paths=paths, runner=runner,
                                 block_rdev=block_rdev, allow_factory=True,
                                 allow_unformatted=True)

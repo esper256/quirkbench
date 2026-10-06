@@ -46,6 +46,7 @@ TARGET_MODULES = (
     'process_ownership',
     'prepared_enrollment',
     'prepared_media',
+    'prepared_factory',
     'product_contracts',
     'provisioning',
     'recipe_registry',

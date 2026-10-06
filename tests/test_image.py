@@ -37,6 +37,15 @@ def test_image_requires_independent_recovery_and_new_regular_output(tmp_path: Pa
         inputs.validate()
 
 
+def test_prepared_format_uses_actual_factory_size_not_unused_legacy_budgets(tmp_path):
+    from dataclasses import replace
+    inputs = _inputs(tmp_path)
+    prepared = replace(inputs, controller_prepared=True, experiment_mib=0, library_mib=0, log_budget_mib=0)
+    prepared.validate()
+    with pytest.raises(ImageError, match='capacities'):
+        replace(prepared, controller_prepared=False).validate()
+
+
 def test_factory_image_rejects_private_gpg_home(tmp_path: Path) -> None:
     inputs = _inputs(tmp_path)
     private = inputs.rootfs_dir / 'root/.gnupg'

@@ -187,27 +187,39 @@ def boot_context(path=Path('/run/quirkbench-boot.json'), *, allow_library_mainte
     expected = BootIdentity(config.disk_guid, (config.esp_partuuid, config.root_partuuid,
                            config.state_partuuid, config.data_partuuid,
                            config.library_partuuid, config.evidence_partuuid))
+    from .boot import validate_capacity
+    from .commission import _load_commission_identity
+    from .prepared_factory import PreparedFactoryIdentity
+    factory = (_load_commission_identity(Path('/etc/quirkbench/commission.json'))
+               if boot['quirkbench.mode'] == 'recovery' else None)
+    prepared = isinstance(factory, PreparedFactoryIdentity)
+    capacity = context['boot'].get('quirkbench.capacity')
+    if capacity is not None:validate_capacity(capacity)
+    if prepared and (capacity is None or capacity.get('record_type') != 'prepared-capacity'):
+        raise ContractError('prepared recovery requires its verified prepared capacity assessment')
+    if not prepared and capacity is not None and capacity.get('record_type') == 'prepared-capacity':
+        raise ContractError('prepared assessment differs from fixed recovery format')
     def verify():
+        if factory is not None and _load_commission_identity(Path('/etc/quirkbench/commission.json')) != factory:
+            raise ContractError('fixed recovery identity changed since boot assessment')
         layout=verify_boot_identity(expected, allow_data_mounted=True, mode=boot['quirkbench.mode'], allow_library_maintenance=allow_library_maintenance,
             **({'runner':native_runner} if native_runner is not None else {}))
         verify_evidence_destination(layout)
+        if prepared:
+            from .boot import prepared_capacity
+            identity = _load_commission_identity(Path('/etc/quirkbench/commission.json'))
+            if (not isinstance(identity, PreparedFactoryIdentity)
+                    or identity.disk_guid != expected.disk_guid
+                    or identity.partition_uuids != expected.partition_uuids
+                    or prepared_capacity(identity, layout, Path('/boot/quirkbench-state')) != capacity):
+                raise ContractError('prepared media differs from verified boot assessment')
         return True
     verify()
     # Preserve verifier observations only when they belong to this current boot.
     for key in ('quirkbench.experiments_unavailable', 'quirkbench.library_unavailable'):
         if key in context['boot']:
             boot[key] = context['boot'][key]
-    capacity = context['boot'].get('quirkbench.capacity')
     if capacity is not None:
-        if (not isinstance(capacity, dict)
-                or set(capacity) != {'eligible', 'current_ram_mib', 'evidence_mib', 'required_evidence_mib'}
-                or type(capacity['eligible']) is not bool
-                or type(capacity['evidence_mib']) is not int or capacity['evidence_mib'] < 0
-                or any(value is not None and (type(value) is not int or value < 1)
-                       for value in (capacity['current_ram_mib'], capacity['required_evidence_mib']))
-                or (capacity['eligible'] and (capacity['required_evidence_mib'] is None
-                     or capacity['evidence_mib'] < capacity['required_evidence_mib']))):
-            raise ContractError('invalid verified capacity assessment')
         boot['quirkbench.capacity'] = capacity
     return config, boot, verify
 

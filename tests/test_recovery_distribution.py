@@ -472,3 +472,23 @@ def test_image_worker_record_has_no_signing_and_controller_can_publish(tmp_path,
         assembled_record, home, trusted_key(tmp_path), FINGERPRINT,
         signing_run=fake_gpg, verification_run=fake_public_gpg)
     assert published["verified_checksums"]["qualification_status"] == "unqualified"
+
+
+@pytest.mark.parametrize('fault', [None, 'source', 'payload', 'version', 'layout', 'legacy-sizing', 'part-type'])
+def test_explicit_prepared_factory_manifest_preserves_old_reader_meaning(tmp_path, monkeypatch, fault):
+    from quirkbench.recovery_distribution import _validate_factory_manifest
+    from quirkbench.prepared_factory import record
+    candidate, image, _ = inputs(tmp_path, monkeypatch)
+    manifest = json.loads(Path(str(image)+'.json').read_bytes())
+    old = manifest['commissioning']
+    manifest['commissioning'] = record(old['disk_guid'], old['partition_uuids'], manifest['partitions'])
+    manifest.update(schema_version=3, layout_version=3)
+    if fault == 'source':manifest['commissioning']['factory_data_end'] += 1
+    elif fault == 'payload':manifest['commissioning']['library_payload_bytes'] = 1
+    elif fault == 'version':manifest['schema_version'] = 2
+    elif fault == 'layout':manifest['layout_version'] = 2
+    elif fault == 'legacy-sizing':manifest['commissioning']['log_budget_mib'] = 4096
+    elif fault == 'part-type':manifest['partitions'][3] = None
+    if fault is None:_validate_factory_manifest(manifest, candidate)
+    else:
+        with pytest.raises(BuildError):_validate_factory_manifest(manifest, candidate)

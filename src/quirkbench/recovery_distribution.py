@@ -65,9 +65,12 @@ def _validate_factory_manifest(manifest: dict, candidate: dict) -> None:
     identity = manifest.get("identity")
     commissioning = manifest.get("commissioning")
     partitions = manifest.get("partitions")
+    prepared = type(manifest.get('schema_version')) is int and manifest['schema_version'] == 3
     if (set(manifest) != FACTORY_IMAGE_FIELDS
-            or manifest.get("schema_version") != 2
-            or manifest.get("layout_version") != 2
+            or type(manifest.get('schema_version')) is not int
+            or manifest.get("schema_version") not in (2,3)
+            or type(manifest.get('layout_version')) is not int
+            or manifest.get("layout_version") != (3 if prepared else 2)
             or manifest.get("commissioned") is not False
             or manifest.get("smoke") is not False
             or any(manifest.get(name) is not None for name in
@@ -86,15 +89,24 @@ def _validate_factory_manifest(manifest: dict, candidate: dict) -> None:
             or not isinstance(identity, dict) or set(identity) != FACTORY_IDENTITY_FIELDS
             or identity.get("schema_version") != 2
             or not isinstance(commissioning, dict)
-            or set(commissioning) != {"schema_version", "disk_guid", "partition_uuids",
+            or (not prepared and set(commissioning) != {"schema_version", "disk_guid", "partition_uuids",
                                      "partition_starts", "fixed_ends", "experiment_mib",
-                                     "library_mib", "log_budget_mib"}
-            or commissioning.get("schema_version") != 2
+                                     "library_mib", "log_budget_mib"})
+            or commissioning.get("schema_version") != (3 if prepared else 2)
             or commissioning.get("disk_guid") != identity.get("disk_guid")
-            or any(commissioning.get(name) != candidate["layout"][name]
-                   for name in ("experiment_mib", "library_mib", "log_budget_mib"))
+            or (not prepared and any(commissioning.get(name) != candidate["layout"][name]
+                   for name in ("experiment_mib", "library_mib", "log_budget_mib")))
             or not isinstance(partitions, list) or len(partitions) != 4):
         raise BuildError("recovery image manifest is not an uncommissioned factory image")
+    if prepared:
+        from .prepared_factory import validate
+        from .commission import CommissionError
+        try:validate(commissioning)
+        except (CommissionError, TypeError, ValueError) as exc:
+            raise BuildError('invalid prepared factory layout') from exc
+        if (any(not isinstance(part, dict) for part in partitions)
+                or commissioning['factory_data_end'] != partitions[3].get('end')):
+            raise BuildError('prepared factory source extent differs from partitions')
     expected = partition_layout(candidate["layout"]["factory_size_mib"],
                                 candidate["layout"]["root_mib"])
     if expected[-1]["end"] < expected[-1]["start"]:

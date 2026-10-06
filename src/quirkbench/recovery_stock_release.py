@@ -75,7 +75,10 @@ def create_candidate(recipe, store, stage_record, inputs):
         raise BuildError("stock image missing or linked")
     image_sha, image_size = _image_identity(image)
     manifest, raw = _load_json(Path(str(image)+'.json'), limit=1024**2, label="stock image manifest")
-    if (set(manifest) != FACTORY_IMAGE_FIELDS or manifest.get("schema_version") != 2
+    expected_version = 3 if inputs.controller_prepared else 2
+    if (set(manifest) != FACTORY_IMAGE_FIELDS or type(manifest.get('schema_version')) is not int
+            or manifest.get("schema_version") != expected_version
+            or manifest.get('layout_version') != expected_version
             or manifest.get("commissioned") is not False or manifest.get("smoke") is not False
             or any(manifest.get(name) is not None for name in
                    ("candidate_id", "candidate_revision", "candidate_kernel_release",

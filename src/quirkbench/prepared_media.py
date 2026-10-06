@@ -62,12 +62,24 @@ def record(factory, artifact_sha256, device_bytes, *, factory_data_end: int, lib
 def validate(value, *, factory: CommissionIdentity, expected_artifact_sha256: str,
              factory_data_end: int):
     """Validate exact fields against authenticated factory identity, not a label."""
+    validate_geometry(value, factory=factory, factory_data_end=factory_data_end)
+    if sha256(value['artifact_sha256']) != sha256(expected_artifact_sha256):
+        raise CommissionError('prepared media differs from selected artifact')
+    return value
+
+
+def validate_geometry(value, *, factory, factory_data_end):
+    """Target structural check against its fixed root identity and observed GPT.
+
+    This does not authenticate the reported artifact digest. Signed artifact
+    acquisition and exact byte verification belong to controller preparation.
+    """
     if (not isinstance(value, dict) or set(value) != FIELDS
             or type(value['schema_version']) is not int or value['schema_version'] != 1
             or value['record_type'] != 'prepared-media' or type(value['complete']) is not bool):
         raise CommissionError('invalid prepared-media record')
-    if (sha256(value['artifact_sha256']) != sha256(expected_artifact_sha256)
-            or value['factory_data_end'] != factory_data_end
+    sha256(value['artifact_sha256'])
+    if (value['factory_data_end'] != factory_data_end
             or type(value['factory_data_end']) is not int):
         raise CommissionError('prepared media differs from selected artifact')
     if (value['disk_guid'] != factory.disk_guid

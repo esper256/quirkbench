@@ -132,6 +132,14 @@ invitation and request; pairing never authorizes a run. These adapters are softw
 foundations; the controller preparation command and automatic console handoff
 are not yet delivered.
 
+The explicit factory layout v3 carries fixed partition identity and source data
+extent without RAM or speculative library budgets. A completed prepared-media
+record describes the final six-role layout. Boot and paired runtime recheck it
+against current geometry; the target does not format or resize v3 media. The
+unversioned historical RAM assessment and factory v2 readers remain separate.
+Stock image production still selects v2 until the controller writer is joined;
+v3 software reader/component tests alone do not make a USB usable.
+
 Restore only the selected private network profile into RAM after target binding is
 checked. Recovery mounts evidence before optional experiment/library storage; failure
 of those optional mounts must not prevent setup, credential access or uploads.
