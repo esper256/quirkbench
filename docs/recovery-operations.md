@@ -21,7 +21,9 @@ candidate retains its existing one-shot default; selecting diagnostics boots rec
 The expected destination is the **Quirkbench recovery dashboard**, painted without pressing Enter.
 Use arrows/Enter, `?` for help, `L` for logs and `T` for the terminal.
 Status keeps current boot checks, USB storage, networking, pairing and authenticated
-controller contact separate. Disabled actions explain the reason and next step.
+controller contact separate. When boot/storage checks block reading prepared trust,
+Controller says **not-checked**; **Connection details** explains the blocker. Invalid
+connection files show **configuration-error**, rather than claiming setup is absent. Disabled actions explain the reason and next step.
 Leaving an action screen does not cancel or duplicate its operation.
 New USB layouts are prepared on the controller; the target menu cannot partition
 or format them. If boot
@@ -35,7 +37,9 @@ The recovery UI owns VT2. The independent local root terminal owns VT3: choose
 UI; if the UI is unavailable, the terminal explains the failure and stays usable.
 This terminal has no password or pairing requirement and commands can modify
 internal disks. Quirkbench's automated actions retain their storage protections;
-opening a shell grants no experiment approval. Boot logs remain on VT1 and serial.
+opening a shell grants no experiment approval. The dashboard redirects kernel messages to VT1 before presenting its screen;
+`console=tty1` alone does not stop printk following the active VT. Serial output
+and journal collection remain enabled. Boot logs remain on VT1 and serial.
 These are staged-software behaviors; actual VT switching requires physical acceptance.
 
 Temporary **Network** setup requires private RAM profile storage and NetworkManager,

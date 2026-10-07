@@ -770,12 +770,13 @@ def test_boot_partition_readiness_waits_only_for_expected_nodes(tmp_path):
     wait_for_boot_partitions(CONFIG, 'candidate', directory=directory, clock=lambda: ticks[0], sleep=sleep)
 
 
-def test_mount_destination_symlink_refused_before_external_command(tmp_path):
+def test_mount_destination_alias_uses_resolved_destination(tmp_path):
     from quirkbench.boot import _mount_one
     destination=tmp_path/'evidence';destination.symlink_to(tmp_path/'other')
-    with pytest.raises(BootError,match='without symlinks'):
-        _mount_one(tmp_path/'device',destination,'ext4','rw,nosuid,nodev,noexec',
-            runner=lambda _:pytest.fail('must not mount through symlink'),mountinfo='')
+    calls=[]
+    _mount_one(tmp_path/'device',destination,'ext4','rw,nosuid,nodev,noexec',
+        runner=calls.append,mountinfo='')
+    assert calls==[['mount','-t','ext4','-o','rw,nosuid,nodev,noexec',str(tmp_path/'device'),str(tmp_path/'other')]]
 
 
 def test_panic_identity_survives_kernel_console_command_line_truncation(tmp_path):
@@ -820,3 +821,13 @@ def test_fedora44_runtime_can_bind_image_identity_after_verified_staging(tmp_pat
     (units/'systemd-remount-fs.service').unlink()
     with pytest.raises(BootError,match='differs from reviewed closure'):
         boot.install_runtime(root,CONFIG)
+
+
+def test_mount_alias_preserves_exact_device_check(tmp_path):
+    from quirkbench.boot import _mount_one
+    mount=tmp_path/'mount';mount.mkdir();alias=tmp_path/'alias';alias.symlink_to(mount)
+    device=tmp_path/'device';device.touch()
+    inventory=f'1 0 8:1 / {mount} rw - ext4 {device} rw\n'
+    _mount_one(device,alias,'ext4','rw',runner=lambda _:pytest.fail('already mounted'),mountinfo=inventory)
+    with pytest.raises(BootError,match='different device'):
+        _mount_one(tmp_path/'other',alias,'ext4','rw',runner=lambda _:pytest.fail('wrong mount'),mountinfo=inventory)

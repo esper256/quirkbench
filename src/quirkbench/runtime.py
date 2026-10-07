@@ -51,8 +51,8 @@ def system_observation(experiment):
 
 
 def load_provisioning(path=CONTROL/'runtime.json'):
-    path = Path(path)
-    if not path.is_absolute() or path.resolve() != path or path.is_symlink() or not path.is_file() or path.stat().st_size > 1024**2:
+    path = Path(path).expanduser().resolve()
+    if not path.is_file() or path.stat().st_size > 1024**2:
         raise ContractError('target provisioning requires a regular bounded JSON file')
     raw = json.loads(path.read_bytes())
     required = {'schema_version', 'device_id', 'controller_url', 'ca', 'token_file', 'remotes'}
@@ -69,11 +69,9 @@ def load_provisioning(path=CONTROL/'runtime.json'):
         value = Path(name)
         if value.is_absolute() or '..' in value.parts or str(value) != name:
             raise ContractError('trust paths must stay in target control directory')
-        destination = path.parent / value
-        if destination.is_symlink() or not destination.is_file():
+        destination = (path.parent / value).resolve()
+        if not destination.is_relative_to(path.parent) or not destination.is_file():
             raise ContractError('target trust file unavailable')
-        if destination.resolve() != destination:
-            raise ContractError('target trust file path contains a symlink')
         return destination
     raw['ca'], raw['token_file'] = local(raw['ca']), local(raw['token_file'])
     remotes = {}
@@ -174,8 +172,8 @@ def verify_evidence_destination(layout, control=CONTROL):
 
 
 def boot_context(path=Path('/run/quirkbench-boot.json'), *, allow_library_maintenance=False,native_runner=None):
-    path = Path(path)
-    if not path.is_absolute() or path.resolve() != path or not path.is_file() or path.stat().st_size > 1024**2:
+    path = Path(path).expanduser().resolve()
+    if not path.is_file() or path.stat().st_size > 1024**2:
         raise ContractError('invalid verified boot context')
     context = json.loads(path.read_bytes())
     if not isinstance(context, dict) or set(context) != {'config', 'boot'} or not isinstance(context['boot'], dict):

@@ -242,7 +242,8 @@ def grub_config(partuuid: str, *, esp_uuid=None,root_uuid=None,state_uuid=None,d
     # IDs may be omitted only by callers inspecting a sample configuration.
     esp_uuid=esp_uuid or partuuid;state_uuid=state_uuid or partuuid;data_uuid=data_uuid or partuuid
     library_uuid=library_uuid or partuuid;evidence_uuid=evidence_uuid or partuuid
-    # Keep serial diagnostics and pin boot output to VT1, never the active VT.
+    # Keep serial diagnostics and userspace /dev/console on VT1.
+    # The recovery console separately redirects printk, which follows the active VT.
     args=f'root=PARTUUID={partuuid} ro rootflags=noload fsck.mode=skip rd.skipfsck selinux=0 console=ttyS0,115200 console=tty1 panic=10 oops=panic noresume rd.auto=0 rd.luks=0 rd.lvm=0 rd.md=0 quirkbench.esp=PARTUUID={esp_uuid} quirkbench.state=PARTUUID={state_uuid} quirkbench.data=PARTUUID={data_uuid} quirkbench.library=PARTUUID={library_uuid} quirkbench.evidence=PARTUUID={evidence_uuid}'
     if stock_recovery: args+=' efi_pstore.pstore_disable=1 systemd.gpt_auto=0 rd.systemd.gpt_auto=0'
     if smoke:args+=' quirkbench.smoke=1'

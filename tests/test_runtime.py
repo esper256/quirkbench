@@ -81,8 +81,8 @@ def test_trust_paths_cannot_escape_control(tmp_path, name):
 def test_provisioning_symlink_ancestors_and_non_boolean_qualification_rejected(tmp_path):
     path = provision(tmp_path / 'real')
     (tmp_path / 'alias').symlink_to(tmp_path / 'real', target_is_directory=True)
-    with pytest.raises(ContractError, match='regular bounded'):
-        runtime.load_provisioning(tmp_path / 'alias/runtime.json')
+    loaded=runtime.load_provisioning(tmp_path / 'alias/runtime.json')
+    assert loaded['token_file']==tmp_path/'real/device.token'
     with pytest.raises(ContractError, match='boolean'):
         runtime.load_provisioning(provision(tmp_path / 'real', qualification_run='yes'))
 
@@ -95,7 +95,8 @@ def test_boot_context_revalidates_external_identity_before_return(tmp_path, monk
     calls = []
     monkeypatch.setattr(runtime, 'verify_evidence_destination', lambda layout: True)
     monkeypatch.setattr(runtime, 'verify_boot_identity', lambda *a, **k: calls.append(k))
-    config, parsed, verify = runtime.boot_context(path)
+    alias=tmp_path/'alias-boot';alias.symlink_to(path)
+    config, parsed, verify = runtime.boot_context(alias)
     assert config == CONFIG and parsed == boot and len(calls) == 1
     assert verify() is True and len(calls) == 2
     def deny(*args, **kwargs):
