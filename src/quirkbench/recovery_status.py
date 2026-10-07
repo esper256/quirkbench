@@ -27,6 +27,7 @@ class Facts:
     pairing_pending: bool = False
     prepared_trust: bool = False
     controller: str = 'unconfigured'
+    controller_detail: str = 'No prepared controller connection was found.'
     target: str = ''
     endpoint: str = ''
     system_uuid: str = ''
@@ -107,6 +108,8 @@ def recommendation(f: Facts) -> tuple[str, str, str]:
         return f.activity, 'This is recorded target activity, not a new run approval or proof of completion.', 'controller'
     if f.controller == 'connected':
         return 'Connected — ready for your next step', 'Continue your investigation on the controller. Each target run requires its own approval.', 'controller'
+    if f.controller == 'configuration-error':
+        return 'Controller configuration needs attention', f.controller_detail, 'controller'
     return 'Connect to your controller', ('Paired, but no current authenticated contact. Retry the connection.' if f.paired
                                             else 'Use the controller trust prepared on this USB.'), 'controller'
 
@@ -225,8 +228,8 @@ def read_status(*, boot_record=Path('/run/quirkbench-boot.json'),
             value['prepared_media_sha256'] = capacity.get('prepared_media_sha256','')
             value['evidence'] = space(control.parent)
             value['experiments'] = 'unavailable' if boot.get('quirkbench.experiments_unavailable') else space(experiments)
-        except (OSError,ValueError,RuntimeError,TypeError,KeyError):
-            value.update(boot='failed',boot_detail='The boot record or current USB verification failed. Review logs; prepare incomplete media on the controller.')
+        except (OSError,ValueError,RuntimeError,TypeError,KeyError) as exc:
+            value.update(boot='failed',boot_detail='Recovery check failed: '+text(str(exc),240)+'. Review boot logs.')
     try:
         from .binding import system_uuid
         value['system_uuid']=system_uuid(binding_reader())
@@ -239,7 +242,9 @@ def read_status(*, boot_record=Path('/run/quirkbench-boot.json'),
             value.update(prepared_trust=True, endpoint=metadata['invitation']['controller_url'],
                          prepared_fingerprint=metadata['invitation']['certificate_sha256'],
                          pairing_pending=(control/'prepared-enrollment.code').exists())
-        except (OSError,ValueError,RuntimeError): pass
+        except FileNotFoundError: pass
+        except (OSError,ValueError,RuntimeError) as exc:
+            value.update(controller='configuration-error',controller_detail='Prepared controller connection could not be read ('+type(exc).__name__+'). Review recovery logs and the prepared USB files.')
         if (control/'runtime.json').exists() or (control/'runtime.json').is_symlink():
             try:
                 from .shutdown_local import _existing_json
@@ -263,7 +268,8 @@ def read_status(*, boot_record=Path('/run/quirkbench-boot.json'),
                         require_runtime_available(control);require_available(control,binding_reader=binding_reader)
                     except (OSError,ValueError,RuntimeError): value['binding'] = 'maintenance'
             except (OSError,ValueError,RuntimeError,TypeError,KeyError):
-                value['binding'] = 'unavailable'
+                value.update(binding='unavailable',controller='configuration-error',
+                    controller_detail='The retained controller connection could not be read. Review recovery logs and the USB connection files.')
     if value['boot']=='verified' and value['binding']=='current':
         try:
             from .shutdown_local import _existing_json
@@ -309,6 +315,7 @@ def read_status(*, boot_record=Path('/run/quirkbench-boot.json'),
     except (OSError,ValueError,RuntimeError):
         value.update(network='failed',network_detail='Local network observations failed. Inspect NetworkManager and retry.')
     if value['paired']:
+        value['controller_detail']='Paired controller connection; current authenticated contact is checked separately.'
         value['controller'] = 'disconnected'
         if value['binding'] == 'current' and value['network'] == 'connected':
             try:
@@ -317,4 +324,7 @@ def read_status(*, boot_record=Path('/run/quirkbench-boot.json'),
             except (OSError,ValueError,RuntimeError,TypeError,KeyError): pass
     elif value['prepared_trust']:
         value['controller'] = 'waiting-network' if value['network'] != 'connected' else 'configured'
+        value['controller_detail']='Controller trust loaded. Connect the network and complete normal pairing.'
+    elif value['boot'] != 'verified' or value['evidence'] == 'unavailable':
+        value.update(controller='not-checked',controller_detail='Controller connection was not checked because recovery/storage checks have not succeeded. '+value['boot_detail'])
     return Facts(**value)

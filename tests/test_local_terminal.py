@@ -97,6 +97,7 @@ def test_actual_console_entrypoint_paints_before_first_vt_switch_without_input(t
     import json
     master, slave=pty.openpty()
     code=('import runpy; import quirkbench.local_terminal as t; original=t.present_once; '
+          't.pin_boot_messages=lambda:print("PIN_KERNEL_VT1",flush=True); '
           'from pathlib import Path; '
           't.present_once=lambda:original(marker=Path('+repr(str(tmp_path/'presented'))+'), '
           'switch=lambda n:print("INITIAL_VT",n,flush=True)); '
@@ -112,6 +113,7 @@ def test_actual_console_entrypoint_paints_before_first_vt_switch_without_input(t
             assert remaining>0, raw.decode(errors='replace')
             assert select.select([master],[],[],remaining)[0]
             raw.extend(os.read(master,65536))
+        assert raw.index(b'PIN_KERNEL_VT1')<raw.index(b'INITIAL_VT 2')
         if withhold_first_render:
             assert b'QUIRKBENCH' not in raw[:raw.index(b'INITIAL_VT 2')]
         else:assert raw.index(b'QUIRKBENCH')<raw.index(b'INITIAL_VT 2')
@@ -134,3 +136,12 @@ def test_actual_boot_arguments_reject_active_vt_routing_mutation():
         assert all('console=ttyS0' in line for line in lines)
     fixed_logs(text)
     with pytest.raises(AssertionError):fixed_logs(text.replace('console=tty1','console=tty0'))
+
+
+def test_kernel_console_redirect_uses_vt1_and_closes_descriptor(monkeypatch):
+    calls=[]
+    monkeypatch.setattr(local_terminal.os,'open',lambda path,flags: calls.append(path) or 42)
+    monkeypatch.setattr(local_terminal.os,'close',lambda fd:calls.append(('close',fd)))
+    monkeypatch.setattr(local_terminal.fcntl,'ioctl',lambda fd,command,data:calls.append((fd,command,data)))
+    local_terminal.pin_boot_messages()
+    assert calls==['/dev/tty0',(42,0x541C,bytes((11,1))),('close',42)]

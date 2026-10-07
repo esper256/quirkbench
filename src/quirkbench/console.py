@@ -275,7 +275,10 @@ def run_console(*, boot_record: Path = BOOT_RECORD, input_stream=None,
 
 
 def main() -> int:
-    from .local_terminal import present_once
+    from .local_terminal import present_once, pin_boot_messages
+    try: pin_boot_messages()
+    except OSError:
+        print("Kernel message routing unavailable; boot messages may interrupt the screen.",file=sys.stderr,flush=True)
     from .recovery_actions import RecoveryActions
     from .recovery_status import read_status
     services=RecoveryActions()

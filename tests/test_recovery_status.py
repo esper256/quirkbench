@@ -58,6 +58,8 @@ def test_real_reader_without_boot_never_reads_persistent_private_state(tmp_path)
     status=read_status(boot_record=tmp_path/'missing',control=control,command=command,
                        binding_reader=lambda:None,profiles_ready=lambda:True)
     assert status.boot=='running' and not status.paired
+    assert status.controller=='not-checked'
+    assert 'not checked' in status.controller_detail
     assert status.network=='no-wifi' and next(a for a in actions(status) if a.id=='network').enabled
     assert {p:p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}==before
 
@@ -175,3 +177,27 @@ def test_unreported_inode_pool_is_not_full_but_byte_exhaustion_still_is(tmp_path
     assert space(tmp_path)=='ready'
     monkeypatch.setattr('os.statvfs',lambda _:SimpleNamespace(f_bavail=0,f_files=0,f_favail=0))
     assert space(tmp_path)=='full'
+
+
+def test_boot_failure_preserves_reason_and_does_not_claim_missing_controller(tmp_path):
+    record=tmp_path/'boot';record.write_text('{}')
+    control=tmp_path/'control';control.mkdir()
+    (control/'prepared-enrollment.json').write_text('must not read unverified storage')
+    def fail(_):raise ValueError('evidence mount is on the wrong device')
+    status=read_status(boot_record=record,control=control,verify_boot=fail,
+        command=lambda _: '',profiles_ready=lambda:False,binding_reader=lambda:None)
+    assert status.controller=='not-checked' and not status.prepared_trust
+    assert 'wrong device' in status.boot_detail
+    assert 'wrong device' in status.controller_detail
+
+
+def test_invalid_prepared_connection_has_distinct_read_error(tmp_path):
+    from test_boot import CONFIG
+    record=tmp_path/'boot';record.write_text('{}')
+    control=tmp_path/'control';control.mkdir()
+    (control/'prepared-enrollment.json').write_text('invalid document')
+    status=read_status(boot_record=record,control=control,
+        verify_boot=lambda _:(CONFIG,{'quirkbench.mode':'recovery'},lambda:True),
+        command=lambda _: '',profiles_ready=lambda:False,binding_reader=lambda:None)
+    assert status.controller=='configuration-error'
+    assert 'could not be read' in status.controller_detail

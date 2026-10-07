@@ -17,6 +17,19 @@ RAM reports survive UI restart, but are lost on reboot.
 '''
 
 
+def pin_boot_messages() -> None:
+    """Keep printk on VT1; console=tty1 alone still follows the foreground VT.
+
+    Linux TIOCL_SETKMSGREDIRECT changes only the virtual-console destination,
+    leaving serial output, the kernel ring and journal collection intact.
+    """
+    fd = os.open('/dev/tty0', os.O_RDWR | os.O_CLOEXEC | os.O_NOCTTY)
+    try:
+        fcntl.ioctl(fd, 0x541C, bytes((11, 1)))  # TIOCLINUX, SETKMSGREDIRECT, VT1
+    finally:
+        os.close(fd)
+
+
 def switch_vt(number: int) -> None:
     """Use the Linux VT ioctl directly; no shell or additional tool dependency."""
     if number not in (1, 2, 3):

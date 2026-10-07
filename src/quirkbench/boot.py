@@ -252,8 +252,7 @@ def _mount_source(mountinfo: str, mountpoint: str) -> tuple[str, set[str]] | Non
 
 def _mount_one(device: Path, mountpoint: Path, filesystem: str, options: str,
                *, runner: Callable[[list[str]], str], mountinfo: str) -> None:
-    if not mountpoint.is_absolute() or mountpoint.resolve() != mountpoint:
-        raise BootError("mountpoint must be a direct allowlisted path without symlinks")
+    mountpoint = mountpoint.expanduser().resolve()
     old = _mount_source(mountinfo, str(mountpoint))
     if old is not None:
         if Path(old[0]).resolve() != device.resolve():

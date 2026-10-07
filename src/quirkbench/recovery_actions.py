@@ -33,11 +33,12 @@ class RecoveryActions:
             from .recovery_status import read_status
             facts=read_status(control=self.control)
             for label,value in (('Computer',facts.target or 'not paired'),('Hardware UUID',facts.system_uuid or 'unavailable'),
-                    ('Controller endpoint',facts.endpoint or 'unconfigured'),
+                    ('Controller endpoint',facts.endpoint or ('not checked' if facts.controller=='not-checked' else 'unavailable')),
                     ('Prepared public trust SHA256',facts.prepared_fingerprint or 'unavailable'),
                     ('Boot checks',facts.boot),('USB',facts.usb),('Binding',facts.binding),
                     ('Authenticated contact',facts.controller),('Current recorded activity',facts.activity or 'none')):
                 stream.write(label+': '+value+'\n')
+            stream.write('Controller details: '+facts.controller_detail+'\n')
             stream.write('Connected/pairing never grants a target run. Temporary connections need explicit remembering.\n')
             return {'read_only':True}
         if name=='logs':
