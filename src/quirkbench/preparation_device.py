@@ -25,6 +25,8 @@ def observe(disk, *, paths=ProbePaths(), block_rdev=_block_rdev):
     and filesystems with synthetic mount IDs cannot be excluded by proc alone.
     """
     disk = Path(disk).expanduser().resolve()
+    if not disk.exists():
+        raise CommissionError(f'selected USB device not found: {disk}; connect the USB to this controller and use lsblk to select its current whole-device path')
     resolved, number = _sysfs_disk(disk, paths)
     if block_rdev(disk) != number:
         raise CommissionError('selected USB node differs from sysfs identity')
