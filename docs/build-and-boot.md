@@ -140,7 +140,7 @@ and firmware updates are covered, not just mounts. Require exact-candidate opera
 approval before arming. Executable candidate storage cannot use blanket `noexec`;
 evidence remains restricted. This is accident prevention, not arbitrary-kernel containment.
 
-The current no-kexec policy does not support kdump. Review that policy and independently qualify the fixed capture kernel before enabling crash capture. Secure Boot is assumed disabled and must be verified. Owner-controlled USB boot selection and manual recovery of unsupported complete hangs remain explicit boundaries.
+The current no-kexec policy does not support kdump. Review that policy and independently qualify the fixed capture kernel before enabling crash capture. Owner-controlled USB boot selection and manual recovery of unsupported complete hangs remain explicit boundaries.
 
 QEMU proves infrastructure behavior, not target fixes. Final release qualification requires a clean-container compose, preserved state after container recreation, one revision changing kernel and userspace with matching modules, interrupted update fault cases, recovery/candidate/subsequent-recovery/failed-candidate boots, and unchanged sentinel disks, fixed recovery and settled persistent firmware settings. Record controller package and boot configuration inventories before and after. A process exit, timeout or immutable OVMF template hash alone is not successful boot qualification.
 

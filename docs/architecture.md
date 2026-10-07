@@ -116,7 +116,7 @@ OSTree generates candidate boot entries without regenerating the system bootload
 Candidate data mounts must permit OS execution; evidence mounts remain restricted.
 Candidate roots follow OSTree semantics: read-only `/usr`, an exactly identified
 writable deployment root and attempt-local `/etc` and `/var`; recovery alone uses
-a wholly read-only root. Secure Boot must be verified disabled.
+a wholly read-only root.
 
 ## Storage protection policy
 

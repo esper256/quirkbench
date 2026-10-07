@@ -95,7 +95,7 @@ BootConfig = RecoveryConfig
 def parse_cmdline(text: str, config: RecoveryConfig) -> dict[str, str]:
     values = {}
     tracked = {"root", "quirkbench.esp", "quirkbench.state", "quirkbench.data",
-               "quirkbench.library", "quirkbench.evidence", "quirkbench.mode", "quirkbench.candidate", "quirkbench.revision", "quirkbench.smoke", "quirkbench.fault", "ostree", "selinux"}
+               "quirkbench.library", "quirkbench.evidence", "quirkbench.mode", "quirkbench.candidate", "quirkbench.revision", "quirkbench.smoke", "quirkbench.fault", "ostree"}
     for token in text.split():
         key, sep, value = token.partition("=")
         if key in tracked:
@@ -117,8 +117,6 @@ def parse_cmdline(text: str, config: RecoveryConfig) -> dict[str, str]:
     forbidden_access = "ro" if mode == "candidate" else "rw"
     if expected_access not in words or forbidden_access in words or any(x.startswith("resume=") for x in words):
         raise BootError("boot root access must match its mode without resume")
-    if mode == "recovery" and values.get("selinux") != "0":
-        raise BootError("recovery requires its explicit selinux=0 boot policy")
     if mode == "candidate" and [x for x in words if x.startswith("rootflags=")] != ["rootflags=nosuid,nodev"]:
         raise BootError("candidate root requires restricted USB mount flags")
     if mode == "candidate":
@@ -234,14 +232,6 @@ def write_candidate_entry(prepared, data_mount: Path, config: RecoveryConfig, *,
     return path
 
 
-def require_secure_boot_disabled(kernel_log: str) -> None:
-    from .commission import CommissionError, secure_boot_disabled
-    try:
-        secure_boot_disabled(kernel_log)
-    except CommissionError as exc:
-        raise BootError("Secure Boot disabled state was not verified") from exc
-
-
 def _run(argv: list[str]) -> str:
     process = subprocess.run(argv, text=True, capture_output=True, check=True, timeout=60)
     return process.stdout
@@ -273,7 +263,7 @@ def _mount_one(device: Path, mountpoint: Path, filesystem: str, options: str,
     runner(["mount", "-t", filesystem, "-o", options, str(device), str(mountpoint)])
 
 
-def prepare_recovery(config: RecoveryConfig, *, cmdline: str, kernel_log: str,
+def prepare_recovery(config: RecoveryConfig, *, cmdline: str,
                      mountinfo: str,
                      state_mount: Path = Path("/boot/quirkbench-state"),
                      data_mount: Path = Path("/var/lib/quirkbench"),
@@ -282,7 +272,6 @@ def prepare_recovery(config: RecoveryConfig, *, cmdline: str, kernel_log: str,
     from .commission import BootIdentity, verify_boot_identity
 
     args = parse_cmdline(cmdline, config)
-    require_secure_boot_disabled(kernel_log)
     expected = BootIdentity(config.disk_guid, (config.esp_partuuid, config.root_partuuid, config.state_partuuid, config.data_partuuid, config.library_partuuid, config.evidence_partuuid))
     mode = args["quirkbench.mode"]
     if mode == "candidate":
@@ -444,11 +433,10 @@ def _verify_stage_identity(config: RecoveryConfig, *, data_mount: Path, state_mo
 
 
 def arm_once(prepared, attempt_id: str, *, config: RecoveryConfig, data_mount: Path,
-             state_mount: Path, kernel_log: str, runner=_run, identity_verifier=None,
+             state_mount: Path, runner=_run, identity_verifier=None,
              mountinfo: str | None = None, system_uuid_reader=None) -> Path:
     if prepared.attempt_id != attempt_id:
         raise BootError("prepared deployment belongs to another attempt")
-    require_secure_boot_disabled(kernel_log)
     _verify_stage_identity(config, data_mount=data_mount, state_mount=state_mount,
                            identity_verifier=identity_verifier, mountinfo=mountinfo)
     target_uuid = system_uuid((system_uuid_reader or read_system_uuid)())
@@ -661,9 +649,8 @@ def service_main(argv: list[str] | None = None, *,
     mode = parse_cmdline(cmdline, config)["quirkbench.mode"]
     wait_for_boot_partitions(config, mode)
     capacity = require_commissioned_boot(config) if mode == "recovery" else None
-    log = _run(["dmesg", "--kernel"])
     mountinfo = Path("/proc/self/mountinfo").read_text()
-    boot = prepare_recovery(config, cmdline=cmdline, kernel_log=log, mountinfo=mountinfo)
+    boot = prepare_recovery(config, cmdline=cmdline, mountinfo=mountinfo)
     mode = boot["quirkbench.mode"]
     if capacity is not None:
         boot["quirkbench.capacity"] = capacity
