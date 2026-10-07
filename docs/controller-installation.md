@@ -1,13 +1,10 @@
 # Controller entry point
 
-Use `./quirkbench --help` from a checkout, or installed `quirkbench --help`, to see
-current commands. `make bootstrap` sets up development dependencies.
+This branch starts a Python rewrite. No controller is implemented here yet.
+See the [setup design](designs/setup-and-media.md) and [mockups](mockups/README.md).
 
-The [setup/media design](designs/setup-and-media.md) describes the intended simple
-journey; it is not yet a complete operating manual for the running code. Consult
-source and command help before acting. This documentation reset does not install,
-start or modify a controller.
+The intended controller runs only in the foreground with
+`quirkbench controller run`. Setup saves its configuration. There is no controller
+systemd integration or automatic background service.
 
-See the [documentation index](README.md) for current requirements and designs.
-Earlier installation instructions are archived in Git and `docs/legacy` in the
-repository; they may be stale and are not binding design guidance.
+The previous implementation is preserved at Git commit `b807199` for reference.

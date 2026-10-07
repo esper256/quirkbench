@@ -1,19 +1,12 @@
-<!-- Scale to the change; remove prompts that add no reviewer value. -->
-## Problem and resulting behavior
+<!-- Keep only information useful for reviewing this change. -->
+## Change
 
-Describe the concrete trigger and what this change makes possible.
+What problem does this solve, and what can the user now do?
 
-## Issue and scope
+## Checks
 
-Fixes #... (use Refs for partial work). State any acceptance left open.
+Which tests ran, what did they establish, and what remains untested?
 
-## Validation
+## Review
 
-Record focused commands/results, CI links and tested source identity as available.
-Distinguish smoke, affected regressions, full milestone software and native evidence.
-
-## Review and limitations
-
-Record required boundary review (reviewer/model, reviewed SHA, findings/resolution)
-when applicable. Note material
-limits, operator gates or changed artifacts that remain unqualified.
+Record the independent review when required. Link related issues.

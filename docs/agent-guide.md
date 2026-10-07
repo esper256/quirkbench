@@ -2,9 +2,8 @@
 
 Use plain English and the [glossary](glossary.md) when explaining work.
 
-Quirkbench is being simplified. This is an orientation, not a guarantee of current
-commands or permission to bypass checks in the running version. Use installed
-`quirkbench --help`, family help and reported capabilities for actual availability.
+This branch starts a Python rewrite and has no runnable application yet. This
+is orientation for the intended product; old commands are not preserved here.
 
 The intended loop: inspect diagnostics, reproduce the problem, edit candidate
 source, build changed RPMs with the supplied instructions, submit an experiment,

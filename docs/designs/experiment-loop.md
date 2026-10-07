@@ -32,7 +32,7 @@ and instructions for using it. Include the same pointers in JSON output.
 Minimize agent tokens spent waiting. Provide a quiet `experiment wait` command
 that waits for results or required intervention and returns one concise response.
 A wait timeout reports pending work; it does not cancel or repeat the experiment.
-Allow waiting again for the same submission after interruption. Use existing
+Allow waiting again for the same submission after interruption. Use
 controller notifications or inexpensive internal checks, not repeated agent
 status calls, narrated sleeps or continuous log output. Human monitoring remains
 separate. This is a design goal, not an extra product requirement.
@@ -47,4 +47,4 @@ recovery system and saved evidence. This is a design goal, not a requirement.
 
 Investigation pause stops new work, lets the current bounded run recover/upload, then waits for resume. Force stop attempts interruption; a hard hang may require manual reset. Ask humans for physical observations only when needed.
 
-Proposed disconnect default, not an owner mandate: finish the bounded run, retain diagnostics, return to recovery and wait for reconnection. Reconcile uncertain runs rather than blindly repeating them. Reuse existing operation state instead of creating another workflow engine.
+Proposed disconnect default, not an owner mandate: finish the bounded run, retain diagnostics, return to recovery and wait for reconnection. Reconcile uncertain runs rather than blindly repeating them. Keep saved work and restart handling simple; the previous implementation does not prescribe their design.

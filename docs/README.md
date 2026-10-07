@@ -24,4 +24,5 @@ Then read only the design relevant to the task. Designs describe **how Quirkbenc
 
 [Legacy documents in the repository](https://github.com/esper256/quirkbench/tree/main/docs/legacy) preserve previous manuals, plans, contracts and operating notes. They have **no current design authority**, even where they say “must,” “approved,” or “contract.” Consult a specific archived file only for a concrete implementation question; do not read the archive as onboarding or inherit its constraints. GitHub issues and existing tests can also contain superseded assumptions.
 
-The executable `--help`, source and actual recorded checks establish current availability. This documentation reorganization does not implement the new product design or authorize live flashing, resetting state or running targets. Thin [agent](agent-guide.md) and [controller](controller-installation.md) entry points are retained for installed tooling.
+This rewrite branch has no runnable application yet. Commit `b807199` preserves
+the previous implementation for reference. This documentation reorganization does not implement the new product design or authorize live flashing, resetting state or running targets. Thin [agent](agent-guide.md) and [controller](controller-installation.md) entry points are retained for installed tooling.

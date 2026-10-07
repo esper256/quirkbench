@@ -8,9 +8,9 @@ quirkbench setup
 quirkbench recovery flash
 ```
 
-**Setup:** ask short terminal questions with useful defaults; Enter accepts each default. Ask for the target-reachable controller URL, generate missing connection credentials and save `~/.quirkbench/config.toml`. Start the Quirkbench controller as part of setup without another question. Re-running edits choices. Direct edits apply at restart; unrelated edits preserve credentials. Reuse existing process management; no new daemon manager or mandatory host systemd.
+**Setup:** ask short terminal questions with useful defaults; Enter accepts each default. Ask for the target-reachable controller URL, generate missing connection credentials and save `~/.quirkbench/config.toml`. Setup saves configuration; it does not start a background service. Print `quirkbench controller run` as the next step. The controller runs in the foreground in a separate terminal. Re-running edits choices. Direct edits apply at restart; unrelated edits preserve credentials. No controller systemd integration, automatic backgrounding or service manager.
 
-**Build:** automatically acquire the selected pinned inputs and use the existing bounded builder. Cache by relevant code, included files, build instructions, packages and build tools—not paths or unrelated settings. A hit says the image is available; `--force` rebuilds without deleting the last good image first. Show phases/logs; incomplete output is not selectable.
+**Build:** automatically acquire the selected pinned inputs and build the generic recovery image. Cache by relevant code, included files, build instructions, packages and build tools—not paths or unrelated settings. A hit says the image is available; `--force` rebuilds without deleting the last good image first. Show phases/logs; incomplete output is not selectable.
 
 This command builds the recovery image. Experiment candidates use the separate
 [rpm-ostree and OSTree path](candidate-deployment.md); ordinary experiments do not

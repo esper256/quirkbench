@@ -112,8 +112,10 @@ Apply the same rule to investigation setup and experiment preparation.
 Mocks replace expensive or unavailable external work, not the Quirkbench behavior
 being checked. The investigation test supplies the agent's decisions and small
 build outputs; it does not run an AI model or prove that a patch fixes hardware.
-These tests check that Quirkbench carries the journey through. Existing physical
-checks retain responsibility for actual boot, device behavior and flashing.
+These tests check that Quirkbench carries the journey through. Broad, fast
+execution is valuable for catching Python runtime errors even when external work
+is mocked. Separate physical checks establish actual boot, device behavior and
+flashing; old checks remain available in Git as reference.
 
 The [mockups](../mockups/README.md) show the intended user experience. Test its
 meaning and usable next steps, not every decorative character. Refine this list

@@ -89,7 +89,7 @@ diagnostics and a terminal, not only blocked actions.
 
 ## Focused implementation checks
 
-Use existing software tests for interrupted candidate preparation, consumption of
+Use the journey integration tests to cover interrupted candidate preparation, consumption of
 the one-time boot request, lost upload replies, and cleanup that preserves active
 files, settings and unuploaded evidence. Check the screen with missing storage
 and no network. Reuse unrelated run names and paths. Hardware checks separately

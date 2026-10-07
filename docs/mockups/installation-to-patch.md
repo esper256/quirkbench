@@ -22,9 +22,14 @@ Press Enter to accept the value in brackets.
 Address your target computers will connect to [https://192.168.1.20:7443]:
 
 Controller config saved: ~/.quirkbench/config.toml
-Quirkbench controller running at https://192.168.1.20:7443
 
-Next: quirkbench recovery build
+Next: quirkbench controller run
+
+$ quirkbench controller run
+Quirkbench controller listening at https://192.168.1.20:7443
+Keep this terminal open. Ctrl+C stops the controller.
+
+In another terminal: quirkbench recovery build
 ```
 
 ## Controller computer · Prepare USB

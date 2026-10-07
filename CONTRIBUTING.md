@@ -12,13 +12,13 @@ or isolated worktree, coordinate shared files and preserve unrelated work. The
 [first-usable tracker](https://github.com/esper256/quirkbench/issues/29) is a task
 index, not authority for superseded product decisions. Do not close unmerged work.
 
-Follow [development guidance](docs/designs/development.md): small complete changes,
+Follow [development guidance](docs/designs/development.md): large coherent implementation stages,
 focused tests, one review of the completed work, honest limitations. Update current help and
 designs as implementation evolves. No new migrations or compatibility machinery.
 Do not modify live state or perform physical operations without authorization.
 
-For local development use `make bootstrap`; for inspection from a checkout use
-`./quirkbench --help`. Use `make smoke` and affected `make test TESTS=...` cases.
+This branch begins a Python rewrite; there is no runnable application yet.
+The implementation will provide the development and fast integration-test commands.
 Do not run full suites or real image builds after every edit. Preserve failure
 logs and diagnose before retrying. Documentation-only work needs link checks and
 `git diff --check`.

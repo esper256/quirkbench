@@ -8,3 +8,4 @@
 
 - [Installation to investigation patch](installation-to-patch.md)
 - [Interruptions and troubleshooting](interruptions.md)
+- [Agent experiment interface](agent-experiment.md)

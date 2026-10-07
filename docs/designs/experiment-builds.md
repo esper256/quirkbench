@@ -47,3 +47,8 @@ files alone. See [recovery storage and cleanup](recovery.md).
 
 Recovery image builds remain a separate Quirkbench responsibility.
 See [deployment and storage](candidate-deployment.md).
+
+See the [agent interaction mockup](../mockups/agent-experiment.md) for a complete
+experiment-file example. Its fields and hook names are illustrative; develop the
+interface with the real recovery and controller code. CLI shortcuts may express
+simple cases without requiring every experiment to use all available fields.

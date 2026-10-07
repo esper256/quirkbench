@@ -9,9 +9,9 @@ are outside scope. Practical protections reduce accidental damage; no tool can
 perfectly contain an arbitrary experimental kernel or guarantee recovery from
 all hangs.
 
-**The product is being simplified.** The documents below describe the intended
-experience, not a claim of completed implementation. Check `./quirkbench --help`
-for current commands. Development setup: `make bootstrap`.
+**This branch starts a Python rewrite.** The implementation has been removed;
+commit `b807199` preserves the previous code as reference. The documents below
+describe the intended product, not currently available commands.
 
 - [Requirements](docs/requirements/product.md): short, human-approved product scope.
 - [Designs](docs/README.md): revisable choices for a simpler, enjoyable application.

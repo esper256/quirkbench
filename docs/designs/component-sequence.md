@@ -18,7 +18,9 @@ sequenceDiagram
 
     Human->>CLI: setup
     CLI->>CLI: Save controller config and connection credentials
-    CLI->>Controller: Start with saved config
+    CLI-->>Human: Configuration saved; run quirkbench controller run
+    Human->>CLI: controller run in a separate terminal
+    CLI->>Controller: Run in foreground with saved config
     Human->>CLI: recovery build
     CLI->>Worker: Use matching cached image or build
     Worker-->>CLI: Progress, then complete recovery image

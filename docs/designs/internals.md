@@ -12,7 +12,7 @@ expensive dependencies easy to replace in tests while exercising real Quirkbench
 behavior. Follow the [testing strategy](testing.md); do not leave tests to work
 around an already completed implementation.
 
-- Reuse existing controller state, operations, content storage, build/deployment components and bounded workers. Share services between human UI and agent CLI. Delete duplicate orchestration and setup ledgers instead of adding a registry to reconcile them.
+- Implement afresh in Python. The old code at Git commit `b807199` is reference material, not an architecture or stored-format constraint. Reuse useful ideas or code selectively. Share application behavior between human and agent interfaces. Preserve owner data; do not migrate it or reset it.
 - Single-user software needs locks, not accounts/tenants. Ordinary data is not invalid merely because of group-readable permissions or symlinked ancestors. Create secrets privately and authenticate network peers.
 - This is a personal experiment tool, not a hardened OS distribution service. Use ordinary tool-supported authentication and package checks. Do not add a release-security system, extra signing approvals or repeated verification rituals for experiments. Keep practical disk protection separate from this choice.
 - Derive managed paths from current roots and existing IDs; don't persist redundant absolute or relative paths. Store necessary external locations once in configuration. Paths and permanent inode observations are not durable identity.
