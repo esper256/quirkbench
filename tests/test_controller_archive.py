@@ -44,8 +44,8 @@ def test_archive_runs_relocated_without_checkout_and_keeps_selected_state(tmp_pa
     manifest = json.loads((release / 'controller-manifest.json').read_bytes())
     for name, expected in manifest['files'].items():
         assert hashlib.sha256((release / name).read_bytes()).hexdigest() == expected
-    for name in ('controller-installation.md', 'recovery-acquisition.md', 'build-and-boot.md',
-                 'agent-guide.md', 'architecture.md', 'implementation-contracts.md'):
+    for name in ('controller-installation.md', 'requirements/product.md', 'designs/setup-and-media.md',
+                 'agent-guide.md', 'designs/internals.md', 'designs/experiment-loop.md'):
         assert (release / 'lib/quirkbench/guide' / name).read_bytes() == (ROOT / 'docs' / name).read_bytes()
     assert 'lib/quirkbench/guide/controller-installation.md' in (release / 'INSTALL.txt').read_text()
     clean_home = tmp_path / 'home'

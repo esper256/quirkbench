@@ -15,7 +15,7 @@ from ci.evidence import FILE_LIMIT, ATTACHMENT_LIMIT, capture_stage, redact
     (['tests/conftest.py'], set(SUITES)),
     (['schemas/operation.schema.json'], set(SUITES)),
     (['src/quirkbench/new_shared_module.py'], set(SUITES)),
-    (['README.md', 'docs/testing-policy.md'], set()),
+    (['README.md', 'docs/designs/development.md'], set()),
     (['development/update-local-install.py'], {'filesystem', 'release-preparation'}),
     (['update.sh'], {'filesystem', 'release-preparation'}),
 ])

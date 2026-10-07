@@ -312,7 +312,7 @@ def test_installed_cli_and_resources_export_without_checkout(lab,tmp_path):
                        cwd=tmp_path,env=env,capture_output=True,text=True,timeout=15)
     assert run.returncode==0,run.stderr+run.stdout
     assert json.loads(run.stdout)['data']['conclusion']=='inconclusive'
-    assert (runtime/'lib/quirkbench/guide/investigation-export.md').is_file()
+    assert (runtime/'lib/quirkbench/guide/designs/experiment-loop.md').is_file()
     assert (runtime/'lib/quirkbench/schemas/investigation-export.v1.schema.json').is_file()
     from jsonschema import Draft202012Validator
     schema=json.loads((runtime/'lib/quirkbench/schemas/investigation-export.v1.schema.json').read_bytes())

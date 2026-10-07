@@ -42,6 +42,8 @@ def test_built_wheel_resolves_same_assets_without_checkout(tmp_path):
     shutil.copyfile(ROOT / "docs/__init__.py", project / "docs/__init__.py")
     for path in (ROOT / 'docs').glob('*.md'):
         shutil.copyfile(path, project / 'docs' / path.name)
+    for name in ("requirements", "designs", "mockups"):
+        shutil.copytree(ROOT / "docs" / name, project / "docs" / name)
     shutil.copyfile(ROOT / "pyproject.toml", project / "pyproject.toml")
     wheel_dir = tmp_path / "wheels"
     wheel_dir.mkdir()
@@ -78,6 +80,9 @@ def test_built_wheel_resolves_same_assets_without_checkout(tmp_path):
     for name in ("schemas", "examples"):
         assert data[name] == {p.name: sha256(p) for p in (ROOT / name).glob("*.json")}
     assert data["guide"] == sha256(ROOT / "docs/agent-guide.md")
+    for name in ("requirements/product.md", "designs/experiment-loop.md", "mockups/installation-to-patch.md"):
+        assert (extracted / "quirkbench/guide" / name).read_bytes() == (ROOT / "docs" / name).read_bytes()
+    assert not (extracted / "quirkbench/guide/legacy").exists()
     assert (extracted / 'quirkbench/guide/controller-installation.md').read_bytes() == (
         ROOT / 'docs/controller-installation.md').read_bytes()
     clean_home = tmp_path / "clean-home"

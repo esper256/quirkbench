@@ -226,7 +226,7 @@ def test_real_disposable_signer_inspection_and_fresh_installed_verification(publ
     help_run=subprocess.run([str(Path(installed['runtime_root']) / 'bin/quirkbench'), 'dev', 'release', 'check', '--help'],
         env=env,cwd=tmp_path,capture_output=True,timeout=15,check=True)
     assert b'--inputs' in help_run.stdout and b'--trust-bundle' in help_run.stdout
-    assert (Path(installed['runtime_root'])/'lib/quirkbench/guide/release-publication.md').is_file()
+    assert (Path(installed['runtime_root'])/'lib/quirkbench/guide/designs/setup-and-media.md').is_file()
     # Verify through the real installed-release reader, with independent trust.
     observed=inspect_selected(installed['runtime_root'],config_home=arguments['config_home'],trust_bundle=trust)
     assert observed['verification']['publisher_fingerprint']==fingerprint

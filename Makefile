@@ -15,7 +15,7 @@ TESTS ?= $(SMOKE_TESTS)
 RELEASE_TARGETS := acceptance-m2 acceptance-v1-image acceptance-qemu acceptance-standard-image acceptance-ostree-repository acceptance-ostree-signatures acceptance-ostree-deployment acceptance-ostree-controller-backup
 ifneq ($(filter $(RELEASE_TARGETS),$(MAKECMDGOALS)),)
 ifneq ($(RELEASE_QUALIFICATION),1)
-$(error Release-only qualification: requires an explicitly requested final major-version release and RELEASE_QUALIFICATION=1; see docs/testing-policy.md)
+$(error Release-only qualification: requires an explicitly requested final major-version release and RELEASE_QUALIFICATION=1; see docs/designs/development.md)
 endif
 endif
 

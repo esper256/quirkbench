@@ -257,7 +257,7 @@ def runtime_archive(tmp_path):
              'controller_service.py', 'run-bounded-podman.sh', 'quirkbench-controller.service',
              'recovery_worker.py', 'assets/quirkbench-recovery.service', 'schemas/experiment.v1.schema.json',
              'examples/experiment.json', 'guide/agent-guide.md', 'guide/controller-installation.md',
-             'guide/recovery-acquisition.md', 'guide/build-and-boot.md')
+             'guide/requirements/product.md', 'guide/designs/setup-and-media.md')
     with zipfile.ZipFile(wheel, 'w') as out:
         for name in files:
             out.writestr('quirkbench/' + name, b'fixture')

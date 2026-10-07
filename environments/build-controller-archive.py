@@ -32,6 +32,8 @@ def main():
         for path in (root / 'docs').iterdir():
             if path.name == '__init__.py' or path.suffix == '.md':
                 shutil.copyfile(path, project / 'docs' / path.name)
+        for name in ('requirements', 'designs', 'mockups'):
+            shutil.copytree(root / 'docs' / name, project / 'docs' / name)
         shutil.copyfile(root / 'pyproject.toml', project / 'pyproject.toml')
         wheels = Path(temporary) / 'wheels'
         wheels.mkdir()

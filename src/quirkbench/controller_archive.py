@@ -124,8 +124,8 @@ def build_controller_archive(wheel: Path, output: Path) -> dict:
     required = ('job_worker.py','job_operations.py','job_coordinator.py','job_cache.py',
                 'controller_service.py','run-bounded-podman.sh','recovery_worker.py', 'assets/quirkbench-recovery.service', 'schemas/experiment.v1.schema.json',
                 'examples/experiment.json', 'guide/agent-guide.md',
-                'guide/controller-installation.md', 'guide/recovery-acquisition.md',
-                'guide/build-and-boot.md')
+                'guide/controller-installation.md', 'guide/requirements/product.md',
+                'guide/designs/setup-and-media.md')
     if any('lib/quirkbench/' + name not in files for name in required):
         raise ValueError('controller wheel is missing installed resources')
     files.update({'install': INSTALL_LAUNCHER, 'bin/quirkbench': LAUNCHER, 'bin/quirkbench-worker': WORKER_LAUNCHER,

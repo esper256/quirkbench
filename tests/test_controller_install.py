@@ -24,7 +24,7 @@ def make_archive(directory, payload=b'fixture'):
            'controller_service.py','run-bounded-podman.sh',
            'recovery_worker.py','assets/quirkbench-recovery.service',
             'schemas/experiment.v1.schema.json','examples/experiment.json','guide/agent-guide.md',
-            'guide/controller-installation.md','guide/recovery-acquisition.md','guide/build-and-boot.md')
+            'guide/controller-installation.md','guide/requirements/product.md','guide/designs/setup-and-media.md')
     with zipfile.ZipFile(wheel,'w') as out:
         for name in names:
             raw=payload

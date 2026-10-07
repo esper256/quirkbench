@@ -33,7 +33,7 @@ quirkbench = ["*.sh", "*.service", "profiles/*.json", "baselines/*.json", "recip
 "quirkbench.assets" = ["*.service", "*.mount", "*.conf", "*.fragment", "*.sh"]
 "quirkbench.schemas" = ["*.json"]
 "quirkbench.examples" = ["*.json"]
-"quirkbench.guide" = ["*.md"]
+"quirkbench.guide" = ["*.md", "requirements/*.md", "designs/*.md", "mockups/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
