@@ -72,6 +72,9 @@ def main():
         try:
             record = refresh(archive)
         except ValueError as exc:
+            if 'ownership is busy' in str(exc):
+                print('Local installation was not updated: the controller or another installation command is still running. Stop the foreground controller with Ctrl-C, wait for it to exit, then rerun this updater. Existing controller state is preserved.', file=sys.stderr)
+                return 1
             if 'incompatible development' in str(exc):
                 from quirkbench.state_config import discover_state_root
                 print('The selected development database is incompatible. Explicit reset archives an unused controller; it preserves images and logs.', file=sys.stderr)
