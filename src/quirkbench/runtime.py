@@ -139,7 +139,7 @@ class UsbBootControl:
             raise ContractError('only recovery may prepare or arm a deployment')
         arm_once(deployment, attempt_id, config=self.config, data_mount=BASE/'experiments',
                  state_mount=Path('/boot/quirkbench-state'),
-                 kernel_log=self.runner(['dmesg', '--kernel']), runner=self.runner)
+                 runner=self.runner)
         self.prepared = deployment
 
     def reboot_to_candidate(self):

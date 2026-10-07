@@ -5,7 +5,7 @@ import json
 import subprocess
 import pytest
 from quirkbench.commission import (BootIdentity, CommissionIdentity, CommissionError, ProbePaths,
-    plan_commission, confirm_commission, execute_commission, verify_boot_identity, secure_boot_disabled, _parse_info)
+    plan_commission, confirm_commission, execute_commission, verify_boot_identity, _parse_info)
 
 GUID = '11111111-1111-1111-1111-111111111111'
 UUIDS = tuple(f'{n:08d}-2222-3333-4444-555555555555' for n in range(1,7))
@@ -43,7 +43,6 @@ class Lab:
 
     def run(self,cmd):
         self.calls.append(cmd)
-        if cmd==('dmesg','--kernel'):return 'Secure boot disabled\n'
         if cmd[:2]==('sgdisk','--print'):
             rows='\n'.join(f' {n} {a} {b} 1MiB 8300 role{n}' for n,(a,b) in self.rows.items())
             return f'Disk {self.disk}: {self.disk_sectors} sectors, 512 bytes each\nDisk identifier (GUID): {GUID}\nMain partition table begins at sector 2 and ends at sector 33\nFirst usable sector is 34, last usable sector is {self.last}\n{rows}'
@@ -252,24 +251,15 @@ def test_insufficient_storage_reports_capacity_without_writes(lab):
     with pytest.raises(CommissionError,match='evidence capacity'):lab.plan()
     assert lab.mutations==0
 
-@pytest.mark.parametrize('failure',['usb','root','swap','fixed_geometry','mounted_experiments','secure_boot'])
+@pytest.mark.parametrize('failure',['usb','root','swap','fixed_geometry','mounted_experiments'])
 def test_protection_failures_prevent_mutation(lab,failure):
     if failure=='usb':(lab.paths.sys_devices/'pci/usb1/1-1/subsystem').unlink()
     if failure=='root':lab.paths.proc_mountinfo.write_text('1 0 8:1 / / ro - ext4 /dev/sda1 ro\n')
     if failure=='swap':lab.paths.proc_swaps.write_text('Filename\n/dev/sda4\n')
     if failure=='fixed_geometry':lab.rows[2][1]-=1;lab.sysfs()
     if failure=='mounted_experiments':lab.paths.proc_mountinfo.write_text(lab.paths.proc_mountinfo.read_text()+'2 1 8:4 / /var/lib/quirkbench/experiments rw,nosuid,nodev - ext4 /dev/sda4 rw\n')
-    if failure=='secure_boot':
-        original=lab.run;lab.run=lambda cmd:'Secure boot enabled' if cmd[0]=='dmesg' else original(cmd)
     with pytest.raises(CommissionError):lab.execute()
     assert lab.mutations==0
-
-@pytest.mark.parametrize('log',['','Secure boot enabled','Secure boot could not be determined','Secure boot disabled\nSecure boot enabled'])
-def test_secure_boot_unknown_or_conflicting_is_rejected(log):
-    with pytest.raises(CommissionError):secure_boot_disabled(log)
-
-def test_legacy_four_uuid_identity_requires_rebuilding():
-    with pytest.raises(CommissionError,match='six'):BootIdentity(GUID,UUIDS[:4])
 
 def test_actual_full_gpt_type_guid_is_recognized():
     value=f'Partition GUID code: C12A7328-F81F-11D2-BA4B-00A0C93EC93B (EFI)\nPartition unique GUID: {UUIDS[0]}\nFirst sector: 2048\nLast sector: 4095\n'

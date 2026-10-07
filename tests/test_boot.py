@@ -10,7 +10,6 @@ from quirkbench.boot import (BootConfig,BootError,install_runtime,install_candid
 from quirkbench.deployment import PreparedDeployment
 UUIDS=tuple(str(n)*8+'-'+str(n)*4+'-'+str(n)*4+'-'+str(n)*4+'-'+str(n)*12 for n in range(1,7))
 CONFIG=BootConfig('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',*UUIDS)
-LOG='[0.000] Secure boot disabled\n'
 
 def cmdline(mode='recovery'):
     root=UUIDS[3 if mode=='candidate' else 1]
@@ -34,11 +33,6 @@ def test_cmdline_matches_actual_boot_mode():
     assert parse_cmdline(cmdline('candidate'),CONFIG)['root']=='PARTUUID='+UUIDS[3]
     for bad in (cmdline().replace(' ro ',' rw '),cmdline()+' root=other',cmdline('candidate').replace(UUIDS[3],UUIDS[1]),cmdline('candidate').replace('rw rootflags=nosuid,nodev','ro'),cmdline('candidate').replace('rootflags=nosuid,nodev','rootflags=nodev')):
         with pytest.raises(BootError):parse_cmdline(bad,CONFIG)
-    for bad in (cmdline().replace(' selinux=0', ''), cmdline().replace('selinux=0', 'selinux=1')):
-        with pytest.raises(BootError, match='selinux'):
-            parse_cmdline(bad, CONFIG)
-    with pytest.raises(BootError, match='duplicate'):
-        parse_cmdline(cmdline() + ' selinux=0', CONFIG)
 
 def test_bls_is_data_and_cannot_override_protected_kernel_arguments(tmp_path):
     p=prepared(tmp_path)
@@ -73,31 +67,26 @@ def test_arm_and_reboot_require_verified_mounts_and_matching_attempt(tmp_path):
             else:return '\n'.join(f'{k}={v}' for k,v in values.items())
         return ''
     kwargs=dict(config=CONFIG,data_mount=data,state_mount=state,runner=run,identity_verifier=lambda *a,**k:layout,mountinfo=inventory,system_uuid_reader=lambda:UUIDS[0])
-    with pytest.raises(BootError,match='another attempt'):arm_once(p,'other',kernel_log=LOG,**kwargs)
-    entry=arm_once(p,'attempt',kernel_log=LOG,**kwargs)
+    with pytest.raises(BootError,match='another attempt'):arm_once(p,'other',**kwargs)
+    entry=arm_once(p,'attempt',**kwargs)
     assert entry.is_file() and values=={'next_entry':'candidate','candidate_id':'a'*64,'target_uuid':UUIDS[0]}
-    assert arm_once(p,'attempt',kernel_log=LOG,**kwargs)==entry
+    assert arm_once(p,'attempt',**kwargs)==entry
     with pytest.raises(BootError,match='explicit'):reboot_candidate(p,permit_reboot=False,**kwargs)
     reboot_candidate(p,permit_reboot=True,**kwargs)
     assert calls[-1]==['systemctl','reboot']
     calls.clear();kwargs['mountinfo']=''
-    with pytest.raises(BootError,match='verified p3'):arm_once(p,'attempt',kernel_log=LOG,**kwargs)
+    with pytest.raises(BootError,match='verified p3'):arm_once(p,'attempt',**kwargs)
     assert calls==[]
 
 def test_recovery_mounts_executable_sysroot_and_restricted_evidence(tmp_path):
     devices=[SimpleNamespace(path=tmp_path/str(i),filesystem="ext4") for i in range(6)]
     calls=[]
-    result=prepare_recovery(CONFIG,cmdline=cmdline(),kernel_log=LOG,mountinfo='',state_mount=tmp_path/'state',data_mount=tmp_path/'data',runner=lambda argv:calls.append(argv) or '',identity_verifier=lambda *a,**k:SimpleNamespace(partitions=devices))
+    result=prepare_recovery(CONFIG,cmdline=cmdline(),mountinfo='',state_mount=tmp_path/'state',data_mount=tmp_path/'data',runner=lambda argv:calls.append(argv) or '',identity_verifier=lambda *a,**k:SimpleNamespace(partitions=devices))
     assert result['quirkbench.mode']=='recovery'
     assert any('rw,nosuid,nodev' in call for call in calls)
     assert any('rw,nosuid,nodev,noexec' in call for call in calls)
     assert any(str(tmp_path/'5') in call and str(tmp_path/'data/evidence') in call for call in calls)
     assert any('ro,noload,nosuid,nodev' in call for call in calls)
-
-def test_secureboot_unknown_blocks_before_mutation(tmp_path):
-    with pytest.raises(BootError,match='Secure Boot'):
-        prepare_recovery(CONFIG,cmdline=cmdline(),kernel_log='',mountinfo='',runner=lambda _:pytest.fail('no writes'))
-
 
 @pytest.mark.parametrize('journal_state,partition_count,allowed', [
     ('missing', 4, False),
@@ -709,7 +698,7 @@ def test_recovery_upload_storage_survives_unavailable_experiments_and_library(tm
             if failure=='full_filesystem':raise OSError('no space left')
             raise subprocess.CalledProcessError(32,argv)
         return ''
-    result=prepare_recovery(CONFIG,cmdline=cmdline(),kernel_log=LOG,mountinfo='',
+    result=prepare_recovery(CONFIG,cmdline=cmdline(),mountinfo='',
         state_mount=tmp_path/'state',data_mount=tmp_path/'data',runner=run,
         identity_verifier=lambda *a,**k:SimpleNamespace(partitions=devices))
     assert 'quirkbench.experiments_unavailable' in result

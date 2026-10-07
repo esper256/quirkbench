@@ -19,7 +19,6 @@ from typing import Callable
 
 
 _GUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z")
-_SECURE_BOOT = re.compile(r"^(?:<\d+>)?(?:\[\s*\d+\.\d+\]\s*)?(?:secureboot:\s*)?Secure boot (disabled|enabled|could not be determined)$", re.I)
 
 
 class CommissionError(RuntimeError):
@@ -173,22 +172,6 @@ def _block_rdev(path: Path) -> tuple[int, int]:
     if not stat.S_ISBLK(information.st_mode):
         raise CommissionError(f"not a block device: {path}")
     return os.major(information.st_rdev), os.minor(information.st_rdev)
-
-
-def secure_boot_disabled(kernel_log: str) -> None:
-    """Verify the current EFI boot's x86 kernel report without efivarfs writes.
-
-    The qualified x86 kernel prints this from arch/x86/kernel/setup.c when
-    EFI_BOOT is true. Missing, enabled, unknown, or conflicting records fail.
-    The caller must obtain the current kernel ring with `dmesg --kernel`.
-    """
-    modes = []
-    for line in kernel_log.splitlines():
-        match = _SECURE_BOOT.fullmatch(line.strip())
-        if match:
-            modes.append(match.group(1).lower())
-    if modes != ["disabled"]:
-        raise CommissionError("current EFI Secure Boot disabled report required")
 
 
 def _integer_file(path: Path, *, minimum: int = 0) -> int:
@@ -412,7 +395,6 @@ def verify_boot_identity(
         raise CommissionError("device node and sysfs disk numbers differ")
     if not paths.efi_directory.is_dir():
         raise CommissionError("current boot is not EFI")
-    secure_boot_disabled(runner(("dmesg", "--kernel")))
     _read_cmdline(paths, expected, mode=mode)
     guid, last_usable, disk_sectors, entry_sectors, rows = _parse_print(runner(("sgdisk", "--print", str(disk))))
     if guid != expected.disk_guid:
