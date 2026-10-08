@@ -1,7 +1,8 @@
 # How the parts work together
 
 Revisable design for the [example walkthrough](../mockups/README.md).
-Arrows show responsibilities, not new services or required wire formats.
+Arrows show responsibilities, not new services. Target requests follow the
+[controller API](controller-api.md).
 Build responsibilities follow the [experiment build design](experiment-builds.md).
 
 ```mermaid
@@ -69,7 +70,9 @@ sequenceDiagram
         Recovery->>Controller: Fetch missing OSTree content
         Controller-->>Recovery: Candidate content
         Recovery->>USB: Prepare candidate on shared data; assign evidence and working directories
-        Recovery->>USB: Set one-time boot request
+        Recovery->>Controller: Confirm prepared run may start
+        Controller-->>Recovery: Saved start decision under investigation authorization
+        Recovery->>USB: Record attempt; set one-time boot request
         Note over USB,Candidate: Bootloader clears request before starting candidate; next boot defaults to recovery
         Recovery->>Candidate: Boot candidate once
         Candidate-->>Controller: Progress and live evidence when connected
@@ -78,14 +81,20 @@ sequenceDiagram
             Candidate->>Recovery: Restart into recovery system
             Recovery->>Controller: Upload saved evidence for this run
             Controller-->>Recovery: Evidence stored durably
-            Recovery->>USB: Delete uploaded evidence; clear finished run temporary files
+            Recovery->>USB: Delete confirmed uploaded files
+            Recovery->>Controller: Final outcome and evidence list
+            Controller-->>Recovery: Result received
+            Recovery->>USB: Clear finished run temporary files
             Controller-->>Agent: Results, missing evidence and next instruction path
         else Target stops responding
             Controller-->>Human: Last contact, partial evidence, unknown outcome
             Human->>Recovery: Restart target manually if needed
             Recovery->>Controller: Upload any surviving evidence
             Controller-->>Recovery: Evidence stored durably
-            Recovery->>USB: Delete uploaded evidence; clear interrupted run temporary files
+            Recovery->>USB: Delete confirmed uploaded files
+            Recovery->>Controller: Interrupted outcome and evidence list
+            Controller-->>Recovery: Result received
+            Recovery->>USB: Clear interrupted run temporary files
             Controller-->>Agent: Interrupted result and next instruction path; do not blindly repeat
         end
     end

@@ -62,6 +62,20 @@ files before refusing new work for lack of space. Never discard unuploaded
 evidence to make room. Shared storage can fill or become damaged; keeping recovery
 separate lets it boot and explain the failure, but cannot guarantee evidence survives.
 
+## Evidence uploads
+
+Follow the [controller API](controller-api.md) for pairing, work, progress and
+evidence receipt. Recovery initiates HTTPS uploads using its paired connection.
+The controller does not need to connect back to the target. Use established HTTP
+libraries to stream files into ordinary controller directories. Start with whole
+file retries; do not add rsync, a second transfer service or custom chunk handling.
+Keep incomplete uploads separate from received files and acknowledge stored files
+before recovery deletes them. A repeated upload must not duplicate results.
+
+This is a small file-transfer feature. Its implementation should be short and
+simple. If it grows into a complicated subsystem, reconsider the approach rather
+than treating that complexity as inevitable.
+
 ## Screen and troubleshooting
 
 Show a clean dashboard automatically, including on failure: one next action plus

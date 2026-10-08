@@ -12,8 +12,8 @@ deployment method for hypothetical future flexibility.
 
 Implement in three large, coherent stages, completing each before focused verification:
 
-1. Recovery TUI and evidence upload/cleanup. Define the controller requests and
-   replies needed by this real recovery code; use a test controller until stage 3.
+1. Recovery TUI and evidence upload/cleanup. Use the [controller API](controller-api.md) for requests and
+   replies; use a test controller until stage 3.
 2. Recovery flashing and setup, including controller connection settings.
 3. The foreground controller: receive/store evidence, serve OSTree candidates,
    coordinate experiments and provide the agent interface and progress.

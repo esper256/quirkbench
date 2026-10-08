@@ -62,6 +62,8 @@ that a feature exists. Keep entries short and change them with the designs.
 | ID | A value that identifies one thing; it is not its file location. |
 | Hash | A value calculated from bytes to detect changes or identify content. |
 | Fingerprint | A short representation of a public key or certificate used to check identity. |
+| API | Defined requests and replies through which programs work together. |
+| HTTPS | HTTP requests protected by an encrypted connection that checks server identity. |
 | CLI | Command-line interface: commands typed into a terminal. |
 | TUI | Text user interface: menus and controls displayed in a terminal. |
 | JSON | A text format used for structured input and output. |

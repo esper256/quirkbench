@@ -17,6 +17,7 @@ Then read only the design relevant to the task. Designs describe **how Quirkbenc
 | [Experiment builds](designs/experiment-builds.md) | Baseline builds, agent-built changes, deployment requirements and candidate hooks |
 | [Candidate deployment](designs/candidate-deployment.md) | Chosen OSTree/rpm-ostree approach, transfer speed and cleanup |
 | [Target recovery](designs/recovery.md) | Practical protection, dashboard, failure recovery and debug reports |
+| [Controller API](designs/controller-api.md) | Target pairing, work delivery, progress and evidence uploads |
 | [Application internals](designs/internals.md) | Conventional Unix behavior, identity, storage and reuse |
 | [Component sequence](designs/component-sequence.md) | How setup, experiments, recovery and the agent work together |
 | [Testing strategy](designs/testing.md) | Fast integration tests covering the mockup journeys |
