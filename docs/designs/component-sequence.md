@@ -5,17 +5,15 @@ Arrows show responsibilities, not new services. Target requests follow the
 [controller API](controller-api.md).
 Build responsibilities follow the [experiment build design](experiment-builds.md).
 
+## Setup and pairing
+
 ```mermaid
 sequenceDiagram
     actor Human
     participant CLI as Quirkbench binary
     participant Controller as Quirkbench controller
-    participant Worker as Preparation worker
-    participant Fedora as Official Fedora repositories
     participant USB as USB drive
     participant Recovery as Recovery system
-    participant Candidate as Candidate on target
-    participant Agent as Quirkbench user's agent
 
     Human->>CLI: setup
     CLI->>CLI: Save controller config and connection credentials
@@ -23,8 +21,8 @@ sequenceDiagram
     Human->>CLI: controller run in a separate terminal
     CLI->>Controller: Run in foreground with saved config
     Human->>CLI: recovery build
-    CLI->>Worker: Use matching cached image or build
-    Worker-->>CLI: Progress, then complete recovery image
+    CLI->>CLI: Use matching cached image or build
+    CLI-->>Human: Progress, then complete recovery image
     Human->>CLI: recovery flash
     CLI->>Controller: Obtain pairing credentials
     CLI-->>Human: Select USB and confirm erasure
@@ -35,6 +33,22 @@ sequenceDiagram
     Human->>Recovery: Connect network if needed
     Recovery->>Controller: Pair using credentials from USB
     Controller-->>Recovery: Target connected
+
+```
+
+## Investigation and experiment loop
+
+Build preparation is shown within the controller, and USB writes within the
+system performing them, to keep the diagram focused on the experiment flow.
+
+```mermaid
+sequenceDiagram
+    actor Human
+    participant Agent as Quirkbench user's agent
+    participant CLI as Quirkbench binary
+    participant Controller as Quirkbench controller
+    participant Recovery as Recovery system
+    participant Candidate as Candidate on target
 
     Human->>CLI: Describe problem#59; approve investigation scope and limits
     CLI->>Controller: Save investigation and authorization
@@ -55,13 +69,11 @@ sequenceDiagram
         Controller-->>Agent: Accepted#59; next command and instruction path
         Controller->>Controller: Check deployment requirements#59; capture submitted files
         Controller-->>Agent: Capture complete#59; editing may resume
-        Controller->>Worker: Prepare package selection with cached baseline and custom RPMs
+        Controller->>Controller: Prepare package selection with cached baseline and custom RPMs
         opt Stock packages not cached
-            Worker->>Fedora: Download selected versions and dependencies
-            Fedora-->>Worker: Stock RPMs
+            Controller->>Controller: Download selected stock RPMs and dependencies from Fedora
         end
-        Worker->>Worker: Assemble with rpm-ostree#59; reuse persistent caches
-        Worker-->>Controller: Candidate recorded in OSTree
+        Controller->>Controller: Assemble with rpm-ostree#59; record candidate in OSTree
         Controller->>Controller: Check investigation still permits execution
         Agent->>CLI: Wait quietly for this submission
         CLI->>Controller: Wait for results or required intervention
@@ -69,38 +81,40 @@ sequenceDiagram
         Controller-->>Recovery: Exact candidate identifier, test and time limit
         Recovery->>Controller: Fetch missing OSTree content
         Controller-->>Recovery: Candidate content
-        Recovery->>USB: Prepare candidate on shared data#59; assign evidence and working directories
+        Recovery->>Recovery: Prepare candidate on shared data#59; assign evidence and working directories
         Recovery->>Controller: Confirm prepared run may start
         Controller-->>Recovery: Saved start decision under investigation authorization
-        Recovery->>USB: Record attempt#59; set one-time boot request
-        Note over USB,Candidate: Bootloader clears request before starting candidate#59; next boot defaults to recovery
+        Recovery->>Recovery: Record attempt#59; set one-time boot request
+        Note over Recovery,Candidate: Bootloader clears request before starting candidate#59; next boot defaults to recovery
         Recovery->>Candidate: Boot candidate once
         Candidate-->>Controller: Progress and live evidence when connected
-        Candidate->>USB: Save evidence locally
+        Candidate->>Candidate: Save evidence locally
         alt Test finishes or failure permits restart
             Candidate->>Recovery: Restart into recovery system
             Recovery->>Controller: Upload saved evidence for this run
             Controller-->>Recovery: Evidence stored durably
-            Recovery->>USB: Delete confirmed uploaded files
+            Recovery->>Recovery: Delete confirmed uploaded files
             Recovery->>Controller: Final outcome and evidence list
             Controller-->>Recovery: Result received
-            Recovery->>USB: Clear finished run temporary files
+            Recovery->>Recovery: Clear finished run temporary files
             Controller-->>Agent: Results, missing evidence and next instruction path
         else Target stops responding
             Controller-->>Human: Last contact, partial evidence, unknown outcome
             Human->>Recovery: Restart target manually if needed
             Recovery->>Controller: Upload any surviving evidence
             Controller-->>Recovery: Evidence stored durably
-            Recovery->>USB: Delete confirmed uploaded files
+            Recovery->>Recovery: Delete confirmed uploaded files
             Recovery->>Controller: Interrupted outcome and evidence list
             Controller-->>Recovery: Result received
-            Recovery->>USB: Clear interrupted run temporary files
+            Recovery->>Recovery: Clear interrupted run temporary files
             Controller-->>Agent: Interrupted result and next instruction path#59; do not blindly repeat
         end
     end
     Agent->>Agent: Assess evidence and create investigation patch with Git
     Agent-->>Human: Investigation patch, results and limitations
 ```
+
+## Pause and resume
 
 ```mermaid
 sequenceDiagram
