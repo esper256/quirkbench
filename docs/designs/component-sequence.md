@@ -1,6 +1,7 @@
 # How the parts work together
 
 Revisable design for the [example walkthrough](../mockups/README.md).
+Quirkbench represents the binary and controller together.
 Arrows show responsibilities, not new services. Target requests follow the
 [controller API](controller-api.md).
 Build responsibilities follow the [experiment build design](experiment-builds.md).
@@ -10,104 +11,95 @@ Build responsibilities follow the [experiment build design](experiment-builds.md
 ```mermaid
 sequenceDiagram
     actor Human
-    participant CLI as Quirkbench binary
-    participant Controller as Quirkbench controller
+    participant Quirkbench
     participant USB as USB drive
     participant Recovery as Recovery system
 
-    Human->>CLI: setup
-    CLI->>CLI: Save controller config and connection credentials
-    CLI-->>Human: Configuration saved#59; run quirkbench controller run
-    Human->>CLI: controller run in a separate terminal
-    CLI->>Controller: Run in foreground with saved config
-    Human->>CLI: recovery build
-    CLI->>CLI: Use matching cached image or build
-    CLI-->>Human: Progress, then complete recovery image
-    Human->>CLI: recovery flash
-    CLI->>Controller: Obtain pairing credentials
-    CLI-->>Human: Select USB and confirm erasure
-    Human->>CLI: Confirm selected USB
-    CLI->>USB: Write generic recovery and final partitions#59; save settings on shared data
-    CLI-->>Human: USB ready
+    Human->>Quirkbench: setup
+    Quirkbench->>Quirkbench: Save controller config and connection credentials
+    Quirkbench-->>Human: Configuration saved#59; run quirkbench controller run
+    Human->>Quirkbench: controller run in a separate terminal
+    Human->>Quirkbench: recovery build
+    Quirkbench->>Quirkbench: Use matching cached image or build
+    Quirkbench-->>Human: Progress, then complete recovery image
+    Human->>Quirkbench: recovery flash
+    Quirkbench-->>Human: Select USB and confirm erasure
+    Human->>Quirkbench: Confirm selected USB
+    Quirkbench->>USB: Write generic recovery and final partitions#59; save settings on shared data
+    Quirkbench-->>Human: USB ready
     Human->>Recovery: Boot target from USB
     Human->>Recovery: Connect network if needed
-    Recovery->>Controller: Pair using credentials from USB
-    Controller-->>Recovery: Target connected
+    Recovery->>Quirkbench: Pair using credentials from USB
+    Quirkbench-->>Recovery: Target connected
 
 ```
 
 ## Investigation and experiment loop
 
-Build preparation is shown within the controller, and USB writes within the
+Build preparation is shown within Quirkbench, and USB writes within the
 system performing them, to keep the diagram focused on the experiment flow.
 
 ```mermaid
 sequenceDiagram
     actor Human
     participant Agent as Quirkbench user's agent
-    participant CLI as Quirkbench binary
-    participant Controller as Quirkbench controller
+    participant Quirkbench
     participant Recovery as Recovery system
     participant Candidate as Candidate on target
 
-    Human->>CLI: Describe problem#59; approve investigation scope and limits
-    CLI->>Controller: Save investigation and authorization
-    Controller-->>CLI: Workspace and INVESTIGATION.md with instructions
-    CLI-->>Human: Guide path to give the agent
+    Human->>Quirkbench: Describe problem#59; approve investigation scope and limits
+    Quirkbench-->>Human: Workspace and agent guide path
     Human->>Agent: Investigate the problem
     Agent->>Agent: Read guide, build instructions and candidate hook examples
     loop Until agent finishes or investigation pauses
-        Agent->>CLI: Read investigation and existing evidence
-        CLI->>Controller: Read saved records and files
-        Controller-->>Agent: Limits, candidate source, results
+        Agent->>Quirkbench: Read investigation and existing evidence
+        Quirkbench-->>Agent: Limits, candidate source, results
         Agent->>Agent: Inspect code#59; design test and time limit#59; edit candidate source
         opt Changed software or compiled test programs
             Agent->>Agent: Incrementally build changed software#59; package completed output as RPMs
         end
-        Agent->>CLI: Submit package changes, custom RPMs and test
-        CLI->>Controller: Save submission and retry ID
-        Controller-->>Agent: Accepted#59; next command and instruction path
-        Controller->>Controller: Check deployment requirements#59; capture submitted files
-        Controller-->>Agent: Capture complete#59; editing may resume
-        Controller->>Controller: Prepare package selection with cached baseline and custom RPMs
+        Agent->>Quirkbench: Submit package changes, custom RPMs and test
+        Quirkbench-->>Agent: Accepted#59; next command and instruction path
+        Quirkbench->>Quirkbench: Check deployment requirements#59; capture submitted files
+        Quirkbench-->>Agent: Capture complete#59; editing may resume
+        Quirkbench->>Quirkbench: Prepare package selection with cached baseline and custom RPMs
         opt Stock packages not cached
-            Controller->>Controller: Download selected stock RPMs and dependencies from Fedora
+            Quirkbench->>Quirkbench: Download selected stock RPMs and dependencies from Fedora
         end
-        Controller->>Controller: Assemble with rpm-ostree#59; record candidate in OSTree
-        Controller->>Controller: Check investigation still permits execution
-        Agent->>CLI: Wait quietly for this submission
-        CLI->>Controller: Wait for results or required intervention
-        Recovery->>Controller: Request candidate and experiment instructions
-        Controller-->>Recovery: Exact candidate identifier, test and time limit
-        Recovery->>Controller: Fetch missing OSTree content
-        Controller-->>Recovery: Candidate content
+        Quirkbench->>Quirkbench: Assemble with rpm-ostree#59; record candidate in OSTree
+        Quirkbench->>Quirkbench: Check investigation still permits execution
+        Agent->>Quirkbench: Wait quietly for this submission
+        Recovery->>Quirkbench: Request candidate and experiment instructions
+        Quirkbench-->>Recovery: Exact candidate identifier, test and time limit
+        Recovery->>Quirkbench: Fetch missing OSTree content
+        Quirkbench-->>Recovery: Candidate content
         Recovery->>Recovery: Prepare candidate on shared data#59; assign evidence and working directories
-        Recovery->>Controller: Confirm prepared run may start
-        Controller-->>Recovery: Saved start decision under investigation authorization
+        Recovery->>Quirkbench: Confirm prepared run may start
+        Quirkbench-->>Recovery: Saved start decision under investigation authorization
         Recovery->>Recovery: Record attempt#59; set one-time boot request
         Note over Recovery,Candidate: Bootloader clears request before starting candidate#59; next boot defaults to recovery
         Recovery->>Candidate: Boot candidate once
-        Candidate-->>Controller: Progress and live evidence when connected
+        Candidate-->>Quirkbench: Progress and live evidence when connected
         Candidate->>Candidate: Save evidence locally
         alt Test finishes or failure permits restart
             Candidate->>Recovery: Restart into recovery system
-            Recovery->>Controller: Upload saved evidence for this run
-            Controller-->>Recovery: Evidence stored durably
+            Recovery->>Quirkbench: Upload saved evidence for this run
+            Quirkbench-->>Recovery: Evidence stored durably
             Recovery->>Recovery: Delete confirmed uploaded files
-            Recovery->>Controller: Final outcome and evidence list
-            Controller-->>Recovery: Result received
+            Recovery->>Quirkbench: Final outcome and evidence list
+            Quirkbench-->>Recovery: Result received
             Recovery->>Recovery: Clear finished run temporary files
-            Controller-->>Agent: Results, missing evidence and next instruction path
+            Quirkbench-->>Agent: Results, missing evidence and next instruction path
         else Target stops responding
-            Controller-->>Human: Last contact, partial evidence, unknown outcome
+            Quirkbench-->>Human: Last contact, partial evidence, unknown outcome
             Human->>Recovery: Restart target manually if needed
-            Recovery->>Controller: Upload any surviving evidence
-            Controller-->>Recovery: Evidence stored durably
+            Recovery->>Quirkbench: Upload any surviving evidence
+            Quirkbench-->>Recovery: Evidence stored durably
             Recovery->>Recovery: Delete confirmed uploaded files
-            Recovery->>Controller: Interrupted outcome and evidence list
-            Controller-->>Recovery: Result received
+            Recovery->>Quirkbench: Interrupted outcome and evidence list
+            Quirkbench-->>Recovery: Result received
             Recovery->>Recovery: Clear interrupted run temporary files
-            Controller-->>Agent: Interrupted result and next instruction path#59; do not blindly repeat
+            Quirkbench-->>Agent: Interrupted result and next instruction path#59; do not blindly repeat
         end
     end
     Agent->>Agent: Assess evidence and create investigation patch with Git
@@ -119,17 +111,17 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     actor Human
-    participant Controller as Quirkbench controller
+    participant Quirkbench
     participant Candidate as Candidate on target
     participant Recovery as Recovery system
-    Human->>Controller: Investigation pause
-    Controller->>Controller: Stop starting new work
+    Human->>Quirkbench: Investigation pause
+    Quirkbench->>Quirkbench: Stop starting new work
     Candidate->>Recovery: Finish current bounded run and restart
-    Recovery->>Controller: Upload evidence
-    Controller-->>Recovery: Evidence stored durably#59; USB copy can be deleted
-    Controller-->>Human: Paused#59; report any missing evidence
-    Human->>Controller: Resume with existing limits
-    Controller->>Controller: Allow new work
+    Recovery->>Quirkbench: Upload evidence
+    Quirkbench-->>Recovery: Evidence stored durably#59; USB copy can be deleted
+    Quirkbench-->>Human: Paused#59; report any missing evidence
+    Human->>Quirkbench: Resume with existing limits
+    Quirkbench->>Quirkbench: Allow new work
 ```
 
 Force stop attempts immediate interruption instead. A frozen target may need a
