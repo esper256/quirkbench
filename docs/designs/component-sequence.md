@@ -38,7 +38,7 @@ sequenceDiagram
     Quirkbench-->>Agent: Prepared baseline with target connection support
     Agent->>Quirkbench: recovery_boot_ostree
     Quirkbench->>Target: Supply candidate content to recovery
-    Target->>Target: Deploy on shared data, prepare fresh files and select one-time boot
+    Target->>Target: Deploy on shared data with fresh /etc and /var, then select one-time boot
     Target->>Quirkbench: Candidate reconnects with same identity and new boot ID
     Quirkbench-->>Agent: Candidate connected
     Agent->>Quirkbench: recovery_return

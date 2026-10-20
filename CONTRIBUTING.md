@@ -17,8 +17,10 @@ focused tests, one review of the completed work, honest limitations. Update curr
 designs as implementation evolves. No new migrations or compatibility machinery.
 Do not modify live state or perform physical operations without authorization.
 
-This branch begins a Python rewrite; there is no runnable application yet.
-The implementation will provide the development and fast integration-test commands.
+Use `uv sync --locked` to acquire dependencies, then `uv run --no-sync pytest -q`
+for the fast integration suite. It uses temporary files and local sockets, without
+root, downloads, image builds or hardware operations. Shared helpers live in
+`tests/support`; keep tests focused on user-visible outcomes.
 Do not run full suites or real image builds after every edit. Preserve failure
 logs and diagnose before retrying. Documentation-only work needs link checks and
 `git diff --check`.

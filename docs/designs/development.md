@@ -47,6 +47,10 @@ separate simulated product. Confirm the actual mount/boot arrangement early rath
 than finishing every screen before the first boot check. Record the initial Secure
 Boot choice and measured USB space before declaring supported setup instructions.
 
+The current implementation and outstanding real checks are described in
+[local installation](../controller-installation.md). Software test success does not
+complete the physical milestone.
+
 ## After milestone 1
 
 2. **Interactive candidate debugging.** Add arbitrary candidate commands,

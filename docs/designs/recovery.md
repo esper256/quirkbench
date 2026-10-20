@@ -22,7 +22,9 @@ RAM-based capacity checks. Use these partition roles:
 Size the fixed parts for their actual contents with modest headroom; shared data
 gets the remaining space. No separate evidence or unused library partition.
 Use the [GRUB arrangement](candidate-deployment.md#recovery-owns-boot-selection)
-with the OSTree layout; a separate boot-selection partition is optional.
+with the OSTree layout. The first implementation uses a separate ext4 boot
+partition for GRUB and OSTree boot files. Recovery mounts it at the candidate
+storage root’s `/boot`; candidate package tools do not own its GRUB configuration.
 
 Recovery settings include saved network connections, the controller address,
 public key and connection credentials. Flashing writes local settings separately

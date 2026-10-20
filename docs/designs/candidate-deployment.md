@@ -46,8 +46,9 @@ reset. Keep run files separate from reusable repository content; never modify
 shared hard-linked files in place. Discard the run after collecting its diagnostics
 rather than attempting to undo individual edits. Preserve unuploaded evidence.
 
-First arrangement to verify: recovery creates a fresh deployment with candidate
-configuration defaults and fresh per-run `/var` and home directories. Mount those
+First arrangement to verify: recovery creates a separate OSTree storage root for
+each run, with a fresh deployment, `--no-merge` configuration defaults and its own
+`/var` and home directories. Mount those
 directories before dependent services start. Reuse unchanged OS content; do not
 undo the previous run's edits. Check service initialization and OSTree's mount
 ordering before treating this arrangement as working.

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "quirkbench"
+version = "0.2.0"
+description = "A Linux investigation lab for coding agents"
+requires-python = ">=3.12"
+dependencies = ["aiohttp>=3.12,<4", "asyncssh>=2.21,<3", "mcp>=1.20,<2", "uvicorn>=0.35,<1", "cryptography>=45", "httpx>=0.28,<1"]
+
+[project.scripts]
+quirkbench = "quirkbench.cli:main"
+quirkbench-target = "quirkbench.target:main"
+quirkbench-console = "quirkbench.console:main"
+quirkbench-disk-writer = "quirkbench.media:writer_main"
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=1", "pytest-timeout>=2", "build>=1", "hatchling>=1", "installer>=0.7"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+timeout = 30
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/quirkbench"]

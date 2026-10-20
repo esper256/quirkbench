@@ -9,9 +9,11 @@ are outside scope. Practical protections reduce accidental damage; no tool can
 perfectly contain an arbitrary experimental kernel or guarantee recovery from
 all hangs.
 
-**This branch starts a Python rewrite.** The implementation has been removed;
-commit `b807199` preserves the previous code as reference. The documents below
-describe the intended product, not currently available commands.
+**This branch implements the first milestone of a Python rewrite.** Fast integration
+tests cover the application journey. Real recovery image builds, USB flashing and
+Bazzite boot/return still need validation. See [local installation](docs/controller-installation.md).
+The design documents describe the full intended product; later features are not
+yet available. Commit `b807199` preserves the previous code as reference.
 
 - [Requirements](docs/requirements/product.md): short, human-approved product scope.
 - [Designs](docs/README.md): revisable choices for a simpler, enjoyable application.

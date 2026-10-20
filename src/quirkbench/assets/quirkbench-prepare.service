@@ -1,0 +1,13 @@
+[Unit]
+Description=Prepare Quirkbench target storage and network settings
+DefaultDependencies=no
+After=local-fs.target
+Before=NetworkManager.service quirkbench-target.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/quirkbench-target prepare-boot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

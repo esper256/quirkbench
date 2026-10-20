@@ -1,0 +1,19 @@
+[Unit]
+Description=Quirkbench target console
+After=multi-user.target
+Conflicts=getty@tty2.service
+
+[Service]
+ExecStartPre=-/usr/bin/chvt 2
+ExecStart=/usr/bin/quirkbench-console
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty2
+TTYReset=yes
+TTYVHangup=yes
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=graphical.target
