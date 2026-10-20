@@ -13,17 +13,20 @@ Then read only the design relevant to the task. Designs describe **how Quirkbenc
 | --- | --- |
 | [Product and experience](designs/experience.md) | Enjoyable human interface; product roles and scope |
 | [Setup, build and flash](designs/setup-and-media.md) | Three simple commands; editable configuration; prepared USB |
-| [Agent experiment loop](designs/experiment-loop.md) | Agent-authored experiments, authorization, evidence, pause |
+| [Interactive debugging](designs/interactive-debugging.md) | MCP, live control, decisions and acceleration measurements |
+| [Agent investigation loop](designs/experiment-loop.md) | Inspection, live probes, software changes, evidence and pause |
 | [Experiment builds](designs/experiment-builds.md) | Baseline builds, agent-built changes, deployment requirements and candidate hooks |
-| [Candidate deployment](designs/candidate-deployment.md) | Chosen OSTree/rpm-ostree approach, transfer speed and cleanup |
-| [Target recovery](designs/recovery.md) | Practical protection, dashboard, failure recovery and debug reports |
-| [Controller API](designs/controller-api.md) | Target pairing, work delivery, progress and evidence uploads |
+| [Candidate deployment](designs/candidate-deployment.md) | Live changes, writable candidates, deployment choices and cleanup |
+| [Target recovery](designs/recovery.md) | Dedicated fallback, practical protection, diagnostics and recovery |
+| [Controller API](designs/controller-api.md) | MCP and target connections, pairing and simple evidence uploads |
 | [Application internals](designs/internals.md) | Conventional Unix behavior, identity, storage and reuse |
 | [Component sequence](designs/component-sequence.md) | How setup, experiments, recovery and the agent work together |
 | [Testing strategy](designs/testing.md) | Fast integration tests covering the mockup journeys |
 | [Development](designs/development.md) | Fast iteration, subtraction, reviews and implementation transition |
 
-[Legacy documents in the repository](https://github.com/esper256/quirkbench/tree/main/docs/legacy) preserve previous manuals, plans, contracts and operating notes. They have **no current design authority**, even where they say “must,” “approved,” or “contract.” Consult a specific archived file only for a concrete implementation question; do not read the archive as onboarding or inherit its constraints. GitHub issues and existing tests can also contain superseded assumptions.
+[Legacy documents](legacy/README.md) are historical reference, not current design
+instructions. Consult a specific file only for a concrete implementation question.
 
 This rewrite branch has no runnable application yet. Commit `b807199` preserves
-the previous implementation for reference. This documentation reorganization does not implement the new product design or authorize live flashing, resetting state or running targets. Thin [agent](agent-guide.md) and [controller](controller-installation.md) entry points are retained for installed tooling.
+the previous implementation for reference. See the [agent guide](agent-guide.md)
+and [controller setup](controller-installation.md) for short entry points.

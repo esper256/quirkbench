@@ -1,54 +1,34 @@
-# Who builds experiment software
+# Build software for an investigation
 
-Quirkbench 1.0 uses **rpm-ostree to assemble candidates and OSTree to deploy them**.
-This is the chosen design, not an added [product requirement](../requirements/product.md).
-Implementation details can change as we learn.
+Builds support [interactive debugging](interactive-debugging.md). Quirkbench prepares
+the baseline, workspace and build instructions. The user's agent edits software,
+chooses builds and resolves compilation errors. No agent edits to Quirkbench are needed.
 
-| Quirkbench | Quirkbench user's agent |
-| --- | --- |
-| Prepare the workspace, baseline and build instructions | Edit candidate source and test programs |
-| Acquire stock RPMs; build unchanged software when needed | Build changed software into replacement RPMs; fix errors |
-| Assemble candidates with rpm-ostree and deploy with OSTree | Supply completed build output and interpret evidence |
+Expose the supplied incremental build scripts through an MCP helper as well as
+ordinary local execution. The helper runs the selected script, returns useful logs
+and retains completed output. It does not diagnose or fix code. Retain useful build
+directories and do not rebuild unchanged software or repeat a successful agent build.
 
-Use official Fedora repositories plus local custom RPMs. Record exact selected
-versions and dependencies; do not silently update unrelated packages. Cache stock
-packages and prepared results. Keep the original baseline available for comparison.
-Quirkbench is not a Fedora mirror or a new package manager.
+Provide context and short guides for the supported kernel/userspace builds, required
+output, debugging symbols and deployment choices. Include matching source/package
+references and build dependencies so the agent can prepare source without guessing.
+Package output as RPMs where useful for OS assembly or installation. A standalone probe or file change needs no RPM.
+Use official packages and cache selected versions without becoming a distribution
+mirror. Record resolved packages when they affect the experiment.
 
-The experiment description names the baseline, stock package changes, custom RPM
-replacements and test instructions. Keep rpm-ostree's configuration internal; do
-not expose its entire format as Quirkbench's interface. Use its existing dependency
-and installation handling. Do not build a parallel arbitrary-file OS assembler.
-Small diagnostic programs and configuration files have a supported place without
-requiring the agent to create a package for every script.
+Publish completed output separately from active build files. Record relevant source
+and build settings. Copy completed output before deployment; later edits must
+not change retained output. Do not require control over the agent's editor.
+Keep symbols and source on the controller unless needed on the target.
 
-Supply ordinary build scripts that preserve incremental build directories and
-package completed output without unnecessary recompilation. The agent runs and
-may adjust them. Quirkbench does not rebuild changed code. Deployment requirements
-cover matching kernel/modules, explicit replacements and necessary boot files.
-Keep source records and debugging symbols on the controller unless the test needs
-them. A successful experimental boot is not an admission condition.
+Candidate hooks support startup/shutdown tests. They are optional alongside
+live commands, not the only way to run diagnostic code. Supply evidence and working
+directories to both. Never require the agent to predict every future inspection at
+build time. Earlier boot instrumentation remains a candidate-source change.
 
-Publish completed output separately from files still being built. Record the code
-and settings used; copy completed output for submission before it can be replaced.
-No `--writers-stopped` assertion or control over arbitrary editors. Report detected
-incomplete or changing output with a useful retry instruction.
-
-Provide `INVESTIGATION.md` with the problem, scope, file locations and exact next
-commands. Link build instructions, deployment requirements and editable candidate
-hook examples. Hooks run at documented points in candidate startup and shutdown;
-earlier instrumentation is a candidate source change. No Quirkbench edits needed.
-
-Candidate hooks receive `QUIRKBENCH_EVIDENCE_DIR` and `QUIRKBENCH_WORK_DIR` for
-the current run. Document these in the supplied agent guide and test examples.
-Evidence is returned to the controller; working files are disposable after the
-run. Tell agents to leave recovery settings, boot selection and managed candidate
-files alone. See [recovery storage and cleanup](recovery.md).
-
-Recovery image builds remain a separate Quirkbench responsibility.
-See [deployment and storage](candidate-deployment.md).
-
-See the [agent interaction mockup](../mockups/agent-experiment.md) for a complete
-experiment-file example. Its fields and hook names are illustrative; develop the
-interface with the real recovery and controller code. CLI shortcuts may express
-simple cases without requiring every experiment to use all available fields.
+Recovery image builds remain Quirkbench's responsibility. Start with matching
+kernel/modules and PipeWire RPM builds for the selected rpm-ostree base. The agent
+chooses and fixes builds; the controller assembles completed outputs into a
+[candidate](candidate-deployment.md). Saved candidates name their base, package
+changes and selected files explicitly. No universal build system or automatic
+capture of every live edit.

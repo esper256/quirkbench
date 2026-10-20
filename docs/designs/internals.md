@@ -2,24 +2,27 @@
 
 Revisable design supporting the [requirements](../requirements/product.md).
 
-Use Python for the controller, CLI, recovery application and shared test tooling.
+Use Python for the controller, MCP interface, CLI, recovery application and shared test tooling.
 This is the chosen implementation language. Continue using existing Linux tools
 for building, deployment and boot.
 
 Design the application to be integration tested from the beginning. It is fine
 to shape production code for this purpose. Keep external commands and other
 expensive dependencies easy to replace in tests while exercising real Quirkbench
-behavior. Follow the [testing strategy](testing.md); do not leave tests to work
-around an already completed implementation.
+behavior. Pass storage roots and small replaceable Linux operations at startup;
+keep ordinary file access real rather than introducing a universal filesystem
+proxy. Follow the [testable application design](testing.md#keep-the-application-easy-to-exercise);
+do not leave tests to work around an already completed implementation.
 
 - Implement afresh in Python. The old code at Git commit `b807199` is reference material, not an architecture or stored-format constraint. Reuse useful ideas or code selectively. Share application behavior between human and agent interfaces. Preserve owner data; do not migrate it or reset it.
 - Single-user software needs locks, not accounts/tenants. Ordinary data is not invalid merely because of group-readable permissions or symlinked ancestors. Create secrets privately and authenticate network peers.
 - This is a personal experiment tool, not a hardened OS distribution service. Use ordinary tool-supported authentication and package checks. Do not add a release-security system, extra signing approvals or repeated verification rituals for experiments. Keep practical disk protection separate from this choice.
 - Derive managed paths from current roots and existing IDs; don't persist redundant absolute or relative paths. Store necessary external locations once in configuration. Paths and permanent inode observations are not durable identity.
 - Validate untrusted inputs at entry and recheck where mutation/races matter. Keep actual containment and live ownership checks; avoid repeated full-tree validation. Configuration edits are normal, not integrity violations.
-- Stable captures, matching symbols, run attribution, atomic publication and retry handling are useful designs supporting the loop—not additional human requirements or a scientific certification system.
+- Keep submitted build output unchanged, retain matching symbols, and attribute commands and evidence to their run. Publish completed files together and make repeated requests identify existing work.
 - Cache loss should cause recomputation. Show storage use and offer cleanup/export; preserve active work and unuploaded evidence. Report partial results and full-disk failures honestly.
 - Use ordinary Git/files for patch and evidence export where practical. Comprehensive backup machinery is not a prerequisite to a useful loop.
-- For 1.0, use Fedora packages, rpm-ostree assembly and OSTree deployment as described in [candidate deployment](candidate-deployment.md). Reuse dracut, GRUB and the existing container tools. These design choices do not limit the product requirements to one platform. Broader support needs working implementation, not universal claims.
+- Use rpm-ostree/OSTree first, with small OS-specific preparation/deployment modules over shared command and evidence code. Keep prepared software unchanged, run files disposable and persistence explicit; see [candidate deployment](candidate-deployment.md).
+- One foreground controller process serves MCP over local Streamable HTTP, HTTPS and AsyncSSH reverse-direction connections. Human commands share its application behavior. No separate persistent MCP process, SSH daemon or worker service. Use child processes for commands/builds and keep blocking work out of the connection event loop.
 
 Changes should leave fewer concepts and fewer sources of truth. A filename changing should not make every subsystem panic.

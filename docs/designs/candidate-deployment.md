@@ -1,52 +1,81 @@
-# Deploy candidates efficiently
+# Prepare candidates and keep runs disposable
 
-Quirkbench 1.0 uses rpm-ostree on the controller computer for candidate assembly
-and OSTree for storage, transfer and target deployment. Details are revisable;
-keep this one implementation working rather than building interchangeable systems.
+The first target baseline is **latest stable Bazzite**, using rpm-ostree/OSTree.
+Default to the standard desktop image `ghcr.io/ublue-os/bazzite:stable` for x86-64.
+Resolve `stable` when preparing the investigation baseline and record the exact
+image digest and version. Reuse that selection for retries and subsequent runs;
+updating the baseline is explicit. Disable unattended OS updates in candidates.
 
-The controller obtains official RPMs and the agent's custom RPMs. Recovery obtains
-the assembled candidate from the controller, not packages from Fedora. Run the
-assembly tools in the supported build environment; the controller computer need
-not run Fedora or an OSTree desktop.
+Bazzite publishes a bootable container image, not a bare OSTree repository URL.
+Use supported image tooling to derive it with the target RPM and debugging tools.
+Choose compatible build tooling and preserve the user/session setup needed for
+reproduction. Report Quirkbench's changes and differences from the installed OS.
+See [Bazzite's image references](https://docs.bazzite.gg/Installing_and_Managing_Software/Updates_Rollbacks_and_Rebasing/rebase_guide/).
 
-Use the normal paired connection and stock package checks. Custom experiment RPMs
-and OSTree candidates need no separate publisher approval or mandatory signing
-process. Configure tool credentials where needed; keep them out of the agent's
-experiment loop. This is test software, not a hardened release-distribution system.
+## Common code, OS-specific preparation
 
-1. Resolve the experiment's package selection and explicit replacements.
-2. Assemble with rpm-ostree using persistent package caches and record the candidate
-   in OSTree. Reuse identical prepared results.
-3. Recovery requests work through its authenticated controller connection and gets
-   the candidate identifier, test instructions and time limit.
-4. Recovery fetches missing OSTree content into the shared data partition and
-   prepares the candidate. Interrupted preparation must not select an incomplete
-   candidate for boot.
-5. Select the completed candidate for one boot. Recovery remains the default.
+Keep MCP, reverse SSH, command recording, evidence and recovery common. Small
+OS-specific Python modules prepare candidates, deploy them and describe boot files
+and supported live changes. Start with one implementation, not a plugin framework.
+A future Debian implementation can reuse the same target program and provide a
+`.deb`; the first packages that program as an RPM. MCP stays on the controller.
 
-Use OSTree's supported boot layout. Keep candidate software read-only where its
-normal deployment expects it; writable configuration and application data start
-fresh for each run unless the experiment explicitly needs persistence. Evidence
-uses a separate writable directory on the same filesystem, outside OSTree-managed
-files. Recovery settings and run temporary directories also live on shared data.
-Package changes never update the recovery system or its settings.
+The controller prepares the selected base plus the Quirkbench target RPM, debugging
+tools and requested changes. It serves completed OSTree content over HTTPS.
+Recovery pulls missing content, deploys it and selects its one-time boot. Neither
+routine changes nor fresh runs reflash the USB. Reuse packages, builds and content.
 
-Measure assembly time, bytes transferred and USB preparation time for repeat
-experiments. rpm-ostree caching does not guarantee that assembly touches only
-changed files. Avoid fresh caches, needless full copies and broad repository
-checks on every submission. Defer binary-difference generation and other extra
-optimizations until measurements justify them.
+## Where changes live
 
-Use existing OSTree cleanup tools after releasing obsolete candidate references.
-Protect active work and explicitly retained candidates; limit disposable history
-and caches by a storage budget. Remove finished temporary assembly directories.
-Do not delete evidence, recovery settings, source records or debugging symbols
-as cache cleanup. Recovery deletes uploaded USB evidence only after the controller
-confirms durable receipt; see [recovery](recovery.md).
-Keep useful agent build directories until explicitly cleaned. Report space use
-and offer manual cleanup; missing retained build inputs must be reported, not
-silently replaced with newer packages.
+These are storage areas, not additional partitions:
 
-Keep software selection, assembly and deployment separate in the code. Replacing
-rpm-ostree later should not require replacing the investigation interface; replacing
-OSTree would also change target boot and storage integration.
+| Area | Lifetime |
+| --- | --- |
+| Recovery settings: network profiles, controller address and credentials | Until explicitly changed in setup or recovery |
+| Prepared candidate: OS, packages, configuration and target program | Unchanged after preparation; reusable |
+| Run files: writable OS configuration, application data, homes, installed-file changes and scratch files | One run |
+| Evidence files | On USB until confirmed uploaded; retained on controller |
+| Command records | Kept on target through run completion for retry/reconnect; results retained on controller |
+| Package, build and transfer caches | Disposable; not the only copy of results or their source/build information |
+
+Each run starts with the selected candidate's defaults and fresh mutable files,
+including `/etc`, `/var` and home directories. Ordinary services use ordinary Linux
+paths. Do not inherit a previous run's configuration merges, application state or
+writable overlays. OSTree's usual shared `/var` and merged `/etc` are not a clean
+reset. Keep run files separate from reusable repository content; never modify
+shared hard-linked files in place. Discard the run after collecting its diagnostics
+rather than attempting to undo individual edits. Preserve unuploaded evidence.
+
+## Live changes and explicit persistence
+
+| Request | Behavior |
+| --- | --- |
+| Probe or script | Transfer through SSH and execute in the run's working directory. No RPM required. |
+| Live package change | Use supported rpm-ostree live operations scoped to this run. Report service restarts or a required fresh boot. |
+| Direct installed-file edit | Use a temporary writable layer for this run; leave prepared content unchanged. |
+| Retain changes or replace a kernel | Prepare a named candidate from an explicit base, package additions/replacements and selected files or instructions. Boot through recovery. |
+
+Retaining build output does not retain a live installation. Do not automatically
+save a running machine or turn shell history into a reproducible candidate.
+Context reports supported live modes and what lasts until run completion. Do not
+promise arbitrary mixing or reversal of package changes and direct file overlays;
+explain when a fresh run is needed. An installed kernel is not the running kernel.
+
+## Recovery owns boot selection
+
+Prepare into unfinished locations; only completed output is selectable. Recovery
+installs the candidate and requests one boot, keeping itself the default. Candidate
+package operations must not replace recovery or independently select the next boot.
+Use supported rpm-ostree/OSTree operations; verify their boot integration early,
+rather than maintaining a second boot manager or silently fighting package scripts.
+Select the concrete directory/mount layout and bootloader integration during the
+first implementation stage. Check preparation, live changes, reset and fallback
+together. If this needs upstream patches or competing boot managers, follow the
+[stop-and-ask guidance](development.md#agent-decisions-and-when-to-ask).
+
+After a crash, report the changed boot and partial results. Never send a candidate
+command to recovery automatically. Reuse tool-provided cleanup; preserve active
+runs, settings and unuploaded evidence. Report space shortages plainly.
+
+References: [OSTree deployments](https://ostreedev.github.io/ostree/deployment/),
+[rpm-ostree live changes](https://coreos.github.io/rpm-ostree/administrator-handbook/).

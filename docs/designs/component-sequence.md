@@ -1,129 +1,99 @@
 # How the parts work together
 
-Revisable design for the [example walkthrough](../mockups/README.md).
-Quirkbench represents the binary and controller together.
-Arrows show responsibilities, not new services. Target requests follow the
-[controller API](controller-api.md).
-Build responsibilities follow the [experiment build design](experiment-builds.md).
+Revisable [mockup](../mockups/README.md). Quirkbench combines the binary, controller
+and MCP interface here. One controller process serves MCP, HTTPS and target SSH
+connections. The target can run a clean fallback or an investigation's
+candidate. Recovery remains separate from the writable candidate.
+The first candidate uses rpm-ostree; see [candidate deployment](candidate-deployment.md).
 
-## Setup and pairing
+## Setup and connection
 
 ```mermaid
 sequenceDiagram
     actor Human
     participant Quirkbench
     participant USB as USB drive
-    participant Recovery as Recovery system
-
-    Human->>Quirkbench: setup
-    Quirkbench->>Quirkbench: Save controller config and connection credentials
-    Quirkbench-->>Human: Configuration saved#59; run quirkbench controller run
-    Human->>Quirkbench: controller run in a separate terminal
-    Human->>Quirkbench: recovery build
-    Quirkbench->>Quirkbench: Use matching cached image or build
-    Quirkbench-->>Human: Progress, then complete recovery image
-    Human->>Quirkbench: recovery flash
-    Quirkbench-->>Human: Select USB and confirm erasure
-    Human->>Quirkbench: Confirm selected USB
-    Quirkbench->>USB: Write generic recovery and final partitions#59; save settings on shared data
-    Quirkbench-->>Human: USB ready
-    Human->>Recovery: Boot target from USB
-    Human->>Recovery: Connect network if needed
-    Recovery->>Quirkbench: Pair using credentials from USB
-    Quirkbench-->>Recovery: Target connected
-
+    participant Target
+    Human->>Quirkbench: Configure and run the foreground controller
+    Human->>Quirkbench: Build recovery image and flash selected USB
+    Quirkbench->>USB: Write bootable software, settings and shared storage
+    Human->>Target: Boot USB and connect network
+    Target->>Quirkbench: Pair over HTTPS, then open reverse-direction SSH connection
+    Quirkbench-->>Human: Target ready and MCP connection instructions
+    Human->>Quirkbench: Describe problem and authorize investigation
 ```
 
-## Investigation and experiment loop
-
-Build preparation is shown within Quirkbench, and USB writes within the
-system performing them, to keep the diagram focused on the experiment flow.
+## Interactive investigation
 
 ```mermaid
 sequenceDiagram
-    actor Human
-    participant Agent as Quirkbench user's agent
+    participant Agent as User's agent
     participant Quirkbench
-    participant Recovery as Recovery system
-    participant Candidate as Candidate on target
-
-    Human->>Quirkbench: Describe problem#59; approve investigation scope and limits
-    Quirkbench-->>Human: Workspace and agent guide path
-    Human->>Agent: Investigate the problem
-    Agent->>Agent: Read guide, build instructions and candidate hook examples
-    loop Until agent finishes or investigation pauses
-        Agent->>Quirkbench: Read investigation and existing evidence
-        Quirkbench-->>Agent: Limits, candidate source, results
-        Agent->>Agent: Inspect code#59; design test and time limit#59; edit candidate source
-        opt Changed software or compiled test programs
-            Agent->>Agent: Incrementally build changed software#59; package completed output as RPMs
-        end
-        Agent->>Quirkbench: Submit package changes, custom RPMs and test
-        Quirkbench-->>Agent: Accepted#59; next command and instruction path
-        Quirkbench->>Quirkbench: Check deployment requirements#59; capture submitted files
-        Quirkbench-->>Agent: Capture complete#59; editing may resume
-        Quirkbench->>Quirkbench: Prepare package selection with cached baseline and custom RPMs
-        opt Stock packages not cached
-            Quirkbench->>Quirkbench: Download selected stock RPMs and dependencies from Fedora
-        end
-        Quirkbench->>Quirkbench: Assemble with rpm-ostree#59; record candidate in OSTree
-        Quirkbench->>Quirkbench: Check investigation still permits execution
-        Agent->>Quirkbench: Wait quietly for this submission
-        Recovery->>Quirkbench: Request candidate and experiment instructions
-        Quirkbench-->>Recovery: Exact candidate identifier, test and time limit
-        Recovery->>Quirkbench: Fetch missing OSTree content
-        Quirkbench-->>Recovery: Candidate content
-        Recovery->>Recovery: Prepare candidate on shared data#59; assign evidence and working directories
-        Recovery->>Quirkbench: Confirm prepared run may start
-        Quirkbench-->>Recovery: Saved start decision under investigation authorization
-        Recovery->>Recovery: Record attempt#59; set one-time boot request
-        Note over Recovery,Candidate: Bootloader clears request before starting candidate#59; next boot defaults to recovery
-        Recovery->>Candidate: Boot candidate once
-        Candidate-->>Quirkbench: Progress and live evidence when connected
-        Candidate->>Candidate: Save evidence locally
-        alt Test finishes or failure permits restart
-            Candidate->>Recovery: Restart into recovery system
-            Recovery->>Quirkbench: Upload saved evidence for this run
-            Quirkbench-->>Recovery: Evidence stored durably
-            Recovery->>Recovery: Delete confirmed uploaded files
-            Recovery->>Quirkbench: Final outcome and evidence list
-            Quirkbench-->>Recovery: Result received
-            Recovery->>Recovery: Clear finished run temporary files
-            Quirkbench-->>Agent: Results, missing evidence and next instruction path
-        else Target stops responding
-            Quirkbench-->>Human: Last contact, partial evidence, unknown outcome
-            Human->>Recovery: Restart target manually if needed
-            Recovery->>Quirkbench: Upload any surviving evidence
-            Quirkbench-->>Recovery: Evidence stored durably
-            Recovery->>Recovery: Delete confirmed uploaded files
-            Recovery->>Quirkbench: Interrupted outcome and evidence list
-            Quirkbench-->>Recovery: Result received
-            Recovery->>Recovery: Clear interrupted run temporary files
-            Quirkbench-->>Agent: Interrupted result and next instruction path#59; do not blindly repeat
-        end
+    participant Target
+    Agent->>Quirkbench: investigation_context, then rpm_ostree_prepare_candidate if needed
+    Quirkbench-->>Agent: Baseline preparation progress, then completed candidate
+    Agent->>Quirkbench: recovery_boot_ostree
+    Quirkbench->>Target: Supply prepared OSTree candidate to recovery
+    Target->>Target: Deploy with fresh run files and read-only connection settings
+    Target->>Target: Recovery selects one candidate boot, keeping recovery the default
+    Target->>Quirkbench: Open reverse-direction SSH connection from candidate
+    Quirkbench-->>Agent: Current software, available tools and instructions
+    loop Inspect and improvise on the same boot
+        Agent->>Quirkbench: Start command, send input or upload a probe
+        Quirkbench->>Target: Execute through SSH, save output independently
+        Quirkbench-->>Agent: Command ID, available output and next action
+        Note over Agent,Target: Other commands can run concurrently; each has its own timeout
+        Agent->>Quirkbench: ssh_command_wait
+        Note over Agent,Quirkbench: Wait without periodic model calls
+        Target-->>Quirkbench: Command output and completion, or interruption
+        Quirkbench-->>Agent: Saved output and status
+        Agent->>Quirkbench: https_evidence_wait for named files
+        Target->>Quirkbench: Upload completed evidence files
+        Quirkbench-->>Agent: Received files or missing evidence reported
     end
-    Agent->>Agent: Assess evidence and create investigation patch with Git
-    Agent-->>Human: Investigation patch, results and limitations
+    opt Software change
+        Agent->>Agent: Edit source
+        Agent->>Quirkbench: controller_build_script_start
+        Quirkbench-->>Agent: Build output or errors to fix
+        Agent->>Quirkbench: rpm_ostree_install_live or rpm_ostree_prepare_candidate
+        Quirkbench->>Target: Transfer changes, new candidate boots go through recovery
+        Target-->>Quirkbench: Current software and connection status
+        Quirkbench-->>Agent: Ready for more inspection
+    end
+    Agent->>Quirkbench: recovery_return
+    Quirkbench->>Target: Stop remaining commands, flush output and return to recovery
+    Target->>Quirkbench: Upload remaining evidence
+    Quirkbench-->>Agent: Return status and received evidence
+    Agent->>Agent: Assess findings and create investigation patch
 ```
 
-## Pause and resume
+## Failure, return and pause
 
 ```mermaid
 sequenceDiagram
     actor Human
+    participant Agent as User's agent
     participant Quirkbench
-    participant Candidate as Candidate on target
-    participant Recovery as Recovery system
-    Human->>Quirkbench: Investigation pause
-    Quirkbench->>Quirkbench: Stop starting new work
-    Candidate->>Recovery: Finish current bounded run and restart
-    Recovery->>Quirkbench: Upload evidence
-    Quirkbench-->>Recovery: Evidence stored durably#59; USB copy can be deleted
-    Quirkbench-->>Human: Paused#59; report any missing evidence
-    Human->>Quirkbench: Resume with existing limits
-    Quirkbench->>Quirkbench: Allow new work
+    participant Target
+    Target--xQuirkbench: Connection lost during experiment
+    Quirkbench-->>Agent: Command status unknown, not replayed
+    alt Same boot reconnects
+        Target->>Quirkbench: Report command status and saved output
+        Quirkbench-->>Agent: Continue the existing run
+    else Target crashed and restarted
+        Note over Quirkbench,Target: Panic reboot or watchdog may help; a hard hang may need manual reset
+        Target->>Target: Boot recovery when possible
+        Target->>Quirkbench: Reconnect and send surviving evidence
+        Quirkbench-->>Target: Confirm stored files
+        Target->>Target: Delete confirmed evidence and finished run files, keep settings
+        Quirkbench-->>Agent: Interrupted commands, results and current availability
+    end
+    Human->>Quirkbench: Pause investigation
+    Quirkbench->>Target: No new commands or runs, finish bounded active work
+    Target->>Quirkbench: Return safely and upload remaining evidence
+    Quirkbench-->>Human: Paused, with any missing evidence reported
 ```
 
-Force stop attempts immediate interruption instead. A frozen target may need a
-manual reset. Recovery-system reports use normal pairing for upload; local
-collection and preview do not need a connection.
+Recovery collects diagnostics and deploys the next prepared candidate. Interrupted
+commands do not survive a reboot.
+Force stop attempts immediate interruption; a frozen target may need manual reset.

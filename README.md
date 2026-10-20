@@ -1,8 +1,8 @@
 # Quirkbench
 
-A Linux hardware lab for coding agents. The agent plans experiments and writes
-changes and builds them; Quirkbench prepares the baseline, deploys experiments and returns diagnostics
-so the agent can choose its next experiment.
+An interactive Linux debugging lab for coding agents. Through MCP, the agent
+inspects the target, runs probes, changes software and reads results as it works.
+Quirkbench adds fast build/deployment helpers and best-effort recovery after failures.
 
 The target boots external media. Internal disks and persistent firmware updates
 are outside scope. Practical protections reduce accidental damage; no tool can
@@ -17,9 +17,10 @@ describe the intended product, not currently available commands.
 - [Designs](docs/README.md): revisable choices for a simpler, enjoyable application.
 - [Contributing](CONTRIBUTING.md): development and review workflow.
 
-The intended human journey is `recovery build`, `setup`, `recovery flash`.
-After one investigation authorization, an external agent can run successive
-low-level experiments within its limits. A human can pause, resume or intervene.
+The intended human journey is setup, a foreground controller, then recovery image
+build and USB flash. See the [mockups](docs/mockups/README.md).
+After one investigation authorization, an external agent can interactively debug
+the target and run prepared experiments within its limits. A human can pause, resume or intervene.
 Quirkbench does not choose the agent, generate its patches or prescribe its reasoning.
 
 [Legacy documentation](docs/legacy/README.md) is preserved for reference. Its old

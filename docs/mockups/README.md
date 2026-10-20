@@ -8,4 +8,8 @@
 
 - [Installation to investigation patch](installation-to-patch.md)
 - [Interruptions and troubleshooting](interruptions.md)
-- [Agent experiment interface](agent-experiment.md)
+- [Interactive agent debugging through MCP](agent-experiment.md)
+
+Show Quirkbench calls, guidance and responses. Agent-only coding, analysis and
+external build work can be a short sentence; do not invent Quirkbench tools merely
+to display those steps. Instructions should tell the agent what output is needed.

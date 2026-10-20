@@ -26,6 +26,40 @@ with test-controlled behavior. Keep Quirkbench's actual decisions, file handling
 and user responses in the code being exercised. Share small, clear interfaces;
 avoid scattered test patches or a separate product implementation for tests.
 
+### Keep the application easy to exercise
+
+Pass storage roots and a few replaceable operations into the application at
+startup. Use ordinary Python functions or objects, not a general plugin framework
+or production branches that ask whether tests are running.
+
+| Part | Application design | Test replacement |
+| --- | --- | --- |
+| Ordinary files | Derive locations from configured roots; use normal file operations | Real temporary directories, including one standing in for mounted shared USB storage |
+| Partitions, mounts and reboot | Small Linux-specific functions perform these actions | Record requests or report failure without touching host devices |
+| Builds and OS tools | Shared command runner executes expensive external tools | Controlled command results and small output files |
+| Investigation commands | Own processes independently of controller connections | Real small child processes |
+| Connections | Configurable addresses and ports | Real local MCP, SSH and HTTPS connections |
+| Long deadlines | Replaceable application time calculations | Controlled time, with a few real short timeout checks |
+
+Do not put every file operation behind a filesystem proxy. Real files keep rename,
+publication, upload and deletion behavior in the test. To test a storage error,
+replace the particular write or publication operation; do not recreate a filesystem.
+
+Keep decisions in application code and machine actions in the small Linux module.
+Tests replace mounting or rebooting, not “prepare candidate” or “recover successfully.”
+Quirkbench must still select the candidate, prepare files, handle failures and decide
+what may be booted or deleted. Directory fixtures do not prove mount isolation,
+boot selection or power-loss durability.
+
+CLI, MCP and TUI call the same application functions. Controller and target can
+start independently over existing saved files, so tests can restart either without
+resetting the other. Expose useful completion signals for startup and work; tests
+wait for these instead of guessing with sleeps.
+
+Prove this structure with the first command-to-recovery journey. If it needs
+extensive patching or a miniature operating system, simplify the application
+structure before extending it.
+
 ## Test hygiene comes first
 
 Readable, maintainable tests are a top priority. Build shared libraries used only
@@ -42,81 +76,158 @@ def test_recovery_returns_evidence_and_clears_uploaded_copy(quirkbench):
 
     # Execute recovery and read results through the real CLI.
     run.recover()
-    result = quirkbench.cli("experiment", "results", run.experiment_id)
+    result = quirkbench.cli("investigation", "show", run.investigation_name)
 
     # Verify successful receipt, actual contents and removal of the USB copy.
     result.assert_success()
-    assert "Evidence: Received" in result.stdout
+    assert "Evidence received" in result.stdout
     assert (run.results_dir / "wifi.log").read_bytes() == b"Connection failed\n"
     assert not (run.usb_evidence_dir / "wifi.log").exists()
 ```
 
-This is Python in pytest style, using proposed shared test helpers. Their names
-and the example CLI arguments describe intended use, not existing interfaces.
-The `quirkbench` fixture supplies an isolated configured installation and paired
-target, and cleans up afterward. `finished_run` uses shared journey setup with
-expensive external work mocked. It does not fabricate successful upload records.
-`recover` runs actual recovery code through receipt and cleanup, without booting
-an image; failures or a bounded wait expiring fail the test with diagnostics.
-The CLI helper invokes the real command handler and captures its output.
-`assert_success` checks the exit status and shows output on failure. Directory
-properties locate real files; they do not return mocked results.
+This is illustrative pytest code, not an implemented interface. Shared test helpers
+supply a configured installation, paired target and temporary files through real
+application setup. They replace expensive OS work, not successful upload records.
+`recover()` runs real recovery code through upload and cleanup; `cli()` invokes
+actual command handling. Failures include captured diagnostics.
 
-This is the target for test readability and compactness. If a test falls short,
-improve the shared test tooling rather than accepting boilerplate in the test.
-Keep setup, execution and verification distinct; CLI calls are execution.
+Keep each test to setup, execution and meaningful checks. If it needs pages of
+boilerplate, improve `tests/support`. Keep special inputs and assertions visible.
+Use exact bytes for evidence, but avoid whole-screen snapshots or comparisons of
+unrelated fields. Fixtures describe useful scenarios, not every internal detail.
+This example checks confirmed upload; a separate failure case checks preservation
+when receipt is unconfirmed.
 
-Keep defaults, process management and waiting inside shared test tooling. Keep
-case-specific inputs and meaningful assertions visible in the test. Use ordinary
-Python assertions when they already express the check clearly. The exact bytes
-matter here because evidence must arrive unchanged; matching the whole CLI output
-does not. This example checks successful cleanup, not the separate failure case
-where the controller has not confirmed receipt.
+## Confront the hardest part first
 
-Check meaningful results and effects, not entire outputs or saved files against
-exact fixture copies. For example, evidence receipt should mean the expected data
-was actually stored, not just that a success message appeared. Use exact equality
-where the exact value matters; avoid checks that break on harmless wording,
-formatting or unrelated fields. Fixtures supply useful scenarios, not a duplicate
-description of every implementation detail. Failures should explain what was
-expected and what happened.
+The hardest part is crossing from a running candidate into recovery: commands may
+be interrupted, evidence is incomplete, files must survive, and only completed
+software may become bootable. A mock that simply says “reboot succeeded” can hide
+nearly every important mistake. Making every test boot a real OS is too costly.
 
-## Additional testing requirements
+Start with one small working journey before completing deployment or the UI:
 
-- Allow a separate, potentially slow recovery-image test, possibly using QEMU.
-  Run it only when the actual recovery image file has changed, not merely when
-  related source files change. Unchanged image contents should not trigger it.
-- Test the recovery TUI, file deletion and evidence uploading quickly, without
-  QEMU or similarly heavy infrastructure. Exercise the real Quirkbench behavior
-  for those tasks, including failure cases.
+1. Connect a real local MCP client to the controller and a separate target process
+   through reverse SSH. Start a small command which writes output and evidence.
+2. Restart the controller while the target command continues. Reconnect, read its
+   saved result and establish that it ran once.
+3. In a separate variation, interrupt the candidate process and start the real
+   recovery application over the same temporary shared-data directory. Confirm
+   interrupted commands are reported, surviving evidence uploads, and cleanup
+   preserves settings and evidence whose receipt is still unconfirmed.
+4. Prepare another run. Confirm disposable files are fresh and explicitly retained
+   candidate files remain. Replace OS deployment and reboot, not Quirkbench's
+   selection, file handling, receipt handling or cleanup decisions.
 
-These record desired coverage and cost limits only. How to detect image changes,
-run these tests and provide their test fixtures remains undecided. This does not
-authorize running slow tests now.
+This is the first implementation slice, not a large test platform built in advance.
+It establishes the necessary process ownership and storage layout while they are
+still cheap to change. Use ordinary temporary directories and child processes;
+do not simulate an entire Linux boot or implement a second target in test code.
+A process restart proves application restart behavior, not power-loss survival.
 
-## Integration tests
+In parallel with that design work, choose the concrete Bazzite/OSTree mount and
+boot arrangement. Identify which guarantees come from Quirkbench and which depend
+on those tools. Check inexpensive real tool operations on tiny fixtures when
+practical. Record remaining uncertainty explicitly. The first authorized image
+check should exercise deployment, clean return and fresh run files early, rather
+than waiting for the whole product to be finished. A directory fixture cannot prove
+read-only mounts, OSTree live changes or firmware boot selection.
 
-| Test | Starts with | Ends with |
+## Spend realism where it catches our mistakes
+
+| Area | Fast test approach | What it does not prove |
 | --- | --- | --- |
-| Install, configure and connect a target | A clean controller computer environment, an installable Quirkbench package and a simulated blank USB drive | Setup saved, generic recovery built or reused, USB prepared, recovery started, networking configured and target paired with the controller. |
-| Investigate, run and inspect results | A connected target and a human's problem description | Investigation authorized; agent follows the supplied instructions, submits a baseline test, reads evidence, supplies a changed build, runs another experiment and receives evidence suitable for assessing an investigation patch. Includes progress, recovery, confirmed upload and USB cleanup. |
-| Interrupt and continue an investigation | An authorized investigation with an experiment being prepared or run | Pause/resume, force stop, lost connections and controller restarts lead to an understandable result or a clear request for human action, without repeating a run by accident or losing unuploaded evidence. Use a few focused variations of this journey. |
-| Diagnose recovery itself | Recovery starts with a storage or connection problem | The human can see the problem, configure temporary networking, open a terminal, collect a Quirkbench internal debugging report and send it after pairing. |
+| MCP, SSH, HTTPS and process ownership | Real libraries, local connections, separate controller/target processes and small real commands | Every agent client's waiting behavior or a physical network |
+| Evidence, retry and cleanup | Real temporary files and uploads; deliberately lose a reply or interrupt a transfer | USB durability during power failure |
+| Recovery TUI and human CLI | Real application handlers and screen actions; simulated keys and responses from network/disk tools | Console visibility during boot or actual Wi-Fi drivers |
+| Build, packages, mounts, boot and flash | Replace expensive or privileged tool calls with small recorded outcomes and files; run real Quirkbench orchestration | Successful OS assembly, live package changes or hardware boot |
+| Packaging and entry points | Install the built Python package once per test session; launch its actual commands | Availability on every Linux distribution |
 
-The connected-target starting point is provisional. Until its saved files and
-connection behavior have a concrete specification, the later tests must use the
-real setup and pairing flow from the first test, with expensive work mocked.
-Reuse that setup rather than inventing independently maintained saved records.
-Apply the same rule to investigation setup and experiment preparation.
+The fast suite needs no root, downloads, image builds, kernel compilation, flashing
+or QEMU. Real processes must never invoke host disk, mount or reboot operations.
+Keep those actions behind a small explicit interface; unexpected calls fail tests.
+Use the TUI library's testing support where available, plus one real terminal
+smoke test for input, child-program return and redraw. Do not test the whole UI
+through brittle screen recordings.
 
-Mocks replace expensive or unavailable external work, not the Quirkbench behavior
-being checked. The investigation test supplies the agent's decisions and small
-build outputs; it does not run an AI model or prove that a patch fixes hardware.
-These tests check that Quirkbench carries the journey through. Broad, fast
-execution is valuable for catching Python runtime errors even when external work
-is mocked. Separate physical checks establish actual boot, device behavior and
-flashing; old checks remain available in Git as reference.
+Mocks describe an external tool's outcome, not our expected success story. For
+example, a failed deployment must leave no selectable candidate because production
+code handles the failure, not because the fixture removes it. Preserve real file
+publication and cleanup logic. Do not teach mocks a second copy of rpm-ostree.
+When tool output needs parsing, keep a small representative sample from the real
+tool and refresh it when changing supported versions.
 
-The [mockups](../mockups/README.md) show the intended user experience. Test its
-meaning and usable next steps, not every decorative character. Refine this list
-as the design becomes concrete; this document does not select a test framework.
+## Journey coverage
+
+| Journey | Meaningful result | Selected variations |
+| --- | --- | --- |
+| Install, configure, prepare USB and pair | Editable config saved; prepared media has connection settings; real pairing establishes a target | Cached image reused; controller unavailable; external preparation fails |
+| Investigate and change software | MCP context leads to concurrent commands, interactive input, file transfer, a changed candidate and received evidence | One command times out or is stopped; live install requires reboot; evidence arrives after command completion |
+| Interrupt and continue | Saved output and attribution survive reconnection; uncertain work is not replayed; pause stops new work and finishes active commands | Controller restart; candidate crash; lost upload acknowledgement; force stop |
+| Recovery and next run | Real recovery UI explains the problem; upload and cleanup preserve the right files; next run is fresh | Missing settings; storage failure; incomplete candidate; internal debugging report without an investigation |
+
+Use a few short tests per journey, sharing setup, rather than one enormous test or
+every possible combination. A normal journey plus failures at important transitions
+is more valuable than exhaustive permutations. Prioritize loss of evidence,
+unintended execution, unusable next steps and inability to recover. A previous bug
+gets a new case only when existing coverage would not detect its underlying mistake.
+
+The interactive journey checks separate command environments, shared files,
+independent timeouts and quiet waiting. A confirmed new boot ends the old command
+wait even while evidence is uploading. Recovery checks that cleanup preserves active
+work, unconfirmed evidence and connection settings; candidate edits cannot silently
+become the next run's defaults. Simulate storage errors without filling the host disk.
+
+Later journeys may reuse real setup/pairing through shared helpers. Do not seed
+private database records to save a few milliseconds. Split journeys only when the
+saved files or API between them have a clear, independently checked meaning; do
+not invent a new specification just to split a test. Tests never depend on another
+test having run. Share immutable package/tool fixtures, not active investigations.
+
+Check results the user or agent can use: exact evidence bytes, command execution
+count, retained/deleted files, a useful next action and honest failure status.
+Avoid whole-response snapshots, exact command-call sequences and assertions on
+incidental internal structure. Keep the individual tests as short as the example
+above; ordinary pytest helpers in `tests/support` hide repeated machinery.
+
+## Keep execution fast and failures useful
+
+- Aim for the routine suite to finish in about **30 seconds** with dependencies
+  present. Treat **60 seconds** as a reason to fix or split out slow work, not a
+  reason to weaken assertions. Measure before setting rigid CI limits.
+- Have small test programs signal when ready and wait for explicit release. Use
+  bounded waits instead of sleeps and repeated polling. Keep one real short
+  command-timeout case; use controlled application clocks for long deadlines.
+- Start fresh controller/target processes for restart cases. Other cases may share
+  startup through a fixture if their files and work remain independent. Use normal
+  in-process CLI invocation often, actual packaged entry points in a few journeys.
+- On failure, collect controller/target output, current work and relevant file
+  locations automatically. Bound every wait and clean up child processes. Do not
+  automatically rerun failures until they happen to pass.
+- Acquire dependencies separately. CI runs the portable fast suite on every code
+  change; avoid complicated selection rules while the suite is small. Missing
+  required dependencies fail clearly rather than silently skipping coverage.
+
+MCP tests prove the server and SDK client exchange, not that a particular agent
+will wake without polling. Check one supported real agent client early and again
+when changing its wait integration; no paid model loop in routine tests.
+
+## Separate image and hardware checks
+
+Keep a slower recovery-image check, potentially using QEMU, outside routine tests.
+Trigger it when the actual recovery image bytes change, using an image digest and
+saved result. An unchanged image reuses its previous result; without a successful
+result it remains unchecked. Failed checks may be rerun explicitly. Building an
+image to discover whether it changed is not part of the fast suite.
+
+That check covers boot-to-menu, included tools, mounts, one-time candidate boot,
+return to recovery and evidence survival using a tiny test workload. Changes to
+candidate OS preparation may need an explicitly requested boot check even if the
+recovery image is unchanged. Physical checks cover USB flashing, Wi-Fi, firmware
+and actual watchdog/crash behavior that a VM cannot establish. This document does
+not authorize running any of these slow or physical checks now.
+
+Do not pursue a coverage percentage or perfect realism. Add realism when it closes
+an important known gap; add a mock when external cost prevents useful routine
+coverage. If making a fast test realistic requires a miniature OS or a general
+simulation framework, stop that approach and use a separate focused real check.

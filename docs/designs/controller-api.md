@@ -1,284 +1,118 @@
-# Controller API for recovery and candidates
+# Controller connections
 
-Revisable Python design supporting [recovery](recovery.md) and the
-[agent interaction](../mockups/agent-experiment.md). This specifies the target's
-HTTP interface, not the controller's CLI or the agent's submission format.
+MCP provides [interactive debugging](interactive-debugging.md). Targets connect
+outward through SSH for commands and HTTPS for pairing, evidence and downloads.
 
-## Keep it ordinary
+## One controller process
 
-The target initiates every connection to the foreground controller. Use HTTPS,
-JSON for small messages and streamed bytes for files. Start with Starlette on the
-controller, an ordinary server such as Uvicorn, and HTTPX on the target. No message
-broker, reverse connection, custom transfer protocol or separate upload service.
+`quirkbench controller run` runs one foreground process with three interfaces:
 
-Use `/api/v1` for application requests. Credentials go in the
-`Authorization: Bearer ...` header, never URLs or logs. Setup supplies controller
-trust on the USB; use normal certificate checking, not disabled TLS verification.
-A paired credential identifies one target and permits access to its runs and
-reports. Recovery and the candidate's Quirkbench process use the same target
-identity. This is cooperative experiment software, not hostile-code containment.
+- Local MCP through the official Python SDK's Streamable HTTP support. The user's
+  agent connects to its URL for context, commands, file transfer, build/deploy
+  helpers, progress and results. Keep this listener local-only in the first version.
+- HTTPS for pairing, evidence and software downloads.
+- AsyncSSH `listen_reverse()` for connections initiated by targets.
 
-Local network setup, the recovery screen, local reports and the terminal work
-without this API. Connection failure must not block those controls.
+These share application behavior and one asynchronous event loop. Use the MCP
+SDK's normal local-access checks. Human CLI and monitor use the same application
+behavior. No separate MCP server process, SSH daemon, tunnel or service manager.
+Child processes perform commands and builds; blocking work must not stall connections.
+An MCP client disconnect does not end the investigation.
 
-## Routes
+MCP, SSH and HTTPS use the same run records. Target mode, boot and command status
+come through the SSH connection, including after reconnection.
 
-All paths below start with `/api/v1`, except the OSTree path.
+Recovery and candidate code use AsyncSSH `connect_reverse()`. The target initiates
+the network connection and acts as the SSH server; the controller acts as the SSH
+client. Commands, interactive terminals and file transfers use standard SSH.
+Pairing records the target's SSH public key and supplies the controller's public
+key. Use library key checks to associate a connection with the paired target.
+No inbound target connection or custom remote-command protocol is needed.
+
+The target connects SSH requests to local processes and terminals, enforcing
+recovery's inspection-only access or the candidate's investigation limits.
+Reconnect identifies the current boot and queries target-owned command records.
+Ordinary commands continue through controller/network loss; old-boot commands
+and lost interactive terminals are not automatically recreated.
+
+Command responses distinguish target mode, boot, run, command ID, output and exit
+status. Repeated start requests identify existing work; uncertain commands or input
+are not replayed. A disconnected target cannot receive queued commands intended for
+its previous boot. Current recovery/candidate status and control availability are
+visible to both the human and agent.
+
+## Name MCP tools by mechanism
+
+Callable MCP actions are **tools**. A skill is a guide for an agent using tools,
+not another name for a callable action. Name both for the workflow or mechanism
+they actually support.
+
+Use names such as these in the [mockup](../mockups/agent-experiment.md):
+
+| Tool | Specific purpose |
+| --- | --- |
+| `investigation_context` | Read the investigation and discover applicable tools. |
+| `ssh_command_start/input/read/wait/stop` | Separate tools for starting, interacting with, waiting for and stopping SSH commands. |
+| `sftp_upload` | Transfer a file over the existing SSH connection. |
+| `controller_build_script_start` | Execute the supplied build script on the controller computer. |
+| `rpm_ostree_install_live` | Apply supported RPM changes to the running candidate. |
+| `rpm_ostree_prepare_candidate` | Prepare an OSTree candidate from an explicit base and changes. |
+| `recovery_boot_ostree` | Have recovery deploy an OSTree candidate and select its one-time boot. |
+| `recovery_return` | Stop remaining commands, flush available output and return to recovery. |
+| `https_evidence_wait` | Wait for named evidence files to reach the controller through HTTPS upload. |
+| `controller_work_wait` | Wait for already accepted controller work; never select or start a mechanism. |
+
+Avoid universal `run`, `execute`, `build` or `deploy` tools with a growing mechanism
+selector. A different execution or deployment mechanism gets a separately named
+tool, which may coexist with the existing one. Do not change an old name to invoke
+something materially different. Ordinary implementation fixes do not need new names;
+use `ssh`, not the library name or version, when SSH behavior is what matters.
+
+Context and tool descriptions identify the recommended tools for the current
+candidate, their effects, persistence and next actions. If mechanism-specific skill
+guides are added, use names such as `rpm-ostree-experiments`, not `run-experiment`.
+No plugin registry, compatibility aliases or stored-record migrations follow from
+this naming choice. Tools share the existing run records and application code.
+Retire unused mechanisms rather than accumulating permanent alternatives.
+Human CLI commands may remain task-oriented.
+
+## Keep simple HTTP services
+
+Pairing, confirmed evidence receipt and recovery reports remain ordinary HTTPS.
+The paired credential identifies the caller, so target routes need no target ID.
+These routes handle file transfer and pairing; SSH carries interactive control.
+Human CLI and monitor requests use a local controller interface, not target routes.
 
 | Method and path | Purpose |
 | --- | --- |
-| `POST /pair` | Bind the prepared USB's invitation to a target. |
-| `POST /targets/{target}/sync` | Report current activity; receive work and desired investigation status. |
-| `PUT /targets/{target}/controls/{request}` | Apply a local human's pause or force-stop request. |
-| `PUT /runs/{run}/start` | Confirm a prepared run may start, immediately before selecting its one-time boot. |
-| `PUT /runs/{run}/evidence/{path}` | Store one finished evidence file. |
-| `PUT /runs/{run}/result` | Store the final outcome and evidence file list. |
-| `PUT /targets/{target}/reports/{report}` | Store one Quirkbench internal debugging report, without an investigation. |
-| `GET /ostree/...` | Serve the ordinary read-only OSTree repository. |
+| `POST /api/v1/pair` | Bind an invitation to a target. |
+| `PUT /api/v1/runs/{run}/evidence/{path}` | Store one completed evidence file. |
+| `PUT /api/v1/runs/{run}/result` | Report the run outcome and expected evidence files; the controller tracks which files it received. |
+| `PUT /api/v1/reports/{report}` | Store recovery's own debugging report without an investigation. |
 
-IDs are generated by software, not entered by humans. Paths are controller-relative;
-do not send controller filesystem locations. JSON responses use ordinary fields,
-not a universal command envelope. Seconds and bytes are numeric; absent optional
-information is omitted or null. Examples use readable IDs.
+OSTree content uses normal read-only repository HTTPS paths on this controller. All paired targets
+may read shared candidate content; the assignment determines what runs. Reading
+content is not approval to execute it. Run uploads must belong to the calling target.
 
-## Pair once; retry without creating another target
+Pairing uses the controller address/trust and single-use, non-expiring invitation
+prepared on USB. Save target credentials before the request; an identical retry
+after a lost reply returns the same binding. No image/evidence prerequisites or
+credential-renewal machinery. Revoked credentials fail clearly.
 
-Flashing supplies the controller URL, trust and a non-expiring, revocable invitation.
-Recovery generates and saves an installation ID and random target credential
-before pairing. The invitation authenticates this request:
+Stream evidence into ordinary temporary files, finish storage before acknowledgement,
+then let recovery delete its copy. Identical retries succeed without duplicating
+results. Retry an interrupted file from the beginning. Keep unfinished uploads
+separate, handle full disks and reject filenames escaping the run directory.
+Use standard HTTP libraries, not a second transfer framework.
 
-```json
-{
-  "installation_id": "usb-1",
-  "target_token": "<random secret saved on USB>",
-  "name": "lab-laptop",
-  "system": {"architecture": "x86_64", "memory_bytes": 8589934592}
-}
-```
+Keep a local file/receipt list until the run's final report is acknowledged. Live
+command output already stored on the controller and later USB evidence belong to
+the same run; neither alone proves collection is complete. Reports distinguish
+finished, interrupted and unknown outcomes, and identify missing evidence. Closed
+log segments may upload during execution. Never rewrite a completed file with a
+growing log. Recovery reports use the same upload helper but separate storage.
 
-Response: `{"target_id":"target-1","name":"lab-laptop"}`. Save it, then use
-the target credential on subsequent requests. No evidence, image verification or
-successful experiment is needed to pair. System facts describe the target; they
-are not an immutable hardware fingerprint or a RAM admission check.
-
-The controller saves this binding before replying. An invitation binds only once;
-retrying the same installation and credential returns that binding after a lost
-reply. Different credentials or installation IDs conflict. Retain enough of the
-binding to recognize that retry, without storing plaintext secrets in logs.
-Revocation blocks retries too. No expiry timer or ongoing token-renewal system.
-
-## One status and work exchange
-
-Recovery and the candidate's Quirkbench process send a current snapshot. Begin
-with short polling: approximately two seconds while active, five while idle;
-back off connection failures and allow an immediate human retry. A response may
-suggest `retry_after_seconds`. Do not add long polling or sockets until useful.
-Send requests sequentially, not an accumulating queue of stale snapshots.
-
-```json
-{
-  "boot_id": "boot-7",
-  "mode": "recovery",
-  "run_id": "run-1",
-  "pending_results": [],
-  "phase": "preparing",
-  "progress": {"message": "Downloading candidate", "completed": 4194304, "total": 8388608, "unit": "bytes"},
-  "storage": {"available": true, "free_bytes": 12000000000},
-  "problem": null
-}
-```
-
-`boot_id` is Linux's current boot ID. `mode` is `recovery` or `candidate`.
-`run_id` is null when idle. `pending_results` lists finished runs still awaiting
-confirmed receipt; it includes the current run after returning to recovery. Phases are `idle`, `preparing`, `ready`, `starting`,
-`running`, `recovering`, `uploading` or `blocked`. Progress counters are optional;
-report measured values only. Include system facts after boot or when changed.
-Only the Quirkbench process for the currently booted system sends sync; stop its
-old requests when it exits. Locally track a run monotonically through preparation,
-start and return, rather than replaying old snapshots after restart.
-A problem has `code`, `message` and `action`, for example instructions to inspect
-full storage. The controller records receipt time for last-contact displays.
-A snapshot does not override a saved start decision or completed result.
-
-```json
-{
-  "investigation": {"id": "investigation-1", "status": "active"},
-  "action": "prepare",
-  "run": {
-    "id": "run-1",
-    "experiment_id": "experiment-1",
-    "candidate": {"repository": "/ostree/repo", "commit": "<exact OSTree commit>"},
-    "execution_file": "/usr/lib/quirkbench/experiment.json",
-    "required_features": [],
-    "run_timeout_seconds": 900
-  },
-  "retry_after_seconds": 2
-}
-```
-
-Actions are `wait`, `prepare`, `continue` or `stop`. `wait` includes a readable
-reason when work is blocked. `run` is null if none is assigned. The controller
-keeps at most one unresolved run per target and saves its assignment before
-returning it. Repeated sync returns that run, not another execution. When idle, return `{"investigation":null,"action":"wait","run":null,
-"retry_after_seconds":5}`; an existing paused investigation instead appears with
-`"status":"paused"`. Preparation never authorizes boot. Storage failure blocks a new run, not status or uploads.
-
-The controller does not assign a new run while recovery reports pending evidence,
-unavailable storage or an unresolved previous run. Uploads and the final report
-remain accepted after pause or force stop. A preparation failure is reported as
-blocked with a useful reason, not retried in a tight loop.
-
-The execution file is already part of the exact candidate; it holds resolved
-program paths, arguments, hooks and time limits from the experiment description.
-Recovery transports it but does not execute its programs. Candidate execution
-uses it and supplies the evidence/working directory environment variables. Avoid
-copying the full agent submission into each sync response.
-
-A normal investigation pause prevents new starts; an already started bounded run
-continues, returns and uploads. Force stop returns `stop` until the run has ended.
-Candidate code makes its best effort to stop and return to recovery. Recovery
-cancels preparation when asked to stop. Neither action suppresses evidence uploads.
-
-For the target's P/F keys, generate and save a request ID, then send
-`{"investigation_id":"investigation-1","action":"pause"}` or the same body
-with `"action":"force_stop"` to the controls route. It acts on that investigation
-for this target, never whichever investigation happens to be active later. Identical retries return the original
-result without affecting a later investigation. Changed input under the same ID
-conflicts. If offline, stop further local starts and show the request as pending;
-force stop also acts locally where possible. Send pending controls before asking
-to start work after reconnecting. Network failure alone does not stop a running test.
-
-## Start once, then return
-
-After preparation succeeds, recovery sends `{"boot_id":"boot-7"}` to the start
-route. The controller checks assignment, investigation authorization and pause,
-then saves the start decision before replying `{"start":true,"run_id":"run-1"}`.
-This is automatic under the investigation authorization, not human per-run approval.
-Repeated requests from the same recovery boot return the saved decision without
-creating new work. A pause blocks the first start decision, not a retry of one
-already saved. Force stop overrides permission to boot, including on retries.
-
-Recovery saves a small local record that the boot attempt is beginning before
-setting boot selection and rebooting. The bootloader consumes the one-time choice
-before entering the candidate. On return, recovery collects that run's results;
-it does not boot it again because a controller reply still mentions it.
-
-If recovery restarts with that local record, or the controller sees a different
-recovery boot after a saved start decision, treat execution as possibly attempted.
-Return surviving diagnostics and an interrupted/unknown outcome. Do not guess and
-repeat the run. A crash between saving intent and reboot can therefore leave a
-run that never executed; honest uncertainty is preferable to duplicate execution.
-Preparation interrupted before this point may resume for the same assignment.
-
-Pause can race with a start reply. Define the controller's saved start decision as
-the point a run starts for pause purposes; force stop remains available afterward.
-No distributed locks or time-limited execution leases are needed.
-
-## Files and final results
-
-Evidence uploads send raw file bytes with `Content-Length`. Relative paths may
-contain subdirectories; accept regular files, reject traversal and symlink escapes.
-The controller streams into a temporary file in the run directory, checks received
-length, flushes the file, renames it and makes the directory update durable before
-returning `{"stored":true}`. A disk-full or interrupted write is not success.
-
-A repeated upload to the same run/path succeeds for identical bytes and conflicts
-for different bytes. A hash calculated during streaming may support this check;
-no global content store or separate hash negotiation. Use ordinary per-file write
-coordination so retries cannot overwrite different completed contents. Restart
-an interrupted file from its beginning; do not implement partial-file resume.
-
-Recovery deletes a local file after its stored acknowledgement. Keep a small local
-list of collected filenames, sizes and confirmed uploads until the final result
-is acknowledged, so restart does not forget already deleted files. Losing an
-upload reply leaves the local file available to retry. A later run has a different
-ID and cannot replace these results.
-
-For useful live evidence, the candidate may upload closed log segments through
-the same route. Never upload a growing file under a completed filename. Recovery
-uses the same saved file list afterward. This is log rotation, not a second
-streaming protocol. Incomplete final files can still be returned as partial evidence.
-
-```json
-{
-  "outcome": "finished",
-  "steps": [{"program": "record-microphone", "exit_code": 1}],
-  "files": [{"path": "kernel.log", "bytes": 12480}, {"path": "capture.json", "bytes": 512}],
-  "missing": [{"path": "recording.wav", "reason": "Recording stopped before the file was created"}]
-}
-```
-
-Outcomes are `finished`, `interrupted` or `unknown`. A nonzero test exit may be a
-finished run; it is not a claim about reproduction or a fix. Recovery saves this
-report locally before sending it. The controller checks that every listed file
-has a stored receipt of the stated size, then saves the result and replies
-`{"received":true}`. Missing uploads return a conflict listing the needed files.
-Known collection failures belong in `missing`, not endless retries. No expected
-file list can guarantee that an arbitrary test produced everything it intended.
-
-The final result closes the run. Identical retries succeed; changed final results
-or new files after closure conflict. Recovery retries finalization after a lost
-reply, then removes its upload bookkeeping and finished temporary work. It reports
-idle before the controller assigns the next run. A missing result leaves the run
-unresolved; a timeout or silence never fabricates success or restarts it.
-
-## Recovery's own reports
-
-Preview and collect locally first. Upload a report as one text or compressed text
-file, under a saved report ID. Use the same streaming storage helper and identical
-retry behavior as evidence. The controller stores it separately under the target;
-no run or evidence-finalization request is needed. Omit credentials before upload.
-A response includes `stored` and `report_id` for the existing report-view command.
-
-## OSTree and future changes
-
-Serve the stock OSTree repository read-only, through the same controller and trust.
-Use OSTree's supported HTTP authentication for its downloads. Do not build a
-candidate-object API or require another daemon. Candidate references are immutable
-for a run. Package resolution and assembly remain controller responsibilities.
-
-Optional descriptive fields can be added within v1; clients ignore unknown
-response fields. A run lists any new mandatory behavior in `required_features`;
-empty means the basic v1 behavior specified here. Unknown actions, required
-execution features or API versions
-produce an actionable unsupported-version error and do not start an experiment.
-Reject unknown control/request fields with useful errors so typos do not silently
-change execution. Use a new version only for incompatible behavior, without
-building compatibility readers in anticipation of it.
-
-Errors have one shape:
-
-```json
-{"error":{"code":"storage_full","message":"Controller storage is full.","action":"Free space on the controller, then retry the upload."}}
-```
-
-Use normal HTTP status codes: 400 invalid input, 401/403 credentials or ownership,
-404 missing record, 409 conflicting request, 413 excessive size, 503 temporarily
-unavailable and 507 storage full. Return structured errors where the application
-can; handle server/network failures even when their response is not JSON. Retry
-connection failures and temporary errors with a bounded delay; show persistent
-problems, and never silently repair authentication by pairing again. Timeouts on
-requests do not expire pairing or cancel experiments.
-
-## Implementation and tests
-
-Keep handlers thin over shared application behavior. Store configuration in files;
-ordinary run records and files are sufficient API concepts. This document does
-not require a new database, workflow engine or generated client library.
-
-Stage 1 uses a small test controller matching these routes. Stage 3 replaces it
-in the same recovery journey tests with the real controller. Share helpers and
-example messages, not duplicate test scripts. Exercise actual HTTP parsing,
-streaming/file storage and cleanup, with tiny files and controlled external work.
-Cover lost pairing/upload/start replies, controller restart, pause before start,
-uncertain return, full storage and reports without an investigation through a few
-readable journey variations. Do not expand into a test per field.
-
-HTTPX can call a real application directly in fast tests; use a small real-network
-check for streaming and disconnect behavior that an in-process call cannot prove.
-No QEMU, image build or hardware is needed for these checks. Keep the upload code
-short. If fulfilling this design grows a complicated subsystem, simplify the design.
-
-Tool references: [HTTPX application testing](https://www.python-httpx.org/advanced/transports/),
-[HTTPX streamed uploads](https://www.python-httpx.org/advanced/clients/),
-[OSTree repository configuration](https://ostreedev.github.io/ostree/man/ostree.repo-config.html).
+Use clear normal HTTP errors and simple JSON. No database format or client generator
+is required by this design. MCP tool inputs follow the
+[mockup](../mockups/agent-experiment.md); SSH carries target commands and streams.
+Exercise both through the real Python application in fast integration tests.

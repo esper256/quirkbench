@@ -8,7 +8,8 @@
 ```console
 $ quirkbench investigation pause wake-wifi
 Investigation pause requested.
-Run 2 will finish, return to the recovery system and upload evidence.
+Run 2's active commands will finish, then the target will return to recovery
+and upload evidence.
 No new work will start.
 
 Watch: quirkbench monitor wake-wifi
@@ -29,7 +30,7 @@ Watch: quirkbench monitor wake-wifi
 ```console
 $ quirkbench investigation resume wake-wifi
 Investigation resumed with the same limits.
-Waiting for the agent's next experiment.
+Waiting for the agent's next action.
 ```
 
 ## Controller computer · Force stop
@@ -57,7 +58,20 @@ Waiting for target lab-laptop to respond.
 └──────────────────────────────────────────────────────────┘
 ```
 
-## Target · Controller connection lost
+## Target · Controller connection lost during a run
+
+```text
+Quirkbench · Run 2
+Controller connection lost. Reconnecting automatically.
+
+Recording continues · Timeout in 6:48
+Output is being saved on USB.
+When current commands finish, this system will wait for reconnection.
+
+P Pause and return to recovery    F Force stop    L Logs
+```
+
+## Target · Controller unavailable after returning to recovery
 
 ```text
 ┌─ Quirkbench ─────────────────────────── Recovery system ──┐

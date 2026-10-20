@@ -6,38 +6,68 @@ Follow the [glossary and writing guidance](../glossary.md) in docs and discussio
 
 Read relevant code, not the entire archive. Coordinate issues/PRs and preserve others' work. Archived contracts, old issues and existing tests do not override current requirements.
 
-Implement the chosen [rpm-ostree/OSTree path](candidate-deployment.md), using old code only where useful. Check repeat-experiment costs early using saved build output; this
-does not authorize image builds or hardware runs. Do not implement a second
-deployment method for hypothetical future flexibility.
+Use [interactive debugging](interactive-debugging.md) as the main workflow.
+Use one controller process and AsyncSSH reverse-direction target connections.
+Implement rpm-ostree first, with fresh mutable files per run and recovery owning
+boot selection. Verify that integration early. Keep OS-specific preparation small
+and separate from shared command/evidence code. Measure repeat-loop cost.
+This does not authorize image builds or hardware runs.
 
-Implement in three large, coherent stages, completing each before focused verification:
+Implement in three large, coherent stages, with focused verification:
 
-1. Recovery TUI and evidence upload/cleanup. Use the [controller API](controller-api.md) for requests and
-   replies; use a test controller until stage 3.
-2. Recovery flashing and setup, including controller connection settings.
-3. The foreground controller: receive/store evidence, serve OSTree candidates,
-   coordinate experiments and provide the agent interface and progress.
+1. **Real interactive connection.** Build the single foreground controller and
+   target command handling. Exercise an actual MCP client, reverse SSH, concurrent
+   local processes, durable output, quiet waits and reconnection after controller
+   restart. Start with the [command-to-recovery test journey](testing.md#confront-the-hardest-part-first),
+   including evidence receipt and cleanup, before finishing the UI or deployment.
+   No image is needed. Plan the latest stable Bazzite import and concrete
+   supported OSTree directory/mount and boot arrangement before building deployment.
+2. **Bootable investigation environment.** Implement baseline preparation, recovery
+   TUI, setup/flashing, deployment, evidence upload/cleanup and fresh run files.
+   Use the real controller from stage 1. Check preparation, live modification,
+   clean reset and recovery-owned boot selection together. Fast tests mock expensive
+   OS work; actual boot confirmation needs a separately authorized image/boot check.
+   Record that gap rather than claiming mocks prove it.
+3. **Complete the patch journey.** Add kernel/PipeWire build helpers, explicit saved
+   candidates, live-change helpers and finish the human/agent screens. Exercise the
+   full investigation journey, including pause, failures and evidence retrieval.
 
-Build shared test tools alongside each stage. Avoid tiny implementation packets
-with repeated verification. Run the relevant fast integration tests after a
-substantial piece works; diagnose failures rather than repeatedly running suites.
-The language is Python, and running broad real-code journeys provides value even
-when expensive external work is mocked. Do not mistake that for hardware proof.
+## Agent decisions and when to ask
 
-Start on the rewrite branch without the old implementation. Commit `b807199`
-preserves it as reference. No requirement to keep its components, APIs or tests.
+Agents may choose ordinary Python libraries, file formats, test helpers, supported
+OSTree commands/layout and container build tooling. The initial base is latest
+stable Bazzite, resolved once per baseline as described in [candidate deployment](candidate-deployment.md).
+Document differences and ask for missing target facts only when they affect reproduction.
+Choose one supported path, keep OS-specific code small and continue through routine
+failures without asking for approval at each step.
 
-No new migrations, compatibility readers or legacy conversion tools: use fresh development state. This does not authorize deleting owner files, changing a live installation or running hardware.
+Stop the affected approach and ask before patching upstream deployment tools,
+building a competing boot manager, adding a persistent controller service, or
+substantially weakening clean resets, recovery, quiet waiting or environment fidelity.
+Also ask before an unusual Linux architecture or a large new subsystem becomes
+necessary. Explain the concrete obstacle, simplest alternative and cost; continue
+independent work. Do not replace a blocked design with a silent downgrade.
 
-Start the redesigned product with [fast journey integration tests](testing.md),
-not unit tests. Use test fixtures and mocks for expensive external work. Existing
-tests are implementation references, not a requirement to preserve their structure.
-No elaborate rename/security matrices or custom test framework. Choose a simple
-test command with the implementation. Documentation needs link checks and
-`git diff --check`.
+Requirement changes, push/merge and live operations still need their stated approval.
+The deliberately limited live-change combinations and lack of guaranteed terminal
+reattachment are accepted design choices, not reasons to stop again.
 
-No image builds, flashing, QEMU or kernel compilation for routine changes. Full release tests need an explicit major-release request and `RELEASE_QUALIFICATION=1`. Separately requested builds/flashes/experiments are product operations, not permission for that suite. Keep logs; don't repeatedly poll long jobs or rerun broad tests without diagnosis.
+## Verification and scope
 
-One independent **gpt-6-astra / medium** review after a substantial implementation effort, before merge, not per-step reviews. Resolve findings in that review; repeat only for major changes to the reviewed design or guarantees. Missing review blocks merge, not independent development. Push/merge/live operations require authorization.
+Build shared test tools alongside each stage. Run the relevant fast integration
+tests after a substantial piece works; diagnose failures instead of repeatedly
+running suites. Follow the [testing strategy](testing.md), including the real
+command-to-recovery journey and separate image checks. Start with integration
+tests, not unit tests. Documentation needs link checks and `git diff --check`.
 
-Designs describe intended behavior; help, source and actual checks establish current availability. Documentation edits alone do not implement new authorization or execution behavior.
+The rewrite branch already excludes the previous implementation; commit `b807199`
+preserves it for specific reference questions. Use fresh development state for
+breaking changes, without migrations or compatibility layers. Preserve owner data.
+
+[AGENTS.md](../../AGENTS.md) governs review, push/merge and live-operation approval.
+No image builds, flashing, QEMU or kernel compilation for routine edits. Obtain one
+independent review after substantial implementation, before merge; documentation
+does not need reviewer agents. Do not repeat reviews or full suites per small step.
+
+Designs describe intended behavior. Documentation edits do not establish working
+features or authorize live installations and hardware operations.

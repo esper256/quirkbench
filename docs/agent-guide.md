@@ -1,21 +1,34 @@
 # Agent entry point
 
 Use plain English and the [glossary](glossary.md) when explaining work.
+This rewrite branch has no runnable application yet. These are intended interfaces.
 
-This branch starts a Python rewrite and has no runnable application yet. This
-is orientation for the intended product; old commands are not preserved here.
+The user's agent connects to Quirkbench through MCP on the controller computer.
+Context names the applicable tools: `ssh_command_start` for target commands,
+`sftp_upload` for files, and rpm-ostree tools for package/candidate changes.
+Use the returned next-tool names; do not assume a universal `run` or `deploy`.
+Read investigation context, inspect the target and try to reproduce the problem.
+Run commands, send probes, install packages or modify candidate software live.
+Use incremental build/deploy helpers when larger changes need them. Prepared tests
+remain available, but every inspection does not require a new experiment or reboot.
 
-The intended loop: inspect diagnostics, reproduce the problem, edit candidate
-source, build changed RPMs with the supplied instructions, submit an experiment,
-follow progress, read diagnostics, then decide the next experiment. The human
-authorizes the investigation once; agent-authored tests are part of its captured
-inputs. Internal-disk experiments and persistent firmware writes are outside scope.
-Normal pause stops new work and lets the current bounded run recover/upload.
+Tools return bounded output, saved results and instructions for the next action.
+Start long commands, do other work, then wait for completion, an agreed deadline
+or an error without periodic polling. Output is saved independently of reading it.
+Commands have separate process environments but share the target's files and
+services. Set working directory and environment explicitly; `cd` and `export` do
+not carry into another command. Do not replay uncertain work after a lost
+connection. Observe the current target boot and mode. The agent owns reasoning,
+code edits and patch generation; never edit Quirkbench to perform an investigation.
+Ordinary target commands continue through controller/network loss and keep output
+locally. Reconnect to retrieve their status; interactive terminal reattachment is
+not guaranteed. The target enforces independent command timeouts. There is no
+overall run deadline; waiting or compiling elsewhere does not expire the run.
 
-The agent owns reasoning and patch generation. Human setup and flashing should be
-simple interactive workflows, not a protocol of manually copied internal IDs.
-
-[Requirements](requirements/product.md) need human approval to change.
-[Designs](README.md) are revisable; ask before massive complexity increases or
-substantial losses of capability, performance or ease of use. Legacy docs are not
-instructions. Implementing this direction is separate from operating current code.
+The human authorizes scope once. Internal disks and persistent firmware remain
+excluded. Pause stops new work and allows bounded work to recover/upload. Force
+stop is best effort. See the [interactive design](designs/interactive-debugging.md)
+and [agent mockup](mockups/agent-experiment.md). The first candidate uses rpm-ostree. Live changes belong to one run; prepare a
+named candidate from explicit packages/files to retain them. Recovery selects
+the next boot. Candidate networking starts from read-only saved connection
+settings; experimental network changes do not update recovery settings.

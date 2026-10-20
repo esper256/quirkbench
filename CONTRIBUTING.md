@@ -8,9 +8,9 @@ Requirements changes need human approval. Design changes do not, except massive
 complexity increases or substantial losses of capability, performance or usability.
 
 Inspect current issues/PRs and working-tree state before coding. Use a topic branch
-or isolated worktree, coordinate shared files and preserve unrelated work. The
-[first-usable tracker](https://github.com/esper256/quirkbench/issues/29) is a task
-index, not authority for superseded product decisions. Do not close unmerged work.
+or isolated worktree, coordinate shared files and preserve unrelated work.
+Current designs guide the rewrite; old issue wording does not override them.
+Do not close unmerged work.
 
 Follow [development guidance](docs/designs/development.md): large coherent implementation stages,
 focused tests, one review of the completed work, honest limitations. Update current help and

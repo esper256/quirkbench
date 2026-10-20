@@ -1,199 +1,284 @@
-# Agent experiment interface
+# Agent debugging through MCP
 
-> **EXAMPLE ONLY — intended design, not implemented commands or a frozen format.**
-> Package names, paths, hooks, timings and the audio problem are examples. Other
-> agents, low-level components and diagnostic programs use the same interface.
+> **EXAMPLE ONLY — intended design, not implemented tools or a frozen API.**
+> Tool names, programs and the audio problem are illustrative. MCP tools are shown
+> as calls and results, not as shell commands. This shows the first rpm-ostree
+> implementation; the example does not limit future candidate OS support.
 
-## Read the investigation
-
-```console
-$ quirkbench investigation show microphone-dropout --json
-{
-  "investigation": "microphone-dropout",
-  "problem": "Microphone capture stops intermittently after several minutes.",
-  "target": "lab-laptop",
-  "authorization": {
-    "status": "active",
-    "changes": ["kernel", "audio services", "diagnostic programs"],
-    "excluded": ["internal disks", "persistent firmware", "Quirkbench itself"]
-  },
-  "baseline": "baseline-1",
-  "workspace": "/home/sam/quirkbench-work/microphone-dropout",
-  "target_information": "target.json",
-  "instructions": ["INVESTIGATION.md", "BUILD.md", "DEPLOY.md", "tests/README.md"],
-  "experiment_template": "experiment.example.json",
-  "next": "Read these files, then submit an experiment file. Relative paths above use workspace."
-}
-
-$ cat INVESTIGATION.md BUILD.md DEPLOY.md tests/README.md
-```
+## Discover the investigation
 
 ```text
-Investigation: microphone-dropout
-Problem: Microphone capture stops intermittently after several minutes.
+Tool: investigation_context
+Input: {"investigation":"microphone-dropout"}
 
-First inspect target.json and existing evidence. Try to reproduce before fixing.
-Choose test duration yourself. No per-run human approval is needed within scope.
-Do not edit Quirkbench, internal disks or persistent firmware.
+Investigation: microphone-dropout · Authorized
+Problem: Microphone capture stops after several minutes.
+Target: lab-laptop · Connected · Recovery system
+Allowed: Kernel, audio services and diagnostic programs
+Excluded: Internal disks, persistent firmware, edits to Quirkbench
 
-Software:
-- baseline-1 selects the saved unchanged software.
-- packages.add requests stock packages; Quirkbench resolves and records versions.
-- packages.replace supplies your locally built replacement RPMs.
-- Build changed software yourself. For PipeWire: ./build-pipewire.sh
-  Read build.log and resolve compilation errors. Preserve the build directory.
-- The build script publishes completed RPMs, source records and build settings in
-  output/. Submit that output; Quirkbench will not rebuild your changed code.
-- programs copies standalone programs and supporting files into the candidate.
-  No RPM is needed for these additions. Supply executable permissions and any
-  runtime dependencies. Quirkbench does not guess missing libraries.
+Workspace: /home/sam/quirkbench-work/microphone-dropout
+Build guides: BUILD.md, DEPLOY.md (relative to Workspace)
+BUILD.md: Matching source/package references, dependencies and incremental build commands.
+DEPLOY.md: Required RPMs and symbols, compatible package versions and file layout.
+Prepare and edit source using these guides. Local build scripts are optional helpers.
+Relative controller paths use Workspace. SFTP destinations use the target working
+directory; evidence names use its evidence directory.
+Target facts: target.json
+Candidate OS: Bazzite stable · rpm-ostree
+Selected upstream reference: ghcr.io/ublue-os/bazzite:stable
+Baseline not yet prepared. Preparation records the exact version in baseline.json.
+Available now: target information, logs, rpm_ostree_prepare_candidate
 
-Execution:
-- Specify a program name and arguments; no implicit shell interpretation.
-- Each step has a candidate hook and a timeout. Steps at the same hook run in order.
-- after-services runs after ordinary candidate services have started.
-- before-recovery runs during an orderly return to recovery. A crash may bypass it.
-- Earlier diagnostic changes belong in candidate source and its boot files.
-- run_timeout covers candidate execution, including boot and all steps. Failure
-  recovery is best effort if the candidate cannot enforce it.
-- A nonzero step exit or timeout ends the test and requests recovery. Available
-  before-recovery steps may collect diagnostics within the remaining time.
+Tools for this target:
+  recovery_boot_ostree          Deploy an OSTree candidate and boot it once
+  ssh_command_start            Execute on the connected candidate through SSH
+  ssh_command_input            Send input to an existing SSH command
+  ssh_command_read             Read saved SSH command output
+  ssh_command_wait             Quietly wait for SSH commands
+  ssh_command_stop             Stop one command without ending the run
+  https_evidence_wait          Wait for named files to arrive on the controller
+  sftp_upload                  Copy a file over the existing SSH connection
+  controller_build_script_start  Run the supplied local build script
+  rpm_ostree_install_live       Apply RPM changes to this run
+  rpm_ostree_prepare_candidate  Prepare a saved candidate from selected changes
+  recovery_return              End this run and return to recovery
+  controller_work_wait         Quietly wait for accepted controller work
 
-Files and results:
-- QUIRKBENCH_EVIDENCE_DIR: write anything needed back on the controller.
-- QUIRKBENCH_WORK_DIR: temporary files, removed after recovery collects results.
-- Leave recovery settings, boot selection and Quirkbench-managed files alone.
-- stdout/stderr, kernel and service logs are collected automatically where possible.
-- Optional progress: write one JSON object per line to QUIRKBENCH_PROGRESS_FILE:
-  {"message":"Recording microphone", "completed":3, "total":10, "unit":"minutes"}
-  Ordinary logs need no special format. Missing progress does not fail the test.
-- An exit code is the program's result, not Quirkbench's judgment that a bug is fixed.
+Prepare the selected baseline, then boot it to inspect live behavior.
+Within a run you can execute commands, send input to interactive programs,
+copy files, install packages and change software. Use root when needed within the authorized scope.
+Choose an execution timeout for each command. Commands have independent timers.
+The run stays available while you think or build. There is no overall run deadline.
+A wait timeout returns control without cancelling the command.
+ssh_command_stop stops one command. recovery_return stops remaining commands,
+flushes available output and returns to recovery. Pause lets active commands finish.
+Tools return bounded output and a reference to complete saved output.
+Long commands run independently. Start other commands while they run, then use
+ssh_command_wait for completion, an agreed deadline or an error. No periodic polling.
+Use ssh_command_read only when you want to inspect output before completion.
 
-Submission:
-- Paths in an experiment file are relative to that file unless absolute.
-- Submission captures files; it never runs a build command from the file.
-- Keep submitted output unchanged until capture completes. Other editing can continue.
-- --request-id identifies a submission. Retry identical input with the same ID after
-  a lost reply; changed input needs a new ID. Do not resubmit merely to wait.
-- All input errors are returned together where possible, with field names and fixes.
-- experiment wait stays quiet until results or intervention are available. If its
-  wait ends first, call it again with the same ID. It does not repeat the experiment.
+Each ssh_command_start starts a new process. Set cwd and env for that command.
+Arguments run directly; launch a shell explicitly for shell syntax.
+cd and export affect only that process and its children. An interactive shell
+keeps its state only when you send input to that same command ID.
+All commands share this target's files, services and devices.
+Ordinary commands keep running during controller/network loss and save output
+on the target. Reconnect reads their status without rerunning them. Interactive
+terminal reattachment is not guaranteed. The target enforces command timeouts.
+Each new run starts with fresh configuration, application data and home directories.
+Live edits last for this run. Prepare a named candidate with selected packages/files
+to retain changes. Package helpers report whether a fresh boot is needed.
+Recovery controls the next boot. Do not change boot entries from the candidate.
 ```
 
-## Submit a diagnostic experiment
+## Prepare the first baseline
 
-The agent writes a recorder and a diagnostic script, builds the recorder, and saves this file.
+```text
+Tool: rpm_ostree_prepare_candidate
+Input: {"investigation":"microphone-dropout","base":"ghcr.io/ublue-os/bazzite:stable","name":"baseline","request_id":"prepare-baseline"}
+Output: {"work_id":"baseline-preparation","status":"preparing","stage":"Resolve Bazzite stable, download and add target RPM and debugging tools","next_tool":"controller_work_wait"}
 
-```console
-$ cat experiment.json
+Tool: controller_work_wait
+Input: {"work_id":"baseline-preparation"}
+Output: {"status":"ready","candidate_id":"baseline-1","base_record":"baseline.json","instructions":"Exact Bazzite version saved for subsequent runs. Baseline prepared. Use recovery_boot_ostree to start it."}
 ```
 
-```json
-{
-  "question": "Does microphone capture stall with stock software, and what do kernel and PipeWire logs show at that time?",
-  "baseline": "baseline-1",
-  "packages": {
-    "add": ["alsa-utils", "pipewire-utils"],
-    "replace": []
-  },
-  "programs": [
-    {"name": "record-microphone", "path": "tests/bin/record-microphone"},
-    {"name": "collect-audio-status", "path": "tests/collect-audio-status.sh"}
-  ],
-  "steps": [
-    {
-      "hook": "after-services",
-      "program": "record-microphone",
-      "args": ["--duration", "600", "--report-progress"],
-      "timeout": "11m"
-    },
-    {
-      "hook": "before-recovery",
-      "program": "collect-audio-status",
-      "args": [],
-      "timeout": "30s"
-    }
-  ],
-  "run_timeout": "15m"
+## Boot once, investigate interactively
+
+```text
+Tool: recovery_boot_ostree
+Input: {"investigation":"microphone-dropout","candidate":"baseline-1","boot_wait_timeout_seconds":300,"request_id":"baseline-1"}
+Output: {"work_id":"work-1","status":"starting","next_tool":"controller_work_wait"}
+
+Tool: controller_work_wait
+Input: {"work_id":"work-1"}
+Output: {
+  "status":"ready",
+  "run_id":"run-1",
+  "boot_id":"boot-7",
+  "software":"baseline-1",
+  "control":"interactive",
+  "mutable_files":"Fresh from baseline-1 defaults",
+  "network":"Connected using saved recovery settings, supplied read-only",
+  "live_changes":{"packages":"supported","direct_files":"temporary writable layer; incompatible package operations may require a fresh run"},
+  "tools_available":["journalctl","dmesg","gdb","strace","perf","pw-cli","arecord"],
+  "evidence_directory":"/run/quirkbench/evidence",
+  "working_directory":"/run/quirkbench/work",
+  "evidence_storage":"Shared USB storage mounted at evidence_directory",
+  "user_session":{"user":"quirkbench","uid":1000,"status":"ready","services":["pipewire","pipewire-pulse","wireplumber"]},
+  "command_defaults":{"user":"quirkbench","cwd":"/run/quirkbench/work","env":{"PATH":"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin","HOME":"/home/quirkbench","LANG":"C.UTF-8","XDG_RUNTIME_DIR":"/run/user/1000","DBUS_SESSION_BUS_ADDRESS":"unix:path=/run/user/1000/bus","QUIRKBENCH_EVIDENCE_DIR":"/run/quirkbench/evidence","QUIRKBENCH_WORK_DIR":"/run/quirkbench/work"}},
+  "instructions":"The default user/session is ready for this audio investigation. as_root requests a separate root command, not a change of the audio session. Commands receive QUIRKBENCH_EVIDENCE_DIR and QUIRKBENCH_WORK_DIR. Evidence survives run cleanup. Working files and OS edits are disposable. Network edits affect this run only. Leave recovery settings, boot selection and Quirkbench files alone."
 }
+
+Tool: ssh_command_start
+Input: {"run_id":"run-1","argv":["pw-cli","info","all"],"timeout_seconds":10,"request_id":"inspect-1"}
+Output: {"command_id":"command-1","status":"finished","exit_code":0,"output":"…device and stream information…","output_file":"results/run-1/commands/command-1.txt"}
 ```
 
-```console
-$ quirkbench experiment submit microphone-dropout --file experiment.json --request-id reproduce-1 --json
-{
-  "request_id": "reproduce-1",
-  "status": "accepted",
-  "capture": "pending",
-  "next_command": "quirkbench experiment wait microphone-dropout --request-id reproduce-1 --json",
-  "instructions": "/home/sam/quirkbench-work/microphone-dropout/instructions/wait.md"
-}
+The agent writes `tests/record.py` locally. It records through the selected audio service, writes the named files to `QUIRKBENCH_EVIDENCE_DIR`, and closes them before exiting.
 
-$ quirkbench experiment wait microphone-dropout --request-id reproduce-1 --json
-{
-  "request_id": "reproduce-1",
-  "experiment_id": "experiment-1",
-  "run_id": "run-1",
-  "status": "finished",
-  "capture": "complete",
-  "target": "recovery",
-  "step_results": [
-    {"program": "record-microphone", "exit_code": 1, "summary": "Capture stopped after 347 seconds"},
-    {"program": "collect-audio-status", "exit_code": 0}
-  ],
-  "evidence": {
-    "status": "received",
-    "directory": "/home/sam/quirkbench-work/microphone-dropout/results/run-1",
-    "files": ["recording.wav", "capture.json", "audio-status.txt", "kernel.log", "services.log", "test.log"],
-    "missing": []
-  },
-  "resolved_packages": "/home/sam/quirkbench-work/microphone-dropout/results/run-1/packages.json",
-  "next": "Read the evidence and decide the next experiment.",
-  "instructions": "/home/sam/quirkbench-work/microphone-dropout/instructions/results.md"
-}
+```text
+Tool: sftp_upload
+Input: {"run_id":"run-1","source":"tests/record.py","destination":"record.py","request_id":"copy-1"}
+Output: {"path":"/run/quirkbench/work/record.py","status":"copied"}
+
+Tool: ssh_command_start
+Input: {"run_id":"run-1","argv":["python3","record.py","--seconds","600"],"cwd":"/run/quirkbench/work","env":{"PYTHONUNBUFFERED":"1"},"timeout_seconds":660,"evidence_files":["capture.json","recording.wav"],"request_id":"record-1"}
+Output: {"command_id":"command-2","status":"running","output":"Recording microphone…","output_file":"results/run-1/commands/command-2.txt","next_tool":"ssh_command_wait","instructions":"Output is saved while this command runs. Other commands can run now. env overrides the displayed target defaults for this process only."}
+
+Tool: ssh_command_start
+Input: {"run_id":"run-1","argv":["journalctl","--user","-u","pipewire.service","--follow","--no-pager"],"timeout_seconds":600,"request_id":"logs-1"}
+Output: {"command_id":"command-3","status":"running","output":"…service logs while recording continues…","output_file":"results/run-1/commands/command-3.txt"}
+
+Tool: ssh_command_stop
+Input: {"command_id":"command-3","request_id":"stop-logs-1"}
+Output: {"status":"stopped","output_file":"results/run-1/commands/command-3.txt","instructions":"Log command stopped. The recording and run continue."}
 ```
 
-## Test changed software
+## Improvise without rebooting
 
-The agent reads the evidence, edits PipeWire and builds replacement RPMs.
+```text
+Tool: rpm_ostree_install_live
+Input: {"run_id":"run-1","packages":["lsof"],"request_id":"package-1"}
+Output: {"status":"installed","method":"rpm-ostree live package addition","output":"lsof is available in this run.","persistence":"this run only","boot_selection":"unchanged"}
 
-```console
-$ ./build-pipewire.sh
-Build complete.
-Replacement RPMs and build records: output/
+Tool: ssh_command_start
+Input: {"run_id":"run-1","argv":["lsof","/dev/snd/pcmC0D0c"],"as_root":true,"timeout_seconds":10,"request_id":"inspect-2"}
+Output: {"command_id":"command-5","status":"finished","exit_code":0,"output":"pipewire 913 quirkbench …"}
 
-$ python - <<'PY'
-import json
-from pathlib import Path
+Tool: ssh_command_wait
+Input: {"command_ids":["command-2"],"wait_timeout_seconds":900}
+Output: {"command_id":"command-2","status":"finished","exit_code":1,"output":"Capture stopped after 347 seconds.","output_file":"results/run-1/commands/command-2.txt","output_saved":true,"evidence_upload":"pending","next_tool":"https_evidence_wait"}
 
-experiment = json.loads(Path("experiment.json").read_text())
-experiment["question"] = "Does the PipeWire change prevent the observed capture stall?"
-experiment["packages"]["replace"] = [
-    {"build": "output/build.json", "rpms": "output/rpms/"}
-]
-Path("experiment-fix.json").write_text(json.dumps(experiment, indent=2) + "\n")
-PY
+Tool: https_evidence_wait
+Input: {"run_id":"run-1","files":["capture.json","recording.wav"],"wait_timeout_seconds":900}
+Output: {"status":"received","controller_directory":"results/run-1/evidence/","files":["capture.json","recording.wav"]}
 
-$ quirkbench experiment submit microphone-dropout --file experiment-fix.json --request-id fix-1 --json
-{
-  "request_id": "fix-1",
-  "status": "accepted",
-  "capture": "pending",
-  "next_command": "quirkbench experiment wait microphone-dropout --request-id fix-1 --json",
-  "instructions": "/home/sam/quirkbench-work/microphone-dropout/instructions/wait.md"
-}
+Tool: ssh_command_start
+Input: {"run_id":"run-1","argv":["gdb","-q","-p","913"],"as_root":true,"terminal":true,"timeout_seconds":120,"request_id":"debug-1"}
+Output: {"command_id":"command-6","status":"running","output":"Attaching to process 913…\n(gdb) ","next_tool":"ssh_command_input"}
+
+Tool: ssh_command_input
+Input: {"command_id":"command-6","text":"thread apply all bt\n","request_id":"input-1"}
+Output: {"status":"running","output":"…thread backtraces…\n(gdb) ","output_file":"results/run-1/commands/command-6.txt","instructions":"Available output only; Quirkbench does not interpret debugger prompts or know when this input has finished."}
+
+Tool: ssh_command_input
+Input: {"command_id":"command-6","text":"detach\nquit\n","request_id":"input-2"}
+Output: {"status":"finished","exit_code":0,"output":"Detaching…"}
 ```
 
-## Correct all reported input errors together
+The agent reads the received files, follows BUILD.md to prepare matching PipeWire source and edits it locally. The investigation build script below runs the documented build; Quirkbench does not diagnose or fix compilation errors.
 
-```json
-{
-  "status": "invalid",
-  "work_started": false,
-  "errors": [
-    {"field": "programs[0].path", "message": "File not found: tests/bin/record-microphone. Build the program or correct its path."},
-    {"field": "steps[0].timeout", "message": "Step timeout exceeds run_timeout. Increase run_timeout or shorten the step."}
-  ],
-  "next": "Correct the file and retry. This request ID has not been accepted.",
-  "instructions": "/home/sam/quirkbench-work/microphone-dropout/DEPLOY.md"
+## Build and try changed software
+
+```text
+Tool: controller_build_script_start
+Input: {"investigation":"microphone-dropout","component":"pipewire","request_id":"build-1"}
+Output: {"work_id":"work-2","status":"running","command":"./build-pipewire.sh","log":"builds/build-1.log","next_tool":"controller_work_wait"}
+
+Tool: controller_work_wait
+Input: {"work_id":"work-2"}
+Output: {"status":"finished","exit_code":0,"build_id":"build-1","files":"output/pipewire/","next_tools":["rpm_ostree_install_live","rpm_ostree_prepare_candidate"],"instructions":"Live installation changes this run. Restart the affected service when ready. A prepared candidate gives a clean repeatable starting point."}
+
+Tool: rpm_ostree_install_live
+Input: {"run_id":"run-1","build_id":"build-1","request_id":"install-1"}
+Output: {"status":"installed","software":"baseline-1 with live changes","restart_needed":["pipewire"],"persistence":"this run only","evidence_preserved":true}
+
+Tool: ssh_command_start
+Input: {"run_id":"run-1","argv":["systemctl","--user","restart","pipewire.service","pipewire-pulse.service","wireplumber.service"],"timeout_seconds":20,"request_id":"restart-1"}
+Output: {"command_id":"command-7","status":"finished","exit_code":0}
+
+Tool: ssh_command_start
+Input: {"run_id":"run-1","argv":["python3","/run/quirkbench/work/record.py","--seconds","600","--output-name","after-change"],"timeout_seconds":660,"evidence_files":["after-change.json","after-change.wav"],"request_id":"record-2"}
+Output: {"command_id":"command-8","status":"running","output_file":"results/run-1/commands/command-8.txt","next_tool":"ssh_command_wait"}
+
+Tool: ssh_command_wait
+Input: {"command_ids":["command-8"],"wait_timeout_seconds":900}
+Output: {"command_id":"command-8","status":"finished","exit_code":0,"output":"Recorded 600 seconds without interruption.","output_file":"results/run-1/commands/command-8.txt","output_saved":true,"evidence_upload":"received","controller_directory":"results/run-1/evidence/","files":["after-change.json","after-change.wav"]}
+```
+
+The agent uses quiet waiting, inspects the new evidence and decides whether a clean comparison is needed.
+
+### If live installation is unavailable
+
+```text
+Tool: rpm_ostree_install_live
+Input: {"run_id":"run-1","build_id":"build-1","request_id":"install-alternative"}
+Output: {"status":"reboot_required","changed":false,"reason":"This run already uses a writable file layer that cannot be combined with this package operation.","next_tool":"rpm_ostree_prepare_candidate","instructions":"Prepare baseline-1 plus build-1, then return to recovery and boot that candidate. The current run remains available."}
+```
+
+## Retain a change for clean repeats
+
+```text
+Tool: rpm_ostree_prepare_candidate
+Input: {"investigation":"microphone-dropout","base":"baseline-1","build_id":"build-1","name":"pipewire-fix","request_id":"save-fix"}
+Output: {"work_id":"work-save","status":"preparing","instructions":"Preparing baseline-1 plus the selected PipeWire RPMs. Live lsof installation, configuration edits and application data are not included."}
+
+Tool: controller_work_wait
+Input: {"work_id":"work-save"}
+Output: {"status":"ready","candidate_id":"pipewire-fix","instructions":"Start this candidate through recovery for a clean repeat. Each run gets fresh mutable files."}
+```
+
+## When a new boot is needed
+
+If a later step needs a kernel change, the agent prepares and edits matching kernel
+source using BUILD.md.
+
+```text
+Tool: controller_build_script_start
+Input: {"investigation":"microphone-dropout","component":"kernel","request_id":"kernel-build-2"}
+Output: {"work_id":"kernel-work-2","status":"running","log":"builds/kernel-build-2.log","next_tool":"controller_work_wait"}
+
+Tool: controller_work_wait
+Input: {"work_id":"kernel-work-2"}
+Output: {"status":"finished","exit_code":0,"build_id":"kernel-build-2","files":"output/kernel/","instructions":"Kernel and matching modules are ready. Prepare a candidate and boot it to test this kernel."}
+
+Tool: rpm_ostree_prepare_candidate
+Input: {"investigation":"microphone-dropout","base":"pipewire-fix","build_id":"kernel-build-2","request_id":"candidate-2"}
+Output: {"work_id":"work-3","status":"preparing","current_run":"run-1","instructions":"The current run remains available. Wait for the candidate, then finish the run and start it explicitly."}
+
+Tool: controller_work_wait
+Input: {"work_id":"work-3"}
+Output: {"status":"ready","candidate_id":"candidate-2","reboot_required":true}
+
+Tool: recovery_return
+Input: {"run_id":"run-1","request_id":"finish-1"}
+Output: {"work_id":"work-4","status":"stopping_commands","instructions":"Stop remaining run commands, flush available output, then reboot to recovery and upload evidence.","next_tool":"controller_work_wait"}
+
+Tool: controller_work_wait
+Input: {"work_id":"work-4"}
+Output: {"status":"finished","evidence":"received","target":"connected in recovery","results":"results/run-1/","cleanup":"Run files discarded. Prepared candidates, recovery settings and controller results retained."}
+
+Tool: recovery_boot_ostree
+Input: {"investigation":"microphone-dropout","candidate":"candidate-2","boot_wait_timeout_seconds":300,"request_id":"run-2"}
+Output: {"work_id":"work-5","status":"starting","stage":"Recovery is deploying candidate-2 with fresh mutable files and saved connection settings.","next_tool":"controller_work_wait"}
+
+Tool: controller_work_wait
+Input: {"work_id":"work-5"}
+Output: {"status":"ready","run_id":"run-2","boot_id":"boot-8","working_directory":"/run/quirkbench/work","instructions":"Fresh run. Upload your local test program again; previous working files were discarded."}
+
+Tool: sftp_upload
+Input: {"run_id":"run-2","source":"tests/record.py","destination":"record.py","request_id":"copy-2"}
+Output: {"path":"/run/quirkbench/work/record.py","status":"copied"}
+```
+
+The agent repeats selected probes using the reported user/session context and creates the investigation patch with its usual coding tools.
+
+## If the target crashes while a command is running
+
+```text
+Tool: ssh_command_wait
+Input: {"command_ids":["command-9","command-10"],"wait_timeout_seconds":900}
+Output: {
+  "status":"interrupted",
+  "reason":"Target rebooted into recovery. Commands from boot-8 cannot continue.",
+  "commands":["command-9","command-10"],
+  "target_mode":"recovery",
+  "boot_id":"boot-9",
+  "saved_output":"results/run-2/commands/",
+  "output_complete":false,
+  "evidence_upload":"in progress",
+  "instructions":"Read the saved output now. Remaining recovery evidence will be reported separately. Neither command was retried."
 }
 ```
