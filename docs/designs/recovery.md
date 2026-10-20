@@ -19,8 +19,8 @@ RAM-based capacity checks. Use these partition roles:
 
 Size the fixed parts for their actual contents with modest headroom; shared data
 gets the remaining space. No separate evidence or unused library partition.
-Choose supported boot selection with the OSTree layout; a separate partition is
-optional.
+Use the [GRUB arrangement](candidate-deployment.md#recovery-owns-boot-selection)
+with the OSTree layout; a separate boot-selection partition is optional.
 
 Recovery settings include saved network connections, the controller address,
 public key and connection credentials. Flashing writes local settings separately
@@ -36,7 +36,8 @@ output and reports. Missing settings produce a connection error, not an automati
 overwrite. Read-only access reduces accidents; it cannot contain arbitrary root code.
 
 Give every run its own evidence and temporary working directories. The evidence
-path must be backed by shared USB storage even if exposed under `/run`. Supply their
+path, saved command output and retry records must be backed by shared USB storage
+even if exposed under `/run`; temporary memory alone is insufficient. Supply their
 locations through environment variables and the agent instructions. Tell the
 agent to leave recovery settings, boot selection and Quirkbench-managed files
 alone. Live software edits belong to this run; retaining them requires explicit
@@ -65,6 +66,13 @@ a modified kernel.
 7. Discard finished runs' mutable OS and temporary files after collecting available
    diagnostics, including after interruption. Files the agent needs returned
    belong in evidence, not temporary storage. Do not remove active-run files.
+
+A newly booted candidate has a target-side startup connection deadline, supplied
+when requesting the boot. Its startup code starts this timer and saves the reason
+before returning to recovery if no authenticated controller connection succeeds.
+Cancel the timer after the first successful connection; later network loss does
+not reactivate it. Recovery does not retry the failed candidate automatically.
+This cannot rescue a kernel that hangs before startup code runs.
 
 Use panic reboot and supported hardware watchdogs for best-effort restart, not an
 overall run timer. The target enforces individual command timeouts while disconnected.

@@ -3,9 +3,12 @@
 Use plain English and the [glossary](glossary.md) when explaining work.
 This rewrite branch has no runnable application yet. These are intended interfaces.
 
-The user's agent connects to Quirkbench through MCP on the controller computer.
+The user configures the local MCP URL and installation token once in their agent
+client. The user's agent then accesses the authorized target by its friendly
+reference; it does not need the target's private pairing credential.
 Context names the applicable tools: `ssh_command_start` for target commands,
-`sftp_upload` for files, and rpm-ostree tools for package/candidate changes.
+`sftp_upload` for files, `rpm_overlay_install` for supported live package changes,
+and `rpm_ostree_prepare_candidate` for saved candidates.
 Use the returned next-tool names; do not assume a universal `run` or `deploy`.
 Read investigation context, inspect the target and try to reproduce the problem.
 Run commands, send probes, install packages or modify candidate software live.

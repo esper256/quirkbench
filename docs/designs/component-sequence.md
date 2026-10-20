@@ -19,7 +19,7 @@ sequenceDiagram
     Quirkbench->>USB: Write bootable software, settings and shared storage
     Human->>Target: Boot USB and connect network
     Target->>Quirkbench: Pair over HTTPS, then open reverse-direction SSH connection
-    Quirkbench-->>Human: Target ready and MCP connection instructions
+    Quirkbench-->>Human: Target ready and local MCP URL/token-file instructions
     Human->>Quirkbench: Describe problem and authorize investigation
 ```
 
@@ -36,7 +36,8 @@ sequenceDiagram
     Quirkbench->>Target: Supply prepared OSTree candidate to recovery
     Target->>Target: Deploy with fresh run files and read-only connection settings
     Target->>Target: Recovery selects one candidate boot, keeping recovery the default
-    Target->>Quirkbench: Open reverse-direction SSH connection from candidate
+    Note over Quirkbench,Target: Return to recovery if candidate startup never connects before its deadline
+    Target->>Quirkbench: Connect with stable paired identity and new boot ID
     Quirkbench-->>Agent: Current software, available tools and instructions
     loop Inspect and improvise on the same boot
         Agent->>Quirkbench: Start command, send input or upload a probe
@@ -55,7 +56,7 @@ sequenceDiagram
         Agent->>Agent: Edit source
         Agent->>Quirkbench: controller_build_script_start
         Quirkbench-->>Agent: Build output or errors to fix
-        Agent->>Quirkbench: rpm_ostree_install_live or rpm_ostree_prepare_candidate
+        Agent->>Quirkbench: rpm_overlay_install or rpm_ostree_prepare_candidate
         Quirkbench->>Target: Transfer changes, new candidate boots go through recovery
         Target-->>Quirkbench: Current software and connection status
         Quirkbench-->>Agent: Ready for more inspection

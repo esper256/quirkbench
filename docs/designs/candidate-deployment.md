@@ -46,14 +46,31 @@ reset. Keep run files separate from reusable repository content; never modify
 shared hard-linked files in place. Discard the run after collecting its diagnostics
 rather than attempting to undo individual edits. Preserve unuploaded evidence.
 
+First arrangement to verify: recovery creates a fresh deployment with candidate
+configuration defaults and fresh per-run `/var` and home directories. Mount those
+directories before dependent services start. Reuse unchanged OS content; do not
+undo the previous run's edits. Check service initialization and OSTree's mount
+ordering before treating this arrangement as working.
+
 ## Live changes and explicit persistence
 
 | Request | Behavior |
 | --- | --- |
 | Probe or script | Transfer through SSH and execute in the run's working directory. No RPM required. |
-| Live package change | Use supported rpm-ostree live operations scoped to this run. Report service restarts or a required fresh boot. |
+| Live package change | Try supported RPM installation in the temporary writable layer; report unsupported transactions as requiring a prepared candidate and new boot. |
 | Direct installed-file edit | Use a temporary writable layer for this run; leave prepared content unchanged. |
 | Retain changes or replace a kernel | Prepare a named candidate from an explicit base, package additions/replacements and selected files or instructions. Boot through recovery. |
+
+Prefer a temporary writable `/usr` layer for quick changes, using OSTree's
+supported development unlock. The proposed `rpm_overlay_install` helper must
+establish package dependencies, scripts and affected files before promising live
+installation. An overlay alone is not a package manager. Verify diagnostic-package
+addition and PipeWire replacement early; do not implement every transaction as
+bare `rpm -Uvh` or silently reduce all changes to reboot-only operation.
+
+Do not wrap `rpm-ostree --apply-live` and assume it is run-local: it also prepares a
+pending deployment. Use rpm-ostree for controller-side candidate preparation;
+retain its live path only if explicitly shown to preserve recovery boot ownership.
 
 Retaining build output does not retain a live installation. Do not automatically
 save a running machine or turn shell history into a reproducible candidate.
@@ -68,14 +85,24 @@ installs the candidate and requests one boot, keeping itself the default. Candid
 package operations must not replace recovery or independently select the next boot.
 Use supported rpm-ostree/OSTree operations; verify their boot integration early,
 rather than maintaining a second boot manager or silently fighting package scripts.
-Select the concrete directory/mount layout and bootloader integration during the
-first implementation stage. Check preparation, live changes, reset and fallback
-together. If this needs upstream patches or competing boot managers, follow the
+Use GRUB one-time `next_entry` as the first boot arrangement to verify, with a
+fixed recovery default. Confirm GRUB can clear that entry on the selected storage,
+and that candidate package operations cannot replace recovery's selection or boot
+files. Check preparation, live changes, fresh files and fallback together before
+extending deployment. Naming GRUB does not establish that this integration works.
+If this needs upstream patches or competing boot managers, follow the
 [stop-and-ask guidance](development.md#agent-decisions-and-when-to-ask).
 
 After a crash, report the changed boot and partial results. Never send a candidate
 command to recovery automatically. Reuse tool-provided cleanup; preserve active
 runs, settings and unuploaded evidence. Report space shortages plainly.
 
+Measure peak USB space for the first Bazzite journey, including preparation,
+mutable files, cached content and evidence, before recommending a drive size.
+Share unchanged content and clean unused files. Do not add static-delta generation
+or an arbitrary candidate-count limit without a measured need.
+
 References: [OSTree deployments](https://ostreedev.github.io/ostree/deployment/),
-[rpm-ostree live changes](https://coreos.github.io/rpm-ostree/administrator-handbook/).
+[development unlock](https://ostreedev.github.io/ostree/man/ostree-admin-unlock.html),
+[rpm-ostree live changes](https://coreos.github.io/rpm-ostree/administrator-handbook/),
+[GRUB one-time boot](https://www.gnu.org/software/grub/manual/grub/html_node/next_005fentry.html).

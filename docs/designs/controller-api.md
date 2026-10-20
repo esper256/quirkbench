@@ -13,9 +13,12 @@ outward through SSH for commands and HTTPS for pairing, evidence and downloads.
 - HTTPS for pairing, evidence and software downloads.
 - AsyncSSH `listen_reverse()` for connections initiated by targets.
 
-These share application behavior and one asynchronous event loop. Use the MCP
-SDK's normal local-access checks. Human CLI and monitor use the same application
-behavior. No separate MCP server process, SSH daemon, tunnel or service manager.
+These share application behavior and one asynchronous event loop. Bind MCP to
+loopback, enable the SDK's Host/Origin checks and require one local installation
+access token, configured once in the agent client. No per-investigation tokens.
+This protects local access without claiming isolation from malicious same-user code.
+Human CLI and monitor use the same application behavior. No separate MCP server
+process, SSH daemon, tunnel or service manager.
 Child processes perform commands and builds; blocking work must not stall connections.
 An MCP client disconnect does not end the investigation.
 
@@ -26,11 +29,17 @@ Recovery and candidate code use AsyncSSH `connect_reverse()`. The target initiat
 the network connection and acts as the SSH server; the controller acts as the SSH
 client. Commands, interactive terminals and file transfers use standard SSH.
 Pairing records the target's SSH public key and supplies the controller's public
-key. Use library key checks to associate a connection with the paired target.
-No inbound target connection or custom remote-command protocol is needed.
+key. Keep the target's private pairing identity stable across reboots; use library
+key checks to recognize it. A friendly target reference and human authorization
+select agent access, without exposing the target secret to the agent. Boot IDs
+identify restarts, not new pairing identities. No per-run keys. Candidate root can
+read its credentials and shared USB storage; a reported recovery identity is not
+proof against malicious candidate software.
 
-The target connects SSH requests to local processes and terminals, enforcing
-recovery's inspection-only access or the candidate's investigation limits.
+The target connects SSH requests to local processes and terminals. Quirkbench
+restricts recovery tools to inspection and checks investigation authorization.
+Scope guides the agent and tool actions; it cannot contain arbitrary candidate
+root code.
 Reconnect identifies the current boot and queries target-owned command records.
 Ordinary commands continue through controller/network loss; old-boot commands
 and lost interactive terminals are not automatically recreated.
@@ -55,7 +64,7 @@ Use names such as these in the [mockup](../mockups/agent-experiment.md):
 | `ssh_command_start/input/read/wait/stop` | Separate tools for starting, interacting with, waiting for and stopping SSH commands. |
 | `sftp_upload` | Transfer a file over the existing SSH connection. |
 | `controller_build_script_start` | Execute the supplied build script on the controller computer. |
-| `rpm_ostree_install_live` | Apply supported RPM changes to the running candidate. |
+| `rpm_overlay_install` | Install supported RPM changes in the run’s temporary writable layer. |
 | `rpm_ostree_prepare_candidate` | Prepare an OSTree candidate from an explicit base and changes. |
 | `recovery_boot_ostree` | Have recovery deploy an OSTree candidate and select its one-time boot. |
 | `recovery_return` | Stop remaining commands, flush available output and return to recovery. |
@@ -112,7 +121,8 @@ finished, interrupted and unknown outcomes, and identify missing evidence. Close
 log segments may upload during execution. Never rewrite a completed file with a
 growing log. Recovery reports use the same upload helper but separate storage.
 
-Use clear normal HTTP errors and simple JSON. No database format or client generator
-is required by this design. MCP tool inputs follow the
+Use clear normal HTTP errors and simple JSON. The controller writes its shared
+SQLite records as described in [internals](internals.md); no client generator is
+needed. MCP tool inputs follow the
 [mockup](../mockups/agent-experiment.md); SSH carries target commands and streams.
 Exercise both through the real Python application in fast integration tests.

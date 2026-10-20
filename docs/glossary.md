@@ -40,6 +40,9 @@ that a feature exists. Keep entries short and change them with the designs.
 | RPM | A software package containing files and information about dependencies and installation. |
 | rpm-ostree | A tool that assembles RPMs and configuration into an OSTree system. |
 | OSTree | A tool for storing system versions, sharing unchanged files and deploying them. |
+| Writable layer | Disposable file changes placed over the unchanged candidate OS for one run. |
+| GRUB | The bootloader first selected to start recovery or a one-time candidate run. |
+| SQLite | The embedded database used for controller work records. |
 | Deployment requirements | Required files, layout and compatibility details for Quirkbench to assemble and deploy a candidate. |
 | Candidate hook | A named point in candidate execution where an investigation test program can run. |
 | Image | A file containing a system that can be written to a device and booted. |

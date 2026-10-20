@@ -30,6 +30,7 @@ $ quirkbench controller run
 Quirkbench controller listening at https://192.168.1.20:7443
 Target SSH: 192.168.1.20:7444
 Agent MCP: http://127.0.0.1:7442/mcp
+MCP token file: ~/.quirkbench/mcp-token
 Keep this terminal open. Ctrl+C stops the controller.
 
 In another terminal: quirkbench recovery build
@@ -154,6 +155,8 @@ Investigation authorized. Internal disks and persistent firmware are excluded.
 
 Add this MCP server in your coding agent's settings:
   URL: http://127.0.0.1:7442/mcp
+  Authorization header: Bearer <contents of ~/.quirkbench/mcp-token>
+  Save these connection settings once. Keep the token out of agent prompts.
 
 Give your agent this request:
   Use Quirkbench to investigate microphone-dropout. Reproduce the failure,
@@ -162,7 +165,8 @@ Give your agent this request:
 Watch: quirkbench monitor microphone-dropout
 ```
 
-The user adds the MCP server and gives their coding agent the displayed request.
+The user copies the token into their client's MCP authentication settings, adds
+the server, and gives their coding agent the displayed request.
 
 ```text
 Agent · Quirkbench tools
@@ -213,9 +217,9 @@ Agent · Quirkbench tools
 
 ```text
 Agent · Quirkbench tools
-✓ rpm_ostree_install_live      Add a diagnostic tool to this run
+✓ rpm_overlay_install      Add a diagnostic tool to this run
 ✓ controller_build_script_start  Build changed PipeWire RPMs
-✓ rpm_ostree_install_live      Install those RPMs · This run only
+✓ rpm_overlay_install      Install those RPMs · This run only
 ✓ ssh_command_start           Restart the affected service
 ↻ ssh_command_start           Start another recording
 ↻ ssh_command_wait            Wait quietly for the new recording to finish

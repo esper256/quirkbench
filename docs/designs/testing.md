@@ -177,6 +177,9 @@ independent timeouts and quiet waiting. A confirmed new boot ends the old comman
 wait even while evidence is uploading. Recovery checks that cleanup preserves active
 work, unconfirmed evidence and connection settings; candidate edits cannot silently
 become the next run's defaults. Simulate storage errors without filling the host disk.
+Check that a never-connected candidate requests recovery after its startup deadline,
+while a later disconnect does not. Exercise local MCP token and browser-request
+checks through the real server without a large security test matrix.
 
 Later journeys may reuse real setup/pairing through shared helpers. Do not seed
 private database records to save a few milliseconds. Split journeys only when the

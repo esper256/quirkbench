@@ -12,6 +12,10 @@ directories and do not rebuild unchanged software or repeat a successful agent b
 Provide context and short guides for the supported kernel/userspace builds, required
 output, debugging symbols and deployment choices. Include matching source/package
 references and build dependencies so the agent can prepare source without guessing.
+Quirkbench's supported build helpers supply `BUILD.md`, `DEPLOY.md` and incremental
+scripts using a pinned build container. Resolve sources and patches from the actual
+selected Bazzite packages, including custom repositories; Fedora sources alone may
+not match. The agent prepares and edits source and fixes compilation errors.
 Package output as RPMs where useful for OS assembly or installation. A standalone probe or file change needs no RPM.
 Use official packages and cache selected versions without becoming a distribution
 mirror. Record resolved packages when they affect the experiment.
@@ -25,6 +29,10 @@ Candidate hooks support startup/shutdown tests. They are optional alongside
 live commands, not the only way to run diagnostic code. Supply evidence and working
 directories to both. Never require the agent to predict every future inspection at
 build time. Earlier boot instrumentation remains a candidate-source change.
+
+Before producing the first bootable image, record whether the initial path supports
+Secure Boot and how experimental kernels meet that choice. Never automatically
+change firmware settings or enroll keys. Ask for any required human action.
 
 Recovery image builds remain Quirkbench's responsibility. Start with matching
 kernel/modules and PipeWire RPM builds for the selected rpm-ostree base. The agent

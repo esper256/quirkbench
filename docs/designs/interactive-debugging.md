@@ -133,15 +133,18 @@ attached to a process across a reboot.
 Each command has its own agent-selected execution timeout within human limits.
 There is no overall run deadline and no sum of command durations. A healthy target
 stays available while the agent thinks or builds elsewhere. Wait timeouts return
-control without stopping work. Boot/reconnect waits are bounded and report failure;
-they do not become a lifetime limit after connection succeeds. No arbitrary memory cap.
+control without stopping work. Boot/reconnect waits are bounded and report failure.
+Separately, the [candidate startup deadline](recovery.md#boot-run-return) returns a
+new candidate to recovery if it never connects. Neither limits the run's lifetime
+after connection succeeds. No arbitrary memory cap.
 
 Investigation pause stops new commands/builds/deployments, lets active bounded work
 finish, then returns to recovery; if idle, return immediately. `ssh_command_stop`
 stops one command and its children without ending the run. Explicit `recovery_return`
 stops remaining run commands, allows bounded output flushing and reboots. Force stop
 attempts immediate interruption. Read access and uploads remain available while paused.
-Controller loss alone neither cancels commands nor reboots a healthy target. Commands
+After the first connection, controller loss neither cancels commands nor reboots
+a healthy target. Commands
 keep their timeouts; once done the target waits for reconnection. Any future policy
 for prolonged disconnection must be explicit, not a hidden overall deadline.
 
@@ -168,7 +171,9 @@ After a crash, recovery uploads surviving files and deletes confirmed copies.
 Interactive command records and uploaded files contribute to the same run's results.
 A live-output stream is not proof that all requested evidence has arrived. Commands
 may name expected evidence files relative to the evidence directory. Upload completed
-files using the same HTTPS helper during the run or after recovery. A command result
+files using the same HTTPS helper: command completion triggers upload of its
+declared evidence files; completed output segments may upload earlier. Recovery
+retries surviving files after interruption. A command result
 reports whether those files reached the controller; `https_evidence_wait` waits for
 named files and returns local paths only after receipt, or reports missing files/errors.
 Command completion alone must not imply evidence receipt.

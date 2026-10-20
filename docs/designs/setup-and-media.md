@@ -3,8 +3,10 @@
 Revisable [design](../README.md); commands describe the destination, not current availability.
 
 ```sh
-quirkbench recovery build
 quirkbench setup
+quirkbench controller run
+# In another terminal:
+quirkbench recovery build
 quirkbench recovery flash
 ```
 
@@ -23,14 +25,16 @@ is generic: put local controller settings and pairing credentials in the shared
 data partition, separately from recovery. Saved network settings go there too.
 Candidates receive read-only access to the connection settings they need and use
 private run copies for network changes; those changes do not alter recovery.
-Pairing credentials are single-use, revocable and non-expiring. No target resizing
-or RAM admission limit. After the fixed boot and recovery space, use the remaining
+The pairing invitation is single-use and non-expiring; the resulting target
+credential remains stable across reboots until explicitly revoked. No target
+resizing or RAM admission limit. After the fixed boot and recovery space, use the remaining
 space for candidate software, settings, evidence and temporary files together.
 Use the shared space as needed; report shortages when they occur.
 
-Show the running controller's local MCP URL for the user's agent settings, without
-requiring a specific agent product. The same controller process serves MCP,
-HTTPS and incoming AsyncSSH connections. Setup records the target-reachable
+Setup also creates one private local MCP access token. Show its file location
+with the running controller's MCP URL for one-time agent configuration; keep the
+secret out of routine output. Do not require a specific agent product. The same
+controller process serves MCP, HTTPS and incoming AsyncSSH connections. Setup records the target-reachable
 connection addresses and ports; flashing supplies them to the target. No separate
 MCP command or tunnel setup.
 

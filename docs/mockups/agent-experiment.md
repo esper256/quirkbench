@@ -19,7 +19,7 @@ Excluded: Internal disks, persistent firmware, edits to Quirkbench
 
 Workspace: /home/sam/quirkbench-work/microphone-dropout
 Build guides: BUILD.md, DEPLOY.md (relative to Workspace)
-BUILD.md: Matching source/package references, dependencies and incremental build commands.
+BUILD.md: Matching Bazzite package sources, patches, pinned build container and incremental commands.
 DEPLOY.md: Required RPMs and symbols, compatible package versions and file layout.
 Prepare and edit source using these guides. Local build scripts are optional helpers.
 Relative controller paths use Workspace. SFTP destinations use the target working
@@ -40,7 +40,7 @@ Tools for this target:
   https_evidence_wait          Wait for named files to arrive on the controller
   sftp_upload                  Copy a file over the existing SSH connection
   controller_build_script_start  Run the supplied local build script
-  rpm_ostree_install_live       Apply RPM changes to this run
+  rpm_overlay_install          Install RPMs in this run’s temporary writable layer
   rpm_ostree_prepare_candidate  Prepare a saved candidate from selected changes
   recovery_return              End this run and return to recovery
   controller_work_wait         Quietly wait for accepted controller work
@@ -50,10 +50,14 @@ Within a run you can execute commands, send input to interactive programs,
 copy files, install packages and change software. Use root when needed within the authorized scope.
 Choose an execution timeout for each command. Commands have independent timers.
 The run stays available while you think or build. There is no overall run deadline.
+On a new boot, startup_connect_timeout_seconds returns the candidate to recovery
+if it never connects. That timer ends at the first successful connection.
 A wait timeout returns control without cancelling the command.
 ssh_command_stop stops one command. recovery_return stops remaining commands,
 flushes available output and returns to recovery. Pause lets active commands finish.
 Tools return bounded output and a reference to complete saved output.
+Declared evidence files upload when their command finishes; completed log segments
+may upload sooner. Command records and output are saved on USB.
 Long commands run independently. Start other commands while they run, then use
 ssh_command_wait for completion, an agreed deadline or an error. No periodic polling.
 Use ssh_command_read only when you want to inspect output before completion.
@@ -88,7 +92,7 @@ Output: {"status":"ready","candidate_id":"baseline-1","base_record":"baseline.js
 
 ```text
 Tool: recovery_boot_ostree
-Input: {"investigation":"microphone-dropout","candidate":"baseline-1","boot_wait_timeout_seconds":300,"request_id":"baseline-1"}
+Input: {"investigation":"microphone-dropout","candidate":"baseline-1","startup_connect_timeout_seconds":300,"request_id":"baseline-1"}
 Output: {"work_id":"work-1","status":"starting","next_tool":"controller_work_wait"}
 
 Tool: controller_work_wait
@@ -101,7 +105,7 @@ Output: {
   "control":"interactive",
   "mutable_files":"Fresh from baseline-1 defaults",
   "network":"Connected using saved recovery settings, supplied read-only",
-  "live_changes":{"packages":"supported","direct_files":"temporary writable layer; incompatible package operations may require a fresh run"},
+  "live_changes":{"packages":"supported RPM transactions in a temporary writable layer","direct_files":"temporary writable layer; unsupported package transactions require a prepared candidate"},
   "tools_available":["journalctl","dmesg","gdb","strace","perf","pw-cli","arecord"],
   "evidence_directory":"/run/quirkbench/evidence",
   "working_directory":"/run/quirkbench/work",
@@ -139,9 +143,9 @@ Output: {"status":"stopped","output_file":"results/run-1/commands/command-3.txt"
 ## Improvise without rebooting
 
 ```text
-Tool: rpm_ostree_install_live
+Tool: rpm_overlay_install
 Input: {"run_id":"run-1","packages":["lsof"],"request_id":"package-1"}
-Output: {"status":"installed","method":"rpm-ostree live package addition","output":"lsof is available in this run.","persistence":"this run only","boot_selection":"unchanged"}
+Output: {"status":"installed","method":"RPM installation in temporary writable layer","output":"lsof is available in this run.","persistence":"this run only","boot_selection":"unchanged"}
 
 Tool: ssh_command_start
 Input: {"run_id":"run-1","argv":["lsof","/dev/snd/pcmC0D0c"],"as_root":true,"timeout_seconds":10,"request_id":"inspect-2"}
@@ -179,9 +183,9 @@ Output: {"work_id":"work-2","status":"running","command":"./build-pipewire.sh","
 
 Tool: controller_work_wait
 Input: {"work_id":"work-2"}
-Output: {"status":"finished","exit_code":0,"build_id":"build-1","files":"output/pipewire/","next_tools":["rpm_ostree_install_live","rpm_ostree_prepare_candidate"],"instructions":"Live installation changes this run. Restart the affected service when ready. A prepared candidate gives a clean repeatable starting point."}
+Output: {"status":"finished","exit_code":0,"build_id":"build-1","files":"output/pipewire/","next_tools":["rpm_overlay_install","rpm_ostree_prepare_candidate"],"instructions":"Live installation changes this run. Restart the affected service when ready. A prepared candidate gives a clean repeatable starting point."}
 
-Tool: rpm_ostree_install_live
+Tool: rpm_overlay_install
 Input: {"run_id":"run-1","build_id":"build-1","request_id":"install-1"}
 Output: {"status":"installed","software":"baseline-1 with live changes","restart_needed":["pipewire"],"persistence":"this run only","evidence_preserved":true}
 
@@ -203,9 +207,9 @@ The agent uses quiet waiting, inspects the new evidence and decides whether a cl
 ### If live installation is unavailable
 
 ```text
-Tool: rpm_ostree_install_live
+Tool: rpm_overlay_install
 Input: {"run_id":"run-1","build_id":"build-1","request_id":"install-alternative"}
-Output: {"status":"reboot_required","changed":false,"reason":"This run already uses a writable file layer that cannot be combined with this package operation.","next_tool":"rpm_ostree_prepare_candidate","instructions":"Prepare baseline-1 plus build-1, then return to recovery and boot that candidate. The current run remains available."}
+Output: {"status":"reboot_required","changed":false,"reason":"These RPMs require an installation step the live helper cannot perform.","next_tool":"rpm_ostree_prepare_candidate","instructions":"Prepare baseline-1 plus build-1, then return to recovery and boot that candidate. The current run remains available."}
 ```
 
 ## Retain a change for clean repeats
@@ -251,7 +255,7 @@ Input: {"work_id":"work-4"}
 Output: {"status":"finished","evidence":"received","target":"connected in recovery","results":"results/run-1/","cleanup":"Run files discarded. Prepared candidates, recovery settings and controller results retained."}
 
 Tool: recovery_boot_ostree
-Input: {"investigation":"microphone-dropout","candidate":"candidate-2","boot_wait_timeout_seconds":300,"request_id":"run-2"}
+Input: {"investigation":"microphone-dropout","candidate":"candidate-2","startup_connect_timeout_seconds":300,"request_id":"run-2"}
 Output: {"work_id":"work-5","status":"starting","stage":"Recovery is deploying candidate-2 with fresh mutable files and saved connection settings.","next_tool":"controller_work_wait"}
 
 Tool: controller_work_wait

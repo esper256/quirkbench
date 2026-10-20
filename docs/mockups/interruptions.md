@@ -58,6 +58,19 @@ Waiting for target lab-laptop to respond.
 └──────────────────────────────────────────────────────────┘
 ```
 
+## Target · New candidate could not connect
+
+```text
+Quirkbench · Recovery system
+Run 3 returned to recovery.
+
+The candidate could not connect to the controller within 5 minutes of startup.
+Recovery is connected. Saved candidate logs are uploading.
+The failed candidate will not restart automatically.
+
+L Logs    N Network    T Terminal
+```
+
 ## Target · Controller connection lost during a run
 
 ```text

@@ -21,7 +21,8 @@ Implement in three large, coherent stages, with focused verification:
    restart. Start with the [command-to-recovery test journey](testing.md#confront-the-hardest-part-first),
    including evidence receipt and cleanup, before finishing the UI or deployment.
    No image is needed. Plan the latest stable Bazzite import and concrete
-   supported OSTree directory/mount and boot arrangement before building deployment.
+   fresh deployment, per-run writable directories and GRUB one-time boot arrangement.
+   Plan the early real check; local tests do not establish that the OS arrangement works.
 2. **Bootable investigation environment.** Implement baseline preparation, recovery
    TUI, setup/flashing, deployment, evidence upload/cleanup and fresh run files.
    Use the real controller from stage 1. Check preparation, live modification,
@@ -32,11 +33,21 @@ Implement in three large, coherent stages, with focused verification:
    candidates, live-change helpers and finish the human/agent screens. Exercise the
    full investigation journey, including pause, failures and evidence retrieval.
 
+Stage 1 is complete when a supported agent client can use the local controller
+to run concurrent commands on a separate local target process, wait quietly, and
+retrieve output after controller restart. The fast integration journey must also
+exercise candidate interruption, real recovery upload/cleanup and fresh run files.
+Use real connections and processes, replacing only privileged OS work. This first
+working result needs no USB image and makes no boot or hardware claim.
+
 ## Agent decisions and when to ask
 
-Agents may choose ordinary Python libraries, file formats, test helpers, supported
-OSTree commands/layout and container build tooling. The initial base is latest
-stable Bazzite, resolved once per baseline as described in [candidate deployment](candidate-deployment.md).
+Agents may choose ordinary Python libraries, record schemas, test helpers,
+supported OSTree commands/layout and container build tooling. Use the agreed
+SQLite controller store, temporary writable-layer direction and first GRUB
+arrangement; verify their integration rather than treating them as proven.
+The initial base is latest stable Bazzite, resolved once per baseline as described
+in [candidate deployment](candidate-deployment.md).
 Document differences and ask for missing target facts only when they affect reproduction.
 Choose one supported path, keep OS-specific code small and continue through routine
 failures without asking for approval at each step.
