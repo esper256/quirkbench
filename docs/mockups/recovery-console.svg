@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="592" viewBox="0 0 920 592" role="img" aria-labelledby="title desc">
+<title id="title">Quirkbench recovery console mockup</title>
+<desc id="desc">Menu upper left, aligned target status upper right, full-width recovery and MCP log below. Example only.</desc>
+<rect width="920" height="592" fill="#141c19"/>
+<g stroke="#4c685a" fill="none"><rect x="20" y="22" width="880" height="529"/><path d="M20 68H900 M295 68V321 M20 321H900 M20 505H900"/></g>
+<g font-family="DejaVu Sans Mono, monospace" font-size="18" xml:space="preserve">
+<text x="42" y="55" fill="#b6c99a">QUIRKBENCH / RECOVERY</text>
+<text x="42" y="101" fill="#b6c99a">MENU</text>
+<text x="312" y="101" fill="#b6c99a">CURRENT STATUS</text>
+<text x="42" y="124" fill="#d9ded4">  N  Network</text>
+<text x="312" y="124" fill="#90a394">Target</text>
+<text x="492" y="124" fill="#d9ded4">lab-target (7c2a91)</text>
+<text x="42" y="147" fill="#d9ded4">  C  Controller</text>
+<rect x="36" y="152" width="248" height="23" fill="#b6c99a"/>
+<text x="42" y="170" fill="#141c19">&gt; A  Activity</text>
+<text x="312" y="147" fill="#90a394">Network</text>
+<text x="492" y="147" fill="#d9ded4">Workshop Wi-Fi</text>
+<text x="42" y="193" fill="#d9ded4">  L  Logs &amp; reports</text>
+<text x="312" y="170" fill="#90a394">Target IP</text>
+<text x="492" y="170" fill="#d9ded4">192.168.1.81</text>
+<text x="42" y="216" fill="#d9ded4">  I  Target details</text>
+<text x="312" y="193" fill="#90a394">Controller</text>
+<text x="492" y="193" fill="#d9ded4">Connected</text>
+<text x="42" y="239" fill="#d9ded4">  T  Open terminal</text>
+<text x="312" y="216" fill="#90a394">Last contact</text>
+<text x="492" y="216" fill="#d9ded4">1s ago</text>
+<text x="42" y="262" fill="#d9ded4">  P  Power</text>
+<text x="312" y="239" fill="#90a394">Controller URL</text>
+<text x="492" y="239" fill="#d9ded4">https://192.168.1.20:7443</text>
+<text x="42" y="285" fill="#d9ded4"></text>
+<text x="312" y="262" fill="#90a394">Recovery OS</text>
+<text x="492" y="262" fill="#d9ded4">Read-only</text>
+<text x="42" y="308" fill="#d9ded4"></text>
+<text x="312" y="285" fill="#90a394">USB free</text>
+<text x="492" y="285" fill="#d9ded4">21 GiB</text>
+<text x="312" y="308" fill="#90a394">Current work</text>
+<text x="492" y="308" fill="#d9ded4">Idle</text>
+<text x="42" y="354" fill="#b6c99a">RECOVERY &amp; MCP ACTIVITY                                      Live log</text>
+<text x="42" y="377" fill="#d9ded4">14:31:52  RECOVERY  Shared USB storage ready</text>
+<text x="42" y="400" fill="#d9ded4">14:31:54  RECOVERY  Connected to Workshop Wi-Fi</text>
+<text x="42" y="423" fill="#d9ded4">14:31:55  RECOVERY  Controller connected</text>
+<text x="42" y="446" fill="#d9ded4">14:32:01  MCP       Read hardware / received</text>
+<text x="42" y="469" fill="#d9ded4">14:32:02  MCP       Read hardware / finished</text>
+<text x="42" y="492" fill="#d9ded4">14:32:04  MCP       Read boot log / finished</text>
+<text x="42" y="538" fill="#90a394">↑↓ Select   Enter Open   A Activity history   T Terminal   Esc Back</text>
+</g>
+</svg>

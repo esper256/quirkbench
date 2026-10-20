@@ -1,124 +1,64 @@
 # Quirkbench agent instructions
 
-Quirkbench connects coding agents to Linux targets for reproducible experiments and
-evidence-backed patches. **Controller** builds and owns investigations; **target**
-boots experiments and produces evidence. Keep vendor, architecture and boot quirks
-in reviewed profiles/adapters. Generic design does not imply universal tested support.
-An example cannot become a default or requirement without a product reason. Classify
-special cases as core invariant, supported-platform implementation, optional recipe,
-investigation input, local setup or historical evidence.
+Use plain English and the [glossary](docs/glossary.md) in docs, help, plans,
+reviews and messages. Avoid jargon outside it. Use short, complete sentences;
+prefer a plain explanation over adding another term.
 
-## Start here
+Glossary terms may be added or corrected as the design evolves. When code work
+also changes the glossary, explicitly say so in the final summary and name the
+terms added, changed or removed, with a brief reason.
 
-Use the [documentation index](docs/README.md) for operating guides. The root
-[README](README.md) is the aspirational product manual, not available-command evidence.
-The [first-usable tracker #29](https://github.com/esper256/quirkbench/issues/29)
-is the task queue: select one ready, unclaimed issue, check dependencies and open PRs,
-and claim a topic branch before editing. Follow [CONTRIBUTING](CONTRIBUTING.md);
-read only the issue's relevant [C0–C7 contracts](docs/implementation-contracts.md)
-and [C8 product interface](docs/product-interface.md). The
-[roadmap](docs/product-roadmap.md) and [acceptance guide](docs/installation-to-patch.md)
-define scope, not a second status ledger.
+Keep intended screens and command sequences in [docs/mockups](docs/mockups/README.md).
+Update affected examples when changing designs. Show what the user sees instead
+of explaining the interface in prose. Mark examples as illustrative, not requirements
+or promises of current availability. Keep the component sequence diagram in sync.
 
-Prioritize the attended installation-to-patch journey. Reuse implemented foundations;
-do not rebuild them from historical packet descriptions. Managed invocation and
-unattended grants remain separate optional follow-ons. No MCP service in v1.
+Product messages help the user complete a task. Do not put development history,
+internal debates or explanations of our design decisions into the interface.
+Include a restriction only when it explains what the user can do or why an action
+is unavailable.
 
-When authorized for consecutive work, finish a bounded PR, record focused evidence
-and required review, merge only with session authorization, update its issue/tracker,
-then select the next ready task from current main. Never close an unmerged software
-issue or infer native acceptance from fixtures. Coordinate claims/shared files;
-do not take over another active worker's task. Supporting infrastructure is not
-a prerequisite unless it actually blocks the selected product work.
+Read [product requirements](docs/requirements/product.md), then only the relevant
+[design](docs/README.md). Every change to the requirements document needs explicit
+human approval. Agents may revise designs unless a change adds massive complexity
+or substantially reduces capability, performance or ease of use; explain that
+suspect tradeoff and ask the human first.
 
-Pause for conflicting contracts, a new scheduler/database/service, incompatible
-wire/storage semantics, weakened ownership/trust/storage/approval rules or a material
-scope change. Record evidence, options and a recommended decision in the issue.
-Continue independent ready work if safe; otherwise ask the owner. Missing required
-review, production credentials/publication and physical execution are explicit gates.
-See the [cloud worker prompt](docs/cloud-worker-prompt.md) for a reusable work loop.
+Follow common Linux service and command-line conventions. If a proposed or existing
+approach differs substantially from normal practice, flag it before building on it.
+Explain the conventional alternative, why Quirkbench might differ and the cost;
+get human approval for the exception. For example, storing user-editable service
+configuration in SQLite instead of a configuration file deserves this discussion.
+This is guidance for agent judgment, not a product constraint or a ban on databases.
+Do not reopen an exception the human has already approved unless its tradeoffs change.
 
-## Single-user scope
+Quirkbench serves an external agent's low-level Linux experiment loop. Humans
+configure the lab and authorize an investigation; ordinary iterations need no
+per-run human approval in the intended product. Agent-authored diagnostics are
+supported by the design. Do not confuse that direction with current implementation.
 
-One user installs a per-user instance and uses it exclusively. Multi-user/shared
-installations, accounts, roles, tenants and collaboration features are out of scope.
-Do not anticipate them with extra architecture or permission enforcement. Components
-and concurrent workers act for the same user; process coordination and authenticated
-target communication remain necessary. See the [single-user contract](docs/implementation-contracts.md#single-user-installation).
+Legacy docs, old issue wording and existing tests have no requirement authority.
+Do not read the archive as onboarding or restore its constraints incidentally.
+Follow [development guidance](docs/designs/development.md) and [CONTRIBUTING](CONTRIBUTING.md).
+Coordinate existing issues/PRs, use a topic branch/worktree, and preserve unrelated
+changes and owner data. Do not take over another active worker's changes.
 
-## Paths and local configuration
+Derive managed paths from current roots and IDs; store necessary external locations
+once. Paths are locations, not identities. Accept ordinary Unix aliases; preserve
+operation-specific containment and live ownership checks. Single-user software
+needs process coordination, not accounts or blanket file-mode enforcement.
 
-Derive managed paths from the current root and existing IDs; do not persist redundant
-absolute or relative paths. Store necessary external locations once in local configuration.
-Paths are locations, not durable identities. Accept ordinary Unix aliases; retain
-operation-specific containment and live ownership checks.
+Use fresh development state for breaking format changes. No new migrations,
+compatibility layers or elaborate relocation tests. This is not permission to
+reset the owner's state or activate an installation.
 
-For the owner-approved [path refactor](docs/path-portability-plan.md), replace affected
-formats directly: no schema migrations, backwards-compatibility machinery or new
-relocation test suite. Update existing focused tests using fresh development state.
+Use focused existing tests and proportionate new checks; keep expensive build,
+flash and QEMU tests out of routine edits. Full release tests require
+an explicit release request and RELEASE_QUALIFICATION=1. Do not poll long
+jobs repeatedly or delegate agents merely to watch them.
 
-## File permissions
-
-Apply the owner-approved [file-access policy](docs/implementation-contracts.md#file-access-and-permission-policy)
-tracked in [#66](https://github.com/esper256/quirkbench/issues/66). Ordinary user data
-must not be rejected merely for group/other bits or non-0600/0700 modes. Keep private
-creation defaults for secrets and preserve real storage, integrity and worker
-coordination requirements. Existing checks/tests are not their own justification.
-The earlier blanket privacy rule is superseded; implementation review should use
-this revised contract rather than ask the owner to approve the same decision again.
-
-## Preserve the boundaries
-
-- The owner-approved [CLI redesign](docs/cli-redesign-plan.md) replaces old public
-  spellings without aliases. Use task-oriented commands and public `--target`; keep
-  network `--host` for addresses. Preserve existing wire names (`device_id`) and
-  retained evidence meanings; schema extensions require explicit versioned readers.
-- Reuse the controller database and attempt state machine. No host systemd is required;
-  preserve worker identity, bounded resources, whole-worker shutdown and restart
-  fencing through the selected supervisor. Preserve state and unrelated uncommitted work.
-- Follow the [storage policy](docs/architecture.md#storage-protection-policy).
-  Recovery uses stock Fedora packages, DNF5 installroot, dracut and the existing
-  GRUB/GPT assembler; its storage operations are boot-device-only. Candidate kernels
-  retain internal-controller exclusions. No required custom recovery compile or
-  incidental second image builder. See [recovery design](docs/recovery-base.md).
-- Require authenticated setup and exact-candidate/attempt operator approval. Agent
-  proposals, successful builds, pairing and watchdog availability do not grant it.
-- Obtain one independent review using **gpt-6-astra at medium reasoning effort**
-  at the end of a substantial implementation campaign, such as a complete
-  refactoring plan or a feature milestone. Review the accumulated changes before
-  merging the campaign, including affected storage, trust/binding, source/worker
-  ownership, durable execution, shutdown and watchdog authorization boundaries.
-  Do not launch reviewer subagents for individual packets, routine bugs, small
-  refactors, documentation changes or ordinary test failures. Use implementer
-  review and focused tests during development. Resolve findings within the same
-  review cycle; request another review only when the resolution materially changes
-  the reviewed design or guarantees. Concrete architectural, trust, ownership or
-  data-loss concerns still require pausing for the owner's decision; they do not
-  automatically authorize an additional reviewer. This policy supersedes review
-  cadence and effort requirements in older implementation plans and guidance;
-  historical review records remain unchanged.
-- Keep readiness, source capture, worker draining, recovery arrival, evidence durability,
-  safe shutdown and unattended eligibility separate. Do not infer them from one status.
-- Default state lives outside Git checkouts; explicit user-selected state/build/output
-  directories may be checkout-local. Admission never grants recursive cleanup authority. Use configured state
-  and a manually opened `quirkbench monitor`; never launch popup viewers.
-- Ad hoc kernel builds in rootless Podman use the [bounded starter](environments/README.md#observable-bounded-kernel-builds).
-  Verify plain `podman stats` visibility and whole-container resource bounds and shutdown before a long compile. Recovery workers have their own contract.
-
-## Validate the change
-
-Follow the [testing policy](docs/testing-policy.md). Use `make smoke` as needed
-during development and focused software regressions for changed code. `make test`
-defaults to smoke; `make test TESTS=...` selects focused cases. Run `make test-full`
-or dispatch the full CI matrix only at larger software integration milestones,
-not after every small bugfix or change. Documentation changes need link/consistency
-checks and `git diff --check`. Image,
-QEMU, composition/transfer/backup qualification and endurance gates require an
-explicit final major-version release request; never bypass `RELEASE_QUALIFICATION=1`.
-Requested image production, scientific experiments and attended commissioning are
-product operations, not authorization for the release suite.
-
-Do not repeatedly poll, sleep through long jobs or delegate agents to watch tests.
-Record durable commands, identities, logs and results; continue independent work or
-return with an honest pending status. Reuse matching evidence, rerun only checks
-invalidated by changes, and keep changed artifacts unqualified until checked.
+Obtain one independent gpt-6-astra / medium review at the end of a substantial
+implementation effort before merge. No reviewer subagents for individual steps,
+documentation or routine failures. Resolve findings in that cycle; repeat review
+only for material changes to the reviewed design/guarantees. Missing review blocks
+merge, not independent development. Push, merge and live operations need authorization.

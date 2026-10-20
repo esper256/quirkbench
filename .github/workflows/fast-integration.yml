@@ -1,0 +1,14 @@
+name: Fast integration
+on: [push, pull_request]
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked --python 3.12
+      - run: timeout 60s uv run --no-sync pytest -q
+      - run: bash -n src/quirkbench/assets/build-recovery.sh src/quirkbench/assets/build-efi.sh

@@ -1,9 +1,0 @@
-{
-  "schema_version": 1,
-  "request_id": "observation-01",
-  "session_id": "session-01",
-  "operator_id": "operator-01",
-  "answered_at": "2026-09-27T12:03:00Z",
-  "answer": "observed",
-  "note": "Sound was audible from the target speakers."
-}

@@ -1,1 +1,0 @@
-"""Installed Quirkbench JSON Schemas."""
