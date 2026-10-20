@@ -64,7 +64,7 @@ $ quirkbench recovery flash
 │ Recovery image: recovery-1                                │
 │ Controller: https://192.168.1.20:7443                      │
 │                                                          │
-│ Select the USB drive to erase                             │
+│ Select the external drive to erase                       │
 │ > USB Flash Drive     32 GB     /dev/sdb                   │
 │                                                          │
 │ Internal system disk excluded from selection.             │
@@ -72,8 +72,17 @@ $ quirkbench recovery flash
 │ ↑↓ Select     Enter Continue     Esc Cancel               │
 └──────────────────────────────────────────────────────────┘
 
-Erase USB Flash Drive, 32 GB, /dev/sdb? [y/N] y
 [sudo] password for sam:
+WARNING: This will erase the entire drive and all its partitions.
+Requested path: /dev/sdb
+Resolved device: /dev/sdb
+Model: USB Flash Drive
+Serial: example-drive-01
+Size: 32.0 GB
+Existing layout:
+  /dev/sdb   32.0 GB  not mounted
+    /dev/sdb1  32.0 GB  exfat  not mounted
+Type ERASE /dev/sdb to continue, or press Enter to cancel: ERASE /dev/sdb
 
 ✓ Write recovery system
 ✓ Prepare shared space for experiments, evidence and settings
@@ -88,22 +97,30 @@ USB ready. Boot your target computer from this drive.
 The user inserts the USB drive into the target computer and boots from it.
 
 ```text
-┌─ Quirkbench ─────────────────────────── Recovery system ──┐
-│                                                          │
-│ Welcome. Connect to your network to get started.          │
-│                                                          │
-│ Network       Not connected                              │
-│ Controller    https://192.168.1.20:7443                    │
-│ Connection    Waiting for network                        │
-│                                                          │
-│ > Connect to a network                                   │
-│   Controller connection                                  │
-│   Troubleshooting                                        │
-│   Open terminal                                          │
-│   Power                                                  │
-│                                                          │
-│ ↑↓ Select     Enter Open     T Terminal                   │
-└──────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ QUIRKBENCH / RECOVERY                                                        │
+├────────────────────────┬─────────────────────────────────────────────────────┤
+│ MENU                   │ CURRENT STATUS                                      │
+│ > N  Network           │ Target          lab-target (7c2a91)                 │
+│   C  Controller        │ Network         Not connected                       │
+│   A  Activity          │ Target IP       Not assigned                        │
+│   L  Logs & reports    │ Controller      Waiting for network                 │
+│   I  Target details    │ Last contact    Never                               │
+│   T  Open terminal     │ Controller URL  https://192.168.1.20:7443           │
+│   P  Power             │ Recovery OS     Read-only                           │
+│                        │ USB free        21 GiB                              │
+│                        │ Current work    Idle                                │
+├────────────────────────┴─────────────────────────────────────────────────────┤
+│ RECOVERY & MCP ACTIVITY                                           Live log   │
+│ 14:31:50  RECOVERY  Recovery started                                         │
+│ 14:31:52  RECOVERY  Shared USB storage ready                                 │
+│ 14:31:54  RECOVERY  No saved network is available                            │
+│ 14:31:54  RECOVERY  Waiting for a network connection                         │
+│ Next: choose Network to connect this target.                                 │
+│                                                                              │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ ↑↓ Select   Enter Open   A Activity history   T Terminal   Esc Back          │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ```text
@@ -124,29 +141,36 @@ Connected to Workshop Wi-Fi. Saved for the next boot.
 ```
 
 ```text
-┌─ Quirkbench ─────────────────────────── Recovery system ──┐
-│                                                          │
-│ Ready. Start an investigation on your controller computer.│
-│                                                          │
-│ Target        lab-laptop                                 │
-│ Network       Workshop Wi-Fi                             │
-│ Controller    Connected · https://192.168.1.20:7443        │
-│ Pairing       Complete                                   │
-│                                                          │
-│ > Network                                                │
-│   Controller connection                                  │
-│   Troubleshooting                                        │
-│   Open terminal                                          │
-│   Power                                                  │
-│                                                          │
-│ ↑↓ Select     Enter Open     T Terminal                   │
-└──────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ QUIRKBENCH / RECOVERY                                                        │
+├────────────────────────┬─────────────────────────────────────────────────────┤
+│ MENU                   │ CURRENT STATUS                                      │
+│   N  Network           │ Target          lab-target (7c2a91)                 │
+│   C  Controller        │ Network         Workshop Wi-Fi                      │
+│ > A  Activity          │ Target IP       192.168.1.81                        │
+│   L  Logs & reports    │ Controller      Connected                           │
+│   I  Target details    │ Last contact    1s ago                              │
+│   T  Open terminal     │ Controller URL  https://192.168.1.20:7443           │
+│   P  Power             │ Recovery OS     Read-only                           │
+│                        │ USB free        21 GiB                              │
+│                        │ Current work    Idle                                │
+├────────────────────────┴─────────────────────────────────────────────────────┤
+│ RECOVERY & MCP ACTIVITY                                           Live log   │
+│ 14:31:52  RECOVERY  Shared USB storage ready                                 │
+│ 14:31:54  RECOVERY  Connected to Workshop Wi-Fi                              │
+│ 14:31:55  RECOVERY  Controller connected                                     │
+│ 14:32:01  MCP       Read hardware / received                                 │
+│ 14:32:02  MCP       Read hardware / finished                                 │
+│ 14:32:04  MCP       Read boot log / finished                                 │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ ↑↓ Select   Enter Open   A Activity history   T Terminal   Esc Back          │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Controller computer · Start an investigation
 
 ```console
-$ quirkbench investigation start microphone-dropout --target lab-laptop
+$ quirkbench investigation start microphone-dropout --target lab-target
 What problem do you want to investigate?
 > Microphone capture stops after several minutes.
 
@@ -184,7 +208,7 @@ Agent · Quirkbench tools
 ┌─ Quirkbench · microphone-dropout ────────────────────────┐
 │ Investigating · Run 1                                   │
 │                                                        │
-│ Target       lab-laptop · Connected                     │
+│ Target       lab-target · Connected                     │
 │ Software     Baseline with live changes                 │
 │ Persistence  Live changes apply to this run only        │
 │ Active       Recording microphone · 04:12 elapsed       │
@@ -249,4 +273,25 @@ Evidence received. Uploaded USB copies removed.
 
 Results: ~/quirkbench-work/microphone-dropout/results/
 Resume: quirkbench investigation resume microphone-dropout
+```
+
+## Controller computer · Update recovery later
+
+```console
+$ quirkbench recovery flash --device /dev/sdb --image recovery-2
+Update recovery and boot files only. Wi-Fi, pairing, candidates and diagnostics will be kept.
+Requested path: /dev/sdb
+Resolved device: /dev/sdb
+Model: USB Flash Drive
+Serial: example-drive-01
+Size: 32.0 GB
+Existing layout:
+  /dev/sdb   32.0 GB  not mounted
+    /dev/sdb1   0.3 GB  vfat  not mounted
+    /dev/sdb2   4.0 GB  ext4  not mounted
+    /dev/sdb3   1.1 GB  ext4 QB-BOOT  not mounted
+    /dev/sdb4  26.6 GB  ext4 QB-DATA  not mounted
+Type UPDATE /dev/sdb to continue, or press Enter to cancel: UPDATE /dev/sdb
+Writing and checking recovery filesystem; keeping shared data
+Recovery updated. Saved Wi-Fi and controller pairing retained. Next boot: recovery.
 ```

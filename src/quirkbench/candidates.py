@@ -114,10 +114,10 @@ async def deploy_candidate(data: Path, boot: Path, linux, request, settings, pro
     await linux.command('ostree', 'admin', f'--sysroot={data}', 'os-init', run_id, log=log)
     await linux.command('ostree', 'admin', f'--sysroot={data}', 'deploy', f'--os={run_id}', '--no-merge', '--retain',
                         '--karg-none', f'--karg=root=UUID={media["data_uuid"]}', '--karg=rw',
-                        '--karg=panic=10', '--karg=rd.shell=0', '--karg=rd.emergency=reboot',
+                        '--karg=panic=10', '--karg=console=tty1', '--karg=rd.shell=0', '--karg=rd.emergency=reboot',
                         f'--karg=quirkbench.run={run_id}', f'--karg=quirkbench.data={media["data_uuid"]}',
-                        '--karg=selinux=0', '--karg=noresume', '--karg=rd.driver.blacklist=nvme,ahci,mmc_block',
-                        '--karg=modprobe.blacklist=nvme,ahci,mmc_block', commit, log=log)
+                        '--karg=selinux=0', '--karg=noresume', '--karg=rd.systemd.gpt_auto=0', '--karg=systemd.gpt_auto=0', '--karg=rd.driver.blacklist=ahci,mmc_block',
+                        '--karg=modprobe.blacklist=ahci,mmc_block', commit, log=log)
     entries = list((data / 'boot' / 'loader' / 'entries').glob('*.conf'))
     matching = [p for p in entries if f'quirkbench.run={run_id}' in p.read_text()]
     if len(matching) != 1:

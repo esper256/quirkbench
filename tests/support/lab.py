@@ -33,6 +33,11 @@ class ToolResults(Linux):
         self.release_deploy = asyncio.Event()
         self.release_deploy.set()
         self.calls = []
+        self.read_only_disks = set()
+        self.diagnostic_started = asyncio.Event()
+        self.release_diagnostic = asyncio.Event()
+        self.release_diagnostic.set()
+        self.disk_inventory = []
 
     async def command(self, *argv, **kwargs):
         args = list(map(str, argv))
@@ -40,7 +45,15 @@ class ToolResults(Linux):
         result = {'exit_code': 0, 'output': ''}
         if kwargs.get('log'):
             atomic_write(Path(kwargs['log']), 'External tool progress\n')
-        if args[0] == 'podman':
+        if args[0] == 'lsblk':
+            inventory = self.disk_inventory
+            if '--tree' not in args:
+                # lsblk omits hierarchy without --tree or the NAME column.
+                inventory = [{k: v for k, v in disk.items() if k != 'children'} for disk in inventory]
+            result['output'] = json.dumps({'blockdevices': inventory})
+        elif args[0] == 'blockdev' and args[1] == '--setro':
+            self.read_only_disks.add(args[2])
+        elif args[0] == 'podman':
             if args[1:3] == ['image', 'inspect']:
                 result['output'] = json.dumps([{'Digest': 'sha256:' + 'b'*64, 'Id': 'sha256:' + 'c'*64, 'Labels': {'org.opencontainers.image.version': 'test-build'}}])
             elif args[1:3] == ['image', 'exists']:
@@ -103,6 +116,8 @@ class ToolResults(Linux):
         elif args[0] == 'sync':
             pass
         elif args[0] in ('journalctl', 'lscpu', 'nmcli', 'findmnt'):
+            self.diagnostic_started.set()
+            await self.release_diagnostic.wait()
             if self.fail_diagnostics:
                 raise OSError('No space left for diagnostics')
             # Still execute an actual short process through the production runner.
@@ -240,3 +255,41 @@ class Lab:
                 await self.target_task
         if self.controller_task and not self.controller_task.done():
             await self.stop_controller()
+
+
+def external_nvme_tools():
+    tools = ToolResults()
+    tools.disk_inventory = [
+        {'path': '/dev/nvme0n1', 'type': 'disk', 'tran': 'nvme', 'hotplug': False,
+         'children': [{'path': '/dev/nvme0n1p1', 'type': 'part', 'uuid': 'owner-root', 'mountpoints': ['/']}]},
+        {'path': '/dev/nvme3n1', 'type': 'disk', 'tran': 'nvme', 'hotplug': True,
+         'serial': 'unrelated-serial', 'size': 1000000000000, 'maj:min': '259:8',
+         'children': [{'path': '/dev/nvme3n1p4', 'type': 'part', 'uuid': 'recovery-data'}]},
+        {'path': '/dev/zram0', 'type': 'disk', 'hotplug': False}]
+    return tools
+
+
+async def flash_fixture(tmp_path):
+    from quirkbench.image import build_recovery
+    from quirkbench.media import disk_identity
+    tools = external_nvme_tools()
+    image = await build_recovery(tmp_path, tools, progress=lambda _: None)
+    alias = tmp_path / 'external-drive'
+    alias.symlink_to('/dev/nvme3n1')
+    return tools, alias, tmp_path / 'images' / image['id'], disk_identity(tools.disk_inventory[1])
+
+
+def kernel_partition_fixture(tmp_path):
+    sysfs, dev = tmp_path / 'sys', tmp_path / 'dev'
+    dev.mkdir()
+    disk = dev / 'nvme5n1'
+    disk.touch()
+    parts = {}
+    for number in range(1, 5):
+        name = f'{disk.name}p{number}'
+        entry = sysfs / disk.name / name / 'partition'
+        entry.parent.mkdir(parents=True)
+        entry.write_text(str(number))
+        parts[number] = dev / name
+        parts[number].touch()
+    return disk, sysfs, dev, parts

@@ -87,6 +87,7 @@ async def _build_recovery(root, linux, force, progress):
     rpm = await build_target_rpm(root, linux, tools, log)
     shutil.copy2(rpm, stage / 'target.rpm')
     shutil.copy2(ASSETS / 'build-recovery.sh', stage / 'build.sh')
+    shutil.copy2(ASSETS / 'build-efi.sh', stage / 'build-efi.sh')
     progress('Installing recovery packages and preparing boot files')
     await linux.command('podman', 'run', '--rm', '--user', '0', '-v', f'{stage.resolve()}:/work:Z',
                         tools, 'bash', '/work/build.sh', log=log)
@@ -99,7 +100,7 @@ async def _build_recovery(root, linux, force, progress):
     result = root / 'images' / image_id
     record = {'id': image_id, 'inputs': key, 'files': hashes,
               'source': source_hash(), 'tools_image': tools_id, 'secure_boot': False,
-              'architecture': 'x86_64', 'boot_checked': False}
+              'architecture': 'x86_64', 'settings_format': 1, 'boot_checked': False}
     save_json(stage / 'image.json', record)
     if result.exists():
         shutil.rmtree(stage)

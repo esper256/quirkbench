@@ -236,3 +236,14 @@ Do not pursue a coverage percentage or perfect realism. Add realism when it clos
 an important known gap; add a mock when external cost prevents useful routine
 coverage. If making a fast test realistic requires a miniature OS or a general
 simulation framework, stop that approach and use a separate focused real check.
+
+The implemented [opt-in recovery boot check](../../boot_tests/README.md) boots an
+already built image with QEMU and OVMF, then checks recovery connection and mounts
+through a temporary controller. It reuses successful results for unchanged boot
+inputs and saves a console screenshot. It is outside the normal test suite.
+Candidate boot/return and physical hardware remain separate checks.
+
+Recovery TUI regressions run in the fast suite: real MCP requests update its status,
+and a pseudo-terminal exercises navigation, resize and shell return. Boot-console
+routing is checked at its configuration boundary. Use a one-time manual QEMU
+confirmation after display/boot changes; do not turn each TUI iteration into a VM test.

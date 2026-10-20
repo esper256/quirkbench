@@ -113,10 +113,61 @@ than treating that complexity as inevitable.
 
 ## Screen and troubleshooting
 
-Show a clean dashboard automatically, including on failure: one next action plus
-Network, Connection, Troubleshooting, Open terminal and Power. Prefer VT2 for UI,
-VT1 for boot logs; switch to the UI without requiring a keypress. Initialize
-temporary networking without evidence-storage or pairing prerequisites; use
+Use the [recovery console mockups](../mockups/recovery-console.md) for appearance
+and navigation. A quiet dark background, warm light text, muted green headings
+and a solid selection bar take inspiration from [Omarchy's consistent themes](https://omarchy.org/manual/themes/).
+Use one 16-color console palette, readable without special fonts; no desktop or
+theme manager. Color supports words and selection markers, never replaces them.
+
+### A dedicated screen
+
+Assign boot console output to `tty1` (`console=tty1`) and explicitly redirect
+kernel messages there with Linux `TIOCL_SETKMSGREDIRECT`. The kernel otherwise
+writes to the active terminal even with `console=tty1`. The recovery TUI owns
+`tty2`; no login prompt shares it. Send service logs to the journal. Switch to
+tty2 once the TUI can draw, without waiting for network or controller success.
+Show setup failures there too. Do not repeatedly switch while the human is using
+another terminal. Merely calling `chvt 2` or hiding boot messages is insufficient.
+Keep logs available through the menu. See Linux [kernel-message redirection](https://man7.org/linux/man-pages/man2/TIOCLINUX.2const.html)
+and systemd [terminal settings](https://www.freedesktop.org/software/systemd/man/256/systemd.exec.html).
+
+### Dashboard and actions
+
+Use two upper panels: the action menu on the left and current status on the right.
+Align status labels and values in two columns; give distinct facts their own rows.
+Use “Target IP” and “Controller URL” to identify which computer each address belongs to.
+A full-width activity log below shows recovery events and incoming MCP actions,
+with timestamps and explicit RECOVERY/MCP labels. It follows new events without
+moving menu selection; Activity opens scrollable history and action details.
+Keep target label and a short stable target ID in current status; show the model
+and full ID in Target details. Use the flashed label before pairing, and say when no label
+is saved. Never use a new boot ID as the target's identity.
+Show network name/interface and address separately from authenticated controller
+connection, address and last contact. Internet access is not a prerequisite.
+Show actual recovery mount and shared-storage status, including unknown values.
+Keep the action menu usable while disconnected or busy.
+A persistent Current work row shows idle, active work or what it is waiting for.
+Update it from the same work records as Activity. Connection and storage problems
+stay visible in their status fields; do not add pinned warnings to the activity log.
+
+The menu offers Network, Controller, Activity, Logs & reports, Target details,
+Open terminal and Power. Arrow keys and Enter work; visible letter shortcuts
+avoid dependence on function keys. Esc returns. Preserve selection on refresh;
+returning from `nmtui`, logs or the shell redraws the whole screen. Fit 80×24;
+on smaller screens stack panels and scroll instead of clipping controls.
+
+The activity log shows actions received by this target: readable name, running or
+finished state, elapsed time, last update and measured progress when available.
+Details show the MCP tool and request/run reference when supplied, plus bounded
+output. Distinguish target work from preparation still running on the controller;
+do not invent incoming commands or percentages. Hide connection heartbeats and
+credentials. Keep recent activity bounded, using existing work records and a small
+status file from the target process; no new daemon or event database. Reconnection
+must not label interrupted work successful. Viewing activity never approves work.
+Power offers restart into recovery and shutdown, with confirmation if work or
+uploads would be interrupted. Do not imply that restarting resumes a candidate.
+
+Initialize temporary networking without evidence-storage or pairing prerequisites; use
 `nmtui`. Save settings automatically when storage works. If it does not, explain
 that the connection is temporary and offer the terminal; do not block networking.
 
@@ -133,7 +184,10 @@ preview, local export or upload to the paired controller. Omit credentials and d
 not post publicly. Pairing is required for upload, not local collection.
 
 Disable internal-disk automount/discovery, swap/resume, repair and firmware-update
-helpers. Exclude internal-storage drivers where practical. Internal storage and
+helpers. Exclude internal-storage drivers where practical. NVMe stays available
+for external USB4/Thunderbolt drives. Before connecting, mark other disks and their
+partitions read-only with `blockdev`; this is an accidental-write precaution, not
+containment of privileged code. Internal storage and
 persistent firmware changes remain outside investigation scope. Power handling
 preserves evidence where possible and explains uncertainty. Failure leaves useful
 diagnostics and a terminal, not only blocked actions.
@@ -143,3 +197,9 @@ diagnostics and a terminal, not only blocked actions.
 Follow the [testing strategy](testing.md): real recovery code, files and uploads;
 replace mount and reboot operations in fast tests. Image and hardware checks
 separately establish boot, mount, watchdog and crash-log behavior.
+Exercise connected, offline, busy and failed screens through the real TUI with
+small recorded status changes. Check navigation, resize and returning from child
+programs; avoid exact screen snapshots. These are fast integration tests, without
+QEMU. After implementing boot/display changes, manually confirm once in QEMU that
+late kernel/service messages stay off tty2 while remaining readable in logs.
+Inspect the real console at 80×24; do not add a slow TUI regression suite.

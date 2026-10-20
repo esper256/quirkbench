@@ -32,7 +32,6 @@ chmod 755 %{buildroot}/usr/bin/quirkbench-$item
 done
 cp /work/quirkbench/assets/quirkbench-*.service %{buildroot}/usr/lib/systemd/system/
 cat > %{buildroot}/usr/lib/modprobe.d/quirkbench.conf <<'CONFIG'
-blacklist nvme
 blacklist ahci
 blacklist mmc_block
 CONFIG

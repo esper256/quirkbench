@@ -55,11 +55,12 @@ def parser():
     b = actions.add_parser('build', help='Build or reuse a cached recovery image')
     b.add_argument('--force', action='store_true', help='Rebuild while retaining the previous completed image')
     actions.add_parser('list', help='List completed recovery images')
-    f = actions.add_parser('flash', help='Erase a selected USB and install recovery')
-    f.add_argument('--device', help='USB device to erase, for example /dev/sdb')
+    f = actions.add_parser('flash', help='Install recovery or update an existing USB while keeping its data')
+    f.add_argument('--device', help='External drive to install or update, for example /dev/sdb or /dev/nvme2n1')
     f.add_argument('--image', help='Completed recovery image ID (default: only available image)')
     f.add_argument('--target', help='Name for the target computer')
-    f.add_argument('--yes', action='store_true', help='Confirm erasing the explicitly selected USB')
+    f.add_argument('--erase', action='store_true', help='Erase all data instead of preserving an existing Quirkbench USB')
+    f.add_argument('--yes', action='store_true', help='Confirm writing the explicitly selected USB')
     i = commands.add_parser('investigation', help='Authorize and follow an investigation', description='Example: quirkbench investigation start first-boot --target laptop')
     acts = i.add_subparsers(dest='action', required=True)
     start = acts.add_parser('start', help='Describe a problem and authorize the agent')
@@ -122,14 +123,16 @@ async def execute(args):
             if not 1 <= choice <= len(images):
                 raise ValueError('Invalid image selection.')
             selected = images[choice - 1]
-        from .media import usb_disks, in_use, disk_identity
+        from .media import usb_disks, in_use, disk_identity, existing_media
+        if args.yes and not args.device:
+            raise ValueError('--yes requires an explicitly selected --device.')
         disks = await usb_disks(linux)
         if args.device:
             device = str(Path(args.device).resolve())
         else:
-            print('Select a USB to erase. Internal system disks are excluded.')
+            print('Select an external drive to erase. Internal system disks are excluded.')
             for index, disk in enumerate(disks, 1):
-                print(f'{index}. {disk["path"]} {disk.get("model", "")} {int(disk["size"])/1e9:.1f} GB')
+                print(f'{index}. {disk["path"]} {disk.get("model", "")} {int(disk["size"])/1e9:.1f} GB  Serial: {disk.get("serial", "unknown")}')
             choice = int(ask('USB number'))
             if not 1 <= choice <= len(disks):
                 raise ValueError('Invalid USB selection.')
@@ -137,17 +140,17 @@ async def execute(args):
         disk = next((d for d in disks if d['path'] == device), None)
         if not disk or in_use(disk):
             raise ValueError('Select an unmounted USB disk. Unmount its partitions first.')
-        if not args.yes or not args.device:
-            if ask(f'Erase {device}, {int(disk["size"])/1e9:.1f} GB? y/N', 'n').lower() != 'y':
-                raise ValueError('USB was not erased.')
-        name = args.target or ask('Target name', 'laptop')
-        connection = await local(root, 'invitation', {'name': name})
+        if existing_media(disk) and not args.erase:
+            connection = {}  # The writer preserves the USB's existing identity.
+        else:
+            name = args.target or ask('Target name', 'target-01')
+            connection = await local(root, 'invitation', {'name': name})
         with tempfile.TemporaryDirectory(prefix='quirkbench-flash-request-') as tmp:
             path = Path(tmp) / 'request.json'
             save_json(path, {'disk': disk_identity(disk), 'connection': connection})
             # Inherit the terminal for sudo and writer progress.
             proc = await asyncio.create_subprocess_exec('sudo', sys.executable, '-m', 'quirkbench.media',
-                       '--device', device, '--image', str((root / 'images' / selected['id']).resolve()), '--request', str(path))
+                       '--device', device, '--image', str((root / 'images' / selected['id']).resolve()), '--request', str(path), *(['--yes'] if args.yes else []), *(['--erase'] if args.erase else []))
             if await proc.wait():
                 raise ValueError('USB writer failed. Review its message before retrying.')
         return {'message': 'USB ready. Boot the target from this drive.'}

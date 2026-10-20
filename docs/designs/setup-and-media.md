@@ -18,7 +18,18 @@ This command builds the recovery image. Experiment candidates use the separate
 [candidate deployment path](candidate-deployment.md); ordinary experiments do not
 reflash the USB. Include tools for the selected deployment and outbound target connection.
 
-**Flash:** refuse missing setup before writes. Use the only compatible image or a short selector. Always ask which USB to erase and show one clear confirmation. Elevate only the disk writer, retain system-disk exclusion and recheck the selected device before writing. Verify/flush completion before declaring success.
+**Flash:** refuse missing setup before writes. Use the only compatible image or a short selector. Offer USB and hot-pluggable external drives, including USB4 NVMe. Show one clear confirmation in the writer after resolving the device path: model, serial, size and current partitions with their mount locations. Refuse mounted drives, including mounted partitions and active swap; recheck after confirmation. Elevate only the disk writer, retain system-disk exclusion and recheck the selected device before writing. Verify/flush completion before declaring success.
+
+Existing Quirkbench media defaults to updating recovery and boot files, keeping
+shared data, Wi-Fi settings and pairing. Check the existing layout, recovery
+partition capacity and saved filesystem identities first. Image metadata declares
+the settings format; format 1 is the original settings directory with saved
+NetworkManager profiles. Change it when the location or format becomes incompatible.
+Do not silently erase an incompatible USB: explain the issue and require `--erase`
+plus the normal erase confirmation. Updates keep filesystem UUIDs and clear any
+pending candidate boot so the next boot enters recovery. Shared data is only
+mounted read-only during the update. An interrupted update can leave recovery
+unbootable; it must not erase saved settings or diagnostics.
 
 Prepare the final [USB layout](recovery.md) during flashing. The recovery image
 is generic: put local controller settings and pairing credentials in the shared

@@ -17,7 +17,9 @@ sequenceDiagram
     Human->>Quirkbench: Configure and run the foreground controller
     Human->>Quirkbench: Build recovery image and flash selected USB
     Quirkbench->>USB: Write bootable software, settings and shared storage
+    Note over Quirkbench,USB: Later compatible recovery updates keep shared data and pairing
     Human->>Target: Boot USB and connect network
+    Target->>Target: Keep boot logs on tty1; display recovery menu on tty2
     Target->>Quirkbench: Pair over HTTPS, then open reverse-direction SSH connection
     Quirkbench-->>Human: Target ready and local MCP URL/token-file instructions
     Human->>Quirkbench: Describe problem and authorize investigation
@@ -32,6 +34,7 @@ sequenceDiagram
     participant Target
     Agent->>Quirkbench: ssh_recovery_inspect
     Quirkbench->>Target: Run selected recovery diagnostic through SSH
+    Target->>Target: Show received action and progress in recovery Activity
     Target-->>Quirkbench: Command output and exit status
     Quirkbench-->>Agent: Bounded output and saved file
     Agent->>Quirkbench: rpm_ostree_prepare_candidate, then controller_work_wait

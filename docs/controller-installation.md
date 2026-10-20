@@ -1,8 +1,10 @@
 # Run the rewrite locally
 
-Milestone 1 has an implementation and fast integration coverage. **The real image
-build, USB flash and Bazzite boot/return are not yet demonstrated.** Do not treat
-passing software tests as proof that the USB boots.
+Milestone 1 has an implementation and fast integration coverage. The recovery
+image builds with rootless Podman on a Fedora host. Recovery boot, its console,
+controller connection and read-only root have been observed in QEMU using OVMF
+and an emulated USB drive. **Physical recovery boot and Bazzite boot/return are
+not yet demonstrated.** See the [separate boot check](../boot_tests/README.md).
 
 Use Python 3.12 or newer:
 
@@ -21,10 +23,21 @@ Use a target-reachable HTTPS address. The same process serves local MCP and targ
 HTTPS/reverse SSH. Configure the agent with its printed MCP URL and the Bearer token
 from the printed token file. There is no controller service manager.
 
+From Distrobox, use `distrobox-host-exec` to run commands on the host when its
+Podman and block devices are not available inside the container. The selected
+Python installation and controller directory must be accessible there.
+
 Builds require rootless Podman. The build container supplies Fedora tools; no
 Distrobox is required. `quirkbench doctor` lists host tools. Flashing additionally
 needs sudo, parted, util-linux, e2fsprogs, dosfstools and GRUB tools. It refuses
-mounted disks and non-USB disks, requires confirmation, and elevates only its writer.
+mounted disks and disks not reported as USB or hot-pluggable, requires confirmation,
+and elevates only its writer. USB4/Thunderbolt NVMe drives are supported by the
+selection checks. Confirm the model and serial, not just the current device name.
+On existing compatible Quirkbench media, `recovery flash` updates recovery and
+boot files while preserving saved Wi-Fi, pairing and shared data. It refuses an
+incompatible layout or settings format; `--erase` explicitly requests a fresh
+installation and deletes those files. Disconnect the drive from the target and
+unmount it on the controller before either operation.
 The first image is x86-64 UEFI and unsigned; it requires Secure Boot to be disabled.
 Quirkbench does not change firmware settings or enroll keys. USB capacity for a real
 Bazzite run has not yet been measured.
@@ -48,6 +61,21 @@ See the [milestone mockup](mockups/recovery-to-candidate.md) for the agent inter
 General candidate shell access and live software changes are later milestones.
 
 ## First real check
+
+The October 20 QEMU check reproduced the GRUB shell with image
+`75b9c229076e64a4c91c7b1c`. Image `057f965cfa62528821be00a2` fixes the EFI
+loader's module lookup and passed recovery connection and mount checks; its
+console showed “Connected.” Boot logs still contain non-blocking Fedora setup
+attempts to write read-only `/etc`, including an authselect service failure.
+These are not proof of a completely clean boot or candidate support.
+
+Image `2e71871f635d7349c8c217f6` adds the recovery dashboard and passed a
+manual QEMU check on October 20: controller connection, MCP inspection, read-only
+OS, local terminal return and Activity view. Injected kernel messages appeared
+on `tty1` while the dashboard remained on `tty2`; service messages remained in
+the journal. Fast console integration tests cover menu interaction, resizing,
+current work, failures and power controls without QEMU. Physical boot of this
+image and candidate deployment remain unverified.
 
 With explicit authorization, first build the recovery image, then select the USB
 for erasure. Observe recovery boot and MCP inspection, candidate preparation,

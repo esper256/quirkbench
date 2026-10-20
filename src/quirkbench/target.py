@@ -35,6 +35,31 @@ class Target:
         self.ready = asyncio.Event()
         self.message = 'Waiting for network'
         self.busy = False
+        self.last_contact = None
+        self.events = []
+        self.inspections = 0
+        self.uploading = False
+
+    def event(self, source, message, detail=''):
+        for secret in (self.settings or {}).get('token'), (self.settings or {}).get('invitation'):
+            if secret:
+                message, detail = message.replace(secret, '[removed]'), detail.replace(secret, '[removed]')
+        self.events.append({'time': time.time(), 'source': source, 'message': message,
+                            'detail': detail[-4096:]})
+        self.events = self.events[-100:]
+        self.publish_screen()
+
+    def publish_screen(self):
+        # Screen updates must never turn a successful operation into a failure.
+        try:
+            save_json(self.home / 'screen.json', self.screen_status())
+        except OSError:
+            pass
+
+    async def update_screen(self):
+        while True:
+            self.publish_screen()
+            await asyncio.sleep(1)
 
     def spawn(self, coro):
         task = asyncio.create_task(coro)
@@ -43,8 +68,12 @@ class Target:
         return task
 
     def record(self, key, **fields):
-        self.work[key] = {**self.work.get(key, {}), **fields}
+        previous = self.work.get(key, {})
+        self.work[key] = {'started': time.time(), **self.work.get(key, {}), **fields, 'updated': time.time()}
         save_json(self.home / 'work.json', self.work)
+        change = fields.get('stage') or fields.get('status')
+        if change and change != (previous.get('stage') if 'stage' in fields else previous.get('status')):
+            self.event('RECOVERY', f'{key}: {change}', fields.get('error', ''))
 
     def status(self):
         return {'target_id': self.settings.get('target_id'), 'name': self.settings.get('name'),
@@ -53,7 +82,28 @@ class Target:
 
     def screen_status(self):
         # Runtime convenience only; evidence and retry records live on USB.
-        return {**self.status(), 'url': self.settings['url'], 'connected': self.connected.is_set()}
+        current = 'Idle' if self.connected.is_set() else 'Waiting for controller'
+        if self.uploading:
+            current = 'Uploading evidence'
+        elif self.active and self.mode == 'recovery' and self.active.get('recovery_boot') != self.boot_id:
+            current = 'Evidence upload waiting'
+        if self.inspections:
+            current = f'Reading diagnostics ({self.inspections})'
+        for record in reversed(list(self.work.values())):
+            if record.get('boot_id') == self.boot_id:
+                if record['status'] in ('deploying', 'prepared', 'boot-requested', 'returning', 'reboot-requested'):
+                    current = record.get('stage') if record['status']=='deploying' else record['status'].replace('-', ' ')
+                    current = current or record['status']
+                    current = {'Downloading missing candidate content': 'Downloading candidate',
+                               'Creating fresh run files': 'Preparing run files'}.get(current, current)
+                    current += f" ({max(0, int(time.time()-record.get('started', time.time())))}s)"
+                    break
+                if record['status'] in ('failed', 'interrupted') and not self.inspections and not self.uploading:
+                    current = record['status'].capitalize()+': '+record.get('error', 'Open Activity')
+                    break
+        return {**self.status(), 'url': self.settings['url'], 'connected': self.connected.is_set(),
+                'last_contact': self.last_contact, 'updated': time.time(),
+                'current_work': current, 'events': self.events}
 
     async def pair(self, http):
         if self.settings.get('target_id'):
@@ -73,13 +123,26 @@ class Target:
         save_json(self.settings_dir / 'connection.json', self.settings)
 
     async def dispatch(self, request):
+        self.last_contact = time.time()
         action = request.pop('action', None)
         if action == 'status' and not request:
             return self.status()
         if action == 'inspect' and self.mode == 'recovery':
             if set(request) - {'view', 'max_lines'}:
                 raise ValueError('Unexpected diagnostic options.')
-            result = await self.linux.inspect(request['view'], request.get('max_lines', 80))
+            view = request['view']
+            if view not in ('hardware', 'network', 'storage', 'boot-log'):
+                raise ValueError('Choose hardware, network, storage or boot-log.')
+            self.inspections += 1
+            self.event('MCP', f'Read {view}: received', 'ssh_recovery_inspect')
+            try:
+                result = await self.linux.inspect(view, request.get('max_lines', 80))
+            except Exception:
+                self.event('MCP', f'Read {view}: failed')
+                raise
+            finally:
+                self.inspections -= 1
+            self.event('MCP', f'Read {view}: '+('finished' if result['exit_code']==0 else 'failed'), result['output'])
             return {**result, 'boot_id': self.boot_id}
         if action == 'deploy' and self.mode == 'recovery':
             if set(request) != {'work_id', 'run_id', 'commit', 'startup_timeout'}:
@@ -96,6 +159,7 @@ class Target:
                 raise ValueError('Finish the existing run before preparing another candidate.')
             self.busy = True
             self.record(key, request=request, status='deploying', boot_id=self.boot_id)
+            self.event('MCP', 'Deploy candidate: received', f'recovery_boot_ostree\nRequest {key}\nRun {request["run_id"]}')
             self.spawn(self.deploy(request))
             return {'status': 'accepted'}
         if action == 'return' and self.mode == 'candidate':
@@ -107,6 +171,7 @@ class Target:
                     raise ValueError('Work ID already has different inputs.')
                 return self.work[key]
             self.record(key, request=request, status='returning', boot_id=self.boot_id)
+            self.event('MCP', 'Return to recovery: received', f'recovery_return\nRequest {key}')
             self.spawn(self.returning(key))
             return {'status': 'accepted'}
         raise ValueError('Action is unavailable in this target mode. Recovery supports named inspections and managed deployment only.')
@@ -148,6 +213,7 @@ class Target:
             self.message = str(e)
         finally:
             self.busy = False
+            self.publish_screen()
 
     async def collect(self, run_id, outcome):
         evidence = self.home / 'evidence' / identifier(run_id)
@@ -272,6 +338,8 @@ class Target:
         for key, record in list(self.work.items()):
             if record['status'] == 'deploying':
                 self.record(key, status='interrupted', error='Target stopped during deployment. No automatic retry.')
+        self.event('RECOVERY', f'{self.mode.capitalize()} started')
+        self.spawn(self.update_screen())
         tls = ssl.create_default_context(cafile=self.settings_dir / 'controller.crt')
         self.spawn(self.startup_deadline())
         target = self
@@ -289,7 +357,9 @@ class Target:
 
             def auth_completed(self):
                 target.connected.set()
+                target.last_contact = time.time()
                 target.message = 'Connected'
+                target.event('RECOVERY', 'Controller connected')
 
         try:
             async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=tls), timeout=aiohttp.ClientTimeout(total=120)) as http:
@@ -303,20 +373,30 @@ class Target:
                             keepalive_interval=10, keepalive_count_max=3)
                         await self.connected.wait()
                         while not self.connection.is_closed():
-                            save_json(self.home / 'screen.json', self.screen_status())
+                            self.publish_screen()
                             try:
+                                self.uploading = bool(self.mode=='recovery' and self.active and self.active['recovery_boot']!=self.boot_id)
+                                if self.uploading:
+                                    self.event('RECOVERY', 'Uploading saved evidence')
                                 await self.upload_evidence(http)
+                                if self.uploading:
+                                    self.event('RECOVERY', 'Evidence received by controller')
                             except (aiohttp.ClientError, OSError, ValueError, RuntimeError) as e:
                                 self.message = f'Diagnostics retained for retry: {e}'
+                            finally:
+                                self.uploading = False
                             await asyncio.sleep(1)
                     except (aiohttp.ClientError, asyncssh.Error, OSError, ValueError) as e:
                         self.message = f'Connection unavailable: {e}'
                     finally:
+                        was_connected = self.connected.is_set()
                         self.connected.clear()
+                        if was_connected:
+                            self.event('RECOVERY', 'Controller disconnected; reconnecting')
                         if self.connection:
                             self.connection.close()
                             await self.connection.wait_closed()
-                        save_json(self.home / 'screen.json', self.screen_status())
+                        self.publish_screen()
                     await asyncio.sleep(2)
         finally:
             for task in list(self.tasks):
@@ -329,6 +409,27 @@ def boot_args():
     return dict(part.split('=', 1) for part in Path('/proc/cmdline').read_text().split() if '=' in part)
 
 
+async def protect_other_disks(linux, data_uuid):
+    """Keep the external boot drive writable; other disks are outside investigations."""
+    result = await linux.command('lsblk', '--json', '--tree', '--paths', '-o', 'PATH,TYPE,UUID')
+    disks = json.loads(result['output'])['blockdevices']
+
+    def entries(node):
+        yield node
+        for child in node.get('children', []):
+            yield from entries(child)
+
+    boot_disks = [disk for disk in disks if any(part.get('uuid') == data_uuid for part in entries(disk))]
+    if len(boot_disks) != 1:
+        raise ValueError('Cannot identify the recovery drive. Other disks will not be used.')
+    for disk in disks:
+        if disk is boot_disks[0] or disk['type'] != 'disk' or disk['path'].startswith('/dev/zram'):
+            continue
+        for part in entries(disk):
+            if part['type'] in ('disk', 'part'):
+                await linux.command('blockdev', '--setro', part['path'])
+
+
 async def prepare_boot():
     """Run before NetworkManager; failure must not remove local networking or the console."""
     linux = Linux()
@@ -338,6 +439,7 @@ async def prepare_boot():
     if 'quirkbench.data' not in args:
         raise ValueError('Missing shared USB identifier in the boot options.')
     uuid = identifier(args['quirkbench.data'])
+    await protect_other_disks(linux, uuid)
     await linux.command('mount', '-o', 'rw', f'UUID={uuid}', data)
     settings = data / 'quirkbench' / 'settings'
     view = Path('/run/quirkbench-settings')

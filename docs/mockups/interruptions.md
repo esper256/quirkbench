@@ -38,7 +38,7 @@ Waiting for the agent's next action.
 ```console
 $ quirkbench investigation stop wake-wifi --force
 Force stop requested. New work stopped.
-Waiting for target lab-laptop to respond.
+Waiting for target lab-target to respond.
 ```
 
 ```text
@@ -87,26 +87,30 @@ P Pause and return to recovery    F Force stop    L Logs
 ## Target · Controller unavailable after returning to recovery
 
 ```text
-┌─ Quirkbench ─────────────────────────── Recovery system ──┐
-│                                                          │
-│ Run ended. Evidence saved on USB; upload waiting.         │
-│                                                          │
-│ Network       Workshop Wi-Fi · Connected                 │
-│ Controller    Cannot reach https://192.168.1.20:7443       │
-│ Evidence      18 MiB waiting to upload                   │
-│ Last attempt  12 seconds ago                             │
-│                                                          │
-│ Check that the Quirkbench controller is running.         │
-│                                                          │
-│ > Retry connection                                       │
-│   Network                                                │
-│   Controller connection                                  │
-│   Troubleshooting                                        │
-│   Open terminal                                          │
-│   Power                                                  │
-│                                                          │
-│ ↑↓ Select     Enter Open     T Terminal                   │
-└──────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ QUIRKBENCH / RECOVERY                                                        │
+├────────────────────────┬─────────────────────────────────────────────────────┤
+│ MENU                   │ CURRENT STATUS                                      │
+│   N  Network           │ Target          lab-target (7c2a91)                 │
+│ > C  Controller        │ Network         Workshop Wi-Fi                      │
+│   A  Activity          │ Target IP       192.168.1.81                        │
+│   L  Logs & reports    │ Controller      Disconnected                        │
+│   I  Target details    │ Last contact    42s ago                             │
+│   T  Open terminal     │ Controller URL  https://192.168.1.20:7443           │
+│   P  Power             │ Recovery OS     Read-only                           │
+│                        │ USB free        21 GiB                              │
+│                        │ Current work    Reconnecting; upload waiting        │
+├────────────────────────┴─────────────────────────────────────────────────────┤
+│ RECOVERY & MCP ACTIVITY                                           Live log   │
+│ 14:31:02  RECOVERY  Returned from candidate run 3                            │
+│ 14:31:02  RECOVERY  Candidate connection timed out                           │
+│ 14:31:05  RECOVERY  Uploading saved run logs                                 │
+│ 14:32:01  RECOVERY  Controller connection lost                               │
+│ 14:32:01  RECOVERY  Unconfirmed evidence kept on USB                         │
+│ 14:32:43  RECOVERY  Reconnecting / no commands running                       │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ ↑↓ Select   Enter Open   A Activity history   T Terminal   Esc Back          │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Target · Upload interrupted
@@ -121,48 +125,28 @@ R Retry now    N Network    T Terminal
 
 ## Target · Saved settings unavailable
 
+The [recovery dashboard](recovery-console.md) keeps its menu and shows:
+
 ```text
-┌─ Quirkbench ─────────────────────────── Recovery system ──┐
-│ Cannot read shared USB storage                           │
-│                                                         │
-│ Saved network and controller settings are unavailable.  │
-│ Experiments cannot start until storage works again.     │
-│ You can connect temporarily to help diagnose this.      │
-│                                                         │
-│ > Connect to a network                                  │
-│   Controller connection                                 │
-│   Troubleshooting                                       │
-│   Open terminal                                         │
-│   Power                                                 │
-│                                                         │
-│ ↑↓ Select     Enter Open     T Terminal                  │
-└─────────────────────────────────────────────────────────┘
+Cannot read shared USB storage.
+Saved network and controller settings are unavailable.
+Connect temporarily using Network, or open Terminal.
+Candidate deployment is unavailable until storage works.
 ```
 
 ## Target · Recovery system problem
 
+The [recovery dashboard](recovery-console.md) keeps its menu and shows:
+
 ```text
-┌─ Quirkbench ─────────────────────────── Recovery system ──┐
-│                                                          │
-│ Cannot save experiment evidence to USB.                  │
-│ No experiment will start.                                │
-│                                                          │
-│ Network       Workshop Wi-Fi · Connected                 │
-│ Controller    Connected                                  │
-│ Problem       Shared USB storage is full                    │
-│                                                          │
-│ > Troubleshooting                                        │
-│   Network                                                │
-│   Controller connection                                  │
-│   Open terminal                                          │
-│   Power                                                  │
-│                                                          │
-│ ↑↓ Select     Enter Open     T Terminal                   │
-└──────────────────────────────────────────────────────────┘
+Cannot save experiment evidence: shared USB storage is full.
+Candidate deployment is unavailable.
+Network connected · Controller connected
+Open Logs & reports to inspect this problem.
 ```
 
 ```text
-┌─ Troubleshooting ─────────────────────────────────────────┐
+┌─ Logs & reports  ─────────────────────────────────────────┐
 │                                                          │
 │ Quirkbench internal debugging report                     │
 │                                                          │
@@ -186,7 +170,7 @@ Report sent to the Quirkbench controller.
 No experiment evidence was changed. Nothing was posted publicly.
 
 On the controller computer:
-quirkbench target report show lab-laptop --latest
+quirkbench target report show lab-target --latest
 
 Enter Back
 ```
@@ -199,21 +183,10 @@ The user selects **Open terminal** or presses **T**.
 Quirkbench recovery system · Local root terminal
 You can change any connected disk here. Type exit to return to the menu.
 
-root@lab-laptop:~# journalctl -b -p err --no-pager
-Oct 07 14:41:03 lab-laptop quirkbench: Cannot save evidence: No space left on device
-root@lab-laptop:~# exit
+root@lab-target:~# journalctl -b -p err --no-pager
+Oct 07 14:41:03 lab-target quirkbench: Cannot save evidence: No space left on device
+root@lab-target:~# exit
 ```
 
-```text
-┌─ Quirkbench ─────────────────────────── Recovery system ──┐
-│ Cannot save experiment evidence to USB.                  │
-│                                                          │
-│ > Troubleshooting                                        │
-│   Network                                                │
-│   Controller connection                                  │
-│   Open terminal                                          │
-│   Power                                                  │
-│                                                          │
-│ ↑↓ Select     Enter Open     T Terminal                   │
-└──────────────────────────────────────────────────────────┘
-```
+The recovery dashboard returns with **Open terminal** still selected and the
+storage warning still visible.

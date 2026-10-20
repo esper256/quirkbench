@@ -6,6 +6,7 @@
 > This example problem does not limit supported investigations. These examples
 > do not add product requirements.
 
+- [Recovery console](recovery-console.md)
 - [Installation to investigation patch](installation-to-patch.md)
 - [Milestone 1: recovery inspection and candidate boot](recovery-to-candidate.md)
 - [Interruptions and troubleshooting](interruptions.md)

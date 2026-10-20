@@ -16,7 +16,7 @@ Input: {"investigation":"microphone-dropout"}
 
 Investigation: microphone-dropout · Authorized
 Problem: Microphone capture stops after several minutes.
-Target: lab-laptop · Connected · Recovery system
+Target: lab-target · Connected · Recovery system
 Allowed: Kernel, audio services and diagnostic programs
 Excluded: Internal disks, persistent firmware, edits to Quirkbench
 

@@ -7,20 +7,36 @@ The user completes [setup, recovery build and USB flash](installation-to-patch.m
 boots the target and connects recovery to the controller.
 
 ```text
-Quirkbench · Recovery system
-
-Target        lab-laptop
-Controller    Connected
-Recovery OS   Read-only
-Shared data   Available
-
-Ready. Start an investigation on your controller computer.
-
-N Network    C Connection    L Logs    T Terminal    P Power
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ QUIRKBENCH / RECOVERY                                                        │
+├────────────────────────┬─────────────────────────────────────────────────────┤
+│ MENU                   │ CURRENT STATUS                                      │
+│   N  Network           │ Target          lab-target (7c2a91)                 │
+│   C  Controller        │ Network         Workshop Wi-Fi                      │
+│ > A  Activity          │ Target IP       192.168.1.81                        │
+│   L  Logs & reports    │ Controller      Connected                           │
+│   I  Target details    │ Last contact    1s ago                              │
+│   T  Open terminal     │ Controller URL  https://192.168.1.20:7443           │
+│   P  Power             │ Recovery OS     Read-only                           │
+│                        │ USB free        21 GiB                              │
+│                        │ Current work    Idle                                │
+├────────────────────────┴─────────────────────────────────────────────────────┤
+│ RECOVERY & MCP ACTIVITY                                           Live log   │
+│ 14:31:52  RECOVERY  Shared USB storage ready                                 │
+│ 14:31:54  RECOVERY  Connected to Workshop Wi-Fi                              │
+│ 14:31:55  RECOVERY  Controller connected                                     │
+│ 14:32:01  MCP       Read hardware / received                                 │
+│ 14:32:02  MCP       Read hardware / finished                                 │
+│ 14:32:04  MCP       Read boot log / finished                                 │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ ↑↓ Select   Enter Open   A Activity history   T Terminal   Esc Back          │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
+[Activity and connection screens](recovery-console.md).
+
 ```console
-$ quirkbench investigation start first-boot --target lab-laptop
+$ quirkbench investigation start first-boot --target lab-target
 What problem do you want to investigate?
 > Check recovery diagnostics and boot the Bazzite baseline.
 
@@ -43,7 +59,7 @@ Tool: investigation_context
 Input: {"investigation":"first-boot"}
 
 Investigation: first-boot · Authorized
-Target: lab-laptop · Recovery · Boot boot-1
+Target: lab-target · Recovery · Boot boot-1
 Recovery OS: Read-only
 Workspace: /home/sam/quirkbench-work/first-boot
 Baseline: Not prepared · Bazzite stable
@@ -61,12 +77,12 @@ Recovery has no agent shell, file-upload or package-install interface.
 
 ```text
 Tool: ssh_recovery_inspect
-Input: {"target":"lab-laptop","view":"boot-log","max_lines":80}
-Output: {"status":"finished","exit_code":0,"output":"…recovery boot messages…","output_file":"/home/sam/.quirkbench/reports/lab-laptop/boot-1/boot.log"}
+Input: {"target":"lab-target","view":"boot-log","max_lines":80}
+Output: {"status":"finished","exit_code":0,"output":"…recovery boot messages…","output_file":"/home/sam/.quirkbench/reports/lab-target/boot-1/boot.log"}
 
 Tool: ssh_recovery_inspect
-Input: {"target":"lab-laptop","view":"storage"}
-Output: {"status":"finished","exit_code":0,"output":"Recovery filesystem: read-only\nShared data: mounted read-write\nNo internal disks mounted","output_file":"/home/sam/.quirkbench/reports/lab-laptop/boot-1/storage.txt"}
+Input: {"target":"lab-target","view":"storage"}
+Output: {"status":"finished","exit_code":0,"output":"Recovery filesystem: read-only\nShared data: mounted read-write\nNo internal disks mounted","output_file":"/home/sam/.quirkbench/reports/lab-target/boot-1/storage.txt"}
 
 Tool: rpm_ostree_prepare_candidate
 Input: {"investigation":"first-boot","base":"ghcr.io/ublue-os/bazzite:stable","name":"baseline","request_id":"prepare-1"}
@@ -82,13 +98,13 @@ Output: {"work_id":"boot-1","status":"starting","stage":"Recovery is downloading
 
 Tool: controller_work_wait
 Input: {"work_id":"boot-1"}
-Output: {"status":"ready","target":"lab-laptop","target_mode":"candidate","run_id":"run-1","boot_id":"boot-2","software":"baseline-1","instructions":"Candidate connected. Use recovery_return to finish the boot check."}
+Output: {"status":"ready","target":"lab-target","target_mode":"candidate","run_id":"run-1","boot_id":"boot-2","software":"baseline-1","instructions":"Candidate connected. Use recovery_return to finish the boot check."}
 ```
 
 ```text
 Quirkbench · Candidate system
 
-Target        lab-laptop
+Target        lab-target
 Software      baseline-1
 Controller    Connected
 Next boot     Recovery
@@ -103,9 +119,9 @@ Output: {"work_id":"return-1","status":"returning","stage":"Save available boot 
 
 Tool: controller_work_wait
 Input: {"work_id":"return-1"}
-Output: {"status":"finished","target":"lab-laptop","target_mode":"recovery","boot_id":"boot-3","evidence":"received","results":"results/run-1/","instructions":"Recovery reconnected. Pairing and network settings retained. Read the results or inspect recovery again."}
+Output: {"status":"finished","target":"lab-target","target_mode":"recovery","boot_id":"boot-3","evidence":"received","results":"results/run-1/","instructions":"Recovery reconnected. Pairing and network settings retained. Read the results or inspect recovery again."}
 
 Tool: ssh_recovery_inspect
-Input: {"target":"lab-laptop","view":"storage"}
-Output: {"status":"finished","exit_code":0,"output":"Recovery filesystem: read-only\nShared data: mounted read-write\nNo internal disks mounted","output_file":"/home/sam/.quirkbench/reports/lab-laptop/boot-3/storage.txt"}
+Input: {"target":"lab-target","view":"storage"}
+Output: {"status":"finished","exit_code":0,"output":"Recovery filesystem: read-only\nShared data: mounted read-write\nNo internal disks mounted","output_file":"/home/sam/.quirkbench/reports/lab-target/boot-3/storage.txt"}
 ```
