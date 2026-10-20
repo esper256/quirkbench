@@ -56,7 +56,7 @@ start independently over existing saved files, so tests can restart either witho
 resetting the other. Expose useful completion signals for startup and work; tests
 wait for these instead of guessing with sleeps.
 
-Prove this structure with the first command-to-recovery journey. If it needs
+Prove this structure with the first recovery/deployment journey. If it needs
 extensive patching or a miniature operating system, simplify the application
 structure before extending it.
 
@@ -105,33 +105,34 @@ be interrupted, evidence is incomplete, files must survive, and only completed
 software may become bootable. A mock that simply says “reboot succeeded” can hide
 nearly every important mistake. Making every test boot a real OS is too costly.
 
-Start with one small working journey before completing deployment or the UI:
+Build the fast tests alongside [milestone 1](development.md#milestone-1-bootable-recovery-and-agent-driven-deployment):
 
-1. Connect a real local MCP client to the controller and a separate target process
-   through reverse SSH. Start a small command which writes output and evidence.
-2. Restart the controller while the target command continues. Reconnect, read its
-   saved result and establish that it ran once.
-3. In a separate variation, interrupt the candidate process and start the real
-   recovery application over the same temporary shared-data directory. Confirm
-   interrupted commands are reported, surviving evidence uploads, and cleanup
-   preserves settings and evidence whose receipt is still unconfirmed.
-4. Prepare another run. Confirm disposable files are fresh and explicitly retained
-   candidate files remain. Replace OS deployment and reboot, not Quirkbench's
-   selection, file handling, receipt handling or cleanup decisions.
+1. Run real setup/pairing and connect a local MCP client to the controller and a
+   separate recovery process through reverse SSH. Read bounded diagnostic output
+   using the real inspection handler. Reject arbitrary shell/argument substitution.
+2. Prepare a small candidate fixture, replacing external image/package work. Run
+   Quirkbench's real deployment and file-selection logic, replacing mount, bootloader
+   and reboot operations. Incomplete preparation must not request a candidate boot.
+3. Restart the target application in candidate mode over the same shared directory,
+   then request return to recovery. Check boot IDs, stable pairing, report upload,
+   fresh run files and cleanup. Lose one upload reply and preserve unconfirmed files.
+4. Restart the controller during deployment or upload; reconnect and report saved
+   progress without blindly repeating writes or boot requests.
 
-This is the first implementation slice, not a large test platform built in advance.
-It establishes the necessary process ownership and storage layout while they are
-still cheap to change. Use ordinary temporary directories and child processes;
-do not simulate an entire Linux boot or implement a second target in test code.
-A process restart proves application restart behavior, not power-loss survival.
+Use ordinary temporary directories and child processes, not an entire simulated
+Linux boot. A process restart proves application behavior, not firmware boot or
+power-loss survival. Read-only mount behavior needs the separate image check.
 
-In parallel with that design work, choose the concrete Bazzite/OSTree mount and
-boot arrangement. Identify which guarantees come from Quirkbench and which depend
-on those tools. Check inexpensive real tool operations on tiny fixtures when
-practical. Record remaining uncertainty explicitly. The first authorized image
-check should exercise deployment, clean return and fresh run files early, rather
-than waiting for the whole product to be finished. A directory fixture cannot prove
-read-only mounts, OSTree live changes or firmware boot selection.
+In milestone 2, extend the same helpers with real concurrent commands and terminals.
+Restart the controller while a target command continues, then retrieve its saved
+result without relaunching it. Interrupt a candidate and confirm recovery reports
+old commands as interrupted while uploading surviving output.
+
+The first authorized image check must exercise the actual Bazzite/OSTree mount and
+GRUB boot arrangement early. Milestone 1 also needs real flash and boot observation;
+keep these slow checks separate from the fast suite. Record unperformed checks as
+missing evidence, not a pass from directory fixtures. Live package replacement is
+checked when that later capability is implemented.
 
 ## Spend realism where it catches our mistakes
 
@@ -162,6 +163,7 @@ tool and refresh it when changing supported versions.
 | Journey | Meaningful result | Selected variations |
 | --- | --- | --- |
 | Install, configure, prepare USB and pair | Editable config saved; prepared media has connection settings; real pairing establishes a target | Cached image reused; controller unavailable; external preparation fails |
+| Inspect recovery and provision a candidate | MCP returns recovery diagnostics, prepares a candidate and requests deployment, one-time boot and return | Incomplete deployment; initial connection failure; reconnect; recovery shell request rejected |
 | Investigate and change software | MCP context leads to concurrent commands, interactive input, file transfer, a changed candidate and received evidence | One command times out or is stopped; live install requires reboot; evidence arrives after command completion |
 | Interrupt and continue | Saved output and attribution survive reconnection; uncertain work is not replayed; pause stops new work and finishes active commands | Controller restart; candidate crash; lost upload acknowledgement; force stop |
 | Recovery and next run | Real recovery UI explains the problem; upload and cleanup preserve the right files; next run is fresh | Missing settings; storage failure; incomplete candidate; internal debugging report without an investigation |

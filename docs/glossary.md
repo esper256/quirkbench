@@ -74,6 +74,7 @@ that a feature exists. Keep entries short and change them with the designs.
 | JSON | A text format used for structured input and output. |
 | Requirement | A human-approved product goal or limit in the requirements document. |
 | Design | A revisable description of how the product should meet its requirements. |
+| Milestone | A useful working result with a clear completion check. |
 | Issue | A tracked problem or task in GitHub. |
 | Branch | A named line of Git changes. |
 | Commit | A saved set of changes in Git. |

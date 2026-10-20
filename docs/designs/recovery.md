@@ -4,6 +4,8 @@ Revisable design supporting the [requirements](../requirements/product.md).
 Keep a dedicated recovery system separate from the writable candidate. Both
 connect outward to Quirkbench. The candidate provides live debugging; recovery
 provides inspection, evidence upload and deployment of the next candidate.
+The [first milestone](development.md#milestone-1-bootable-recovery-and-agent-driven-deployment)
+delivers this recovery-to-candidate boot journey before interactive candidate commands.
 
 ## USB and saved files
 
@@ -26,6 +28,12 @@ Recovery settings include saved network connections, the controller address,
 public key and connection credentials. Flashing writes local settings separately
 from the generic recovery image. Recovery saves later changes there. Use ordinary
 file permissions and expose only needed directories to candidate programs.
+
+Mount recovery OS files read-only. Keep saved settings, downloads and diagnostics
+in shared data, and temporary runtime files in writable runtime directories.
+Remote inspection cannot install software or edit recovery files. Managed
+deployment writes candidate data and the one-time boot request; it does not rewrite
+the recovery OS. The human local root terminal remains an explicit exception.
 
 The candidate needs read access to saved network profiles, including credentials
 needed to connect, and the controller address and trust information. Supply a
@@ -112,7 +120,8 @@ that the connection is temporary and offer the terminal; do not block networking
 
 Menu/T opens a real local root shell; exit returns. Function-key switching is
 optional. The human accepts unrestricted shell risk. The agent gets recovery
-inspection tools, not its unrestricted terminal. Full remote command access,
+inspection through `ssh_recovery_inspect`, plus managed deployment and boot controls,
+not its unrestricted terminal. Full remote command access,
 including root within investigation scope, belongs in the candidate.
 
 Provide Quirkbench internal debugging reports for repairing recovery itself:

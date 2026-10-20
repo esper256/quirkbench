@@ -7,6 +7,7 @@
 > do not add product requirements.
 
 - [Installation to investigation patch](installation-to-patch.md)
+- [Milestone 1: recovery inspection and candidate boot](recovery-to-candidate.md)
 - [Interruptions and troubleshooting](interruptions.md)
 - [Interactive agent debugging through MCP](agent-experiment.md)
 

@@ -9,6 +9,9 @@ reference; it does not need the target's private pairing credential.
 Context names the applicable tools: `ssh_command_start` for target commands,
 `sftp_upload` for files, `rpm_overlay_install` for supported live package changes,
 and `rpm_ostree_prepare_candidate` for saved candidates.
+In recovery, use `ssh_recovery_inspect` for hardware, network, storage and boot logs;
+general shell access and file writes are unavailable. Recovery inspection and
+candidate deployment arrive in milestone 1; candidate interactive tools follow.
 Use the returned next-tool names; do not assume a universal `run` or `deploy`.
 Read investigation context, inspect the target and try to reproduce the problem.
 Run commands, send probes, install packages or modify candidate software live.

@@ -13,32 +13,51 @@ boot selection. Verify that integration early. Keep OS-specific preparation smal
 and separate from shared command/evidence code. Measure repeat-loop cost.
 This does not authorize image builds or hardware runs.
 
-Implement in three large, coherent stages, with focused verification:
+## Milestone 1: bootable recovery and agent-driven deployment
 
-1. **Real interactive connection.** Build the single foreground controller and
-   target command handling. Exercise an actual MCP client, reverse SSH, concurrent
-   local processes, durable output, quiet waits and reconnection after controller
-   restart. Start with the [command-to-recovery test journey](testing.md#confront-the-hardest-part-first),
-   including evidence receipt and cleanup, before finishing the UI or deployment.
-   No image is needed. Plan the latest stable Bazzite import and concrete
-   fresh deployment, per-run writable directories and GRUB one-time boot arrangement.
-   Plan the early real check; local tests do not establish that the OS arrangement works.
-2. **Bootable investigation environment.** Implement baseline preparation, recovery
-   TUI, setup/flashing, deployment, evidence upload/cleanup and fresh run files.
-   Use the real controller from stage 1. Check preparation, live modification,
-   clean reset and recovery-owned boot selection together. Fast tests mock expensive
-   OS work; actual boot confirmation needs a separately authorized image/boot check.
-   Record that gap rather than claiming mocks prove it.
-3. **Complete the patch journey.** Add kernel/PipeWire build helpers, explicit saved
-   candidates, live-change helpers and finish the human/agent screens. Exercise the
-   full investigation journey, including pause, failures and evidence retrieval.
+Build and flash a USB, boot recovery, connect to the controller, inspect recovery
+through MCP, and deploy a Bazzite candidate that boots once and returns to recovery.
+See the [recovery-to-candidate mockup](../mockups/recovery-to-candidate.md).
 
-Stage 1 is complete when a supported agent client can use the local controller
-to run concurrent commands on a separate local target process, wait quietly, and
-retrieve output after controller restart. The fast integration journey must also
-exercise candidate interruption, real recovery upload/cleanup and fresh run files.
-Use real connections and processes, replacing only privileged OS work. This first
-working result needs no USB image and makes no boot or hardware claim.
+Deliver this as one coherent working journey:
+
+- Setup and one foreground controller, with local MCP, pairing, reverse SSH and
+  HTTPS downloads/uploads. Keep credentials stable across reboots.
+- Recovery image build/cache and USB flashing with progress; recovery TUI for
+  networking, connection status, diagnostics and the human terminal.
+- Read-only recovery OS files, with settings, downloaded candidates and diagnostics
+  in shared data. MCP offers specific inspection actions, not an unrestricted shell.
+- Controller preparation of the selected Bazzite baseline. Recovery deploys it on
+  shared data with fresh writable directories and GRUB one-time boot selection.
+- Minimal candidate connection, boot identification, startup connection deadline
+  and return-to-recovery control. Candidate command execution is not needed yet.
+
+Completion means an actual built/flashed USB boots recovery, an agent retrieves
+useful recovery command output through MCP, provisions and boots a candidate, then
+requests return and observes recovery reconnect with the same target identity and
+a new boot ID. Read-only recovery and preserved settings/diagnostics are checked.
+Fast tests alone cannot establish this result. Perform the separate image/physical
+checks with the required authorization; if they remain unperformed, say the milestone
+is not yet demonstrated.
+
+Start with the [fast recovery/deployment journey](testing.md#confront-the-hardest-part-first)
+while implementing this result. Use real application processes, connections and
+files; replace expensive or privileged OS work in routine tests. Do not build a
+separate simulated product. Confirm the actual mount/boot arrangement early rather
+than finishing every screen before the first boot check. Record the initial Secure
+Boot choice and measured USB space before declaring supported setup instructions.
+
+## After milestone 1
+
+2. **Interactive candidate debugging.** Add arbitrary candidate commands,
+   concurrent sessions, interactive input, durable output, quiet waiting, file
+   transfer, command stop and investigation pause/resume. Exercise controller
+   restart and candidate interruption through evidence receipt and cleanup.
+3. **Changed software and the patch journey.** Add kernel/PipeWire build helpers,
+   explicit saved candidates and live-change helpers; complete the investigation
+   screens. Verify temporary writable-layer package changes without disturbing
+   recovery boot selection. Keep general live replacement and patch generation
+   out of milestone 1's completion criteria.
 
 ## Agent decisions and when to ask
 
@@ -65,10 +84,10 @@ reattachment are accepted design choices, not reasons to stop again.
 
 ## Verification and scope
 
-Build shared test tools alongside each stage. Run the relevant fast integration
+Build shared test tools alongside each milestone. Run the relevant fast integration
 tests after a substantial piece works; diagnose failures instead of repeatedly
-running suites. Follow the [testing strategy](testing.md), including the real
-command-to-recovery journey and separate image checks. Start with integration
+running suites. Follow the [testing strategy](testing.md), including real recovery/deployment tests, later command interruption tests and
+separate image checks. Start with integration
 tests, not unit tests. Documentation needs link checks and `git diff --check`.
 
 The rewrite branch already excludes the previous implementation; commit `b807199`

@@ -32,7 +32,8 @@ evidence of a fix. Keep the dedicated recovery system separate from that candida
   use interactive debuggers, transfer files and make live changes in the candidate,
   including root commands, within that scope. No fixed list of permitted probes.
 - Live changes include package installation and replacement of installed OS files.
-  Recovery exposes inspection tools only. Its local human terminal remains unrestricted.
+  Recovery diagnostics are inspection-only; separate managed actions deploy and boot
+  candidates. Its local human terminal remains unrestricted.
 - Keep practical internal-disk and firmware protections. Ordinary permissions and
   clear instructions help cooperative code; a modified kernel cannot be contained.
 - Build/deployment helpers accelerate larger changes. Do not require an RPM, full
@@ -180,9 +181,13 @@ Command completion alone must not imply evidence receipt.
 
 ## First implementation
 
+Start with [milestone 1](development.md#milestone-1-bootable-recovery-and-agent-driven-deployment):
+build/flash recovery, connect, inspect through MCP, deploy a candidate and demonstrate
+boot and return. The full interactive command behavior above follows in milestone 2.
+
 Use [rpm-ostree candidate preparation](candidate-deployment.md), fresh mutable files
-per run and explicit persistence. Recovery owns boot selection. Begin with the
-kernel and PipeWire build paths; other OS support can reuse the same command,
+per run and explicit persistence. Recovery owns boot selection. Add kernel and
+PipeWire build paths in milestone 3; other OS support can reuse the same command,
 connection and evidence code. Start with latest stable Bazzite, record its exact
 version when preparing the baseline and disclose differences from the reported environment. Available debugging tools do not substitute for reproducing the problem.
 

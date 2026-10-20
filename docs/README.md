@@ -6,6 +6,7 @@ Start with the short [product requirements](requirements/product.md). Changes to
 
 See the [example screens and commands](mockups/README.md) for the intended experience,
 from installation to an investigation patch.
+Start implementation with [milestone 1: recovery and candidate deployment](designs/development.md#milestone-1-bootable-recovery-and-agent-driven-deployment).
 
 Then read only the design relevant to the task. Designs describe **how Quirkbench should work**, not a claim that the current code implements them. Agents may improve them without approval except for suspect changes: massive added complexity or a substantial loss of capability, performance or ease of use. Explain such a change and ask the human first.
 

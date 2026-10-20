@@ -37,7 +37,8 @@ read its credentials and shared USB storage; a reported recovery identity is not
 proof against malicious candidate software.
 
 The target connects SSH requests to local processes and terminals. Quirkbench
-restricts recovery tools to inspection and checks investigation authorization.
+restricts recovery diagnostics to inspection and checks investigation authorization.
+Recovery also performs the explicit candidate deployment and boot actions.
 Scope guides the agent and tool actions; it cannot contain arbitrary candidate
 root code.
 Reconnect identifies the current boot and queries target-owned command records.
@@ -61,6 +62,7 @@ Use names such as these in the [mockup](../mockups/agent-experiment.md):
 | Tool | Specific purpose |
 | --- | --- |
 | `investigation_context` | Read the investigation and discover applicable tools. |
+| `ssh_recovery_inspect` | Read bounded hardware, network, storage or boot-log output through recovery's SSH connection. |
 | `ssh_command_start/input/read/wait/stop` | Separate tools for starting, interacting with, waiting for and stopping SSH commands. |
 | `sftp_upload` | Transfer a file over the existing SSH connection. |
 | `controller_build_script_start` | Execute the supplied build script on the controller computer. |
@@ -84,6 +86,19 @@ No plugin registry, compatibility aliases or stored-record migrations follow fro
 this naming choice. Tools share the existing run records and application code.
 Retire unused mechanisms rather than accumulating permanent alternatives.
 Human CLI commands may remain task-oriented.
+
+## Recovery tools in milestone 1
+
+`ssh_recovery_inspect` takes a target, a named view and bounded options such as
+the number of log lines. Recovery maps these to fixed diagnostic commands and
+returns their actual output, exit status and saved-output location. Do not accept
+shell text, arbitrary executables or arbitrary file paths. Reuse ordinary command
+and output handling rather than building a second diagnostic framework.
+
+Recovery exposes this tool alongside candidate preparation, deployment, progress
+and return controls. General `ssh_command_*`, SFTP writes and live package changes
+are candidate-only features delivered later. Minimal candidate connection and
+return control are sufficient for the first boot demonstration.
 
 ## Keep simple HTTP services
 

@@ -23,7 +23,34 @@ sequenceDiagram
     Human->>Quirkbench: Describe problem and authorize investigation
 ```
 
-## Interactive investigation
+## Milestone 1: recovery inspection, deployment and return
+
+```mermaid
+sequenceDiagram
+    participant Agent as User's agent
+    participant Quirkbench
+    participant Target
+    Agent->>Quirkbench: ssh_recovery_inspect
+    Quirkbench->>Target: Run selected recovery diagnostic through SSH
+    Target-->>Quirkbench: Command output and exit status
+    Quirkbench-->>Agent: Bounded output and saved file
+    Agent->>Quirkbench: rpm_ostree_prepare_candidate, then controller_work_wait
+    Quirkbench-->>Agent: Prepared baseline with target connection support
+    Agent->>Quirkbench: recovery_boot_ostree
+    Quirkbench->>Target: Supply candidate content to recovery
+    Target->>Target: Deploy on shared data, prepare fresh files and select one-time boot
+    Target->>Quirkbench: Candidate reconnects with same identity and new boot ID
+    Quirkbench-->>Agent: Candidate connected
+    Agent->>Quirkbench: recovery_return
+    Quirkbench->>Target: Save diagnostics and reboot
+    Target->>Quirkbench: Recovery reconnects and uploads surviving diagnostics
+    Quirkbench-->>Agent: Recovery available and results ready
+```
+
+Recovery OS files stay read-only; managed actions write shared data and boot selection.
+An initial candidate connection failure follows the startup fallback in the recovery design.
+
+## Later milestones: interactive investigation
 
 ```mermaid
 sequenceDiagram

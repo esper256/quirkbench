@@ -5,6 +5,9 @@
 > as calls and results, not as shell commands. This shows the first rpm-ostree
 > implementation; the example does not limit future candidate OS support.
 
+For the first implementation, see [recovery inspection and candidate boot](recovery-to-candidate.md).
+The full interactive journey below follows in later milestones.
+
 ## Discover the investigation
 
 ```text
@@ -31,6 +34,7 @@ Baseline not yet prepared. Preparation records the exact version in baseline.jso
 Available now: target information, logs, rpm_ostree_prepare_candidate
 
 Tools for this target:
+  ssh_recovery_inspect          Read recovery hardware, network, storage or boot logs
   recovery_boot_ostree          Deploy an OSTree candidate and boot it once
   ssh_command_start            Execute on the connected candidate through SSH
   ssh_command_input            Send input to an existing SSH command
