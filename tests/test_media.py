@@ -170,3 +170,19 @@ async def test_recovery_update_unmount_failure_never_deletes_mounted_files(tmp_p
     assert (mounted_boot/'loader/candidate.conf').read_text() == 'saved candidate entry'
     assert (mounted_boot/'grub.cfg').is_file()
 
+
+
+async def test_old_recovery_layout_is_refused_before_writing(tmp_path, monkeypatch):
+    import pytest
+    from tests.support.media import saved_usb
+    from quirkbench.files import read_json, save_json
+    usb = await saved_usb(tmp_path, monkeypatch)
+    record = read_json(usb.image/'image.json')
+    record.pop('boot_method')
+    save_json(usb.image/'image.json', record)
+    before = usb.saved_files()
+
+    with pytest.raises(ValueError, match='older boot layout'):
+        await usb.update(yes=True)
+
+    assert usb.saved_files() == before

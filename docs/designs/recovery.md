@@ -10,7 +10,7 @@ delivers this recovery-to-candidate boot journey before interactive candidate co
 ## USB and saved files
 
 The controller creates the final layout when flashing. No target resizing or
-RAM-based capacity checks. Use these partition roles:
+RAM-based partition sizing. Use these partition roles:
 
 | Partition | Purpose |
 | --- | --- |
@@ -31,8 +31,12 @@ public key and connection credentials. Flashing writes local settings separately
 from the generic recovery image. Recovery saves later changes there. Use ordinary
 file permissions and expose only needed directories to candidate programs.
 
-Mount recovery OS files read-only. Keep saved settings, downloads and diagnostics
-in shared data, and temporary runtime files in writable runtime directories.
+Build recovery as a compressed SquashFS image inside the recovery partition.
+Dracut's live-image support copies it into RAM before starting recovery
+(`rd.live.ram=1`). Mount the OS read-only; use RAM for temporary runtime files.
+Keep saved settings, downloads and diagnostics in shared data. Insufficient RAM
+is a boot failure, not a silent fallback to a disk-backed OS. Measure memory use
+and boot copying time with the built image.
 Prepare authentication and fixed system defaults during image creation. Network
 services write runtime configuration under `/run`, not read-only `/etc`. Generic
 media uses worldwide Wi-Fi limits rather than guessing a country from a timezone.
@@ -244,8 +248,8 @@ late kernel/service messages stay off tty2 while remaining readable in logs.
 Inspect the real console at 80×24; do not add a slow TUI regression suite.
 
 Emergency inspection reads `/proc` and the kernel message buffer without launching
-disk-backed programs. It can help when executables return I/O errors, but cannot
-guarantee survival if the running process needs unreadable code or libraries.
+disk-backed programs. It remains useful when shared storage fails. It cannot guarantee survival
+through kernel or memory failures.
 Saved reports have distinct names and bounded reads. Missing report sections are
 reported individually. Complete candidate journals are saved as files; MCP does
 not paste them into every response.
@@ -257,7 +261,8 @@ Draw from `/run`; read network addresses from the kernel. Mark stalled storage
 checks unavailable instead of keeping an old value. Save network changes in the
 background and say whether they were saved for the next boot.
 
-Hold loaded recovery console and connection code in RAM with Linux memory locking.
+Run the complete recovery OS from the RAM copy; do not lock individual processes
+in memory or maintain lists of libraries to preload.
 Cache the connection details needed for report upload in private `/run` files.
 Evidence collection must not delay SSH reconnection. Emergency reports read bounded
 kernel information without launching programs or waiting for full reports. They
@@ -268,4 +273,5 @@ Offer confirmed force reboot and force power off, including while normal shutdow
 is stuck. These ask the kernel directly, without syncing, programs or disk writes.
 Warn about lost unsaved data and unchanged boot selection. Never escalate silently.
 This improves the chance of recovery; it cannot fix a stuck kernel or guarantee
-that external programs, Wi-Fi services or firmware survive loss of their drive.
+that the kernel, network hardware or firmware keeps responding. Programs can
+still block on failed shared storage. Reboot needs working boot media again.

@@ -119,7 +119,7 @@ async def check(image, work, firmware, timeout):
         with tempfile.TemporaryDirectory(prefix='qb-qmp-') as socket_dir, (work/'qemu.log').open('wb') as log:
             qmp = Path(socket_dir) / 'qmp'
             proc = await asyncio.create_subprocess_exec(
-                'qemu-system-x86_64', '-machine', 'q35,accel=kvm', '-cpu', 'host', '-m', '2048',
+                'qemu-system-x86_64', '-machine', 'q35,accel=kvm', '-cpu', 'host', '-m', '4096',
                 '-drive', f'if=pflash,format=raw,readonly=on,file={firmware}/OVMF_CODE.fd',
                 '-drive', f'if=pflash,format=raw,file={work}/vars.fd',
                 '-drive', f'if=none,id=usb,format=raw,file={disk}',
@@ -140,8 +140,11 @@ async def check(image, work, firmware, timeout):
                     storage_text = Path(storage['output_file']).read_text()
                     (work/'storage.json').write_text(storage_text)
                     (work/'boot.log').write_text(Path(report['output_file']).read_text())
-                    entries = {m['target']: m for m in mounts(json.loads(storage_text)['filesystems'])}
+                    mount_json = storage_text.split('findmnt (exit 0):\n', 1)[1]
+                    filesystem_info, _ = json.JSONDecoder().raw_decode(mount_json)
+                    entries = {m['target']: m for m in mounts(filesystem_info['filesystems'])}
                     assert 'ro' in entries['/']['options'].split(','), 'Recovery root is writable'
+                    assert entries['/']['fstype'] == 'overlay', 'Recovery is not using the live image'
                     assert 'rw' in entries['/run/quirkbench-data']['options'].split(','), 'Shared data is not writable'
                     # Connection readiness need not coincide with the console starting.
                     await asyncio.sleep(2)

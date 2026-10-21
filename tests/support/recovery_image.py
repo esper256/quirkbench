@@ -46,3 +46,60 @@ def check_configuration(root):
     assert (root/'etc/resolv.conf').readlink() == Path('/run/NetworkManager/resolv.conf')
     assert (root/'etc/NetworkManager/system-connections').readlink() == Path('/run/NetworkManager/system-connections')
     assert (root/'etc/sysconfig/regdomain').read_text().strip() == 'COUNTRY=00'
+
+
+def assemble_with_tools(folder):
+    """Run the real build script; replace package/image programs, not its file flow."""
+    import shutil
+    import sys
+    from quirkbench.image import ASSETS
+    from quirkbench.runtime import stage_runtime
+    root, env = prepare_root(folder)
+    (root/'boot').mkdir()
+    (root/'usr/lib/modules/fixture-kernel').mkdir(parents=True)
+    (root/'usr/lib/modules/fixture-kernel/vmlinuz').write_bytes(b'kernel')
+    work = folder/'work'
+    work.mkdir()
+    stage_runtime(work/'target-root')
+    for name in ('configure-recovery.sh', 'build-efi.sh'):
+        shutil.copy2(ASSETS/name, work/name)
+    driver = folder/'tools.py'
+    driver.write_text('''import json, os, shutil, sys
+from pathlib import Path
+name, args = Path(sys.argv[0]).name, sys.argv[1:]
+work = Path(os.environ['BUILD_WORK'])
+if name == 'dnf' and 'install' in args:
+    shutil.copytree(os.environ['BUILD_ROOT'], work/'root', dirs_exist_ok=True)
+elif name == 'dracut':
+    assert 'dmsquash-live' in args
+    assert Path(args[args.index('--kmoddir')+1]).is_dir()
+    assert {'squashfs', 'overlay', 'ext4'} <= set(args[args.index('--filesystems')+1].split())
+    Path(args[-1]).write_bytes(b'initramfs')
+elif name == 'chroot':
+    if args[1] == '/usr/bin/authselect':
+        (Path(args[0])/'etc/authselect-prepared').touch()
+elif name == 'mksquashfs':
+    root = Path(args[0])
+    assert (root/'usr/bin/quirkbench-target').is_file()
+    assert (root/'etc/authselect-prepared').exists()
+    assert not (root/'boot/initramfs.img').exists()
+    Path(args[1]).write_bytes(b'compressed read-only OS')
+elif name == 'mkfs.ext4':
+    shutil.copytree(args[args.index('-d')+1], work/'inspected-media')
+elif name == 'grub2-mkstandalone':
+    Path(args[args.index('-o')+1]).write_bytes(b'EFI')
+elif name == 'rpm':
+    print('fixture-package')
+elif name == 'systemd-analyze':
+    pass
+elif name != 'dnf':
+    raise RuntimeError(name)
+''')
+    for name in ('dnf', 'dracut', 'chroot', 'mksquashfs', 'mkfs.ext4', 'grub2-mkstandalone', 'rpm', 'systemd-analyze'):
+        tool = folder/'fixture-tools'/name
+        tool.write_text(f'#!{sys.executable}\n' + driver.read_text())
+        tool.chmod(0o755)
+    result = subprocess.run(['bash', str(ASSETS/'build-recovery.sh'), str(work), str(folder/'base')],
+                            env=dict(env, BUILD_WORK=str(work), BUILD_ROOT=str(root)), capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    return work/'inspected-media'

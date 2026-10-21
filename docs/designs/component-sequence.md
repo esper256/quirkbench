@@ -20,6 +20,7 @@ sequenceDiagram
     Quirkbench->>USB: Write bootable software, settings and shared storage
     Note over Quirkbench,USB: Later compatible recovery updates keep shared data and pairing
     Human->>Target: Boot USB and connect network
+    Target->>Target: Copy compressed recovery OS to RAM with dracut
     Target->>Target: Keep boot logs on tty1; display recovery menu on tty2
     Target->>Quirkbench: Pair over HTTPS, then open reverse-direction SSH connection
     Note over Target: Menu and connection status use RAM; storage work runs separately

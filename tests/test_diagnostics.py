@@ -121,7 +121,7 @@ async def test_stalled_evidence_does_not_hold_reconnection_or_emergency_inspecti
 
 
 
-async def test_first_emergency_upload_without_recovery_os_files(lab):
+async def test_first_emergency_upload_without_shared_storage(lab):
     from tests.support.terminal import cold_emergency_upload
     report = await cold_emergency_upload(lab.data)
     received = lab.root/'reports'/lab.target.settings['target_id']/report.name

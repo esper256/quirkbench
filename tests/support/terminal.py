@@ -171,14 +171,12 @@ async def cold_emergency_upload(data):
 import asyncio, os, sys
 from pathlib import Path
 from quirkbench.console import Console
-from quirkbench.recovery_runtime import keep_resident
 console = Console(Path(sys.argv[1]))
-keep_resident()
 def unavailable(event, arguments):
     if event == 'open' and isinstance(arguments[0], (str, bytes)):
         path = os.fsdecode(arguments[0])
-        if path.startswith(('/usr/', '/etc/')):
-            raise OSError(5, 'Recovery OS files unavailable: ' + path)
+        if path.startswith(str(Path(sys.argv[1]))):
+            raise OSError(5, 'Shared storage unavailable: ' + path)
 sys.addaudithook(unavailable)
 print(asyncio.run(console.report(upload=True, basic=True)))
 '''

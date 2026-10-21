@@ -11,7 +11,7 @@ It uses an already built recovery image; it does not download or build one.
 The check boots the actual EFI loader and generated GRUB menu from a regular
 USB disk image. It starts a separate temporary controller, waits up to 120 seconds
 for recovery to pair and connect, and requests real diagnostics. It checks that
-recovery's root is read-only and shared data is writable. It saves a screen image
+recovery's live root is read-only and shared data is writable, using a 4 GiB VM. It saves a screen image
 for reviewing the recovery console. No host disks are mounted or erased.
 
 A successful result is reused when the image bytes, generated menu, test script,

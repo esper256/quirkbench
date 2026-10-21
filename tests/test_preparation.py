@@ -138,3 +138,17 @@ async def test_prepare_replacement_while_retained_deployment_is_not_ready_for_de
     assert lab.target.active['run_id'] == deployed['run_id']
     assert lab.tools.reboots == 0
 
+
+
+async def test_recovery_assembly_and_boot_menu_use_ram_live_image(tmp_path):
+    from tests.support.recovery_image import assemble_with_tools
+    from quirkbench.media import grub_config
+
+    media = assemble_with_tools(tmp_path)
+    menu = grub_config({'recovery_uuid': 'unrelated-recovery', 'data_uuid': 'unrelated-data'})
+
+    assert (media/'boot/vmlinuz').read_bytes() == b'kernel'
+    assert (media/'boot/initramfs.img').read_bytes() == b'initramfs'
+    assert (media/'LiveOS/squashfs.img').read_bytes() == b'compressed read-only OS'
+    assert 'root=live:UUID=unrelated-recovery' in menu and 'rd.live.ram=1' in menu
+    assert 'rootflags=ro ro console=' in menu and 'quirkbench.data=unrelated-data' in menu

@@ -13,6 +13,7 @@ NetworkManager-tui
 wpa_supplicant
 dracut
 dracut-network
+dracut-live
 bash
 coreutils
 util-linux

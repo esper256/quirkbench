@@ -210,7 +210,7 @@ else
 fi
 menuentry 'Quirkbench recovery' --id recovery {{
   search --no-floppy --fs-uuid --set=root {media['recovery_uuid']}
-  linux /boot/vmlinuz root=UUID={media['recovery_uuid']} ro console=tty1 quirkbench.data={media['data_uuid']} panic=10 rd.shell=0 rd.emergency=reboot rd.driver.blacklist=ahci,mmc_block modprobe.blacklist=ahci,mmc_block noresume rd.systemd.gpt_auto=0 systemd.gpt_auto=0 selinux=0
+  linux /boot/vmlinuz root=live:UUID={media['recovery_uuid']} rd.live.image rd.live.ram=1 rd.live.overlay.overlayfs=1 rootflags=ro ro console=tty1 quirkbench.data={media['data_uuid']} panic=10 rd.shell=0 rd.emergency=reboot rd.driver.blacklist=ahci,mmc_block modprobe.blacklist=ahci,mmc_block noresume rd.systemd.gpt_auto=0 systemd.gpt_auto=0 selinux=0
   initrd /boot/initramfs.img
 }}
 function load_video {{
@@ -235,6 +235,8 @@ async def write_usb(device, expected, image, connection, linux=None, *, yes=Fals
     record = read_json(image / 'image.json')
     if not record:
         raise ValueError('Select a completed recovery image.')
+    if record.get('boot_method') != 'dracut-live-ram':
+        raise ValueError('This recovery image uses an older boot layout. Build a new recovery image before flashing. Nothing was written.')
     for name, digest in record['files'].items():
         if digest_file(image / name) != digest:
             raise ValueError(f'Image file changed: {name}. Rebuild before flashing.')

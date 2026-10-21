@@ -76,8 +76,10 @@ this checkout does not update an already-running controller or target.
 
 Saved results are available through `run_results` and `saved_output_read`.
 `ssh_recovery_inspect` offers an `emergency` view which launches no external
-programs. This helps when disk-backed programs cannot start, but cannot guarantee operation
-if the running process needs unreadable code or libraries.
+programs or waits for shared storage. Recovery now copies its compressed OS into
+RAM at boot, keeping programs available after drive loss. Saved data still needs
+the drive; kernel or memory failures can still prevent recovery. Force reboot
+and power off remain available from the local menu.
 
 Fresh flashes reserve the recovery image size plus 1 GiB. Existing-media updates
 only require the image to fit; they do not enforce unused headroom or repartition.
