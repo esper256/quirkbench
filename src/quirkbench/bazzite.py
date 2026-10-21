@@ -15,6 +15,17 @@ _BUILDER_PATH = Path(__file__)
 _LOADED_BUILDER = _BUILDER_PATH.read_bytes()
 
 
+DEBUGGING_PACKAGES = ('strace', 'gdb', 'elfutils', 'binutils', 'procps-ng', 'sysstat', 'pciutils',
+                      'usbutils', 'ethtool', 'iw', 'tcpdump', 'jq', 'ripgrep', 'file', 'lsof',
+                      'psmisc', 'trace-cmd', 'stress-ng')
+
+
+def package_requests(names):
+    if not isinstance(names, list) or any(not isinstance(n, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._+:-]*', n) for n in names):
+        raise ValueError('Repository packages must be package names or exact package versions, not URLs, paths or flags.')
+    return sorted(set(names))
+
+
 async def prepare_candidate(root, linux, work, progress):
     check_packaging_source()
     if _BUILDER_PATH.read_bytes() != _LOADED_BUILDER:
@@ -77,12 +88,18 @@ RUN rpm-ostree install /tmp/quirkbench-target.rpm && rm /tmp/quirkbench-target.r
     progress('Adding target connection support to Bazzite')
     await linux.command('podman', 'build', '-t', tag, str(folder), log=log)
     archive = folder / 'candidate.oci'
+    progress('Recording resolved candidate packages')
+    inventory_file = root / 'logs' / (work['id'] + '-packages.txt')
+    await disk(inventory_file.unlink, missing_ok=True)
+    await linux.command('podman', 'run', '--rm', '--entrypoint', 'rpm', tag, '-qa', '--qf', '%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}\\n', log=inventory_file)
+    resolved_packages = sorted((await disk(inventory_file.read_text)).splitlines())
+    save_json(folder / 'packages.json', resolved_packages)
     progress('Exporting the prepared container image')
     await linux.command('podman', 'save', '--format', 'oci-archive', '-o', archive, tag, log=log)
     # Import in the tools container, so the controller host needs only Podman.
     progress('Importing candidate into the shared OSTree repository')
     commit = await import_candidate(root, linux, tools, folder, work['id'], log)
-    result = dict(commit=commit, base=selection, source=runtime_hash(), inputs=changes, changes=['Quirkbench target RPM', 'Bazzite automatic bootloader updates disabled', 'Greenboot checks run as bounded diagnostics without reboot or rollback actions', 'Bazzite automatic hardware-setup deployment/reboot disabled', 'Automatic updates, automount and firmware update services disabled'])
+    result = dict(commit=commit, base=selection, source=runtime_hash(), inputs=changes, package_count=len(resolved_packages), packages_file=inventory_file.relative_to(root).as_posix(), changes=change_summary(changes) + ['Quirkbench target RPM', 'Bazzite automatic bootloader updates disabled', 'Greenboot checks run as bounded diagnostics without reboot or rollback actions', 'Bazzite automatic hardware-setup deployment/reboot disabled', 'Automatic updates, automount and firmware update services disabled'])
     save_json(folder / 'candidate.json', result)
     save_json(cache_file, result)
     archive.unlink(missing_ok=True)
@@ -123,6 +140,11 @@ printf '%s\\n' "$commit" > /work/commit
 def stage_changes(root, folder, changes):
     """Bazzite/RPM-specific image edits; never execute agent probes on the controller."""
     lines = []
+    packages = package_requests(changes.get('repository_packages', []))
+    if changes.get('debugging_tools', True):
+        packages = sorted(set(packages) | set(DEBUGGING_PACKAGES))
+    if packages:
+        lines.append('RUN rpm-ostree install --idempotent ' + ' '.join(packages) + ' && ostree container commit')
     for kind, operation in (('packages', 'install'), ('replacements', 'override replace')):
         names = []
         for index, item in enumerate(changes.get(kind, [])):
@@ -156,3 +178,14 @@ WantedBy=multi-user.target
                   'COPY quirkbench-probe.service /usr/lib/systemd/system/quirkbench-probe.service',
                   'RUN chmod 755 /usr/libexec/quirkbench-startup-probe && systemctl enable quirkbench-probe.service && ostree container commit']
     return '\n'.join(lines)
+
+
+def change_summary(changes):
+    summary = ['Candidate debugging toolkit included' if changes.get('debugging_tools', True) else 'Candidate debugging toolkit omitted']
+    summary += ['Repository package: ' + name for name in changes.get('repository_packages', [])]
+    for kind in ('packages', 'replacements'):
+        summary += [f"Local RPM {kind}: {item['name']} (sha256 {item['sha256']})" for item in changes.get(kind, [])]
+    if changes.get('startup_probe'):
+        probe = changes['startup_probe']
+        summary.append(f"Startup probe: {probe['name']} (sha256 {probe['sha256']}), timeout {changes['startup_probe_timeout_seconds']} seconds")
+    return summary

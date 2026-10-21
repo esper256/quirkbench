@@ -76,3 +76,32 @@ The [mockups](mockups/agent-experiment.md) also show intended later features,
 including interactive terminal input and live package helpers.
 Check the actual tool list instead of assuming those examples are available.
 See [installation and observed checks](controller-installation.md) for build status.
+
+## Optional accelerators
+
+Use `investigation_problem_update` to track several symptoms together, and
+`investigation_timeline` to inspect observed delays. Neither requires a particular
+reasoning format. `ssh_candidate_inventory` reports tools, kernel/build files and
+storage without implying that every listed facility works. Internal disks are
+intentionally excluded from experiments; unmounted does not prove never modified.
+The recovery `services` view lists **failed units**, not every service.
+
+Candidate preparation includes a small debugging toolkit by default; set
+`debugging_tools: false` when environment fidelity calls for omitting it.
+`repository_packages` selects packages from the candidate's repositories.
+`packages` and `replacements` still accept controller-local RPM files. Preparation
+records the requested changes and resolved packages. No tracing or stress tool is
+started automatically. Context reports whether Podman is visible to the running
+controller, separately from target availability and source versions.
+
+When the next actions are already known, `controller_sequence_start` can perform
+an explicit ordered list of supported tools. Start collectors and probes separately,
+then explicitly wait or stop them. Each command keeps its own deadline. Sequences
+stop on errors; inspect progress before explicitly resuming after a controller
+restart. Ordinary individual tool calls remain equally supported.
+
+Humans can use `quirkbench investigation pause NAME`, `force-stop NAME`, and
+`resume NAME`; agents use `investigation_control`. Pause finishes bounded work and
+returns to recovery. Resume permits work but never boots or resumes a sequence.
+Review `run_results` collection status: received files do not establish that all
+requested diagnostics were available or that the experiment succeeded.

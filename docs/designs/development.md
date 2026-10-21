@@ -106,3 +106,12 @@ does not need reviewer agents. Do not repeat reviews or full suites per small st
 
 Designs describe intended behavior. Documentation edits do not establish working
 features or authorize live installations and hardware operations.
+
+## Quirkbench 1.1
+
+Implement issues #192–#202 from the investigation feedback in #191 as one coherent
+change: named problems, timing, ordered operations and pause controls first;
+candidate toolkit/package requests, inventory and diagnostics next. No migrations
+or owner-state reset. Use fresh development state and preserve old files for manual
+reference. Fast tests establish software behavior; updated target tools, image
+builds, flashing and hardware confirmation remain separately authorized work.

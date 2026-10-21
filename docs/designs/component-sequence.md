@@ -68,14 +68,16 @@ sequenceDiagram
 Recovery OS files stay read-only; managed actions write shared data and boot selection.
 An initial candidate connection failure follows the startup fallback in the recovery design.
 
-## Later milestones: interactive investigation
+## Interactive investigation
 
 ```mermaid
 sequenceDiagram
     participant Agent as User's agent
     participant Quirkbench
     participant Target
-    Agent->>Quirkbench: investigation_context, then rpm_ostree_prepare_candidate if needed
+    Agent->>Quirkbench: investigation_context and optional candidate inventory
+    Note over Agent,Quirkbench: Optional ordered list calls the same tools; stop on failure
+    Agent->>Quirkbench: rpm_ostree_prepare_candidate if needed
     Quirkbench-->>Agent: Baseline preparation progress, then completed candidate
     opt Replacing retained run files
         Agent->>Quirkbench: Retrieve needed results; confirm diagnostics receipt
@@ -145,6 +147,8 @@ sequenceDiagram
     Quirkbench->>Target: No new commands or runs, finish bounded active work
     Target->>Quirkbench: Return safely and upload remaining evidence
     Quirkbench-->>Human: Paused, with any missing evidence reported
+    Human->>Quirkbench: Resume investigation
+    Note over Quirkbench: Permit new work; no automatic boot or sequence resume
 ```
 
 Recovery collects diagnostics and deploys the next prepared candidate. Interrupted

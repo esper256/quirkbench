@@ -298,3 +298,9 @@ kernel power request. Exercise emergency HTTPS upload in a fresh Python process
 with recovery-file reads denied, so earlier tests cannot preload its dependencies.
 A separate manual QEMU drive-removal check verifies the built image; it stays
 outside the routine suite.
+
+Group tests by journey: deployment, cancellation, commands, preparation, recovery
+console, media and diagnostics. Keep shared interruption setup in `tests/support`.
+Each lab has fresh state and a real controller. Reuse its HTTP connection pool to
+avoid repeated client setup; keep MCP sessions within their calling tasks and
+close the pool on controller restart. Do not share mutable state between tests.

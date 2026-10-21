@@ -192,3 +192,18 @@ recorded with the deployment and survive repeat boots. Quirkbench retains contro
 of root/deployment selection, internal-disk protections, recovery behavior and
 hibernation-resume settings. Startup probes receive their evidence and scratch
 directories before networking, so early failures can leave retrievable files.
+
+## Candidate debugging tools and package requests
+
+Keep a small default debugging toolkit in candidate preparation, separate from the
+essential connection RPM and recovery image. `debugging_tools: false` omits it.
+Install no automatic collectors or stress services. Agents can request additional
+`repository_packages` from the selected candidate's own repositories, or supply
+local RPM additions/replacements. Resolve dependencies with rpm-ostree, record the
+resulting package versions, and reuse the completed candidate cache. Never resolve
+candidate packages using the controller host's repository configuration.
+
+The preparation result lists local RPM names/digests, startup probe and deadline,
+requested repository packages, toolkit choice and resolved package inventory.
+Different requested changes produce a different cache key. No promise that an
+extra tool leaves the investigated environment identical; the agent judges fidelity.

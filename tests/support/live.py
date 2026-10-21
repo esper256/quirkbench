@@ -73,3 +73,41 @@ async def held_command_admission(monkeypatch):
             yield entered
         finally:
             release.set()
+
+
+@asynccontextmanager
+async def held_reconnect(lab, monkeypatch):
+    """Disconnect SSH while target processes keep running; release without a delay."""
+    import asyncssh
+    reconnect = asyncio.Event()
+    original = asyncssh.connect_reverse
+    async def connect(*args, **kwargs):
+        await reconnect.wait()
+        return await original(*args, **kwargs)
+    target_id = next(iter(lab.controller.connections))
+    with monkeypatch.context() as patch:
+        patch.setattr(asyncssh, 'connect_reverse', connect)
+        lab.controller.connections[target_id].close()
+        await lab.until(lambda: target_id not in lab.controller.connections)
+        try:
+            yield
+        finally:
+            reconnect.set()
+            await lab.until(lambda: target_id in lab.controller.targets)
+
+
+@asynccontextmanager
+async def held_command_wait(controller):
+    """Hold controller observation while target commands continue running."""
+    original = controller.command_wait
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def wait(*args, **kwargs):
+        entered.set()
+        await release.wait()
+        return await original(*args, **kwargs)
+    controller.command_wait = wait
+    try:
+        yield entered
+    finally:
+        release.set()
+        controller.command_wait = original

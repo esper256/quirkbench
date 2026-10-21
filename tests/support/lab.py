@@ -42,8 +42,12 @@ class ToolResults(Linux):
         self.disk_inventory = []
         self.mount_sources = {}
         self.package_version = "1"
+        self.resolved_packages_text = "kernel-core-0:6.1-1.x86_64\nstrace-0:6.1-1.x86_64\n"
         self.fail_acquisition = False
         self.tools_id = "sha256:" + "c" * 64
+
+    def tool_path(self, name):
+        return '/test-tools/' + name
 
     async def command(self, *argv, **kwargs):
         args = list(map(str, argv))
@@ -64,6 +68,10 @@ class ToolResults(Linux):
                 result['output'] = json.dumps([{'Digest': 'sha256:' + 'b'*64, 'Id': self.tools_id, 'Labels': {'org.opencontainers.image.version': 'test-build'}}])
             elif args[1:3] == ['image', 'exists']:
                 result['exit_code'] = 1
+            elif args[1] == 'run' and '--entrypoint' in args and 'rpm' in args:
+                result['output'] = self.resolved_packages_text[-65536:]
+                if kwargs.get('log'):
+                    atomic_write(Path(kwargs['log']), self.resolved_packages_text)
             elif args[1] == 'run':
                 volumes = {value.split(':')[1]: Path(value.split(':')[0]) for i, value in enumerate(args) if i and args[i-1] == '-v'}
                 folder = volumes['/work']
@@ -151,7 +159,7 @@ class ToolResults(Linux):
             atomic_write(Path(args[1]), args[-1])
         elif args[0] == 'sync':
             pass
-        elif args[0] in ('journalctl', 'lscpu', 'lspci', 'lsusb', 'nmcli', 'findmnt', 'ps', 'systemctl'):
+        elif args[0] in ('uname', 'cat', 'sh', 'journalctl', 'lscpu', 'lspci', 'lsusb', 'nmcli', 'findmnt', 'ps', 'systemctl'):
             self.diagnostic_started.set()
             await self.release_diagnostic.wait()
             if self.fail_diagnostics:
@@ -212,6 +220,7 @@ class Lab:
         self.tools = ToolResults()
         self.controller_task = self.target_task = None
         self.stack = AsyncExitStack()
+        self.mcp_http = None
         self.boot_number = 0
 
     async def cli(self, *args):
@@ -231,6 +240,7 @@ class Lab:
         return self
 
     async def start_controller(self):
+        await self.close_mcp()
         self.controller = InterruptedReplyController(self.root, self.tools)
         # Exercise the real reconnect/status loops without production pacing.
         self.controller.poll_interval = self.controller.command_poll_interval = .02
@@ -238,6 +248,7 @@ class Lab:
         await self.until(self.controller.ready.is_set)
 
     async def stop_controller(self):
+        await self.close_mcp()
         self.controller_task.cancel()
         with suppress(asyncio.CancelledError):
             await self.controller_task
@@ -270,13 +281,21 @@ class Lab:
                         raise AssertionError('Application stopped unexpectedly')
                 await asyncio.sleep(.01)
 
+    async def close_mcp(self):
+        if self.mcp_http:
+            await self.mcp_http.aclose()
+            self.mcp_http = None
+
     async def raw_call(self, tool, **args):
         from datetime import timedelta
-        async with httpx.AsyncClient(headers={'Authorization': 'Bearer ' + self.controller.token}, trust_env=False, timeout=12) as http:
-            async with streamable_http_client(f'http://127.0.0.1:{self.ports[2]}/mcp', http_client=http) as (read, write, _):
-                async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=12)) as mcp:
-                    await mcp.initialize()
-                    return await mcp.call_tool(tool, args)
+        # Reuse HTTP connections, but keep SDK task groups within each calling task.
+        if self.mcp_http is None:
+            self.mcp_http = httpx.AsyncClient(
+                headers={'Authorization': 'Bearer ' + self.controller.token}, trust_env=False, timeout=12)
+        async with streamable_http_client(f'http://127.0.0.1:{self.ports[2]}/mcp', http_client=self.mcp_http) as (read, write, _):
+            async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=12)) as mcp:
+                await mcp.initialize()
+                return await mcp.call_tool(tool, args)
 
     async def call(self, tool, **args):
         result = await self.raw_call(tool, **args)
@@ -305,6 +324,7 @@ class Lab:
         return work
 
     async def close(self):
+        await self.close_mcp()
         await self.stack.aclose()
         if self.target_task:
             self.target_task.cancel()
@@ -435,3 +455,22 @@ async def stalled_evidence_upload(lab, monkeypatch):
     finally:
         release.set()
         lab.target.active = None
+
+
+async def wait_for_status_polls(lab, count=3):
+    """Observe real status exchanges without guessing how long they take."""
+    original = lab.controller.rpc
+    observed = asyncio.Event()
+    async def rpc(target, action, **fields):
+        nonlocal count
+        result = await original(target, action, **fields)
+        if action == 'status':
+            count -= 1
+            if count <= 0:
+                observed.set()
+        return result
+    lab.controller.rpc = rpc
+    try:
+        await observed.wait()
+    finally:
+        lab.controller.rpc = original

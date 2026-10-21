@@ -13,7 +13,24 @@ class Store:
         self.db = sqlite3.connect(root / 'work.sqlite')
         self.db.execute('PRAGMA journal_mode=WAL')
         self.db.execute('CREATE TABLE IF NOT EXISTS records (kind TEXT, id TEXT, data TEXT NOT NULL, PRIMARY KEY(kind,id))')
+        self.db.execute("CREATE TABLE IF NOT EXISTS events (cursor INTEGER PRIMARY KEY, at REAL, kind TEXT, id TEXT, scope TEXT, data TEXT)")
         self.db.commit()
+
+    def event(self, kind, key, scope, stage, **fields):
+        data = json.dumps(dict(stage=stage, **fields))
+        def insert():
+            self.db.execute('INSERT INTO events (at,kind,id,scope,data) VALUES (?,?,?,?,?)',
+                            (time.time(), kind, key, scope, data))
+        if self.db.in_transaction:
+            insert()
+        else:
+            with self.db:
+                insert()
+
+    def events(self, scope, after, limit):
+        return [dict(cursor=c, at=t, kind=k, id=i, **json.loads(d)) for c,t,k,i,d in self.db.execute(
+            'SELECT cursor,at,kind,id,data FROM events WHERE scope=? AND cursor>? ORDER BY cursor LIMIT ?',
+            (scope, after, limit))]
 
     def close(self):
         self.db.close()
@@ -38,6 +55,8 @@ class Store:
 
     def change(self, kind, key, **fields):
         data = self.get(kind, key)
+        if all(data.get(name) == value for name, value in fields.items()):
+            return data
         data.pop('id')
         return self.put(kind, key, **(data | fields))
 
@@ -61,7 +80,8 @@ class Store:
             work = self.get('work', key)
         except ValueError:
             work = self.put('work', key, action=kind, scope=scope, request_id=request_id,
-                            inputs=inputs, status='accepted', stage='Accepted', updated=time.time())
+                            inputs=inputs, status='accepted', stage='Accepted', created_at=time.time(), updated=time.time())
+            self.event('work', key, self.get('run', scope)['investigation'] if kind == 'ssh-command' else scope, 'Accepted', action=kind)
             return work, True
         if work['action'] != kind or work['inputs'] != inputs:
             raise ValueError('This request_id already has different inputs. Use a new request_id.')

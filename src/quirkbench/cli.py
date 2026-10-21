@@ -62,7 +62,7 @@ def parser():
     f.add_argument('--target', help='Name for the target computer')
     f.add_argument('--erase', action='store_true', help='Erase all data instead of preserving an existing Quirkbench USB')
     f.add_argument('--yes', action='store_true', help='Confirm writing the explicitly selected USB')
-    i = commands.add_parser('investigation', help='Authorize and follow an investigation', description='Example: quirkbench investigation start first-boot --target laptop')
+    i = commands.add_parser('investigation', help='Authorize and follow an investigation', description='Example: quirkbench investigation start first-boot --target target-1')
     acts = i.add_subparsers(dest='action', required=True)
     start = acts.add_parser('start', help='Describe a problem and authorize the agent')
     start.add_argument('name', help='Investigation name')
@@ -75,6 +75,14 @@ def parser():
     wait.add_argument('name', help='Investigation name')
     wait.add_argument('--work', required=True, help='Work ID returned by preparation, deployment, boot or return')
     wait.add_argument('--timeout', type=int, default=3600, help='Maximum wait in seconds, up to 86400; does not stop work')
+    for action, help_text in {
+        'pause': 'Stop new work, finish bounded work and return to recovery',
+        'resume': 'Allow new work without booting or repeating anything',
+        'force-stop': 'Stop active work and request return to recovery',
+        'timeline': 'Show observed progress and elapsed time',
+    }.items():
+        command = acts.add_parser(action, help=help_text, description=help_text)
+        command.add_argument('name', help='Investigation name')
     return p
 
 
@@ -97,6 +105,10 @@ async def execute(args):
         return {'tools': {name: bool(shutil.which(name) or (shutil.which('grub-editenv') if name == 'grub2-editenv' else None)) for name in names},
                 'message': 'Podman builds images. USB writer uses the remaining Linux disk tools. '}
     if args.command == 'investigation':
+        if args.action in ('pause', 'resume', 'force-stop'):
+            return await local(root, 'investigation-control', {'name': args.name, 'control': args.action})
+        if args.action == 'timeline':
+            return await local(root, 'investigation-timeline', {'name': args.name})
         if args.action == 'wait':
             if not 0 <= args.timeout <= 86400:
                 raise ValueError('Wait timeout must be between 0 and 86400 seconds.')
