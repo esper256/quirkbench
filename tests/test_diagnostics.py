@@ -113,8 +113,6 @@ async def test_stalled_evidence_does_not_hold_reconnection_or_emergency_inspecti
         old_connection = lab.target.connection
         old_connection.abort()
         await lab.until(lambda: lab.target.connection is not old_connection and lab.target.connected.is_set())
-        # Both ordinary inspection slots may already be waiting on the drive.
-        lab.target.inspections = 2
         report = await lab.call('ssh_recovery_inspect', target='unrelated-laptop', view='emergency')
         assert '/proc/uptime' in report['output'] and report['exit_code'] == 0
         assert not lab.target.active.get('evidence_received')
@@ -128,3 +126,17 @@ async def test_first_emergency_upload_without_shared_storage(lab):
     assert received.read_bytes() == report.read_bytes()
     assert '/proc/uptime' in received.read_text()
 
+
+
+async def test_recovery_inspections_have_no_arbitrary_parallel_limit(lab):
+    lab.tools.release_diagnostic.clear()
+    inspections = [asyncio.create_task(lab.call('ssh_recovery_inspect',
+                   target='unrelated-laptop', view='hardware')) for _ in range(4)]
+    try:
+        await lab.until(lambda: lab.target.inspections == 4)
+        emergency = await lab.call('ssh_recovery_inspect', target='unrelated-laptop', view='emergency')
+        assert emergency['exit_code'] == 0
+    finally:
+        lab.tools.release_diagnostic.set()
+        results = await asyncio.gather(*inspections)
+    assert all(result['exit_code'] == 0 for result in results)

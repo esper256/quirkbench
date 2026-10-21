@@ -105,3 +105,21 @@ Humans can use `quirkbench investigation pause NAME`, `force-stop NAME`, and
 returns to recovery. Resume permits work but never boots or resumes a sequence.
 Review `run_results` collection status: received files do not establish that all
 requested diagnostics were available or that the experiment succeeded.
+
+### Optional load utility
+
+Candidates with the debugging toolkit offer `quirkbench-load --help`. Use it only
+when a synthetic workload helps the investigation. `--seconds` is required;
+`--gpu` adds headless Vulkan rendering and `--audio rain` adds generated rain-like
+playback. Both are off by default. Playback needs the human's authorization and a
+working ALSA device; `--audio-device` selects it without changing mixer settings.
+The seed makes workload choices repeatable, not execution timing or failures.
+GPU output identifies the device. A missing device, failed or skipped render, or
+playback failure is an error. The tool timestamps reported audio underruns, other playback messages, delayed
+feeding and late CPU frames, plus failures and counts. JSON lines go to stderr,
+which Quirkbench retains with command output and collects after return. Use
+`ssh_command_read` or `ssh_command_wait`, then retained run results. UTC observation
+time and monotonic time help correlate other logs; observation time can lag the
+fault under load. `--late-ms` adjusts the CPU frame tolerance. Delayed feeding can
+also mean ordinary backpressure. These observations do not prove an audible glitch
+or certify graphics correctness; an unreported fault is still possible.

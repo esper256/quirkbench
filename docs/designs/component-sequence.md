@@ -98,6 +98,7 @@ sequenceDiagram
         Quirkbench->>Target: Execute through SSH, save output independently
         Quirkbench-->>Agent: Command ID, available output and next action
         Note over Agent,Target: Other commands can run concurrently; each has its own timeout
+        Note over Target: Optional quirkbench-load uses ordinary command control; no separate service
         Agent->>Quirkbench: ssh_command_wait
         Note over Agent,Quirkbench: Wait without periodic model calls
         Target-->>Quirkbench: Command output and completion, or interruption

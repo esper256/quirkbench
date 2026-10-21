@@ -1,0 +1,30 @@
+[require]
+fbsize 512 512
+
+[vertex shader]
+#version 450
+layout(location=0) in vec3 position;
+void main() { gl_Position = vec4(position, 1.0); }
+
+[fragment shader]
+#version 450
+layout(push_constant) uniform Frame { float phase; } frame;
+layout(location=0) out vec4 color;
+void main() {
+    vec2 uv = (gl_FragCoord.xy / 512.0 - 0.5) * 2.0;
+    vec3 ray = normalize(vec3(uv, 1.7));
+    vec3 origin = vec3(sin(frame.phase) * 0.4, 0, -3);
+    float distanceTravelled = 0;
+    vec3 p;
+    for (int i = 0; i < 64; i++) {
+        p = origin + ray * distanceTravelled;
+        float distanceToSurface = length(p) - (0.8 + 0.06 * sin(p.x * 19 + frame.phase));
+        distanceTravelled += max(distanceToSurface, 0.002);
+        if (distanceToSurface < 0.002 || distanceTravelled > 8) break;
+    }
+    float light = max(dot(normalize(p), normalize(vec3(1, 2, -3))), 0.0);
+    color = vec4(distanceTravelled < 8 ? vec3(0.15, 0.5, 0.8) * light : vec3(0.02), 1);
+}
+
+[test]
+# The load tool appends seeded frames with different push constants.

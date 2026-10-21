@@ -155,3 +155,25 @@ $ quirkbench investigation resume intermittent-fault
 Investigation status: active
 Mode: recovery
 ```
+
+## Optional synthetic load
+
+The agent may use the bundled utility instead of writing a probe. This example
+adds headless graphics load; it does not require a desktop or enable sound.
+
+```text
+Tool: ssh_command_start
+Input: {"run_id":"run-1","request_id":"load-1","argv":["quirkbench-load","--seconds","60","--gpu","--seed","72"],"timeout_seconds":75}
+Output: {"command_id":"command-5","status":"running"}
+
+Tool: ssh_command_wait
+Input: {"command_id":"command-5","timeout_seconds":50}
+Output: {"command_id":"command-5","status":"running","output":"Load started: seconds=60 seed=72 audio=off gpu=True\nVulkan device 1: <reported GPU> (Integrated GPU); offscreen rendering\nElapsed 5s: {'frames': 290, 'gpu_batches': 12, 'audio_bytes': 0}\n"}
+```
+
+```text
+Tool: ssh_command_read
+Input: {"command_id":"command-5"}
+Output includes a JSON line when a CPU frame is late:
+{"event":"late_frame","observed_utc":"2026-10-21T23:30:02+00:00","monotonic_ns":5210000000,"run_id":"run-1","late_ms":84.2,"expected_monotonic_ns":5125800000,"interpretation":"Scheduling or CPU delay; not proof of a graphics or audio glitch"}
+```
