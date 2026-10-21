@@ -232,8 +232,6 @@ class Target:
             view = request['view']
             if view not in ('hardware', 'network', 'storage', 'boot-log', 'processes', 'services', 'report', 'emergency'):
                 raise ValueError('Choose hardware, network, storage, processes, services, boot-log or report.')
-            if self.inspections >= 2 and view != 'emergency':
-                raise ValueError('Two recovery diagnostics are already running. Wait for one to finish.')
             self.inspections += 1
             self.event('MCP', f'Read {view}: received', 'ssh_recovery_inspect')
             try:

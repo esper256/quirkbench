@@ -17,7 +17,8 @@ _LOADED_BUILDER = _BUILDER_PATH.read_bytes()
 
 DEBUGGING_PACKAGES = ('strace', 'gdb', 'elfutils', 'binutils', 'procps-ng', 'sysstat', 'pciutils',
                       'usbutils', 'ethtool', 'iw', 'tcpdump', 'jq', 'ripgrep', 'file', 'lsof',
-                      'psmisc', 'trace-cmd', 'stress-ng')
+                      'psmisc', 'trace-cmd', 'stress-ng', 'alsa-utils', 'vulkan-loader')
+LOAD_ASSETS = ('build.Containerfile', 'quirkbench-load', 'scene.shader_test')
 
 
 def package_requests(names):
@@ -61,7 +62,7 @@ async def _prepare_candidate(root, linux, work, progress):
     tools = await build_tools(root, linux, log)
     tools = await tools_identity(linux, tools)
     rpm = await build_target_rpm(root, linux, tools, log)
-    preparation = files_hash(('bazzite.py', 'assets/bazzite/health-report', 'assets/bazzite/quirkbench-bazzite-health.service'))
+    preparation = files_hash(('bazzite.py', 'assets/bazzite/health-report', 'assets/bazzite/quirkbench-bazzite-health.service') + tuple('assets/load/' + name for name in LOAD_ASSETS))
     cache_key = preparation_key(selection, preparation + digest_file(rpm) + tools, changes)
     cache_file = root / 'cache' / 'prepared-candidates' / (cache_key + '.json')
     cached = read_json(cache_file)
@@ -74,7 +75,8 @@ async def _prepare_candidate(root, linux, work, progress):
     shutil.copy2(assets / 'health-report', folder / 'health-report')
     shutil.copy2(assets / 'quirkbench-bazzite-health.service', folder / 'quirkbench-bazzite-health.service')
     additions = await disk(stage_changes, root, folder, changes)
-    atomic_write(folder / 'Containerfile', f'''FROM {selection['image']}
+    load_builder = (folder / 'load' / 'build.Containerfile').read_text() if changes.get('debugging_tools', True) else ''
+    atomic_write(folder / 'Containerfile', load_builder + f'''FROM {selection['image']}
 COPY target.rpm /tmp/quirkbench-target.rpm
 COPY health-report /usr/libexec/quirkbench-bazzite-health
 COPY quirkbench-bazzite-health.service /usr/lib/systemd/system/quirkbench-bazzite-health.service
@@ -143,6 +145,13 @@ def stage_changes(root, folder, changes):
     packages = package_requests(changes.get('repository_packages', []))
     if changes.get('debugging_tools', True):
         packages = sorted(set(packages) | set(DEBUGGING_PACKAGES))
+        source = Path(__file__).with_name('assets') / 'load'
+        (folder / 'load').mkdir(exist_ok=True)
+        for name in LOAD_ASSETS:
+            shutil.copy2(source / name, folder / 'load' / name)
+        lines += ['COPY --from=qb-load /out/ /usr/libexec/quirkbench-load/',
+                  'COPY load/quirkbench-load /usr/bin/quirkbench-load',
+                  'RUN chmod 755 /usr/bin/quirkbench-load && ostree container commit']
     if packages:
         lines.append('RUN rpm-ostree install --idempotent ' + ' '.join(packages) + ' && ostree container commit')
     for kind, operation in (('packages', 'install'), ('replacements', 'override replace')):
@@ -182,6 +191,8 @@ WantedBy=multi-user.target
 
 def change_summary(changes):
     summary = ['Candidate debugging toolkit included' if changes.get('debugging_tools', True) else 'Candidate debugging toolkit omitted']
+    if changes.get('debugging_tools', True):
+        summary.append('Optional quirkbench-load utility (audio and GPU off unless selected)')
     summary += ['Repository package: ' + name for name in changes.get('repository_packages', [])]
     for kind in ('packages', 'replacements'):
         summary += [f"Local RPM {kind}: {item['name']} (sha256 {item['sha256']})" for item in changes.get(kind, [])]

@@ -1,0 +1,181 @@
+#!/usr/bin/python3
+"""Optional, bounded game-like workload. No Quirkbench services or privileges needed."""
+import argparse
+import asyncio
+from array import array
+import math
+import os
+from pathlib import Path
+import random
+import re
+import signal
+import sys
+import tempfile
+import time
+
+
+ASSETS = Path(__file__).resolve().parent
+# Installed beside the helper's shader and VkRunner; not part of recovery.
+if ASSETS == Path('/usr/bin'):
+    ASSETS = Path('/usr/libexec/quirkbench-load')
+
+
+def positive(value):
+    number = float(value)
+    if not math.isfinite(number) or number <= 0:
+        raise argparse.ArgumentTypeError('Use a finite number greater than zero.')
+    return number
+
+
+def arguments():
+    p = argparse.ArgumentParser(description='Bounded frame, optional rain audio and headless Vulkan load. '
+                                'Audio and GPU load are off unless selected. No display is needed.')
+    p.add_argument('--seconds', required=True, type=positive, help='Stop after this many seconds, including setup')
+    p.add_argument('--fps', default=60, type=positive, help='CPU frame rate (default: 60)')
+    p.add_argument('--seed', default=1, type=int, help='Repeatable workload seed (default: 1)')
+    p.add_argument('--audio', choices=('off', 'rain'), default='off', help='Generated continuous rain-like sound; playback requires permission')
+    p.add_argument('--audio-device', default='default', help='ALSA playback device; does not change system mixer settings')
+    p.add_argument('--volume', default=0.1, type=float, help='Signal amplitude 0–1 (default: 0.1); actual loudness depends on mixer')
+    p.add_argument('--gpu', action='store_true', help='Render randomized offscreen Vulkan batches')
+    p.add_argument('--gpu-device', type=int, help='VkRunner device number; default is first hardware GPU')
+    a = p.parse_args()
+    if not 0 < a.volume <= 1:
+        p.error('--volume must be greater than zero and at most one')
+    if a.gpu_device is not None and (not a.gpu or a.gpu_device < 1):
+        p.error('--gpu-device requires --gpu and a positive device number')
+    return a
+
+
+def rain(seed, volume):
+    """Periodic rain-like noise, stereo signed 16-bit LE, no downloaded recordings."""
+    rng = random.Random(seed)
+    samples = array('h')
+    # Repeated noise with a short crossfade prevents a click at the loop boundary.
+    noise = [rng.uniform(-1, 1) for _ in range(48000)]
+    for i in range(480):
+        t = i / 480
+        noise[i] = noise[-480+i] * (1-t) + noise[i] * t
+    for n in noise[:-480]:
+        value = int(n * volume * 32767)
+        samples.extend((value, value))
+    if sys.byteorder != 'little':
+        samples.byteswap()
+    return samples.tobytes()
+
+
+async def child(*argv, input=None):
+    process = await asyncio.create_subprocess_exec(*map(str, argv),
+        stdin=asyncio.subprocess.PIPE if input is not None else asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+    try:
+        output, _ = await process.communicate(input)
+        text = output.decode(errors='replace')
+        if process.returncode:
+            raise RuntimeError(f'{argv[0]} failed ({process.returncode}): {text[-4000:]}')
+        return text
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+
+
+async def audio(a, counts):
+    data = rain(a.seed, a.volume)
+    process = await asyncio.create_subprocess_exec('aplay', '-q', '-D', a.audio_device,
+        '-t', 'raw', '-f', 'S16_LE', '-r', '48000', '-c', '2',
+        stdin=asyncio.subprocess.PIPE)
+    try:
+        while True:
+            process.stdin.write(data)
+            await process.stdin.drain()
+            counts['audio_bytes'] += len(data)
+    except (BrokenPipeError, ConnectionResetError):
+        raise RuntimeError('Audio playback stopped; inspect the ALSA error above and selected device.') from None
+    finally:
+        if process.returncode is None:
+            process.kill()
+        await process.wait()
+
+
+async def gpu(a, counts, directory):
+    runner = ASSETS / 'vkrunner'
+    listing = await child(runner, '--device-list')
+    devices = re.findall(r'Device (\d+): ([^\n]+)\n\s+Type: ([^\n]+)', listing)
+    selected = next((d for d in devices if int(d[0]) == a.gpu_device), None) if a.gpu_device else next(
+        (d for d in devices if d[2] in ('Integrated GPU', 'Discrete GPU', 'Virtual GPU')), None)
+    if not selected:
+        raise RuntimeError('No selected hardware Vulkan device. Available devices:\n' + listing)
+    print(f'Vulkan device {selected[0]}: {selected[1]} ({selected[2]}); offscreen rendering', flush=True)
+    template = (ASSETS / 'scene.shader_test').read_text()
+    rng = random.Random(a.seed)
+    scene = directory / 'scene.shader_test'
+    while True:
+        frames = rng.randint(8, 32)
+        scene.write_text(template + ''.join(
+            f'push float 0 {rng.uniform(0, 6.28):.6f}\ndraw rect -1 -1 2 2\n' for _ in range(frames)))
+        output = await child(runner, '--device-id', selected[0], scene)
+        if not re.search(r'"result":\s*"pass"', output):
+            raise RuntimeError('Vulkan batch did not pass: ' + output[-4000:])
+        counts['gpu_batches'] += 1
+        await asyncio.sleep(rng.uniform(0, 0.03))
+
+
+async def frames(a, counts):
+    rng = random.Random(a.seed)
+    while True:
+        started = time.monotonic()
+        # A small physics-like update, allocations and timer waits, not a benchmark score.
+        positions = [rng.random() for _ in range(512)]
+        sum(math.sin(x) * math.cos(x) for x in positions)
+        counts['frames'] += 1
+        await asyncio.sleep(max(0, 1/a.fps - (time.monotonic() - started)))
+
+
+async def run(a):
+    counts = dict(frames=0, gpu_batches=0, audio_bytes=0)
+    started = time.monotonic()
+    print(f'Load started: seconds={a.seconds:g} seed={a.seed} audio={a.audio} gpu={a.gpu}', flush=True)
+    async def progress():
+        while True:
+            await asyncio.sleep(5)
+            print(f'Elapsed {time.monotonic()-started:.0f}s: {counts}', flush=True)
+    with tempfile.TemporaryDirectory(prefix='quirkbench-load-', dir=os.environ.get('QUIRKBENCH_WORK_DIR')) as folder:
+        tasks = [asyncio.create_task(frames(a, counts)), asyncio.create_task(progress())]
+        if a.audio != 'off':
+            tasks.append(asyncio.create_task(audio(a, counts)))
+        if a.gpu:
+            tasks.append(asyncio.create_task(gpu(a, counts, Path(folder))))
+        try:
+            done, _ = await asyncio.wait(tasks, timeout=a.seconds, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                task.result()
+            if a.audio != 'off' and not counts['audio_bytes']:
+                raise RuntimeError('No audio was sent before the deadline; playback is unconfirmed.')
+            if a.gpu and not counts['gpu_batches']:
+                raise RuntimeError('No Vulkan batch completed before the deadline; GPU load is unconfirmed.')
+            print(f'Load finished: {counts}', flush=True)
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def main():
+    a = arguments()
+    async def entry():
+        task = asyncio.current_task()
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
+        await run(a)
+    try:
+        asyncio.run(entry())
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        print('Load stopped.', flush=True)
+        return 130
+    except (OSError, RuntimeError) as error:
+        print(f'Load failed: {error}', file=sys.stderr, flush=True)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -105,3 +105,15 @@ Humans can use `quirkbench investigation pause NAME`, `force-stop NAME`, and
 returns to recovery. Resume permits work but never boots or resumes a sequence.
 Review `run_results` collection status: received files do not establish that all
 requested diagnostics were available or that the experiment succeeded.
+
+### Optional load utility
+
+Candidates with the debugging toolkit offer `quirkbench-load --help`. Use it only
+when a synthetic workload helps the investigation. `--seconds` is required;
+`--gpu` adds headless Vulkan rendering and `--audio rain` adds generated rain-like
+playback. Both are off by default. Playback needs the human's authorization and a
+working ALSA device; `--audio-device` selects it without changing mixer settings.
+The seed makes workload choices repeatable, not execution timing or failures.
+GPU output identifies the device. A missing device, failed or skipped render, or
+playback failure is an error. This probe does not measure whether sound glitched
+or certify graphics correctness. Collect the relevant diagnostics separately.

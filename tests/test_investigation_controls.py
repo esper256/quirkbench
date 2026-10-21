@@ -103,9 +103,18 @@ async def test_preparation_summary_inventory_and_journal_collection(lab, tmp_pat
     candidate = await lab.call('controller_work_wait', work_id=work['work_id'], timeout_seconds=5)
     assert any('change.rpm' in item for item in candidate['candidate']['changes'])
     assert any('Startup probe' in item for item in candidate['candidate']['changes'])
+    staged = lab.root / 'candidates' / work['work_id']
+    assert (staged/'load/quirkbench-load').is_file()
+    assert 'COPY --from=qb-load' in (staged/'Containerfile').read_text()
     assert candidate['candidate']['package_count'] == 3000
     inventory_file = lab.root / candidate['candidate']['packages_file']
     assert inventory_file.read_text() == lab.tools.resolved_packages_text
+    minimal = await lab.call('rpm_ostree_prepare_candidate', investigation='wifi-case',
+                             request_id='minimal', debugging_tools=False)
+    await lab.call('controller_work_wait', work_id=minimal['work_id'], timeout_seconds=5)
+    minimal_folder = lab.root / 'candidates' / minimal['work_id']
+    assert not (minimal_folder/'load').exists()
+    assert 'qb-load' not in (minimal_folder/'Containerfile').read_text()
     run = await lab.start_run(candidate['candidate_id'])
     await lab.boot_target('candidate', run['run_id'])
     inventory = await lab.call('ssh_candidate_inventory', run_id=run['run_id'])
