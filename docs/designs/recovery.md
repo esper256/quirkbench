@@ -249,3 +249,23 @@ guarantee survival if the running process needs unreadable code or libraries.
 Saved reports have distinct names and bounded reads. Missing report sections are
 reported individually. Complete candidate journals are saved as files; MCP does
 not paste them into every response.
+
+## When the recovery drive fails
+
+Keep the menu, connection status and essential controls independent of disk work.
+Draw from `/run`; read network addresses from the kernel. Mark stalled storage
+checks unavailable instead of keeping an old value. Save network changes in the
+background and say whether they were saved for the next boot.
+
+Hold loaded recovery console and connection code in RAM with Linux memory locking.
+Cache the connection details needed for report upload in private `/run` files.
+Evidence collection must not delay SSH reconnection. Emergency reports read bounded
+kernel information without launching programs or waiting for full reports. They
+are saved in RAM and uploaded over HTTPS; they disappear at power off unless uploaded.
+
+Normal power actions still finish work and clear boot selection where needed.
+Offer confirmed force reboot and force power off, including while normal shutdown
+is stuck. These ask the kernel directly, without syncing, programs or disk writes.
+Warn about lost unsaved data and unchanged boot selection. Never escalate silently.
+This improves the chance of recovery; it cannot fix a stuck kernel or guarantee
+that external programs, Wi-Fi services or firmware survive loss of their drive.

@@ -46,7 +46,7 @@ def emergency_report():
     """Read kernel memory interfaces without launching programs from a failed disk."""
     import os
     sections = []
-    for name in ('/proc/uptime', '/proc/mounts', '/proc/diskstats', '/proc/pressure/io'):
+    for name in ('/proc/self/status', '/proc/uptime', '/proc/mounts', '/proc/diskstats', '/proc/pressure/io', '/proc/net/route', '/proc/net/dev'):
         try:
             with open(name) as stream:
                 sections.append(name + '\n' + stream.read(32768))

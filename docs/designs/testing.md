@@ -291,3 +291,10 @@ Also cover connection loss, new boots, incomplete/changing downloads, read-only
 SFTP evidence, debugging boot arguments and early probe files. Verify target-service
 priority settings and actual child execution. Elevated service scheduling and live
 module replacement still need the separate authorized hardware check.
+
+Recovery failure checks hold disk work with test signals while exercising menu,
+connection, report upload and confirmed power controls. Substitute only the final
+kernel power request. Exercise emergency HTTPS upload in a fresh Python process
+with recovery-file reads denied, so earlier tests cannot preload its dependencies.
+A separate manual QEMU drive-removal check verifies the built image; it stays
+outside the routine suite.

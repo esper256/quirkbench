@@ -5,6 +5,7 @@ Requires=quirkbench-prepare.service
 Wants=NetworkManager.service
 
 [Service]
+LimitMEMLOCK=infinity
 User=root
 Nice=-5
 CPUSchedulingResetOnFork=yes

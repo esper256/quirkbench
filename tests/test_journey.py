@@ -146,6 +146,7 @@ async def test_recovery_console_report_uses_paired_upload_separate_from_evidence
     assert 'probe observed' in report.read_text()
     target_id = lab.target.settings['target_id']
     assert (lab.root/'reports'/target_id/report.name).read_bytes() == report.read_bytes()
+    assert report.is_relative_to(lab.data/'quirkbench/reports')
     assert not (lab.root/'results').exists()
     assert lab.target.settings['token'] not in report.read_text()
 
@@ -415,7 +416,7 @@ async def test_console_power_shows_waiting_and_does_not_repeat_request(tmp_path,
     console = power_console(tmp_path, monkeypatch)
     console.release_stop.clear()
 
-    with ThreadPoolExecutor(max_workers=1) as console.workers:
+    with ThreadPoolExecutor(max_workers=1) as console.power_workers:
         console.open_page('power')
         console.choice = 2
         console.key(10, None)
@@ -444,7 +445,7 @@ async def test_console_reboot_confirmation_failure_and_retry(tmp_path, monkeypat
               current_work='Downloading candidate', progress={'label': 'Downloading candidate', 'started':time.time()}))
     console.fail_boot_edit = True
 
-    with ThreadPoolExecutor(max_workers=1) as console.workers:
+    with ThreadPoolExecutor(max_workers=1) as console.power_workers:
         console.open_page('power')
         assert console.options()[1] == 'Reboot'
         console.choice = 1
@@ -1062,3 +1063,54 @@ async def test_recovery_report_retains_early_boot_diagnostics(lab):
     assert 'Early diagnostic' not in Path(preview['output_file']).read_text()
     assert 'Early diagnostic: controller adapter failed' in Path(report['output_file']).read_text()
     assert report['boot_id'] == lab.target.boot_id
+
+
+async def test_failed_media_keeps_console_emergency_report_and_power_available(lab, monkeypatch):
+    import os
+    import curses
+    from concurrent.futures import ThreadPoolExecutor
+    from tests.support.terminal import power_console, broken_console_storage
+    console = power_console(lab.data, monkeypatch)
+    lab.target.publish_screen()
+    console.release_stop.clear()
+
+    with broken_console_storage(console, monkeypatch) as kernel_requests, ThreadPoolExecutor(max_workers=1) as console.power_workers:
+        try:
+            assert lab.target.settings['url'] in '\n'.join(console.lines())
+            console.pending = 'shutdown'
+            console.start_power()
+            assert await asyncio.to_thread(console.stop_started.wait, 2)
+            report = await console.report(upload=True, basic=True)
+            console.key(ord('f'), None)
+            assert 'Unsaved data may be lost' in '\n'.join(console.page_lines())
+            console.key(curses.KEY_DOWN, None)
+            console.key(10, None)
+            import select
+            assert select.select([kernel_requests], [], [], 0)[0], 'No emergency power request'
+            assert os.read(kernel_requests, 1) == b'o'
+            assert (lab.root/'reports'/lab.target.settings['target_id']/report.name).read_bytes() == report.read_bytes()
+            assert 'Connected' in '\n'.join(console.lines())
+        finally:
+            console.release_stop.set()
+
+
+async def test_stalled_evidence_does_not_hold_reconnection_or_emergency_inspection(lab, monkeypatch):
+    from tests.support.lab import stalled_evidence_upload
+    async with stalled_evidence_upload(lab, monkeypatch) as entered:
+        await asyncio.wait_for(entered.wait(), 2)
+        old_connection = lab.target.connection
+        old_connection.abort()
+        await lab.until(lambda: lab.target.connection is not old_connection and lab.target.connected.is_set())
+        # Both ordinary inspection slots may already be waiting on the drive.
+        lab.target.inspections = 2
+        report = await lab.call('ssh_recovery_inspect', target='unrelated-laptop', view='emergency')
+        assert '/proc/uptime' in report['output'] and report['exit_code'] == 0
+        assert not lab.target.active.get('evidence_received')
+
+
+async def test_first_emergency_upload_without_recovery_os_files(lab):
+    from tests.support.terminal import cold_emergency_upload
+    report = await cold_emergency_upload(lab.data)
+    received = lab.root/'reports'/lab.target.settings['target_id']/report.name
+    assert received.read_bytes() == report.read_bytes()
+    assert '/proc/uptime' in received.read_text()

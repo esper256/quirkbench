@@ -17,6 +17,7 @@ import asyncssh
 from .files import disk, atomic_write, identifier, read_json, save_json
 from .linux import Linux
 from .diagnostics import emergency_report
+from .recovery_runtime import keep_resident
 
 
 class Target:
@@ -30,6 +31,7 @@ class Target:
         self.screen = data.parent / 'quirkbench-runtime' / 'screen.json'
         self.settings_dir = self.home / 'settings'
         self.mode, self.run_id = mode, run_id
+        self.lock_memory = False
         self.boot_id = boot_id or Path('/proc/sys/kernel/random/boot_id').read_text().strip()
         identifier(self.boot_id)
         self.linux = linux or Linux()
@@ -75,6 +77,26 @@ class Target:
             save_json(self.screen, self.screen_status())
         except OSError:
             pass
+
+    def cache_report_connection(self):
+        save_json(self.screen.parent / 'report-connection.json', self.settings)
+
+    async def maintain_evidence(self, http):
+        # One evidence worker. Its disk reads cannot hold up reconnection.
+        while True:
+            try:
+                self.uploading = bool(self.connected.is_set() and self.mode == 'recovery' and self.active
+                                      and self.active.get('launched') and not self.active.get('evidence_received')
+                                      and self.active['recovery_boot'] != self.boot_id)
+                if self.uploading:
+                    self.event('RECOVERY', 'Uploading saved evidence')
+                    await self.upload_evidence(http)
+                    self.event('RECOVERY', 'Evidence received by controller')
+            except (aiohttp.ClientError, OSError, ValueError, RuntimeError) as error:
+                self.message = f'Diagnostics retained for retry: {error}'
+            finally:
+                self.uploading = False
+            await asyncio.sleep(self.poll_interval)
 
     async def update_screen(self):
         while True:
@@ -203,13 +225,13 @@ class Target:
             view = request['view']
             if view not in ('hardware', 'network', 'storage', 'boot-log', 'processes', 'services', 'report', 'emergency'):
                 raise ValueError('Choose hardware, network, storage, processes, services, boot-log or report.')
-            if self.inspections >= 2:
+            if self.inspections >= 2 and view != 'emergency':
                 raise ValueError('Two recovery diagnostics are already running. Wait for one to finish.')
             self.inspections += 1
             self.event('MCP', f'Read {view}: received', 'ssh_recovery_inspect')
             try:
                 if view == 'emergency':
-                    result = {'exit_code': 0, 'output': await disk(emergency_report)}
+                    result = {'exit_code': 0, 'output': emergency_report()}
                 elif view == 'report':
                     from .diagnostics import recovery_report
                     output = await recovery_report(self.linux, self.data, self.screen_status())
@@ -568,7 +590,10 @@ class Target:
             await disk(self.workspace.mkdir, parents=True, exist_ok=True)
             self.commands = await disk(Commands, self.home, self.run_id, self.boot_id, lambda message: self.event('MCP', message))
         self.spawn(self.update_screen())
-        tls = ssl.create_default_context(cafile=self.settings_dir / 'controller.crt')
+        certificate = (self.settings_dir / 'controller.crt').read_text()
+        tls = ssl.create_default_context(cadata=certificate)
+        atomic_write(self.screen.parent / 'controller.crt', certificate)
+        self.cache_report_connection()
         self.spawn(self.startup_deadline())
         target = self
         controller_key = asyncssh.import_public_key(self.settings['controller_key'])
@@ -592,6 +617,10 @@ class Target:
                 target.last_contact = time.time()
                 target.message = 'Connected'
                 target.event('RECOVERY', 'Controller connected')
+                if target.lock_memory:
+                    warning = keep_resident()
+                    if warning:
+                        target.event('RECOVERY', warning)
 
         async def sftp_server(channel):
             from .transfer import CandidateSFTP
@@ -604,11 +633,13 @@ class Target:
 
         try:
             async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=tls), timeout=aiohttp.ClientTimeout(total=120)) as http:
+                self.spawn(self.maintain_evidence(http))
                 self.ready.set()
                 host_key = None
                 while True:
                     try:
                         await self.pair(http)
+                        self.cache_report_connection()
                         if host_key is None:
                             host_key = await disk(asyncssh.read_private_key, self.settings_dir / 'target.key')
                         self.connection = await asyncssh.connect_reverse(urlparse(self.settings['url']).hostname,
@@ -618,17 +649,6 @@ class Target:
                         await self.connected.wait()
                         while not self.connection.is_closed():
                             self.publish_screen()
-                            try:
-                                self.uploading = bool(self.mode=='recovery' and self.active and self.active.get('launched') and not self.active.get('evidence_received') and self.active['recovery_boot']!=self.boot_id)
-                                if self.uploading:
-                                    self.event('RECOVERY', 'Uploading saved evidence')
-                                await self.upload_evidence(http)
-                                if self.uploading:
-                                    self.event('RECOVERY', 'Evidence received by controller')
-                            except (aiohttp.ClientError, OSError, ValueError, RuntimeError) as e:
-                                self.message = f'Diagnostics retained for retry: {e}'
-                            finally:
-                                self.uploading = False
                             await asyncio.sleep(self.poll_interval)
                     except (aiohttp.ClientError, asyncssh.Error, OSError, ValueError) as e:
                         self.message = f'Connection unavailable: {type(e).__name__}: {e}'
@@ -747,6 +767,11 @@ def main():
             run_id = cmdline.get('quirkbench.run')
             target = Target(Path('/run/quirkbench-data'), Path('/run/quirkbench-boot'),
                             mode='candidate' if run_id else 'recovery', run_id=run_id)
+            if not run_id:
+                target.lock_memory = True
+                warning = keep_resident()
+                if warning:
+                    print(warning, flush=True)
             asyncio.run(target.run())
     except KeyboardInterrupt:
         pass

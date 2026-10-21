@@ -22,6 +22,7 @@ sequenceDiagram
     Human->>Target: Boot USB and connect network
     Target->>Target: Keep boot logs on tty1; display recovery menu on tty2
     Target->>Quirkbench: Pair over HTTPS, then open reverse-direction SSH connection
+    Note over Target: Menu and connection status use RAM; storage work runs separately
     Quirkbench-->>Human: Target ready and local MCP URL/token-file instructions
     Human->>Quirkbench: Describe problem and authorize investigation
 ```
@@ -154,4 +155,20 @@ sequenceDiagram
     Target-->>Quirkbench: Cancelled; recovery ready
     Agent->>Quirkbench: controller_work_wait(work_id)
     Quirkbench-->>Agent: Cancellation confirmed
+```
+
+## Recovery drive failure
+
+```mermaid
+sequenceDiagram
+    actor Human
+    participant Recovery
+    participant Quirkbench
+    participant Kernel
+    Note over Recovery: Storage work is stalled; menu and connection remain available when possible
+    Quirkbench->>Recovery: Read emergency diagnostics
+    Recovery->>Kernel: Read bounded kernel information
+    Recovery-->>Quirkbench: Return diagnostics without external programs
+    Human->>Recovery: Confirm force power off
+    Recovery->>Kernel: Power off without waiting for disk cleanup
 ```

@@ -230,3 +230,45 @@ If work is running, selecting Reboot asks for confirmation first.
 
   Esc Back   T Open terminal
 ```
+
+```text
+POWER
+
+  Back
+  Reboot
+  Shut down
+  Force reboot
+> Force power off
+```
+
+```text
+EMERGENCY POWER
+
+Unsaved data may be lost. This skips shutdown and storage cleanup.
+Force reboot cannot change the next boot selection.
+If the kernel cannot respond, use the physical power button.
+
+> Cancel
+  Force power off now
+```
+
+```text
+SHUTTING DOWN
+
+Stopping target work
+
+F Force power action   T Open terminal
+```
+
+```text
+LOGS & REPORTS
+
+  View boot logs
+  View Quirkbench service logs
+  Preview report
+  Save report
+  Send report to controller
+> Send emergency report
+
+Report uploaded. Local copy: /run/quirkbench-runtime/reports/recovery-184.txt
+```

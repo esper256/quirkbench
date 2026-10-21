@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor
 import curses
 import fcntl
 import json
-import logging
 import os
 from pathlib import Path
 import shutil
@@ -18,6 +17,8 @@ import aiohttp
 
 from .files import atomic_write, read_json
 from .linux import Linux
+from .recovery_runtime import EmergencyPower, keep_resident, network_facts
+from .diagnostics import emergency_report, recovery_report
 
 MENU = [('n', 'Network'), ('c', 'Controller'), ('a', 'Activity'),
         ('l', 'Logs & reports'), ('i', 'Target details'), ('t', 'Open terminal'), ('p', 'Power')]
@@ -37,29 +38,12 @@ def snapshot(path):
 
 def local_facts(data):
     """Read host facts off the UI thread; no writes, mounts or network probes."""
-    result = {'network': 'Not connected', 'ip': 'Not assigned', 'root': 'Unknown', 'space': 'Unavailable'}
-    try:
-        devices = subprocess.run(['nmcli', '-t', '-e', 'no', '-f', 'DEVICE,STATE', 'device'],
-                                 capture_output=True, text=True, timeout=2, check=True)
-        for line in devices.stdout.splitlines():
-            device, state = line.split(':', 1)
-            if state != 'connected' or device == 'lo':
-                continue
-            profile = subprocess.run(['nmcli', '-g', 'GENERAL.CONNECTION', 'device', 'show', device],
-                                     capture_output=True, text=True, timeout=2, check=True)
-            addresses = subprocess.run(['ip', '-j', 'address', 'show', 'dev', device],
-                                       capture_output=True, text=True, timeout=2, check=True)
-            ips = [a['local'] for d in json.loads(addresses.stdout) for a in d['addr_info']
-                   if a.get('scope') == 'global']
-            result.update(network=profile.stdout.strip() or device, ip=', '.join(ips) or 'Not assigned')
-            break
-    except (OSError, ValueError, subprocess.SubprocessError):
-        result['network'] = 'Unavailable'
+    result = {'root': 'Unknown', 'space': 'Unavailable'}
     try:
         entries = [line.split() for line in Path('/proc/self/mountinfo').read_text().splitlines()]
         root = next(e for e in entries if e[4] == '/')
         result['root'] = 'Read-only' if 'ro' in root[5].split(',') else 'Writable'
-        if any(e[4] == str(data) for e in entries):
+        if any(e[4].replace(r'\040', ' ').replace(r'\011', '\t').replace(r'\012', '\n').replace(r'\134', '\\') == str(data) for e in entries):
             result['space'] = f'{shutil.disk_usage(data).free / 1024**3:.1f} GiB'
         model = Path('/sys/class/dmi/id/product_name')
         result['model'] = model.read_text().strip() if model.exists() else 'Unknown'
@@ -88,10 +72,16 @@ class Console:
         self.power_task = None
         self.power_action = None
         self.power_error = ''
+        self.emergency = EmergencyPower()
+        self.resident_warning = ''
+        self.network_save = None
+        self.emergency_report_task = None
 
     def state(self):
         status = snapshot(self.screen)
-        settings = snapshot(self.home / 'settings' / 'connection.json')
+        # The target publishes public identity/URL into /run. Never touch the
+        # removable drive while drawing or handling keys.
+        settings = {key: status.get(key) for key in ('name', 'target_id', 'url')}
         stale = time.time() - status.get('updated', 0) > 5
         connected = status.get('connected', False) and not stale
         last = status.get('last_contact')
@@ -104,7 +94,7 @@ class Console:
                   ('Network', self.facts['network']), ('Target IP', self.facts['ip']),
                   ('Controller', 'Connected' if connected else 'Disconnected'),
                   ('Last contact', f'{max(0, int(time.time()-last))}s ago' if last else 'Never'),
-                  ('Controller URL', settings.get('url', 'Not configured')),
+                  ('Controller URL', settings.get('url') or 'Not configured'),
                   ('Recovery OS' if status.get('mode', 'recovery') == 'recovery' else 'Candidate OS', self.facts['root']),
                   ('Data free', self.facts['space']), ('Current work', current)]
         return fields, status, settings
@@ -171,16 +161,15 @@ class Console:
                     atomic_write(destination / profile.name, profile.read_bytes())
             self.notice = 'Network settings saved for future boots.'
         except OSError:
-            self.notice = 'Network settings are temporary. Shared USB storage is unavailable.'
+            self.notice = 'Network settings are temporary. Data storage is unavailable.'
 
-    async def report(self, upload=False):
-        folder = self.home / 'reports' if self.home.exists() else Path('/run/quirkbench-reports')
+    async def report(self, upload=False, basic=False):
+        folder = self.screen.parent / 'reports' if basic else self.home / 'reports'
         folder.mkdir(parents=True, exist_ok=True)
         name = 'recovery-' + str(time.time_ns())
-        from .diagnostics import recovery_report
         path = folder / (name + '.txt')
-        text = await recovery_report(self.linux, self.data, snapshot(self.screen))
-        settings = read_json(self.home / 'settings' / 'connection.json', {})
+        text = emergency_report() if basic else await recovery_report(self.linux, self.data, snapshot(self.screen))
+        settings = read_json(self.screen.parent / 'report-connection.json', {})
         # Fixed diagnostics never request NetworkManager secrets or private key files.
         for secret in (settings.get('token'), settings.get('invitation')):
             if secret:
@@ -189,8 +178,8 @@ class Console:
         if upload:
             if not settings.get('target_id'):
                 raise ValueError(f'Pair with the controller before uploading. Local report: {path}')
-            tls = ssl.create_default_context(cafile=self.home / 'settings' / 'controller.crt')
-            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=tls)) as client:
+            tls = ssl.create_default_context(cafile=self.screen.parent / 'controller.crt')
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=tls), timeout=aiohttp.ClientTimeout(total=30)) as client:
                 with path.open('rb') as f:
                     async with client.put(settings['url'] + '/api/v1/reports/' + name, data=f,
                                           headers={'Authorization': 'Bearer ' + settings['token']}) as response:
@@ -199,7 +188,7 @@ class Console:
                             raise ValueError('Controller did not confirm report storage.')
             self.notice = f'Report uploaded. Local copy: {path}'
         else:
-            self.notice = f'Report saved: {path}'
+            self.notice = f'Report saved{" in RAM until power off" if basic else ""}: {path}'
         return path
 
     def open_page(self, page):
@@ -209,21 +198,27 @@ class Console:
 
     def options(self):
         reboot = 'Reboot into recovery' if self.state()[1].get('mode') == 'candidate' else 'Reboot'
-        return {'logs': ['View boot logs', 'View Quirkbench service logs', 'Preview report', 'Save report', 'Send report to controller'],
-                'power': ['Back', reboot, 'Shut down'],
+        return {'logs': ['View boot logs', 'View Quirkbench service logs', 'Preview report', 'Save report', 'Send report to controller', 'Send emergency report'],
+                'power': ['Back', reboot, 'Shut down', 'Force reboot', 'Force power off'],
+                'emergency-confirm': ['Cancel', 'Force reboot now' if getattr(self, 'pending', '')=='restart' else 'Force power off now'],
                 'confirm': ['Cancel', 'Reboot now' if getattr(self, 'pending', '')=='restart' else 'Shut down now']}.get(self.page, [])
 
     def page_lines(self, width=80):
         fields, status, settings = self.state()
+        if self.page == 'emergency-confirm':
+            return ['EMERGENCY POWER', '', 'Unsaved data may be lost. This skips shutdown and storage cleanup.',
+                    'Force reboot cannot change the next boot selection.',
+                    'If the kernel cannot respond, use the physical power button.', self.emergency.error, self.resident_warning, '',
+                    *[('> ' if i==self.choice else '  ')+label for i,label in enumerate(self.options())]]
         if self.page == 'power-progress':
             return ['REBOOTING' if self.power_action=='restart' else 'SHUTTING DOWN', '',
                     self.local_progress['label'], '',
                     'Wait until the computer has powered off before disconnecting the drive.'
                     if self.power_action=='shutdown' else 'Keep the drive connected while the computer reboots.', '',
-                    'If this takes too long, press T to open the terminal.']
+                    'F Force power action   T Open terminal']
         if self.page == 'power-error':
             return ['POWER ACTION FAILED', '', *textwrap.wrap(self.power_error, max(20,width-2)), '',
-                    'Press Esc to return and retry, or T to inspect the problem in a terminal.']
+                    'F Force power action   Esc Back   T Open terminal']
         if self.page == 'activity':
             rows = ['ACTIVITY / '+('Following' if self.follow else 'Scroll paused'), '']
             for event in status.get('events', []):
@@ -272,7 +267,9 @@ class Console:
     def activate(self, key, screen):
         if key == 'n':
             self.child(screen, ['nmtui'])
-            self.save_network()
+            if not self.network_save or self.network_save.done():
+                self.network_save = self.workers.submit(self.save_network)
+                self.notice = 'Network changes apply now; saving for future boots.'
         elif key == 't':
             self.child(screen, self.terminal)
         else:
@@ -317,7 +314,8 @@ class Console:
         self.power_action = self.pending
         self.local_progress = {'label': 'Preparing power action', 'started': time.time()}
         self.open_page('power-progress')
-        self.power_task = self.workers.submit(self.power, self.power_action)
+        # A separate lane: reports or storage checks cannot queue power behind them.
+        self.power_task = self.power_workers.submit(self.power, self.power_action)
 
     def update_power(self):
         if self.power_task and self.power_task.done():
@@ -325,14 +323,34 @@ class Console:
                 self.power_task.result()
             except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
                 self.power_error = text(error)
+                self.pending = self.power_action
                 self.power_action = self.local_progress = None
-                self.open_page('power-error')
+                if self.page != 'emergency-confirm':
+                    self.open_page('power-error')
             finally:
                 self.power_task = None
 
     def key(self, key, screen):
+        if self.page == 'emergency-confirm':
+            if key == 27:
+                self.open_page('power-progress' if self.power_action else 'power')
+            elif key in (curses.KEY_UP, curses.KEY_DOWN):
+                self.choice = 1 - self.choice
+            elif key in (10, 13, curses.KEY_ENTER):
+                if self.choice == 0:
+                    self.open_page('power-progress' if self.power_action else 'power')
+                else:
+                    try:
+                        self.emergency.trigger(self.pending)
+                        self.notice = 'Emergency power requested. If the computer does not respond, use its physical power button.'
+                    except OSError as error:
+                        self.notice = str(error)
+            return
         if self.power_action or self.page=='power-error':
-            if key in (ord('t'), ord('T')):
+            if key in (ord('f'), ord('F')):
+                self.pending = self.power_action or self.pending
+                self.open_page('emergency-confirm')
+            elif key in (ord('t'), ord('T')):
                 self.child(screen, self.terminal)
             elif key==27 and not self.power_action:
                 self.open_page('home')
@@ -364,17 +382,24 @@ class Console:
                     if self.choice == 1:
                         command += ['-u','quirkbench-target','-u','quirkbench-prepare','-u','quirkbench-console']
                     self.child(screen, command)
+                elif self.choice == 5:
+                    if not self.emergency_report_task or self.emergency_report_task.done():
+                        self.emergency_report_task = self.emergency_workers.submit(lambda: asyncio.run(self.report(upload=True, basic=True)))
+                        self.notice = 'Sending emergency report; saved in RAM until power off.'
                 else:
-                    if self.report_task:
+                    if self.report_task and not self.report_task.done():
                         self.notice = 'A report is already in progress.'
                         return
                     self.report_preview = self.choice==2
-                    upload = self.choice==4
+                    upload = self.choice in (4, 5)
                     self.local_progress = {'label': 'Collecting and uploading report' if upload else 'Collecting report', 'started': time.time()}
                     self.report_task = self.workers.submit(lambda: asyncio.run(self.report(upload=upload)))
             elif self.page == 'power':
                 if self.choice == 0:
                     self.open_page('home')
+                elif self.choice in (3, 4):
+                    self.pending = 'restart' if self.choice == 3 else 'shutdown'
+                    self.open_page('emergency-confirm')
                 else:
                     self.pending = 'restart' if self.choice==1 else 'shutdown'
                     status = self.state()[1]
@@ -409,9 +434,9 @@ class Console:
             self.scroll=min(self.scroll,max(0,len(body)-available))
             rows=body[self.scroll:self.scroll+available]
             rows+=['']*max(0,height-4-len(rows))
-            help_line = 'T Open terminal' if self.power_action else '↑↓ Scroll/select  Enter Open  F Follow  Esc Back'
+            help_line = 'F Force power action  T Open terminal' if self.power_action else '↑↓ Scroll/select  Enter Open  F Follow  Esc Back'
             if self.page == 'power-error':
-                help_line = 'Esc Back  T Open terminal'
+                help_line = 'F Force power action  Esc Back  T Open terminal'
             rows += ['─'*width, self.progress_line(self.state()[1]), help_line,self.notice]
         for y,line in enumerate(rows[:height]):
             color = 1
@@ -434,8 +459,10 @@ class Console:
         screen.refresh()
 
     def run(self, screen):
-        with ThreadPoolExecutor(max_workers=3) as workers:
+        with ThreadPoolExecutor(max_workers=3) as workers, ThreadPoolExecutor(max_workers=1) as power_workers, ThreadPoolExecutor(max_workers=1) as emergency_workers:
             self.workers = workers
+            self.power_workers = power_workers
+            self.emergency_workers = emergency_workers
             try:
                 curses.curs_set(0)
             except curses.error:
@@ -452,9 +479,21 @@ class Console:
                 screen.bkgd(' ',curses.color_pair(1))
             facts = workers.submit(local_facts,self.data)
             next_check = time.monotonic()+3
+            self.emergency.prepare()
+            self.facts.update(network_facts())
+            self.resident_warning = keep_resident()
+            next_network = 0
             switched = False
             while True:
                 self.update_power()
+                for name in ('network_save', 'emergency_report_task'):
+                    task = getattr(self, name)
+                    if task and task.done():
+                        try:
+                            task.result()
+                        except (OSError, ValueError, aiohttp.ClientError, TimeoutError) as error:
+                            self.notice = text(error)
+                        setattr(self, name, None)
                 if self.report_task and self.report_task.done():
                     try:
                         path = self.report_task.result()
@@ -467,10 +506,15 @@ class Console:
                         if not self.power_action:
                             self.local_progress = None
                 if facts.done():
-                    self.facts = facts.result()
+                    self.facts.update(facts.result())
                     if time.monotonic()>=next_check:
                         facts=workers.submit(local_facts,self.data)
                         next_check=time.monotonic()+3
+                if time.monotonic() >= next_network:
+                    self.facts.update(network_facts())
+                    next_network = time.monotonic() + 3
+                if not facts.done() and time.monotonic() > next_check + 5:
+                    self.facts['space'] = 'Unavailable (check stalled)'
                 self.draw(screen)
                 if not switched:
                     # Only the packaged tty2 console claims the display, once drawn.
@@ -483,7 +527,6 @@ class Console:
                 try:
                     self.key(screen.getch(), screen)
                 except (OSError, ValueError, aiohttp.ClientError, subprocess.SubprocessError) as e:
-                    logging.exception('Recovery console action failed on page %s', self.page)
                     self.notice = text(e)
 
 

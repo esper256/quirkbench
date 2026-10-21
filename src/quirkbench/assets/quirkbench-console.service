@@ -4,6 +4,7 @@ After=multi-user.target
 Conflicts=getty@tty2.service
 
 [Service]
+LimitMEMLOCK=infinity
 ExecStart=/usr/bin/quirkbench-console
 StandardInput=tty
 StandardOutput=tty

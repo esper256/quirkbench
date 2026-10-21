@@ -18,6 +18,11 @@ def console_terminal_roundtrip(data):
 import curses, fcntl, os, subprocess, termios
 from pathlib import Path
 from quirkbench.console import Console
+from quirkbench.recovery_runtime import EmergencyPower
+EmergencyPower.prepare = lambda self: None
+def forbidden_power(*args):
+    raise AssertionError('Unexpected real emergency power command in terminal test')
+EmergencyPower.trigger = forbidden_power
 data = Path(DATA_PATH)
 fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 ioctl, run = fcntl.ioctl, subprocess.run
@@ -112,3 +117,78 @@ def power_console(data, monkeypatch):
         return subprocess.CompletedProcess(command, 0, '', '')
     monkeypatch.setattr(subprocess, 'run', run)
     return console
+
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def broken_console_storage(console, monkeypatch):
+    """Hold the real disk-space read; all other media reads fail immediately."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from pathlib import Path
+    from quirkbench.console import local_facts
+    from quirkbench.recovery_runtime import network_facts
+    entered, release = Event(), Event()
+    read_text, open_file = Path.read_text, Path.open
+    def read(path, *args, **kwargs):
+        if str(path) == '/proc/self/mountinfo':
+            mount = str(console.data).replace(' ', r'\040')
+            return f'1 0 0:1 / / ro - ext4 recovery ro\n2 0 0:2 / {mount} rw - ext4 data rw'
+        return read_text(path, *args, **kwargs)
+    def open_media(path, *args, **kwargs):
+        if path.is_relative_to(console.data):
+            raise OSError(5, 'Media unavailable')
+        return open_file(path, *args, **kwargs)
+    def blocked_space(path):
+        entered.set()
+        release.wait()
+        raise OSError(5, 'Media unavailable')
+    monkeypatch.setattr(Path, 'open', open_media)
+    monkeypatch.setattr(Path, 'read_text', read)
+    monkeypatch.setattr('quirkbench.console.shutil.disk_usage', blocked_space)
+    read_fd, console.emergency.fd = os.pipe()
+    console.emergency.error = ''
+    with ThreadPoolExecutor(max_workers=1) as worker:
+        pending = worker.submit(local_facts, console.data)
+        try:
+            assert entered.wait(2), 'Disk check did not start'
+            console.facts.update(network_facts())
+            yield read_fd
+        finally:
+            release.set()
+            pending.result(timeout=2)
+            os.close(read_fd)
+            os.close(console.emergency.fd)
+
+
+async def cold_emergency_upload(data):
+    """Use a new interpreter: earlier TLS tests must not preload its dependencies."""
+    import asyncio
+    from pathlib import Path
+    code = '''
+import asyncio, os, sys
+from pathlib import Path
+from quirkbench.console import Console
+from quirkbench.recovery_runtime import keep_resident
+console = Console(Path(sys.argv[1]))
+keep_resident()
+def unavailable(event, arguments):
+    if event == 'open' and isinstance(arguments[0], (str, bytes)):
+        path = os.fsdecode(arguments[0])
+        if path.startswith(('/usr/', '/etc/')):
+            raise OSError(5, 'Recovery OS files unavailable: ' + path)
+sys.addaudithook(unavailable)
+print(asyncio.run(console.report(upload=True, basic=True)))
+'''
+    proc = await asyncio.create_subprocess_exec(sys.executable, '-c', code, str(data),
+                                                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), 5)
+    finally:
+        if proc.returncode is None:
+            proc.kill()
+            await proc.wait()
+    assert proc.returncode == 0, stderr.decode()
+    return Path(stdout.decode().strip())

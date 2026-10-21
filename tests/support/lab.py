@@ -419,3 +419,19 @@ async def interrupted_admission(monkeypatch, store, kind, status):
     with monkeypatch.context() as patch:
         patch.setattr(store, 'put', put)
         yield
+
+
+@asynccontextmanager
+async def stalled_evidence_upload(lab, monkeypatch):
+    """Hold evidence collection, while keeping the real SSH reconnect path."""
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def collect(http):
+        entered.set()
+        await release.wait()
+    monkeypatch.setattr(lab.target, 'upload_evidence', collect)
+    lab.target.active = {'launched': True, 'recovery_boot': 'earlier-boot', 'run_id': 'test-return'}
+    try:
+        yield entered
+    finally:
+        release.set()
+        lab.target.active = None

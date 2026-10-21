@@ -9,7 +9,7 @@ ROOT = Path(__file__).parent
 # target.py currently serves both modes and imports these modules in deferred paths.
 # Keep that real dependency shared; do not infer dependencies from import syntax.
 COMMON = ('__init__.py', 'target.py', 'files.py', 'linux.py', 'diagnostics.py',
-          'candidates.py', 'commands.py', 'transfer.py', 'console.py',
+          'recovery_runtime.py', 'candidates.py', 'commands.py', 'transfer.py', 'console.py',
           'assets/quirkbench-prepare.service', 'assets/quirkbench-target.service',
           'assets/quirkbench-console.service')
 RECOVERY = ('assets/build-recovery.sh', 'assets/configure-recovery.sh', 'assets/build-efi.sh')
