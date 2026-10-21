@@ -181,7 +181,9 @@ class Console:
             tls = ssl.create_default_context(cafile=self.screen.parent / 'controller.crt')
             async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=tls), timeout=aiohttp.ClientTimeout(total=30)) as client:
                 with path.open('rb') as f:
-                    async with client.put(settings['url'] + '/api/v1/reports/' + name, data=f,
+                    # Explicit type avoids reading the OS MIME database after drive failure.
+                    payload = aiohttp.payload.BufferedReaderPayload(f, content_type='text/plain; charset=utf-8')
+                    async with client.put(settings['url'] + '/api/v1/reports/' + name, data=payload,
                                           headers={'Authorization': 'Bearer ' + settings['token']}) as response:
                         response.raise_for_status()
                         if not (await response.json()).get('stored'):
