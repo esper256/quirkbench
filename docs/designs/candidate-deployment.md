@@ -217,3 +217,9 @@ files. Candidate cache identity includes the utility, shaders and build recipe.
 Unsupported graphics or playback fails visibly; software rendering is never
 silently presented as hardware GPU load. This is one synthetic probe, not a
 real game or a required investigation procedure.
+
+The load utility records UTC and monotonic observation times for playback warnings,
+feed delays, missed CPU frame timing and failures, with final counts. Reuse command
+output retention and recovery collection rather than a separate logging system.
+Distinguish measured warnings from suspected glitches; software cannot reliably
+detect every audible fault. Keep synthetic workloads optional and generic.
