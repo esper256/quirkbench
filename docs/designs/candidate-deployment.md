@@ -154,6 +154,8 @@ Cancellation does not stop controller-side candidate preparation.
 to prepare software on the controller. Preparation can proceed while a previous
 run is retained. Keep those files until the replacement is ready and needed results
 are retrieved; discard requires final diagnostics receipt for a booted run.
+Recovery’s refusal, “Finish the existing run before deploying another candidate,”
+applies to deployment only. Controller-side preparation remains available.
 
 `recovery_deploy_ostree` creates fresh files without selecting a boot. The agent can
 inspect progress and recovery before `recovery_boot_ostree(run_id)` boots them.

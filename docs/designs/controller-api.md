@@ -130,8 +130,8 @@ and return controls. The first candidate command tools are `ssh_command_start`,
 `ssh_command_read`, `ssh_command_wait` and `ssh_command_stop`. They execute explicit
 arguments as root, with separate working directories and environment overrides,
 individual timeouts and durable output. They do not accept commands in recovery.
-Interactive input, user-session selection, SFTP writes and live package helpers
-remain later work. No OS preparation code belongs in these command tools.
+Candidate file transfer is available through `sftp_upload` and `sftp_download`.
+Interactive input, user-session selection and live package helpers remain later work. No OS preparation code belongs in these command tools.
 
 ## Keep simple HTTP services
 
