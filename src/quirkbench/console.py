@@ -4,12 +4,14 @@ from concurrent.futures import ThreadPoolExecutor
 import curses
 import fcntl
 import json
+import logging
 import os
 from pathlib import Path
 import shutil
 import ssl
 import subprocess
 import termios
+import textwrap
 import time
 
 import aiohttp
@@ -67,10 +69,12 @@ def local_facts(data):
 
 
 class Console:
-    def __init__(self, data=Path('/run/quirkbench-data'), linux=None, terminal=('/bin/bash',), facts=None):
+    def __init__(self, data=Path('/run/quirkbench-data'), linux=None, terminal=('/bin/bash', '-i'), facts=None):
         self.terminal = terminal
         self.data = data
         self.home = data / 'quirkbench'
+        # A sibling of the data mount lives in /run on the target, not on USB.
+        self.screen = data.parent / 'quirkbench-runtime' / 'screen.json'
         self.linux = linux or Linux()
         self.notice = ''
         self.selected = 0
@@ -79,9 +83,14 @@ class Console:
         self.scroll = 0
         self.follow = True
         self.choice = 0
+        self.report_task = None
+        self.local_progress = None
+        self.power_task = None
+        self.power_action = None
+        self.power_error = ''
 
     def state(self):
-        status = snapshot(self.home / 'screen.json')
+        status = snapshot(self.screen)
         settings = snapshot(self.home / 'settings' / 'connection.json')
         stale = time.time() - status.get('updated', 0) > 5
         connected = status.get('connected', False) and not stale
@@ -97,8 +106,20 @@ class Console:
                   ('Last contact', f'{max(0, int(time.time()-last))}s ago' if last else 'Never'),
                   ('Controller URL', settings.get('url', 'Not configured')),
                   ('Recovery OS' if status.get('mode', 'recovery') == 'recovery' else 'Candidate OS', self.facts['root']),
-                  ('USB free', self.facts['space']), ('Current work', current)]
+                  ('Data free', self.facts['space']), ('Current work', current)]
         return fields, status, settings
+
+    def progress_line(self, status):
+        stale = time.time()-status.get('updated', 0)>5
+        progress = self.local_progress or (status.get('progress') if not stale else None)
+        if not progress:
+            return '[------------] '+('Waiting for current status' if stale else 'No operation running')
+        # Moving blocks mean activity, not an invented completion percentage.
+        position = int(time.monotonic()*4) % 18
+        position = min(position, 18-position)
+        bar = ('-'*position+'###').ljust(12, '-')
+        elapsed = max(0, int(time.time()-progress['started']))
+        return f'[{bar}] {progress["label"]} / {elapsed}s'
 
     def lines(self, width=80, height=24):
         fields, status, _ = self.state()
@@ -126,18 +147,19 @@ class Console:
                 lines.append(row(('> ' if i==self.selected else '  ')+key.upper()+' '+label))
             lines += [row('Target: '+fields[0][1]), row('Controller: '+fields[3][1]), row('Work: '+fields[-1][1]), border()]
         lines.append(row('RECOVERY & MCP ACTIVITY'))
-        available = max(0, height-len(lines)-3)
+        available = max(0, height-len(lines)-5)
         events = status.get('events', [])[-available:] if available else []
         for event in events:
             stamp = time.strftime('%H:%M:%S', time.localtime(event['time']))
             lines.append(row(f'{stamp}  {event["source"]:<8}  {event["message"]}'))
-        while len(lines)<height-3:
+        while len(lines)<height-5:
             lines.append(row())
-        lines += [border(), row(self.notice or '↑↓ Select  Enter Open  A Activity  T Terminal  Esc Back'), border('└','┘')]
+        lines += [border(), row(self.progress_line(status)), border(),
+                  row(self.notice or '↑↓ Select  Enter Open  A Activity  T Terminal  Esc Back'), border('└','┘')]
         return lines[:height]
 
     def save_network(self):
-        if snapshot(self.home / 'screen.json').get('mode') == 'candidate':
+        if snapshot(self.screen).get('mode') == 'candidate':
             self.notice = 'Network changes apply to this run only.'
             return
         source = Path('/run/NetworkManager/system-connections')
@@ -155,12 +177,9 @@ class Console:
         folder = self.home / 'reports' if self.home.exists() else Path('/run/quirkbench-reports')
         folder.mkdir(parents=True, exist_ok=True)
         name = 'recovery-' + str(time.time_ns())
-        chunks = []
-        for view in ('hardware', 'storage', 'network', 'boot-log'):
-            result = await self.linux.inspect(view, 200)
-            chunks.append(view + '\n' + result['output'])
+        from .diagnostics import recovery_report
         path = folder / (name + '.txt')
-        text = '\n\n'.join(chunks)
+        text = await recovery_report(self.linux, self.data, snapshot(self.screen))
         settings = read_json(self.home / 'settings' / 'connection.json', {})
         # Fixed diagnostics never request NetworkManager secrets or private key files.
         for secret in (settings.get('token'), settings.get('invitation')):
@@ -176,6 +195,8 @@ class Console:
                     async with client.put(settings['url'] + '/api/v1/reports/' + name, data=f,
                                           headers={'Authorization': 'Bearer ' + settings['token']}) as response:
                         response.raise_for_status()
+                        if not (await response.json()).get('stored'):
+                            raise ValueError('Controller did not confirm report storage.')
             self.notice = f'Report uploaded. Local copy: {path}'
         else:
             self.notice = f'Report saved: {path}'
@@ -187,12 +208,22 @@ class Console:
         self.notice = ''
 
     def options(self):
+        reboot = 'Reboot into recovery' if self.state()[1].get('mode') == 'candidate' else 'Reboot'
         return {'logs': ['View boot logs', 'View Quirkbench service logs', 'Preview report', 'Save report', 'Send report to controller'],
-                'power': ['Back', 'Restart into recovery', 'Shut down'],
-                'confirm': ['Keep running', 'Confirm '+getattr(self, 'pending', '')]}.get(self.page, [])
+                'power': ['Back', reboot, 'Shut down'],
+                'confirm': ['Cancel', 'Reboot now' if getattr(self, 'pending', '')=='restart' else 'Shut down now']}.get(self.page, [])
 
-    def page_lines(self):
+    def page_lines(self, width=80):
         fields, status, settings = self.state()
+        if self.page == 'power-progress':
+            return ['REBOOTING' if self.power_action=='restart' else 'SHUTTING DOWN', '',
+                    self.local_progress['label'], '',
+                    'Wait until the computer has powered off before disconnecting the drive.'
+                    if self.power_action=='shutdown' else 'Keep the drive connected while the computer reboots.', '',
+                    'If this takes too long, press T to open the terminal.']
+        if self.page == 'power-error':
+            return ['POWER ACTION FAILED', '', *textwrap.wrap(self.power_error, max(20,width-2)), '',
+                    'Press Esc to return and retry, or T to inspect the problem in a terminal.']
         if self.page == 'activity':
             rows = ['ACTIVITY / '+('Following' if self.follow else 'Scroll paused'), '']
             for event in status.get('events', []):
@@ -214,7 +245,7 @@ class Console:
         title = {'logs':'LOGS & REPORTS', 'power':'POWER', 'confirm':'CONFIRM'}.get(self.page, self.page.upper())
         extra = []
         if self.page == 'confirm':
-            extra = ['Current work: '+fields[-1][1], 'This interrupts active work. Unconfirmed evidence stays on USB.', '']
+            extra = ['Current work: '+fields[-1][1], 'This interrupts active work. Unconfirmed evidence stays on the drive.', '']
         return [title, '', *extra, *[('> ' if i==self.choice else '  ')+label for i,label in enumerate(self.options())], '', self.notice]
 
     def child(self, screen, command):
@@ -223,7 +254,17 @@ class Console:
         try:
             if command == self.terminal:
                 print('Local root terminal. You can change connected disks. Type exit to return.', flush=True)
-            subprocess.run(command, check=True)
+            # Interactive programs need their errors/prompts on this terminal,
+            # even though the console service itself logs errors to the journal.
+            try:
+                result = subprocess.run(command, stderr=subprocess.STDOUT, check=False)
+            except OSError as error:
+                print(f'Could not start {command[0]}: {error}\nPress Enter to return.', flush=True)
+                input()
+                raise
+            if result.returncode:
+                print(f'{command[0]} exited with status {result.returncode}. Press Enter to return.', flush=True)
+                input()
         finally:
             curses.reset_prog_mode()
             screen.clear()
@@ -237,24 +278,65 @@ class Console:
         else:
             self.open_page({'a':'activity', 'l':'logs', 'i':'details', 'c':'controller', 'p':'power'}[key])
 
-    def power(self, screen):
+    def power_command(self, command, check=True):
+        result = subprocess.run(command, capture_output=True, text=True, timeout=120)
+        if check and result.returncode:
+            raise RuntimeError((result.stderr or result.stdout).strip() or f'{command[0]} failed ({result.returncode}).')
+        return result
+
+    def power(self, action):
+        def stage(label):
+            self.local_progress = {'label': label, 'started': time.time()}
         env = self.data/'boot/grubenv'
-        if self.pending == 'restart' and not env.is_file():
-            raise ValueError('Boot settings are unavailable. Open terminal to inspect the USB, or choose Shut down.')
-        was_running = subprocess.run(['systemctl','is-active','--quiet','quirkbench-target.service'],
-                                     capture_output=True, check=False).returncode == 0
+        if action == 'restart' and not env.is_file():
+            raise ValueError('Boot settings are unavailable. Open terminal to inspect the drive, or choose Shut down.')
+        was_running = self.power_command(['systemctl','is-active','--quiet','quirkbench-target.service'], check=False).returncode == 0
         try:
             # Stop deployment before it can select a candidate after our reset.
-            self.child(screen, ['systemctl','stop','quirkbench-target.service'])
-            if self.pending == 'restart':
-                self.child(screen, ['grub2-editenv', str(env), 'unset','next_entry'])
-            self.child(screen, ['systemctl','reboot' if self.pending=='restart' else 'poweroff'])
-        except (OSError, subprocess.SubprocessError):
+            stage('Stopping target work')
+            self.power_command(['systemctl','stop','quirkbench-target.service'])
+            if action == 'restart':
+                stage('Selecting recovery for the next boot')
+                self.power_command(['grub2-editenv', str(env), 'unset','next_entry'])
+            stage('Requesting reboot' if action=='restart' else 'Requesting shutdown')
+            self.power_command(['systemctl','--no-block','reboot' if action=='restart' else 'poweroff'])
+            stage('Reboot requested; waiting for the system' if action=='restart' else 'Shutdown requested; waiting for the system')
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
             if was_running:
-                self.child(screen, ['systemctl','start','quirkbench-target.service'])
+                stage('Restoring the controller connection after failure')
+                try:
+                    self.power_command(['systemctl','start','quirkbench-target.service'])
+                except (OSError, RuntimeError, subprocess.SubprocessError) as restore_error:
+                    raise RuntimeError(f'{error} Controller connection could not restart: {restore_error}') from error
             raise
 
+    def start_power(self):
+        if self.power_action:
+            self.page = 'power-progress'
+            return
+        self.power_action = self.pending
+        self.local_progress = {'label': 'Preparing power action', 'started': time.time()}
+        self.open_page('power-progress')
+        self.power_task = self.workers.submit(self.power, self.power_action)
+
+    def update_power(self):
+        if self.power_task and self.power_task.done():
+            try:
+                self.power_task.result()
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+                self.power_error = text(error)
+                self.power_action = self.local_progress = None
+                self.open_page('power-error')
+            finally:
+                self.power_task = None
+
     def key(self, key, screen):
+        if self.power_action or self.page=='power-error':
+            if key in (ord('t'), ord('T')):
+                self.child(screen, self.terminal)
+            elif key==27 and not self.power_action:
+                self.open_page('home')
+            return
         if key == 27:
             self.open_page('home')
         elif self.page == 'home':
@@ -283,20 +365,28 @@ class Console:
                         command += ['-u','quirkbench-target','-u','quirkbench-prepare','-u','quirkbench-console']
                     self.child(screen, command)
                 else:
-                    path = asyncio.run(self.report(upload=self.choice==4))
-                    if self.choice==2:
-                        self.child(screen, ['less', str(path)])
+                    if self.report_task:
+                        self.notice = 'A report is already in progress.'
+                        return
+                    self.report_preview = self.choice==2
+                    upload = self.choice==4
+                    self.local_progress = {'label': 'Collecting and uploading report' if upload else 'Collecting report', 'started': time.time()}
+                    self.report_task = self.workers.submit(lambda: asyncio.run(self.report(upload=upload)))
             elif self.page == 'power':
                 if self.choice == 0:
                     self.open_page('home')
                 else:
                     self.pending = 'restart' if self.choice==1 else 'shutdown'
-                    self.open_page('confirm')
+                    status = self.state()[1]
+                    if status.get('progress') or status.get('mode')=='candidate' or self.report_task or time.time()-status.get('updated',0)>5:
+                        self.open_page('confirm')
+                    else:
+                        self.start_power()
             elif self.page == 'confirm':
                 if self.choice == 0:
                     self.open_page('home')
                 else:
-                    self.power(screen)
+                    self.start_power()
 
     def draw(self, screen):
         screen.erase()
@@ -308,8 +398,8 @@ class Console:
                 start = max(0, selected-max(0,height-3))
                 rows = rows[start:start+max(1,height-1)]+['↑↓ Select  Enter Open  Esc Back']
         else:
-            body = self.page_lines()
-            available = max(1,height-2)
+            body = self.page_lines(width)
+            available = max(1,height-4)
             if self.options():
                 selected = next(i for i,line in enumerate(body) if line.startswith('> '))
                 self.scroll = min(self.scroll, selected)
@@ -318,8 +408,11 @@ class Console:
                 self.scroll=max(0,len(body)-available)
             self.scroll=min(self.scroll,max(0,len(body)-available))
             rows=body[self.scroll:self.scroll+available]
-            rows+=['']*max(0,height-2-len(rows))
-            rows += ['↑↓ Scroll/select  Enter Open  F Follow  Esc Back',self.notice]
+            rows+=['']*max(0,height-4-len(rows))
+            help_line = 'T Open terminal' if self.power_action else '↑↓ Scroll/select  Enter Open  F Follow  Esc Back'
+            if self.page == 'power-error':
+                help_line = 'Esc Back  T Open terminal'
+            rows += ['─'*width, self.progress_line(self.state()[1]), help_line,self.notice]
         for y,line in enumerate(rows[:height]):
             color = 1
             if line.startswith(('┌','├','└')):
@@ -341,7 +434,8 @@ class Console:
         screen.refresh()
 
     def run(self, screen):
-        with ThreadPoolExecutor(max_workers=1) as workers:
+        with ThreadPoolExecutor(max_workers=3) as workers:
+            self.workers = workers
             try:
                 curses.curs_set(0)
             except curses.error:
@@ -360,6 +454,18 @@ class Console:
             next_check = time.monotonic()+3
             switched = False
             while True:
+                self.update_power()
+                if self.report_task and self.report_task.done():
+                    try:
+                        path = self.report_task.result()
+                        if self.report_preview and not self.power_action:
+                            self.child(screen, ['less', str(path)])
+                    except (OSError, ValueError, aiohttp.ClientError, subprocess.SubprocessError) as e:
+                        self.notice = text(e)
+                    finally:
+                        self.report_task = None
+                        if not self.power_action:
+                            self.local_progress = None
                 if facts.done():
                     self.facts = facts.result()
                     if time.monotonic()>=next_check:
@@ -377,6 +483,7 @@ class Console:
                 try:
                     self.key(screen.getch(), screen)
                 except (OSError, ValueError, aiohttp.ClientError, subprocess.SubprocessError) as e:
+                    logging.exception('Recovery console action failed on page %s', self.page)
                     self.notice = text(e)
 
 

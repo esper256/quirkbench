@@ -9,9 +9,10 @@ are outside scope. Practical protections reduce accidental damage; no tool can
 perfectly contain an arbitrary experimental kernel or guarantee recovery from
 all hangs.
 
-**This branch implements the first milestone of a Python rewrite.** Fast integration
-tests cover the application journey, and a real recovery image build has passed.
-Physical USB boot and Bazzite boot/return still need validation. See [local installation](docs/controller-installation.md).
+**Quirkbench is in active development.** Fast integration tests cover the
+application journey. Recovery and Bazzite have booted on physical hardware,
+connected to the controller, run an MCP command and returned diagnostics.
+New images and changes still need their own boot checks. See [local installation](docs/controller-installation.md).
 The design documents describe the full intended product; later features are not
 yet available. Commit `b807199` preserves the previous code as reference.
 

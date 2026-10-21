@@ -31,6 +31,12 @@ pending candidate boot so the next boot enters recovery. Shared data is only
 mounted read-only during the update. An interrupted update can leave recovery
 unbootable; it must not erase saved settings or diagnostics.
 
+Fresh flashes size the recovery partition to the image plus 1 GiB, rounded up
+to a whole MiB for alignment. This is unused partition capacity, not padding
+added to the image or download. Existing partitions are not moved or resized;
+updates still preserve data whenever the image fits. Enlarging an old layout
+requires an explicit erase after saving any needed data.
+
 Prepare the final [USB layout](recovery.md) during flashing. The recovery image
 is generic: put local controller settings and pairing credentials in the shared
 data partition, separately from recovery. Saved network settings go there too.

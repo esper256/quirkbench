@@ -70,3 +70,22 @@ def build_lock(root: Path):
         except BlockingIOError:
             raise ValueError('Another image or candidate build is using this directory. Wait for it to finish.') from None
         yield
+
+
+async def disk(function, *args, on_cancel=None, **kwargs):
+    """Finish blocking work before cancellation releases its caller's ownership."""
+    import asyncio
+    from functools import partial
+    work = asyncio.get_running_loop().run_in_executor(None, partial(function, *args, **kwargs))
+    cancelled = False
+    while not work.done():
+        try:
+            await asyncio.shield(work)
+        except asyncio.CancelledError:
+            cancelled = True
+    result = work.result()
+    if cancelled:
+        if on_cancel:
+            await disk(on_cancel, result)
+        raise asyncio.CancelledError
+    return result

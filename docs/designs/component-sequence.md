@@ -37,11 +37,18 @@ sequenceDiagram
     Target->>Target: Show received action and progress in recovery Activity
     Target-->>Quirkbench: Command output and exit status
     Quirkbench-->>Agent: Bounded output and saved file
+    opt Human requests Send report in recovery menu
+        Target->>Quirkbench: HTTPS report upload, independently of SSH
+        Quirkbench-->>Target: Confirm report stored
+    end
     Agent->>Quirkbench: rpm_ostree_prepare_candidate, then controller_work_wait
     Quirkbench-->>Agent: Prepared baseline with target connection support
-    Agent->>Quirkbench: recovery_boot_ostree
+    Agent->>Quirkbench: recovery_deploy_ostree
     Quirkbench->>Target: Supply candidate content to recovery
-    Target->>Target: Deploy on shared data with fresh /etc and /var, then select one-time boot
+    Target->>Target: Deploy on shared data with fresh /etc and /var
+    Quirkbench-->>Agent: Prepared, still in recovery
+    Agent->>Quirkbench: recovery_boot_ostree
+    Quirkbench->>Target: Select one-time boot
     Target->>Quirkbench: Candidate reconnects with same identity and new boot ID
     Quirkbench-->>Agent: Candidate connected
     Agent->>Quirkbench: recovery_return
@@ -62,10 +69,11 @@ sequenceDiagram
     participant Target
     Agent->>Quirkbench: investigation_context, then rpm_ostree_prepare_candidate if needed
     Quirkbench-->>Agent: Baseline preparation progress, then completed candidate
-    Agent->>Quirkbench: recovery_boot_ostree
+    Agent->>Quirkbench: recovery_deploy_ostree
     Quirkbench->>Target: Supply prepared OSTree candidate to recovery
     Target->>Target: Deploy with fresh run files and read-only connection settings
-    Target->>Target: Recovery selects one candidate boot, keeping recovery the default
+    Agent->>Quirkbench: recovery_boot_ostree
+    Quirkbench->>Target: Recovery selects one candidate boot, keeping recovery the default
     Note over Quirkbench,Target: Return to recovery if candidate startup never connects before its deadline
     Target->>Quirkbench: Connect with stable paired identity and new boot ID
     Quirkbench-->>Agent: Current software, available tools and instructions
@@ -95,6 +103,7 @@ sequenceDiagram
     Quirkbench->>Target: Stop remaining commands, flush output and return to recovery
     Target->>Quirkbench: Upload remaining evidence
     Quirkbench-->>Agent: Return status and received evidence
+    Agent->>Quirkbench: Boot retained files again, or explicitly discard
     Agent->>Agent: Assess findings and create investigation patch
 ```
 
@@ -128,3 +137,19 @@ sequenceDiagram
 Recovery collects diagnostics and deploys the next prepared candidate. Interrupted
 commands do not survive a reboot.
 Force stop attempts immediate interruption; a frozen target may need manual reset.
+
+## Cancel before boot
+
+```mermaid
+sequenceDiagram
+    participant Agent as User's agent
+    participant Quirkbench
+    participant Target as Target recovery
+    Agent->>Quirkbench: recovery_cancel_ostree(work_id)
+    Quirkbench-->>Agent: Cancellation requested
+    Quirkbench->>Target: Cancel deployment (retry after reconnect if needed)
+    Target->>Target: Stop process, clear boot selection, clean unfinished run
+    Target-->>Quirkbench: Cancelled; recovery ready
+    Agent->>Quirkbench: controller_work_wait(work_id)
+    Quirkbench-->>Agent: Cancellation confirmed
+```

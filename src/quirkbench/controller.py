@@ -5,6 +5,7 @@ import fcntl
 import hashlib
 import hmac
 import json
+import logging
 from pathlib import Path
 import secrets
 import ssl
@@ -21,7 +22,7 @@ from starlette.routing import Mount, Route
 import uvicorn
 
 from .config import Config
-from .files import atomic_write, contained, identifier, read_json, save_json, sync_dir
+from .files import disk, atomic_write, contained, identifier, read_json, save_json, sync_dir
 from .linux import Linux
 from .store import Store, new_id
 
@@ -31,6 +32,8 @@ class RequestRejected(ValueError):
 
 
 class Controller:
+    poll_interval = 1
+
     def __init__(self, root: Path, linux=None):
         self.root = root
         self.config = Config.load(root)
@@ -42,7 +45,10 @@ class Controller:
         self.changed = asyncio.Event()
         self.ready = asyncio.Event()
         self.token = (root / 'mcp-token').read_text().strip()
+        from .image import source_hash
+        self.software_source = source_hash()
         self.prepare_lock = asyncio.Lock()
+        self.upload_publish_lock = asyncio.Lock()
 
     def spawn(self, coro):
         task = asyncio.create_task(coro)
@@ -89,13 +95,17 @@ class Controller:
         return self.store.put('investigation', name, target=t['id'], problem=problem, authorized=True)
 
     def context(self, investigation):
+        from .image import source_hash
         inv = self.store.get('investigation', investigation)
         t = self.store.get('target', inv['target'])
-        status = self.targets.get(t['id'], {'mode': 'offline'})
-        return {'investigation': investigation, 'problem': inv['problem'], 'target': t['name'],
+        status = self.targets.get(t['id'], {'mode': 'offline', 'last_contact': t.get('last_contact'),
+                                                  'last_boot_id': t.get('last_boot_id'), 'last_mode': t.get('last_mode')})
+        return {'controller_source': self.software_source, 'installed_source_differs': source_hash() != self.software_source, 'investigation': investigation, 'problem': inv['problem'], 'target': t['name'],
                 **status, 'tools': ['ssh_recovery_inspect', 'rpm_ostree_prepare_candidate',
-                                   'recovery_boot_ostree', 'controller_work_wait', 'recovery_return'],
-                'instructions': 'Inspect recovery, prepare a candidate, then boot it. Recovery has no agent shell.'}
+                                   'recovery_deploy_ostree', 'recovery_boot_ostree', 'recovery_discard_ostree', 'run_results', 'saved_output_read', 'recovery_cancel_ostree', 'controller_work_wait', 'recovery_return',
+                                   'ssh_command_start', 'ssh_command_read', 'ssh_command_wait', 'ssh_command_stop'],
+                'runs': [r for r in self.store.find('run') if r['investigation'] == investigation],
+                'instructions': 'Inspect recovery, prepare and deploy a candidate, then explicitly boot it. Returned files are retained until recovery_discard_ostree. Plain ostree admin unlock edits to /usr are lost on reboot. Candidate SSH commands run as root with explicit argv/cwd/env and individual deadlines. Recovery has no agent shell.'}
 
     async def rpc(self, target_id, action, **fields):
         conn = self.connections.get(target_id)
@@ -104,7 +114,7 @@ class Controller:
         async with asyncio.timeout(30):
             response = await conn.run(json.dumps({'action': action, **fields}), check=True)
         result = json.loads(response.stdout)
-        if 'error' in result:
+        if 'error' in result and 'status' not in result:
             raise RequestRejected(result['error'])
         return result
 
@@ -114,9 +124,96 @@ class Controller:
             raise ValueError('Recovery inspection requires the target to be in recovery.')
         result = await self.rpc(t['id'], 'inspect', view=view, max_lines=max_lines)
         boot = identifier(result['boot_id'])
-        path = self.root / 'reports' / t['id'] / boot / (identifier(view) + '.txt')
-        atomic_write(path, result['output'])
-        return dict(result, output_file=str(path), status='finished')
+        path = self.root / 'reports' / t['id'] / boot / (identifier(view) + '-' + secrets.token_hex(6) + '.txt')
+        await disk(atomic_write, path, result['output'])
+        return dict(result, output=result['output'][:2000], output_truncated=len(result['output']) > 2000,
+                    output_file=str(path), saved_file=path.relative_to(self.root).as_posix(), next_tool='saved_output_read', status='finished')
+
+    async def saved_output(self, file, offset=0, limit=8192):
+        if not isinstance(offset, int) or offset < 0 or not 1 <= limit <= 32768:
+            raise ValueError('Use a nonnegative byte offset and a limit between 1 and 32768.')
+        if not Path(file).parts or Path(file).parts[0] not in ('results', 'reports', 'logs'):
+            raise ValueError('Choose a saved_file returned by a diagnostics tool.')
+        path = contained(self.root, file)
+        def read():
+            with path.open('rb') as stream:
+                stream.seek(offset)
+                value = stream.read(limit)
+                more = bool(stream.read(1))
+            return dict(output=value.decode(errors='replace'), next_offset=offset+len(value), more=more)
+        return await disk(read)
+
+    async def run_results(self, run_id):
+        run = self.store.get('run', run_id)
+        folder = self.root / 'results' / run_id
+        files = await disk(lambda: sorted(p.relative_to(self.root).as_posix() for p in folder.rglob('*') if p.is_file()))
+        commands = []
+        for work in self.store.find('work'):
+            if work['action'] == 'ssh-command' and work.get('run_id') == run_id:
+                result = await self.command_read(work['id'])
+                commands.append({k:v for k,v in result.items() if k != 'output'})
+        return dict(run=run, evidence='received' if run.get('evidence') else 'pending',
+                    files=files, commands=commands, next_tool='saved_output_read',
+                    cause='Not inferred. Inspect the saved journal; a return to recovery alone does not establish a crash.')
+
+    def command_run(self, run_id):
+        run = self.store.get('run', run_id)
+        inv = self.store.get('investigation', run['investigation'])
+        target = self.targets.get(run['target'], {})
+        if not inv['authorized'] or run['status'] != 'running' or target.get('mode') != 'candidate' or target.get('run_id') != run_id:
+            raise ValueError('Connect the authorized candidate run before executing commands.')
+        return run, target
+
+    async def command_start(self, run_id, request_id, argv, cwd, env, timeout_seconds, max_output_bytes):
+        run, target = self.command_run(run_id)
+        inputs = dict(argv=argv,cwd=cwd,env=env,timeout_seconds=timeout_seconds,max_output_bytes=max_output_bytes)
+        work, fresh = self.store.request('ssh-command',run_id,request_id,inputs)
+        if fresh:
+            self.update_work(work['id'],run_id=run_id,boot_id=target['boot_id'])
+        if work.get('boot_id',target['boot_id']) != target['boot_id']:
+            raise ValueError('The command belongs to an earlier boot and will not be replayed.')
+        return await self.rpc(run['target'],'command-start',run_id=run_id,boot_id=target['boot_id'],
+                              command_id=work['id'],**inputs)
+
+    async def command_read(self, command_id, offset=0, stop=False):
+        work = self.store.get('work',command_id)
+        if work['action'] != 'ssh-command':
+            raise ValueError('Not an SSH command ID.')
+        run = self.store.get('run',work['run_id'])
+        target = self.targets.get(run['target'])
+        if target and target.get('boot_id') == work['boot_id'] and target.get('mode') == 'candidate':
+            result = await self.rpc(run['target'],'command-stop' if stop else 'command-read',
+                run_id=run['id'],boot_id=work['boot_id'],command_id=command_id,offset=offset)
+            self.update_work(command_id,status=result['status'])
+            return result
+        if not isinstance(offset,int) or offset < 0:
+            raise ValueError('Output offset must be nonnegative.')
+        folder = self.root/'results'/run['id']/'commands'
+        saved = read_json(folder/(command_id+'.json'),{})
+        output = b''
+        path = folder/(command_id+'.txt')
+        if path.exists():
+            with path.open('rb') as f:
+                f.seek(offset)
+                output = f.read(32768)
+        status = saved.get('status') if saved.get('status') in ('finished','failed','timed-out','stopped','interrupted') else ('interrupted' if run.get('evidence') else 'awaiting-evidence')
+        if saved:
+            self.update_work(command_id, status=status)
+        return dict(command_id=command_id,run_id=run['id'],boot_id=work['boot_id'], status=status,
+            output=output.decode(errors='replace'),next_offset=offset+len(output),
+            message='Candidate is disconnected. Waiting for recovery evidence.' if status == 'awaiting-evidence' else 'Reading saved command evidence.',
+            next_tool='ssh_command_wait' if status == 'awaiting-evidence' else 'ssh_command_read',
+            **({'exit_code':saved['exit_code']} if 'exit_code' in saved else {}))
+
+    async def command_wait(self, command_id, timeout_seconds=25, offset=0):
+        if not 0 <= timeout_seconds <= 50:
+            raise ValueError('Wait timeout must be between 0 and 50 seconds; it does not stop the command.')
+        deadline = asyncio.get_running_loop().time()+timeout_seconds
+        while True:
+            result = await self.command_read(command_id,offset)
+            if result['status'] not in ('accepted','running','awaiting-evidence') or asyncio.get_running_loop().time() >= deadline:
+                return result
+            await asyncio.sleep(min(.5,max(0,deadline-asyncio.get_running_loop().time())))
 
     async def prepare(self, investigation, base, name, request_id):
         inv = self.store.get('investigation', investigation)
@@ -127,7 +224,7 @@ class Controller:
         return self.work_result(work['id'])
 
     async def _prepare(self, work, inv):
-        from .candidates import prepare_candidate
+        from .bazzite import prepare_candidate
         key = work['id']
         try:
             async with self.prepare_lock:
@@ -146,6 +243,15 @@ class Controller:
         result = {k: v for k, v in work.items() if k not in ('inputs', 'scope', 'action')}
         result['work_id'] = result.pop('id')
         result['next_tool'] = 'controller_work_wait'
+        if work['action'] != 'ssh-command':
+            import shlex
+            result['quiet_wait_command'] = shlex.join(['quirkbench', '--state', str(self.root), '--json',
+                'investigation', 'wait', work['scope'], '--work', key, '--timeout', '3600'])
+        if work.get('candidate_id'):
+            result['candidate'] = self.store.get('candidate', work['candidate_id'])
+        elif work.get('run_id'):
+            run = self.store.get('run', work['run_id'])
+            result['candidate'] = self.store.get('candidate', run['candidate'])
         log = self.root / 'logs' / (key + '.log')
         if log.exists():
             result['log_file'] = str(log)
@@ -155,17 +261,21 @@ class Controller:
                 result['recent_output'] = f.read().decode(errors='replace')
         return result
 
-    async def boot(self, investigation, candidate, timeout, request_id):
+    async def deploy(self, investigation, candidate, request_id):
+        timeout = 300
         if not 1 <= timeout <= 3600:
             raise ValueError('Startup connection timeout must be between 1 and 3600 seconds.')
         inv = self.store.get('investigation', investigation)
         if not inv['authorized']:
             raise ValueError('Investigation is not authorized.')
         software = self.store.get('candidate', candidate)
-        work, fresh = self.store.request('boot', investigation, request_id, {'candidate': candidate, 'timeout': timeout})
+        work, fresh = self.store.request('deploy', investigation, request_id, {'candidate': candidate})
         if not fresh:
             return self.work_result(work['id'])
         t = inv['target']
+        if 'deploy-only' not in self.targets.get(t, {}).get('capabilities', []):
+            self.update_work(work['id'], status='failed', stage='Update recovery before deployment: this image does not support separate deployment and boot.')
+            return self.work_result(work['id'])
         if self.targets.get(t, {}).get('mode') != 'recovery':
             self.update_work(work['id'], status='failed', stage='Connect the target in recovery before requesting a boot.')
             return self.work_result(work['id'])
@@ -174,7 +284,7 @@ class Controller:
             return self.work_result(work['id'])
         run = new_id('run')
         self.store.put('run', run, target=t, investigation=investigation, candidate=candidate,
-                       status='preparing', work_id=work['id'], evidence=None,
+                       status='preparing', work_id=work['id'], deployment_id=run, evidence=None,
                        recovery_boot=self.targets[t]['boot_id'])
         self.update_work(work['id'], status='starting', stage='Deploying candidate on target', run_id=run)
         self.spawn(self._dispatch_boot(t, work['id'], run, software, timeout))
@@ -190,6 +300,72 @@ class Controller:
         except Exception as e:
             # A lost reply is not proof that the target did nothing.
             self.update_work(work_id, reconcile=True, stage=f'Waiting for target reconciliation: {e}')
+
+    async def retained_action(self, run_id, request_id, action, timeout=300):
+        previous = self.store.get('run', run_id)
+        inv = self.store.get('investigation', previous['investigation'])
+        if not inv['authorized']:
+            raise ValueError('Investigation is not authorized.')
+        if not 1 <= timeout <= 3600:
+            raise ValueError('Startup connection timeout must be between 1 and 3600 seconds.')
+        work, fresh = self.store.request(action, previous['investigation'], request_id,
+                                         {'run_id': run_id, 'timeout': timeout})
+        if not fresh:
+            return self.work_result(work['id'])
+        target = self.targets.get(previous['target'], {})
+        active = target.get('retained_run') or {}
+        if target.get('mode') != 'recovery' or active.get('run_id') != run_id:
+            self.update_work(work['id'], status='failed', stage='Connect recovery with this retained run before acting.')
+            return self.work_result(work['id'])
+        if previous['status'] not in ('prepared', 'finished', 'failed'):
+            self.update_work(work['id'], status='failed', stage='Wait for preparation or diagnostics upload to finish.')
+            return self.work_result(work['id'])
+        # A repeat boot gets new evidence and command identities, while OS files stay put.
+        attempt = new_id('run') if action == 'boot' and (previous['status'] == 'finished' or previous.get('evidence') is not None or previous.get('boot_id')) else run_id
+        if attempt != run_id:
+            self.store.put('run', attempt, **{k:v for k,v in previous.items() if k not in ('id','evidence','boot_id')}, evidence=None)
+        self.store.change('run', attempt, status='starting' if action == 'boot' else 'discarding',
+                          work_id=work['id'], recovery_boot=target['boot_id'])
+        self.update_work(work['id'], status='starting', run_id=attempt, previous_run=run_id,
+                         stage='Requesting candidate boot' if action == 'boot' else 'Discarding retained run files')
+        self.spawn(self._dispatch_retained(previous['target'], action, work['id'], run_id, attempt, timeout))
+        return self.work_result(work['id'])
+
+    async def _dispatch_retained(self, target, action, key, previous, run_id, timeout):
+        try:
+            await self.rpc(target, action, work_id=key, previous_run=previous,
+                           run_id=run_id, startup_timeout=timeout)
+        except RequestRejected as error:
+            self.update_work(key, status='failed', stage=str(error))
+            self.store.change('run', run_id, status='failed')
+        except Exception as error:
+            self.update_work(key, reconcile=True, stage=f'Waiting for target reconciliation: {error}')
+
+    async def cancel_deployment(self, work_id):
+        work = self.store.get('work', work_id)
+        if work['action'] != 'deploy' or not work.get('run_id'):
+            raise ValueError('Choose the work ID returned by recovery_deploy_ostree.')
+        if work['status'] == 'cancelled':
+            return self.work_result(work_id)
+        run = self.store.get('run', work['run_id'])
+        if run['status'] not in ('preparing', 'prepared'):
+            raise ValueError('Deployment is no longer preparing. Use recovery_return for a running candidate.')
+        self.update_work(work_id, cancel_requested=True, cancellation_error=None, status='cancelling',
+                         stage='Cancellation requested; waiting for target confirmation')
+        self.spawn(self._dispatch_cancel(run))
+        return self.work_result(work_id)
+
+    async def _dispatch_cancel(self, run):
+        key = run['work_id']
+        if run['target'] not in self.connections:
+            return
+        try:
+            await self.rpc(run['target'], 'cancel-deploy', work_id=key, run_id=run['id'])
+        except RequestRejected as error:
+            self.update_work(key, cancel_requested=False, status='starting', cancellation_error=str(error), stage=str(error))
+        except Exception:
+            # Keep the durable request; reconnect will retry it.
+            pass
 
     async def return_recovery(self, run_id, request_id):
         run = self.store.get('run', run_id)
@@ -210,14 +386,14 @@ class Controller:
         except Exception as e:
             self.update_work(key, reconcile=True, stage=f'Waiting for target reconciliation: {e}')
 
-    async def wait(self, work_id, timeout_seconds=25):
-        if not 0 <= timeout_seconds <= 50:
-            raise ValueError('Wait timeout must be between 0 and 50 seconds; it does not stop work.')
+    async def wait(self, work_id, timeout_seconds=25, maximum=50):
+        if not 0 <= timeout_seconds <= maximum:
+            raise ValueError(f'Wait timeout must be between 0 and {maximum} seconds; it does not stop work.')
         async def waiting():
             while True:
                 self.changed.clear()
                 result = self.work_result(work_id)
-                if result['status'] in ('ready', 'finished', 'failed', 'interrupted'):
+                if result['status'] in ('ready', 'finished', 'failed', 'interrupted', 'cancelled'):
                     return result
                 await self.changed.wait()
         try:
@@ -239,56 +415,69 @@ class Controller:
                 if result['target_id'] != tid:
                     raise ValueError('SSH identity does not match target status.')
                 identifier(result['boot_id'])
+                result['last_contact'] = time.time()
                 self.targets[tid] = result
                 for run in self.store.find('run'):
                     if run['target'] != tid or run['status'] in ('finished', 'failed'):
                         continue
+                    remote = result.get('work', {}).get(run['work_id'], {})
+                    if self.store.get('work', run['work_id']).get('cancel_requested'):
+                        if remote.get('status') != 'cancelled' and not remote.get('cancel_error'):
+                            await self._dispatch_cancel(run)
+                            if self.store.get('work', run['work_id']).get('cancel_requested'):
+                                continue
                     if result['mode'] == 'candidate' and result.get('run_id') == run['id']:
                         self.store.change('run', run['id'], status='running', boot_id=result['boot_id'])
                         self.update_work(run['work_id'], status='ready', stage='Candidate connected',
                                          boot_id=result['boot_id'], target_mode='candidate', run_id=run['id'])
                     elif result['mode'] == 'recovery':
-                        remote = result.get('work', {}).get(run['work_id'], {})
-                        if remote.get('stage') and result['boot_id'] == run['recovery_boot']:
+                        action = self.store.get('work', run['work_id'])['action']
+                        if remote.get('stage') and not self.store.get('work', run['work_id']).get('cancel_requested'):
                             self.update_work(run['work_id'], stage=remote['stage'])
-                        if remote.get('status') in ('failed', 'interrupted'):
+                        if remote.get('status') in ('failed', 'interrupted', 'cancelled'):
                             self.store.change('run', run['id'], status='failed')
-                            self.update_work(run['work_id'], status=remote['status'], stage=remote.get('error', 'Target preparation interrupted'))
-                        elif result['boot_id'] != run['recovery_boot']:
+                            self.update_work(run['work_id'], status=remote['status'], cancel_requested=False,
+                                             stage=remote.get('error') or remote.get('stage', 'Target action interrupted'))
+                        elif action == 'deploy' and remote.get('status') == 'prepared':
+                            self.store.change('run', run['id'], status='prepared')
+                            self.update_work(run['work_id'], status='ready', stage='Deployed; use recovery_boot_ostree to boot', target_mode='recovery')
+                        elif action == 'discard' and remote.get('status') == 'finished':
+                            self.store.change('run', run['id'], status='finished', discarded=True)
+                            self.update_work(run['work_id'], status='finished', stage=remote['stage'])
+                        elif action == 'boot' and result['boot_id'] != run['recovery_boot']:
                             self.store.change('run', run['id'], status='returned')
                             self.finish_return(run['id'])
+                        elif self.store.get('work', run['work_id']).get('reconcile') and not remote:
+                            self.store.change('run', run['id'], status='failed')
+                            self.update_work(run['work_id'], status='failed', stage='Target did not accept this request. Submit a new request.')
                 for work in self.store.find('work'):
-                    if work['action'] not in ('boot', 'return') or work['status'] in ('failed', 'interrupted', 'finished'):
+                    if work['action'] != 'return' or work['status'] != 'returning':
                         continue
-                    run_id = work.get('run_id')
-                    if not run_id:
-                        continue
-                    run = self.store.get('run', run_id)
+                    run = self.store.get('run', work['run_id'])
                     if run['target'] != tid:
                         continue
                     remote = result.get('work', {}).get(work['id'])
-                    error = None
                     if remote and remote.get('status') in ('failed', 'interrupted'):
-                        error = remote.get('error', 'Target action failed. Use a new request after fixing the problem.')
-                    elif work.get('reconcile') and not remote:
-                        error = 'Target did not accept this request. Reconnect and submit a new request.'
-                    if error:
-                        self.update_work(work['id'], status='failed', stage=error)
-                        if work['action'] == 'boot':
-                            self.store.change('run', run_id, status='failed')
+                        self.update_work(work['id'], status='failed', stage=remote.get('error', 'Return interrupted.'))
+                    elif work.get('reconcile') and not remote and result['mode'] == 'candidate':
+                        self.update_work(work['id'], status='failed', stage='Return was not accepted. Submit a new request.')
                 self.changed.set()
-                await asyncio.sleep(1)
-        except (asyncssh.Error, OSError, ValueError, TimeoutError, json.JSONDecodeError):
-            conn.close()
+                await asyncio.sleep(self.poll_interval)
+        except (asyncssh.Error, OSError, ValueError, TimeoutError, json.JSONDecodeError) as error:
+            logging.warning('Target %s status connection ended: %s', tid, type(error).__name__)
+            reason = 'Status request timed out after 30 seconds' if isinstance(error, TimeoutError) else f'Status request failed: {type(error).__name__}'
+            conn.disconnect(asyncssh.DISC_BY_APPLICATION, reason)
         finally:
             if self.connections.get(tid) is conn:
                 self.connections.pop(tid, None)
-                self.targets.pop(tid, None)
+                last = self.targets.pop(tid, {})
+                self.store.change('target', tid, last_contact=last.get('last_contact'),
+                                  last_boot_id=last.get('boot_id'), last_mode=last.get('mode'))
                 self.changed.set()
 
     def finish_return(self, run_id):
         run = self.store.get('run', run_id)
-        if run['status'] != 'returned' or run.get('evidence') is None:
+        if run['status'] != 'returned' or run.get('evidence') is None or not (self.targets.get(run['target'],{}).get('retained_run') or {}).get('evidence_received'):
             return
         self.store.change('run', run_id, status='finished')
         boot_work = self.store.get('work', run['work_id'])
@@ -306,6 +495,11 @@ class Controller:
             return self.invitation(**data)
         if action == 'investigation-start':
             return self.start_investigation(**data)
+        if action == 'investigation-wait':
+            work = self.store.get('work', data['work_id'])
+            if work['scope'] != data['name']:
+                raise ValueError('Work does not belong to this investigation.')
+            return await self.wait(work['id'], data['timeout_seconds'], maximum=86400)
         if action == 'status':
             return {'targets': [{'name': t['name'], **self.targets.get(t['id'], {'mode': 'offline'})} for t in self.store.find('target')],
                     'work': [self.work_result(w['id']) for w in self.store.find('work')]}
@@ -325,8 +519,40 @@ class Controller:
 
         @mcp.tool()
         async def ssh_recovery_inspect(target: str, view: str, max_lines: int = 80) -> dict:
-            """Read hardware, network, storage or boot-log through recovery SSH. No shell access."""
+            """Read hardware, network, storage, processes, services, boot-log, report or emergency (kernel memory; no subprocesses). No shell access."""
             return await self.inspect(target, view, max_lines)
+
+        @mcp.tool()
+        async def saved_output_read(file: str, offset: int = 0, limit: int = 8192) -> dict:
+            """Read saved diagnostics by controller-relative path, with a byte cursor. Maximum 32 KiB per response."""
+            return await self.saved_output(file, offset, limit)
+
+        @mcp.tool()
+        async def run_results(run_id: str) -> dict:
+            """Show run outcome, evidence receipt, command results and saved files without database access."""
+            return await self.run_results(run_id)
+
+        @mcp.tool()
+        async def ssh_command_start(run_id: str, request_id: str, argv: list[str],
+                                    timeout_seconds: int, cwd: str = '/', env: dict[str,str] | None = None,
+                                    max_output_bytes: int = 16777216) -> dict:
+            """Start a candidate command as root. Explicit argv: no implicit shell. Each command has its own cwd/env; files and services are shared. Output is saved on target. Use ssh_command_wait/read/stop. Output defaults to 16 MiB; increase max_output_bytes explicitly if needed. No interactive input yet."""
+            return await self.command_start(run_id,request_id,argv,cwd,env or {},timeout_seconds,max_output_bytes)
+
+        @mcp.tool()
+        async def ssh_command_read(command_id: str, offset: int = 0) -> dict:
+            """Read up to 32 KiB of saved output; next_offset is a byte cursor. Does not repeat execution."""
+            return await self.command_read(command_id,offset)
+
+        @mcp.tool()
+        async def ssh_command_wait(command_id: str, timeout_seconds: int = 25, offset: int = 0) -> dict:
+            """Wait quietly for completion, connection loss or a wait deadline (maximum 50 seconds). Does not stop work."""
+            return await self.command_wait(command_id,timeout_seconds,offset)
+
+        @mcp.tool()
+        async def ssh_command_stop(command_id: str) -> dict:
+            """Stop this command and its process group without ending the candidate run."""
+            return await self.command_read(command_id,stop=True)
 
         @mcp.tool()
         async def rpm_ostree_prepare_candidate(investigation: str, request_id: str,
@@ -335,10 +561,24 @@ class Controller:
             return await self.prepare(investigation, base, name, request_id)
 
         @mcp.tool()
-        async def recovery_boot_ostree(investigation: str, candidate: str, request_id: str,
-                                        startup_connect_timeout_seconds: int = 300) -> dict:
-            """Deploy a prepared candidate with fresh files and boot once. Recovery remains default."""
-            return await self.boot(investigation, candidate, startup_connect_timeout_seconds, request_id)
+        async def recovery_deploy_ostree(investigation: str, candidate: str, request_id: str) -> dict:
+            """Transfer and prepare fresh run files. Does not select a boot or reboot. Inspect progress with controller_work_wait, then use recovery_boot_ostree."""
+            return await self.deploy(investigation, candidate, request_id)
+
+        @mcp.tool()
+        async def recovery_boot_ostree(run_id: str, request_id: str, startup_connect_timeout_seconds: int = 300) -> dict:
+            """Boot a prepared or retained OSTree deployment once. Persistent edits remain; plain ostree admin unlock /usr edits do not survive reboot. Repeat boots get a new run ID and never replay commands."""
+            return await self.retained_action(run_id, request_id, 'boot', startup_connect_timeout_seconds)
+
+        @mcp.tool()
+        async def recovery_discard_ostree(run_id: str, request_id: str) -> dict:
+            """Remove retained run files after diagnostics receipt, or discard an unbooted prepared run. Keep downloaded candidates, settings and controller evidence. Recovery only."""
+            return await self.retained_action(run_id, request_id, 'discard')
+
+        @mcp.tool()
+        async def recovery_cancel_ostree(work_id: str) -> dict:
+            """Cancel a recovery_deploy_ostree transfer. Returns promptly; controller_work_wait confirms cleanup. Disconnected targets receive cancellation on reconnect. After boot is committed use recovery_return."""
+            return await self.cancel_deployment(work_id)
 
         @mcp.tool()
         async def recovery_return(run_id: str, request_id: str) -> dict:
@@ -432,26 +672,34 @@ class Controller:
                 folder = self.root / 'reports' / target['id']
                 name = identifier(request.match_info['report']) + '.txt'
             path = contained(folder, name)
-            path.parent.mkdir(parents=True, exist_ok=True)
+            await disk(path.parent.mkdir, parents=True, exist_ok=True)
             import tempfile, os
-            fd, temporary = tempfile.mkstemp(dir=path.parent, prefix='.upload-')
+            def discard_upload(created):
+                descriptor, name = created
+                os.close(descriptor)
+                Path(name).unlink(missing_ok=True)
+            fd, temporary = await disk(tempfile.mkstemp, dir=path.parent, prefix='.upload-', on_cancel=discard_upload)
             try:
                 with os.fdopen(fd, 'wb') as f:
                     async for chunk in request.content.iter_chunked(256*1024):
-                        f.write(chunk)
-                    f.flush()
-                    os.fsync(f.fileno())
+                        await disk(f.write, chunk)
+                    await disk(f.flush)
+                    await disk(os.fsync, f.fileno())
                 from .files import digest_file
-                digest = digest_file(Path(temporary))
-                if path.exists():
-                    if digest_file(path) != digest:
-                        raise web.HTTPConflict(text='A completed file with different bytes already exists.')
-                else:
-                    os.replace(temporary, path)
+                def publish():
+                    digest = digest_file(Path(temporary))
+                    if path.exists():
+                        if digest_file(path) != digest:
+                            raise web.HTTPConflict(text='A completed file with different bytes already exists.')
+                    else:
+                        os.replace(temporary, path)
                     sync_dir(path.parent)
+                    return digest
+                async with self.upload_publish_lock:
+                    digest = await disk(publish)
                 return web.json_response({'stored': True, 'sha256': digest})
             finally:
-                Path(temporary).unlink(missing_ok=True)
+                await disk(Path(temporary).unlink, missing_ok=True)
 
         async def result(request):
             target = authenticated_target(request)
@@ -469,6 +717,9 @@ class Controller:
                 raise web.HTTPConflict(text='The final report already has different contents.')
             save_json(self.root / 'results' / run_id / 'result.json', report)
             self.store.change('run', run_id, evidence=report)
+            for work in self.store.find('work'):
+                if work['action'] == 'ssh-command' and work.get('run_id') == run_id:
+                    await self.command_read(work['id'])
             self.finish_return(run_id)
             return web.json_response({'stored': True})
 
@@ -495,7 +746,7 @@ class Controller:
             raise ValueError('A controller is already using this directory.') from None
         self.store = Store(self.root)
         for work in self.store.find('work'):
-            if work['action'] in ('boot', 'return') and work['status'] in ('starting', 'returning'):
+            if work['action'] in ('deploy', 'boot', 'discard', 'return') and work['status'] in ('starting', 'returning'):
                 self.update_work(work['id'], reconcile=True)
         for work in self.store.find('work'):
             if work['action'] == 'prepare' and work['status'] in ('accepted', 'preparing'):

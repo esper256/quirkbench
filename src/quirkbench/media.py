@@ -213,6 +213,9 @@ menuentry 'Quirkbench recovery' --id recovery {{
   linux /boot/vmlinuz root=UUID={media['recovery_uuid']} ro console=tty1 quirkbench.data={media['data_uuid']} panic=10 rd.shell=0 rd.emergency=reboot rd.driver.blacklist=ahci,mmc_block modprobe.blacklist=ahci,mmc_block noresume rd.systemd.gpt_auto=0 systemd.gpt_auto=0 selinux=0
   initrd /boot/initramfs.img
 }}
+function load_video {{
+  insmod all_video
+}}
 set root=$qbboot
 set blsdir=/loader/entries
 blscfg
@@ -240,7 +243,13 @@ async def write_usb(device, expected, image, connection, linux=None, *, yes=Fals
         return
     print(erase_warning(requested, disk), flush=True)
     recovery_bytes = (image / 'recovery.img').stat().st_size
-    recovery_end = 257 + (recovery_bytes + 1048575) // 1048576
+    # Reserve device space, not extra image bytes: updates can copy a larger
+    # filesystem later without moving boot or shared-data partitions.
+    gib = 1024**3
+    recovery_mib = (recovery_bytes + 1048575) // 1048576 + 1024
+    recovery_end = 257 + recovery_mib
+    print(f'Recovery partition: {recovery_mib / 1024:.2f} GiB; '
+          f'{(recovery_mib * 1048576 - recovery_bytes) / gib:.1f} GiB reserved for image growth.', flush=True)
     data_start = recovery_end + 1024
     if int(disk['size']) < (data_start + 1024) * 1048576:
         raise ValueError('USB is too small for recovery and shared data. Choose a larger USB.')

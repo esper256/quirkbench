@@ -82,6 +82,7 @@ Size: 32.0 GB
 Existing layout:
   /dev/sdb   32.0 GB  not mounted
     /dev/sdb1  32.0 GB  exfat  not mounted
+Recovery partition: 2.50 GiB; 1.0 GiB reserved for image growth.
 Type ERASE /dev/sdb to continue, or press Enter to cancel: ERASE /dev/sdb
 
 ✓ Write recovery system
@@ -108,7 +109,7 @@ The user inserts the USB drive into the target computer and boots from it.
 │   I  Target details    │ Last contact    Never                               │
 │   T  Open terminal     │ Controller URL  https://192.168.1.20:7443           │
 │   P  Power             │ Recovery OS     Read-only                           │
-│                        │ USB free        21 GiB                              │
+│                        │ Data free       21 GiB                              │
 │                        │ Current work    Idle                                │
 ├────────────────────────┴─────────────────────────────────────────────────────┤
 │ RECOVERY & MCP ACTIVITY                                           Live log   │
@@ -118,6 +119,8 @@ The user inserts the USB drive into the target computer and boots from it.
 │ 14:31:54  RECOVERY  Waiting for a network connection                         │
 │ Next: choose Network to connect this target.                                 │
 │                                                                              │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ [------------] No operation running                                          │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ ↑↓ Select   Enter Open   A Activity history   T Terminal   Esc Back          │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -152,7 +155,7 @@ Connected to Workshop Wi-Fi. Saved for the next boot.
 │   I  Target details    │ Last contact    1s ago                              │
 │   T  Open terminal     │ Controller URL  https://192.168.1.20:7443           │
 │   P  Power             │ Recovery OS     Read-only                           │
-│                        │ USB free        21 GiB                              │
+│                        │ Data free       21 GiB                              │
 │                        │ Current work    Idle                                │
 ├────────────────────────┴─────────────────────────────────────────────────────┤
 │ RECOVERY & MCP ACTIVITY                                           Live log   │
@@ -162,6 +165,8 @@ Connected to Workshop Wi-Fi. Saved for the next boot.
 │ 14:32:01  MCP       Read hardware / received                                 │
 │ 14:32:02  MCP       Read hardware / finished                                 │
 │ 14:32:04  MCP       Read boot log / finished                                 │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ [------------] No operation running                                          │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ ↑↓ Select   Enter Open   A Activity history   T Terminal   Esc Back          │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -197,7 +202,8 @@ Agent · Quirkbench tools
 ✓ investigation_context       Read the problem and available tools
 ↻ rpm_ostree_prepare_candidate Prepare latest stable Bazzite baseline
 ✓ controller_work_wait        Baseline ready · Exact Bazzite version saved
-✓ recovery_boot_ostree        Boot the baseline with fresh run files
+✓ recovery_deploy_ostree      Prepare fresh baseline files
+✓ recovery_boot_ostree        Boot the prepared baseline
 ↻ ssh_command_start           Record microphone · Running
 ✓ ssh_command_start           Inspect service logs while recording continues
 ```
@@ -250,7 +256,9 @@ Agent · Quirkbench tools
 
 ✓ rpm_ostree_prepare_candidate  Save baseline + selected PipeWire RPMs
 ✓ recovery_return             Upload evidence and finish this run
-✓ recovery_boot_ostree        Boot the saved candidate for a clean repeat
+✓ recovery_discard_ostree     Remove the previous run files
+✓ recovery_deploy_ostree      Prepare the saved candidate for a clean repeat
+✓ recovery_boot_ostree        Boot the prepared candidate
 ```
 
 ## Controller computer · Results

@@ -50,7 +50,7 @@ Waiting for target lab-target to respond.
 │ Run result           Unknown                             │
 │ Evidence             Partial logs received              │
 │                                                          │
-│ Check the laptop. If frozen, restart it from the USB.     │
+│ Check the target. If frozen, restart it from the USB.     │
 │ Quirkbench will collect surviving evidence on reconnect. │
 │ The interrupted test will not restart automatically.     │
 │                                                          │
@@ -98,7 +98,7 @@ P Pause and return to recovery    F Force stop    L Logs
 │   I  Target details    │ Last contact    42s ago                             │
 │   T  Open terminal     │ Controller URL  https://192.168.1.20:7443           │
 │   P  Power             │ Recovery OS     Read-only                           │
-│                        │ USB free        21 GiB                              │
+│                        │ Data free       21 GiB                              │
 │                        │ Current work    Reconnecting; upload waiting        │
 ├────────────────────────┴─────────────────────────────────────────────────────┤
 │ RECOVERY & MCP ACTIVITY                                           Live log   │
@@ -108,6 +108,8 @@ P Pause and return to recovery    F Force stop    L Logs
 │ 14:32:01  RECOVERY  Controller connection lost                               │
 │ 14:32:01  RECOVERY  Unconfirmed evidence kept on USB                         │
 │ 14:32:43  RECOVERY  Reconnecting / no commands running                       │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ [------------] No operation running                                          │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ ↑↓ Select   Enter Open   A Activity history   T Terminal   Esc Back          │
 └──────────────────────────────────────────────────────────────────────────────┘

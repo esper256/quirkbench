@@ -8,7 +8,7 @@ Read relevant code, not the entire archive. Coordinate issues/PRs and preserve o
 
 Use [interactive debugging](interactive-debugging.md) as the main workflow.
 Use one controller process and AsyncSSH reverse-direction target connections.
-Implement rpm-ostree first, with fresh mutable files per run and recovery owning
+Implement rpm-ostree first, with fresh mutable files per deployment and recovery owning
 boot selection. Verify that integration early. Keep OS-specific preparation small
 and separate from shared command/evidence code. Measure repeat-loop cost.
 This does not authorize image builds or hardware runs.
@@ -30,7 +30,8 @@ Deliver this as one coherent working journey:
 - Controller preparation of the selected Bazzite baseline. Recovery deploys it on
   shared data with fresh writable directories and GRUB one-time boot selection.
 - Minimal candidate connection, boot identification, startup connection deadline
-  and return-to-recovery control. Candidate command execution is not needed yet.
+  and return-to-recovery control. The next proof also includes bounded candidate MCP
+  commands, saved output and disposable `/usr` edits through `ostree admin unlock`.
 
 Completion means an actual built/flashed USB boots recovery, an agent retrieves
 useful recovery command output through MCP, provisions and boots a candidate, then

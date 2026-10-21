@@ -14,10 +14,10 @@ from .files import read_json, save_json
 from .linux import Linux
 
 
-async def local(root, action, data=None):
+async def local(root, action, data=None, timeout=30):
     config = Config.load(root)
     token = (root / 'mcp-token').read_text().strip()
-    async with httpx.AsyncClient(trust_env=False, timeout=30) as client:
+    async with httpx.AsyncClient(trust_env=False, timeout=timeout) as client:
         try:
             response = await client.post(f'http://127.0.0.1:{config.mcp_port}/local/{action}', json=data or {},
                                          headers={'Authorization': 'Bearer ' + token})
@@ -70,6 +70,10 @@ def parser():
     start.add_argument('--yes', action='store_true', help='Authorize candidate preparation and boot on the USB')
     show = acts.add_parser('show', help='Read current progress and results')
     show.add_argument('name', help='Investigation name')
+    wait = acts.add_parser('wait', help='Wait quietly for existing controller work; prints once when ready or the wait ends')
+    wait.add_argument('name', help='Investigation name')
+    wait.add_argument('--work', required=True, help='Work ID returned by preparation, deployment, boot or return')
+    wait.add_argument('--timeout', type=int, default=3600, help='Maximum wait in seconds, up to 86400; does not stop work')
     return p
 
 
@@ -92,6 +96,10 @@ async def execute(args):
         return {'tools': {name: bool(shutil.which(name) or (shutil.which('grub-editenv') if name == 'grub2-editenv' else None)) for name in names},
                 'message': 'Podman builds images. USB writer uses the remaining Linux disk tools. '}
     if args.command == 'investigation':
+        if args.action == 'wait':
+            if not 0 <= args.timeout <= 86400:
+                raise ValueError('Wait timeout must be between 0 and 86400 seconds.')
+            return await local(root, 'investigation-wait', {'name': args.name, 'work_id': args.work, 'timeout_seconds': args.timeout}, timeout=args.timeout+10)
         if args.action == 'show':
             return await local(root, 'investigation-show', {'name': args.name})
         problem = args.problem or ask('What problem do you want to investigate?')

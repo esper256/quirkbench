@@ -1,6 +1,7 @@
 [Unit]
 Description=Quirkbench outbound target connection
 After=quirkbench-prepare.service NetworkManager.service
+Requires=quirkbench-prepare.service
 Wants=NetworkManager.service
 
 [Service]

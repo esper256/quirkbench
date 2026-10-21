@@ -20,7 +20,7 @@
 │   I  Target details    │ Last contact    Never                               │
 │   T  Open terminal     │ Controller URL  https://192.168.1.20:7443           │
 │   P  Power             │ Recovery OS     Read-only                           │
-│                        │ USB free        21 GiB                              │
+│                        │ Data free       21 GiB                              │
 │                        │ Current work    Idle                                │
 ├────────────────────────┴─────────────────────────────────────────────────────┤
 │ RECOVERY & MCP ACTIVITY                                           Live log   │
@@ -30,6 +30,8 @@
 │ 14:31:54  RECOVERY  Waiting for a network connection                         │
 │ Next: choose Network to connect this target.                                 │
 │                                                                              │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ [------------] No operation running                                          │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ ↑↓ Select   Enter Open   A Activity history   T Terminal   Esc Back          │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -51,7 +53,7 @@ The user chooses Network, connects through NetworkManager and returns.
 │   I  Target details    │ Last contact    1s ago                              │
 │   T  Open terminal     │ Controller URL  https://192.168.1.20:7443           │
 │   P  Power             │ Recovery OS     Read-only                           │
-│                        │ USB free        21 GiB                              │
+│                        │ Data free       21 GiB                              │
 │                        │ Current work    Idle                                │
 ├────────────────────────┴─────────────────────────────────────────────────────┤
 │ RECOVERY & MCP ACTIVITY                                           Live log   │
@@ -61,6 +63,8 @@ The user chooses Network, connects through NetworkManager and returns.
 │ 14:32:01  MCP       Read hardware / received                                 │
 │ 14:32:02  MCP       Read hardware / finished                                 │
 │ 14:32:04  MCP       Read boot log / finished                                 │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ [------------] No operation running                                          │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ ↑↓ Select   Enter Open   A Activity history   T Terminal   Esc Back          │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -80,16 +84,17 @@ The user chooses Network, connects through NetworkManager and returns.
 │   I  Target details    │ Last contact    1s ago                              │
 │   T  Open terminal     │ Controller URL  https://192.168.1.20:7443           │
 │   P  Power             │ Recovery OS     Read-only                           │
-│                        │ USB free        21 GiB                              │
-│                        │ Current work    Deploying baseline-1 (52%)          │
+│                        │ Data free       21 GiB                              │
+│                        │ Current work    Downloading candidate               │
 ├────────────────────────┴─────────────────────────────────────────────────────┤
 │ RECOVERY & MCP ACTIVITY                                           Live log   │
 │ 14:34:52  MCP       Read storage / finished                                  │
 │ 14:35:08  MCP       Deploy baseline-1 / received                             │
 │ 14:35:09  RECOVERY  Downloading candidate content                            │
 │ 14:36:20  RECOVERY  Download active / last update 1s ago                     │
-│                     [##########----------] 52%                               │
-│ Next: prepare run files, then restart into baseline-1.                       │
+│ Next: prepare run files; wait for a boot request.                            │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ [---###------] Downloading candidate / 72s                                   │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ ↑↓ Select   Enter Open   A Activity history   T Terminal   Esc Back          │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -102,11 +107,11 @@ The user chooses Activity, then the running action.
 
   Running · Downloading candidate content
   Started 14:35:08 · Elapsed 1m 12s · Last update 1s ago
-  Investigation first-boot · Request boot-1
-  MCP tool recovery_boot_ostree
+  Investigation first-boot · Request send-1
+  MCP tool recovery_deploy_ostree
 
   Received    640 MiB / 1.2 GiB
-  Next        Prepare run files, then restart into baseline-1
+  Next        Prepare run files, then wait for a boot request
 
   Recent output
   Downloading candidate content from the controller...
@@ -128,7 +133,7 @@ The user chooses Activity, then the running action.
 │   I  Target details    │ Last contact    42s ago                             │
 │   T  Open terminal     │ Controller URL  https://192.168.1.20:7443           │
 │   P  Power             │ Recovery OS     Read-only                           │
-│                        │ USB free        21 GiB                              │
+│                        │ Data free       21 GiB                              │
 │                        │ Current work    Reconnecting; upload waiting        │
 ├────────────────────────┴─────────────────────────────────────────────────────┤
 │ RECOVERY & MCP ACTIVITY                                           Live log   │
@@ -138,6 +143,8 @@ The user chooses Activity, then the running action.
 │ 14:32:01  RECOVERY  Controller connection lost                               │
 │ 14:32:01  RECOVERY  Unconfirmed evidence kept on USB                         │
 │ 14:32:43  RECOVERY  Reconnecting / no commands running                       │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ [------------] No operation running                                          │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ ↑↓ Select   Enter Open   A Activity history   T Terminal   Esc Back          │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -167,7 +174,7 @@ The user chooses Activity, then the running action.
   Target         7c2a91  [Show full ID]
   Recovery       recovery-1
   Booted         6 minutes ago
-  USB            21 GiB free / 27 GiB usable
+  Data           21 GiB free / 27 GiB usable
 
   Use lab-target when selecting this target on the controller.
 
@@ -177,23 +184,49 @@ The user chooses Activity, then the running action.
 ## Power
 
 ```text
-  POWER / lab-target
+  POWER
 
-  > Restart into recovery
-    Shut down
     Back
+    Reboot
+  > Shut down
 
   Enter Select   Esc Back
 ```
 
 ```text
-  Restart into recovery?
+  SHUTTING DOWN
 
-  Candidate deployment is still running. Restarting will interrupt it.
-  Unconfirmed evidence will stay on USB.
+  Stopping target work
 
-  > Keep running
-    Restart now
+  Wait until the computer has powered off before disconnecting the drive.
+
+  If this takes too long, press T to open the terminal.
+
+  --------------------------------------------------------------------------
+  [---###------] Stopping target work / 3s
+  T Open terminal
+```
+
+If work is running, selecting Reboot asks for confirmation first.
+
+```text
+  CONFIRM
+
+  Current work: Downloading candidate
+  This interrupts active work. Unconfirmed evidence stays on the drive.
+
+  > Cancel
+    Reboot now
 
   Enter Select   Esc Back
+```
+
+```text
+  POWER ACTION FAILED
+
+  Cannot write boot settings
+
+  Press Esc to return and retry, or T to inspect the problem in a terminal.
+
+  Esc Back   T Open terminal
 ```

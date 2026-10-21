@@ -66,7 +66,9 @@ do not hold the only copy in memory or require the agent to read it.
 Save completion and received output before announcing that results are ready.
 Retain them across agent disconnects and controller restarts. After a crash,
 report partial output and unknown outcomes honestly; recent unwritten bytes may
-be lost. A recording failure, including a full disk, is an error to report.
+be lost. A recording failure, including a full disk, is an error to report. The first command
+tools accept an explicit output byte limit (16 MiB by default) and stop recording
+before exhausting shared storage; the outcome explains why the command stopped.
 
 Ordinary commands survive a network disconnect or controller restart. The target
 owns their processes, deadlines and saved output; it records request IDs before
@@ -186,7 +188,7 @@ build/flash recovery, connect, inspect through MCP, deploy a candidate and demon
 boot and return. The full interactive command behavior above follows in milestone 2.
 
 Use [rpm-ostree candidate preparation](candidate-deployment.md), fresh mutable files
-per run and explicit persistence. Recovery owns boot selection. Add kernel and
+per deployment and explicit persistence. Recovery owns boot selection. Add kernel and
 PipeWire build paths in milestone 3; other OS support can reuse the same command,
 connection and evidence code. Start with latest stable Bazzite, record its exact
 version when preparing the baseline and disclose differences from the reported environment. Available debugging tools do not substitute for reproducing the problem.

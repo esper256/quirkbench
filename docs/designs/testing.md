@@ -55,6 +55,9 @@ CLI, MCP and TUI call the same application functions. Controller and target can
 start independently over existing saved files, so tests can restart either without
 resetting the other. Expose useful completion signals for startup and work; tests
 wait for these instead of guessing with sleeps.
+The shared lab shortens reconnect and status intervals while running the real
+connection loops. The terminal fixture shortens curses’ Escape-key delay.
+Production defaults stay unchanged; keep real short waits when testing timeouts.
 
 Prove this structure with the first recovery/deployment journey. If it needs
 extensive patching or a miniature operating system, simplify the application
@@ -115,7 +118,8 @@ Build the fast tests alongside [milestone 1](development.md#milestone-1-bootable
    and reboot operations. Incomplete preparation must not request a candidate boot.
 3. Restart the target application in candidate mode over the same shared directory,
    then request return to recovery. Check boot IDs, stable pairing, report upload,
-   fresh run files and cleanup. Lose one upload reply and preserve unconfirmed files.
+   fresh deployment files, retained repeat boots and explicit discard. Lose one
+   upload reply and preserve unconfirmed files.
 4. Restart the controller during deployment or upload; reconnect and report saved
    progress without blindly repeating writes or boot requests.
 
@@ -166,7 +170,7 @@ tool and refresh it when changing supported versions.
 | Inspect recovery and provision a candidate | MCP returns recovery diagnostics, prepares a candidate and requests deployment, one-time boot and return | Incomplete deployment; initial connection failure; reconnect; recovery shell request rejected |
 | Investigate and change software | MCP context leads to concurrent commands, interactive input, file transfer, a changed candidate and received evidence | One command times out or is stopped; live install requires reboot; evidence arrives after command completion |
 | Interrupt and continue | Saved output and attribution survive reconnection; uncertain work is not replayed; pause stops new work and finishes active commands | Controller restart; candidate crash; lost upload acknowledgement; force stop |
-| Recovery and next run | Real recovery UI explains the problem; upload and cleanup preserve the right files; next run is fresh | Missing settings; storage failure; incomplete candidate; internal debugging report without an investigation |
+| Recovery and next run | Real recovery UI explains the problem; upload and cleanup preserve the right files; explicit discard permits a fresh deployment; repeat boot retains persistent edits | Missing settings; storage failure; incomplete candidate; internal debugging report without an investigation |
 
 Use a few short tests per journey, sharing setup, rather than one enormous test or
 every possible combination. A normal journey plus failures at important transitions
@@ -247,3 +251,17 @@ Recovery TUI regressions run in the fast suite: real MCP requests update its sta
 and a pseudo-terminal exercises navigation, resize and shell return. Boot-console
 routing is checked at its configuration boundary. Use a one-time manual QEMU
 confirmation after display/boot changes; do not turn each TUI iteration into a VM test.
+
+## Recovery disk stalls
+
+Hold one real recovery record write with a test-controlled signal. While it is
+held, exercise MCP status and the combined diagnostic report over local SSH,
+and send a report over HTTPS. Verify no boot occurs before the write completes.
+Release the signal and complete deployment once. Use no sleep or expired timeout
+to simulate the stall; test timeouts only prevent a broken test hanging forever.
+
+The fast journey covers separate deployment and boot, recovery restart before
+boot, unexpected return with uploaded diagnostics, retained edits on a repeat
+boot, separate command/evidence identities, and explicit discard. Emergency
+inspection must work when spawning diagnostic programs fails. Read saved output
+in bounded pages; do not assert exact diagnostic prose.

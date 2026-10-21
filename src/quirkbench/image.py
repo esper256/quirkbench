@@ -49,6 +49,7 @@ async def build_target_rpm(root, linux, tools, log):
     folder.mkdir(parents=True, exist_ok=True)
     shutil.copytree(Path(__file__).parent, folder / 'quirkbench', dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+    save_json(folder / 'quirkbench' / 'source.json', {'source': folder.name})
     shutil.copy2(ASSETS / 'target.spec', folder / 'target.spec')
     output.mkdir(exist_ok=True)
     await linux.command('podman', 'run', '--rm', '--userns=keep-id', '-v', f'{folder.resolve()}:/work:Z',
@@ -88,6 +89,7 @@ async def _build_recovery(root, linux, force, progress):
     shutil.copy2(rpm, stage / 'target.rpm')
     shutil.copy2(ASSETS / 'build-recovery.sh', stage / 'build.sh')
     shutil.copy2(ASSETS / 'build-efi.sh', stage / 'build-efi.sh')
+    shutil.copy2(ASSETS / 'configure-recovery.sh', stage / 'configure-recovery.sh')
     progress('Installing recovery packages and preparing boot files')
     await linux.command('podman', 'run', '--rm', '--user', '0', '-v', f'{stage.resolve()}:/work:Z',
                         tools, 'bash', '/work/build.sh', log=log)

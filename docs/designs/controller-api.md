@@ -68,7 +68,11 @@ Use names such as these in the [mockup](../mockups/agent-experiment.md):
 | `controller_build_script_start` | Execute the supplied build script on the controller computer. |
 | `rpm_overlay_install` | Install supported RPM changes in the run’s temporary writable layer. |
 | `rpm_ostree_prepare_candidate` | Prepare an OSTree candidate from an explicit base and changes. |
-| `recovery_boot_ostree` | Have recovery deploy an OSTree candidate and select its one-time boot. |
+| `recovery_cancel_ostree` | Request cancellation by deployment work ID; wait for target-confirmed stop and cleanup. |
+| `recovery_deploy_ostree` | Transfer and prepare fresh files without rebooting. |
+| `recovery_boot_ostree` | Boot a prepared or retained deployment once. |
+| `recovery_discard_ostree` | Discard retained files after diagnostics receipt. |
+| `run_results` / `saved_output_read` | Find received results and read bounded portions of saved files. |
 | `recovery_return` | Stop remaining commands, flush available output and return to recovery. |
 | `https_evidence_wait` | Wait for named evidence files to reach the controller through HTTPS upload. |
 | `controller_work_wait` | Wait for already accepted controller work; never select or start a mechanism. |
@@ -96,9 +100,12 @@ shell text, arbitrary executables or arbitrary file paths. Reuse ordinary comman
 and output handling rather than building a second diagnostic framework.
 
 Recovery exposes this tool alongside candidate preparation, deployment, progress
-and return controls. General `ssh_command_*`, SFTP writes and live package changes
-are candidate-only features delivered later. Minimal candidate connection and
-return control are sufficient for the first boot demonstration.
+and return controls. The first candidate command tools are `ssh_command_start`,
+`ssh_command_read`, `ssh_command_wait` and `ssh_command_stop`. They execute explicit
+arguments as root, with separate working directories and environment overrides,
+individual timeouts and durable output. They do not accept commands in recovery.
+Interactive input, user-session selection, SFTP writes and live package helpers
+remain later work. No OS preparation code belongs in these command tools.
 
 ## Keep simple HTTP services
 
@@ -141,3 +148,13 @@ SQLite records as described in [internals](internals.md); no client generator is
 needed. MCP tool inputs follow the
 [mockup](../mockups/agent-experiment.md); SSH carries target commands and streams.
 Exercise both through the real Python application in fast integration tests.
+
+For long controller work, responses include a copyable `investigation wait` CLI
+command. It waits quietly and prints once, allowing an agent's process tool to
+wait without repeated model calls. Short MCP waits remain available for clients
+with short request deadlines; automatic wake-up depends on the agent client's
+process/task support. A timed-out wait never cancels the work.
+
+Run summaries distinguish evidence pending from missing output. Uploaded command
+records update controller status. Software identity, target capabilities and
+candidate base/target-tools identity are visible before deployment.

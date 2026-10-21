@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="920" height="592" viewBox="0 0 920 592" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="638" viewBox="0 0 920 638" role="img" aria-labelledby="title desc">
 <title id="title">Quirkbench recovery console mockup</title>
 <desc id="desc">Menu upper left, aligned target status upper right, full-width recovery and MCP log below. Example only.</desc>
-<rect width="920" height="592" fill="#141c19"/>
-<g stroke="#4c685a" fill="none"><rect x="20" y="22" width="880" height="529"/><path d="M20 68H900 M295 68V321 M20 321H900 M20 505H900"/></g>
+<rect width="920" height="638" fill="#141c19"/>
+<g stroke="#4c685a" fill="none"><rect x="20" y="22" width="880" height="575"/><path d="M20 68H900 M295 68V321 M20 321H900 M20 505H900 M20 551H900"/></g>
 <g font-family="DejaVu Sans Mono, monospace" font-size="18" xml:space="preserve">
 <text x="42" y="55" fill="#b6c99a">QUIRKBENCH / RECOVERY</text>
 <text x="42" y="101" fill="#b6c99a">MENU</text>
@@ -31,7 +31,7 @@
 <text x="312" y="262" fill="#90a394">Recovery OS</text>
 <text x="492" y="262" fill="#d9ded4">Read-only</text>
 <text x="42" y="308" fill="#d9ded4"></text>
-<text x="312" y="285" fill="#90a394">USB free</text>
+<text x="312" y="285" fill="#90a394">Data free</text>
 <text x="492" y="285" fill="#d9ded4">21 GiB</text>
 <text x="312" y="308" fill="#90a394">Current work</text>
 <text x="492" y="308" fill="#d9ded4">Idle</text>
@@ -42,6 +42,7 @@
 <text x="42" y="446" fill="#d9ded4">14:32:01  MCP       Read hardware / received</text>
 <text x="42" y="469" fill="#d9ded4">14:32:02  MCP       Read hardware / finished</text>
 <text x="42" y="492" fill="#d9ded4">14:32:04  MCP       Read boot log / finished</text>
-<text x="42" y="538" fill="#90a394">↑↓ Select   Enter Open   A Activity history   T Terminal   Esc Back</text>
+<text x="42" y="538" fill="#d9ded4">[------------] No operation running</text>
+<text x="42" y="584" fill="#90a394">↑↓ Select   Enter Open   A Activity history   T Terminal   Esc Back</text>
 </g>
 </svg>

@@ -1,6 +1,6 @@
 """Shared test tools: real applications/connections/files, tiny external tool results."""
 import asyncio
-from contextlib import AsyncExitStack, suppress
+from contextlib import AsyncExitStack, suppress, asynccontextmanager
 import json
 from pathlib import Path
 import shutil
@@ -27,6 +27,7 @@ class ToolResults(Linux):
         self.rebooted = asyncio.Event()
         self.reboots = 0
         self.fail_deploy = False
+        self.fail_cleanup = False
         self.fail_boot_selection = False
         self.fail_diagnostics = False
         self.deploy_started = asyncio.Event()
@@ -68,6 +69,11 @@ class ToolResults(Linux):
                     atomic_write(volumes['/publish'] / 'config', '[core]\nmode=archive\n')
                     atomic_write(volumes['/publish'] / 'objects' / 'fixture', b'candidate content')
                 elif args[-1] == '/work/build.sh':
+                    from tests.support.recovery_image import prepare_root, configure, check_configuration
+                    image_root, env = prepare_root(folder)
+                    configured = configure(folder/'configure-recovery.sh', image_root, env)
+                    assert configured.returncode == 0, configured.stderr
+                    check_configuration(image_root)
                     for name in ('recovery.img', 'BOOTX64.EFI', 'packages.txt'):
                         atomic_write(folder / name, name + ' fixture bytes')
                 else:
@@ -78,6 +84,8 @@ class ToolResults(Linux):
                 raise AssertionError(args)
         elif args[0] == 'mountpoint':
             result['exit_code'] = 0 if Path(args[-1]).is_symlink() else 1
+        elif args[0] == 'mount' and args[1].startswith('UUID='):
+            Path(args[2]).mkdir(parents=True,exist_ok=True)
         elif args[0] == 'mount' and args[1] == '--bind':
             target = Path(args[3])
             if target.exists() and not target.is_symlink():
@@ -102,12 +110,20 @@ class ToolResults(Linux):
                              f'title Fixture candidate\nlinux /ostree/fixture/vmlinuz\ninitrd /ostree/fixture/initramfs.img\noptions root=UUID=fixture ostree=/ostree/boot.1/{run}/fixture/0 quirkbench.run={run}\n')
             elif 'status' in args:
                 root = Path(next(a.split('=',1)[1] for a in args if a.startswith('--sysroot=')))
-                result['output'] = '\n'.join(f'  {p.name} {COMMIT}.0' for p in sorted((root/'ostree/deploy').glob('*')))
+                result['output'] = '\n'.join(f'  {p.name} {COMMIT}.0' for p in sorted((root/'ostree/deploy').glob('*')) if (p/'deploy').exists() and not (p/'unselected').exists())
             elif 'undeploy' in args:
+                if self.fail_cleanup:
+                    raise OSError('Fixture storage interruption during discard')
                 root = Path(next(a.split('=',1)[1] for a in args if a.startswith('--sysroot=')))
                 paths = sorted((root/'ostree/deploy').glob('*'))
-                shutil.rmtree(paths[int(args[-1])] / 'deploy')
-            elif not any(x in args for x in ('config', 'remote', 'pull')):
+                # Real OSTree undeploy removes selection; cleanup removes its files.
+                (paths[int(args[-1])]/'unselected').touch()
+            elif 'cleanup' in args:
+                root = Path(next(a.split('=',1)[1] for a in args if a.startswith('--sysroot=')))
+                for path in (root/'ostree/deploy').glob('*/unselected'):
+                    shutil.rmtree(path.parent/'deploy')
+                    path.unlink()
+            elif not any(x in args for x in ('config', 'remote', 'pull', 'refs')):
                 raise AssertionError(args)
         elif args[0] == 'grub2-editenv':
             if self.fail_boot_selection and 'set' in args:
@@ -115,7 +131,7 @@ class ToolResults(Linux):
             atomic_write(Path(args[1]), args[-1])
         elif args[0] == 'sync':
             pass
-        elif args[0] in ('journalctl', 'lscpu', 'nmcli', 'findmnt'):
+        elif args[0] in ('journalctl', 'lscpu', 'nmcli', 'findmnt', 'ps', 'systemctl'):
             self.diagnostic_started.set()
             await self.release_diagnostic.wait()
             if self.fail_diagnostics:
@@ -194,6 +210,8 @@ class Lab:
 
     async def start_controller(self):
         self.controller = InterruptedReplyController(self.root, self.tools)
+        # Exercise the real reconnect/status loops without production pacing.
+        self.controller.poll_interval = .02
         self.controller_task = asyncio.create_task(self.controller.serve())
         await self.until(self.controller.ready.is_set)
 
@@ -202,13 +220,21 @@ class Lab:
         with suppress(asyncio.CancelledError):
             await self.controller_task
 
-    async def boot_target(self, mode='recovery', run_id=None):
+    async def stop_target(self):
         if self.target_task:
             self.target_task.cancel()
             with suppress(asyncio.CancelledError):
                 await self.target_task
+            self.target_task = None
+
+    async def boot_target(self, mode='recovery', run_id=None):
+        await self.stop_target()
+        from quirkbench.target import mount_boot_files
+        await mount_boot_files(self.data,self.boot,self.tools,
+                               self.data/'candidate-boot' if mode=='candidate' else None)
         self.boot_number += 1
         self.target = Target(self.data, self.boot, mode=mode, boot_id=f'boot-{self.boot_number}', run_id=run_id, linux=self.tools)
+        self.target.poll_interval = self.target.reconnect_delay = .02
         self.target_task = asyncio.create_task(self.target.run())
         await self.until(lambda: any(t['boot_id'] == self.target.boot_id for t in self.controller.targets.values()))
 
@@ -240,9 +266,17 @@ class Lab:
         work = await self.call('rpm_ostree_prepare_candidate', investigation='wifi-case', request_id='baseline')
         return await self.call('controller_work_wait', work_id=work['work_id'], timeout_seconds=5)
 
+    async def deploy_and_boot(self, candidate, request_id, investigation='wifi-case', startup_connect_timeout_seconds=300):
+        deployed = await self.call('recovery_deploy_ostree', investigation=investigation, candidate=candidate, request_id=request_id)
+        ready = await self.call('controller_work_wait', work_id=deployed['work_id'], timeout_seconds=5)
+        if ready['status'] != 'ready':
+            return ready
+        return await self.call('recovery_boot_ostree', run_id=deployed['run_id'], request_id=request_id+'-boot',
+                               startup_connect_timeout_seconds=startup_connect_timeout_seconds)
+
     async def start_run(self, candidate):
         self.tools.rebooted.clear()
-        work = await self.call('recovery_boot_ostree', investigation='wifi-case', candidate=candidate, request_id=f'boot-{self.boot_number}')
+        work = await self.deploy_and_boot(candidate=candidate, request_id=f'boot-{self.boot_number}')
         async with asyncio.timeout(5):
             await self.tools.rebooted.wait()
         return work
@@ -293,3 +327,37 @@ def kernel_partition_fixture(tmp_path):
         parts[number] = dev / name
         parts[number].touch()
     return disk, sysfs, dev, parts
+
+
+def reject_data_writes(monkeypatch, data):
+    """Fail if dashboard/inspection work needs to flush the busy media."""
+    def write(path, value):
+        assert not path.is_relative_to(data), f'Unexpected media write: {path}'
+        save_json(path, value)
+    monkeypatch.setattr('quirkbench.target.save_json', write)
+
+
+@asynccontextmanager
+async def stalled_target_write(monkeypatch, lab):
+    """Hold one actual write until the test releases it. No simulated latency."""
+    from threading import Event
+    entered, release = asyncio.Event(), Event()
+    loop = asyncio.get_running_loop()
+    original = save_json
+    def write(path, value):
+        if path == lab.data/'quirkbench/work.json' and not release.is_set():
+            loop.call_soon_threadsafe(entered.set)
+            release.wait()
+        original(path, value)
+    monkeypatch.setattr('quirkbench.target.save_json', write)
+    try:
+        yield entered
+    finally:
+        release.set()
+
+
+def interrupt_after_admission(monkeypatch, target):
+    """Simulate power loss after the durable request, before its background action."""
+    def abandon(coroutine):
+        coroutine.close()
+    monkeypatch.setattr(target, 'spawn', abandon)

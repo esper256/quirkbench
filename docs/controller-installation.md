@@ -1,10 +1,10 @@
-# Run the rewrite locally
+# Run Quirkbench locally
 
-Milestone 1 has an implementation and fast integration coverage. The recovery
-image builds with rootless Podman on a Fedora host. Recovery boot, its console,
-controller connection and read-only root have been observed in QEMU using OVMF
-and an emulated USB drive. **Physical recovery boot and Bazzite boot/return are
-not yet demonstrated.** See the [separate boot check](../boot_tests/README.md).
+Recovery and candidate boot, controller connection, MCP commands and return with
+uploaded diagnostics have been observed in QEMU and on a physical target. That
+does not establish that every newer image works. See [earlier boot checks](observations/2026-10-20-boot-checks.md),
+[physical run findings](observations/2026-10-20-nvme-first-candidate.md) and the
+[separate boot test](../boot_tests/README.md).
 
 Use Python 3.12 or newer:
 
@@ -39,8 +39,8 @@ incompatible layout or settings format; `--erase` explicitly requests a fresh
 installation and deletes those files. Disconnect the drive from the target and
 unmount it on the controller before either operation.
 The first image is x86-64 UEFI and unsigned; it requires Secure Boot to be disabled.
-Quirkbench does not change firmware settings or enroll keys. USB capacity for a real
-Bazzite run has not yet been measured.
+Quirkbench does not change firmware settings or enroll keys. The first physical transfer wrote 10.8 GB of candidate content. Peak space for
+ongoing investigation remains unmeasured; this is not a minimum-drive-size claim.
 
 Recovery builds retain their package list and container identity. Completed images
 use content IDs. Failed builds do not replace completed images. `--force` creates a
@@ -58,29 +58,30 @@ network setup, logs, report export/upload and a terminal. Reports debug Quirkben
 run evidence is stored separately.
 
 See the [milestone mockup](mockups/recovery-to-candidate.md) for the agent interaction.
-General candidate shell access and live software changes are later milestones.
+Candidate MCP commands support explicit arguments, working directories, environment
+variables and individual timeouts, with saved output, waiting and stopping. Recovery
+still offers inspection tools only. Interactive terminal input, file transfer and
+live package helpers remain later work.
 
-## First real check
+## Deploy, boot, inspect and discard
 
-The October 20 QEMU check reproduced the GRUB shell with image
-`75b9c229076e64a4c91c7b1c`. Image `057f965cfa62528821be00a2` fixes the EFI
-loader's module lookup and passed recovery connection and mount checks; its
-console showed “Connected.” Boot logs still contain non-blocking Fedora setup
-attempts to write read-only `/etc`, including an authselect service failure.
-These are not proof of a completely clean boot or candidate support.
+Quirkbench separates `recovery_deploy_ostree` from `recovery_boot_ostree` and
+retains returned OS files until `recovery_discard_ostree`. Each repeat boot gets a
+new run ID. Temporary `/usr` edits from `ostree admin unlock` may disappear;
+persistent configuration and application files remain. Recovery images without
+these capabilities must be updated before using the new deployment flow. Updating
+this checkout does not update an already-running controller or target.
 
-Image `2e71871f635d7349c8c217f6` adds the recovery dashboard and passed a
-manual QEMU check on October 20: controller connection, MCP inspection, read-only
-OS, local terminal return and Activity view. Injected kernel messages appeared
-on `tty1` while the dashboard remained on `tty2`; service messages remained in
-the journal. Fast console integration tests cover menu interaction, resizing,
-current work, failures and power controls without QEMU. Physical boot of this
-image and candidate deployment remain unverified.
+Saved results are available through `run_results` and `saved_output_read`.
+`ssh_recovery_inspect` offers an `emergency` view which launches no external
+programs. This helps when disk-backed programs cannot start, but cannot guarantee operation
+if the running process needs unreadable code or libraries.
 
-With explicit authorization, first build the recovery image, then select the USB
-for erasure. Observe recovery boot and MCP inspection, candidate preparation,
-one-time candidate boot, return, uploaded diagnostics and retained network settings.
-Check read-only recovery mounts, fresh `/etc` and `/var`, GRUB clearing `next_entry`,
-and the initial candidate connection timeout. Record image ID, candidate digest,
-logs, observed USB usage and failures. A physical boot failure must be investigated,
-not replaced with a passing fixture result.
+The latest built recovery is `896043b1a791323576c10942`, with source
+`3ff91dbda25b2e98fdae8228cd52456eac6de452e46febac9fda995461cfaa54`.
+Its packaged source identity and x86-64 EFI file were checked. Its boot has not yet
+been checked. Fast tests and review do not substitute for that check.
+
+Fresh flashes reserve the recovery image size plus 1 GiB. Existing-media updates
+only require the image to fit; they do not enforce unused headroom or repartition.
+An erase is needed to enlarge the old layout, not merely because the software changed.

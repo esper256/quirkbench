@@ -19,8 +19,10 @@ A run starts from an identified candidate and includes subsequent commands and l
 changes until returning to recovery. Keep its initial candidate identity unchanged;
 record later actions separately. Changed files do not invalidate unrelated work.
 A baseline that does not reproduce the problem is not a fix.
-New runs start with fresh mutable OS files. Retain changes by preparing a named
-candidate from selected packages/files, not by inheriting the last run's disk.
+New deployments start with fresh mutable OS files. The controller may boot a
+retained deployment again, keeping persistent edits but assigning a new run ID.
+Plain `ostree admin unlock` edits disappear on reboot. For a reusable candidate,
+prepare selected packages/files explicitly; a retained disk is not a saved candidate.
 
 For software changes, use [build helpers](experiment-builds.md) and choose the
 appropriate [deployment](candidate-deployment.md). Small probes and suitable

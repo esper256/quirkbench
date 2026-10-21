@@ -6,7 +6,7 @@ Start with the short [product requirements](requirements/product.md). Changes to
 
 See the [example screens and commands](mockups/README.md) for the intended experience,
 from installation to an investigation patch.
-Start implementation with [milestone 1: recovery and candidate deployment](designs/development.md#milestone-1-bootable-recovery-and-agent-driven-deployment).
+See the implementation scope in [milestone 1: recovery and candidate deployment](designs/development.md#milestone-1-bootable-recovery-and-agent-driven-deployment).
 
 Then read only the design relevant to the task. Designs describe **how Quirkbench should work**, not a claim that the current code implements them. Agents may improve them without approval except for suspect changes: massive added complexity or a substantial loss of capability, performance or ease of use. Explain such a change and ask the human first.
 
@@ -28,6 +28,8 @@ Then read only the design relevant to the task. Designs describe **how Quirkbenc
 [Legacy documents](legacy/README.md) are historical reference, not current design
 instructions. Consult a specific file only for a concrete implementation question.
 
-This rewrite branch has no runnable application yet. Commit `b807199` preserves
-the previous implementation for reference. See the [agent guide](agent-guide.md)
-and [controller setup](controller-installation.md) for short entry points.
+See the [agent guide](agent-guide.md) and [controller setup](controller-installation.md)
+for current commands and the checks completed so far. Mockups also include later
+features; do not assume every illustrated tool is implemented.
+
+[First physical NVMe candidate: debugging friction](observations/2026-10-20-nvme-first-candidate.md) records observed problems and proposed improvements, not requirements.

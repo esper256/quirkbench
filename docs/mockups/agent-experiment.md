@@ -35,7 +35,9 @@ Available now: target information, logs, rpm_ostree_prepare_candidate
 
 Tools for this target:
   ssh_recovery_inspect          Read recovery hardware, network, storage or boot logs
-  recovery_boot_ostree          Deploy an OSTree candidate and boot it once
+  recovery_deploy_ostree        Prepare a fresh deployment without booting
+  recovery_boot_ostree          Boot prepared or retained files once
+  recovery_discard_ostree       Explicitly remove retained run files
   ssh_command_start            Execute on the connected candidate through SSH
   ssh_command_input            Send input to an existing SSH command
   ssh_command_read             Read saved SSH command output
@@ -74,7 +76,7 @@ All commands share this target's files, services and devices.
 Ordinary commands keep running during controller/network loss and save output
 on the target. Reconnect reads their status without rerunning them. Interactive
 terminal reattachment is not guaranteed. The target enforces command timeouts.
-Each new run starts with fresh configuration, application data and home directories.
+Each new deployment starts fresh. A repeat boot can reuse persistent configuration, application data and home directories; temporary /usr edits are lost on reboot.
 Live edits last for this run. Prepare a named candidate with selected packages/files
 to retain changes. Package helpers report whether a fresh boot is needed.
 Recovery controls the next boot. Do not change boot entries from the candidate.
@@ -89,14 +91,22 @@ Output: {"work_id":"baseline-preparation","status":"preparing","stage":"Resolve 
 
 Tool: controller_work_wait
 Input: {"work_id":"baseline-preparation"}
-Output: {"status":"ready","candidate_id":"baseline-1","base_record":"baseline.json","instructions":"Exact Bazzite version saved for subsequent runs. Baseline prepared. Use recovery_boot_ostree to start it."}
+Output: {"status":"ready","candidate_id":"baseline-1","base_record":"baseline.json","instructions":"Exact Bazzite version saved for subsequent runs. Baseline prepared. Deploy with recovery_deploy_ostree, then boot with recovery_boot_ostree."}
 ```
 
 ## Boot once, investigate interactively
 
 ```text
+Tool: recovery_deploy_ostree
+Input: {"investigation":"microphone-dropout","candidate":"baseline-1","request_id":"baseline-1"}
+Output: {"work_id":"send-1","run_id":"run-1","status":"starting","next_tool":"controller_work_wait"}
+
+Tool: controller_work_wait
+Input: {"work_id":"send-1"}
+Output: {"status":"ready","target_mode":"recovery","run_id":"run-1"}
+
 Tool: recovery_boot_ostree
-Input: {"investigation":"microphone-dropout","candidate":"baseline-1","startup_connect_timeout_seconds":300,"request_id":"baseline-1"}
+Input: {"run_id":"run-1","request_id":"boot-1"}
 Output: {"work_id":"work-1","status":"starting","next_tool":"controller_work_wait"}
 
 Tool: controller_work_wait
@@ -225,7 +235,7 @@ Output: {"work_id":"work-save","status":"preparing","instructions":"Preparing ba
 
 Tool: controller_work_wait
 Input: {"work_id":"work-save"}
-Output: {"status":"ready","candidate_id":"pipewire-fix","instructions":"Start this candidate through recovery for a clean repeat. Each run gets fresh mutable files."}
+Output: {"status":"ready","candidate_id":"pipewire-fix","instructions":"Start this candidate through recovery for a clean repeat. Each new deployment gets fresh mutable files."}
 ```
 
 ## When a new boot is needed
@@ -256,14 +266,30 @@ Output: {"work_id":"work-4","status":"stopping_commands","instructions":"Stop re
 
 Tool: controller_work_wait
 Input: {"work_id":"work-4"}
-Output: {"status":"finished","evidence":"received","target":"connected in recovery","results":"results/run-1/","cleanup":"Run files discarded. Prepared candidates, recovery settings and controller results retained."}
+Output: {"status":"finished","evidence":"received","target":"connected in recovery","results":"results/run-1/","cleanup":"Run files retained until explicit discard. Temporary /usr edits do not survive reboot."}
 
-Tool: recovery_boot_ostree
-Input: {"investigation":"microphone-dropout","candidate":"candidate-2","startup_connect_timeout_seconds":300,"request_id":"run-2"}
+Tool: recovery_discard_ostree
+Input: {"run_id":"run-1","request_id":"discard-1"}
+Output: {"work_id":"discard-1","status":"starting"}
+
+Tool: controller_work_wait
+Input: {"work_id":"discard-1"}
+Output: {"status":"finished"}
+
+Tool: recovery_deploy_ostree
+Input: {"investigation":"microphone-dropout","candidate":"candidate-2","request_id":"run-2"}
 Output: {"work_id":"work-5","status":"starting","stage":"Recovery is deploying candidate-2 with fresh mutable files and saved connection settings.","next_tool":"controller_work_wait"}
 
 Tool: controller_work_wait
 Input: {"work_id":"work-5"}
+Output: {"status":"ready","run_id":"run-2","target_mode":"recovery"}
+
+Tool: recovery_boot_ostree
+Input: {"run_id":"run-2","request_id":"boot-2"}
+Output: {"work_id":"boot-2","status":"starting"}
+
+Tool: controller_work_wait
+Input: {"work_id":"boot-2"}
 Output: {"status":"ready","run_id":"run-2","boot_id":"boot-8","working_directory":"/run/quirkbench/work","instructions":"Fresh run. Upload your local test program again; previous working files were discarded."}
 
 Tool: sftp_upload

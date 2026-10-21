@@ -14,16 +14,20 @@ See [Bazzite's image references](https://docs.bazzite.gg/Installing_and_Managing
 
 ## Common code, OS-specific preparation
 
-Keep MCP, reverse SSH, command recording, evidence and recovery common. Small
-OS-specific Python modules prepare candidates, deploy them and describe boot files
-and supported live changes. Start with one implementation, not a plugin framework.
+Keep MCP, reverse SSH, command recording, evidence and recovery common.
+`bazzite.py` prepares the first OS; `candidates.py` handles OSTree deployment and
+cleanup without selecting a distribution. Other deployment mechanisms can be added
+alongside it. Start with small modules, not a plugin framework.
 A future Debian implementation can reuse the same target program and provide a
 `.deb`; the first packages that program as an RPM. MCP stays on the controller.
 
-The controller prepares the selected base plus the Quirkbench target RPM, debugging
+The controller prepares the selected base plus the Quirkbench target tools RPM, debugging
 tools and requested changes. It serves completed OSTree content over HTTPS.
-Recovery pulls missing content, deploys it and selects its one-time boot. Neither
+Recovery pulls missing content and deploys it. A separate controller request selects its one-time boot. Neither
 routine changes nor fresh runs reflash the USB. Reuse packages, builds and content.
+Import Bazzite inside the tools container as container root, using a bare OSTree
+cache so layered files retain their ownership and executable permissions. Publish
+the result through the controller's archive repository.
 
 ## Where changes live
 
@@ -33,18 +37,17 @@ These are storage areas, not additional partitions:
 | --- | --- |
 | Recovery settings: network profiles, controller address and credentials | Until explicitly changed in setup or recovery |
 | Prepared candidate: OS, packages, configuration and target program | Unchanged after preparation; reusable |
-| Run files: writable OS configuration, application data, homes, installed-file changes and scratch files | One run |
+| Run files: writable OS configuration, application data, homes, installed-file changes and scratch files | Until the controller explicitly discards the deployment |
 | Evidence files | On USB until confirmed uploaded; retained on controller |
 | Command records | Kept on target through run completion for retry/reconnect; results retained on controller |
 | Package, build and transfer caches | Disposable; not the only copy of results or their source/build information |
 
-Each run starts with the selected candidate's defaults and fresh mutable files,
+Each new deployment starts with the selected candidate's defaults and fresh mutable files,
 including `/etc`, `/var` and home directories. Ordinary services use ordinary Linux
 paths. Do not inherit a previous run's configuration merges, application state or
 writable overlays. OSTree's usual shared `/var` and merged `/etc` are not a clean
 reset. Keep run files separate from reusable repository content; never modify
-shared hard-linked files in place. Discard the run after collecting its diagnostics
-rather than attempting to undo individual edits. Preserve unuploaded evidence.
+shared hard-linked files in place. Keep returned run files until the controller explicitly discards them. Upload evidence immediately and delete only its confirmed copy. A repeat boot reuses persistent edits but receives a new run ID; commands are never replayed. A clean repeat requires discard followed by a new deployment. Preserve unuploaded evidence.
 
 First arrangement to verify: recovery creates a separate OSTree storage root for
 each run, with a fresh deployment, `--no-merge` configuration defaults and its own
@@ -52,6 +55,9 @@ each run, with a fresh deployment, `--no-merge` configuration defaults and its o
 directories before dependent services start. Reuse unchanged OS content; do not
 undo the previous run's edits. Check service initialization and OSTree's mount
 ordering before treating this arrangement as working.
+Mount the USB boot filesystem at the candidate's `/boot` before target tools start.
+On explicit discard, let OSTree undeploy and clean up before removing the run's remaining
+writable directories. Keep references to reusable candidates in its repository.
 
 ## Live changes and explicit persistence
 
@@ -62,8 +68,8 @@ ordering before treating this arrangement as working.
 | Direct installed-file edit | Use a temporary writable layer for this run; leave prepared content unchanged. |
 | Retain changes or replace a kernel | Prepare a named candidate from an explicit base, package additions/replacements and selected files or instructions. Boot through recovery. |
 
-Prefer a temporary writable `/usr` layer for quick changes, using OSTree's
-supported development unlock. The proposed `rpm_overlay_install` helper must
+Use `ostree admin unlock` for disposable `/usr` edits first. Those edits are lost on reboot, including a repeat boot of a retained deployment. Persistent `/etc`, `/var` and home files remain until discard. No custom overlay is needed. Do not build custom
+overlay management unless the actual supported image exposes a concrete need. The proposed `rpm_overlay_install` helper must
 establish package dependencies, scripts and affected files before promising live
 installation. An overlay alone is not a package manager. Verify diagnostic-package
 addition and PipeWire replacement early; do not implement every transaction as
@@ -107,3 +113,31 @@ References: [OSTree deployments](https://ostreedev.github.io/ostree/deployment/)
 [development unlock](https://ostreedev.github.io/ostree/man/ostree-admin-unlock.html),
 [rpm-ostree live changes](https://coreos.github.io/rpm-ostree/administrator-handbook/),
 [GRUB one-time boot](https://www.gnu.org/software/grub/manual/grub/html_node/next_005fentry.html).
+
+## Cancel a deployment
+
+`recovery_cancel_ostree(work_id)` returns promptly. The controller saves the request
+and retries after reconnection. `controller_work_wait` reports `cancelled` only
+after recovery stops the deployment process, clears boot selection and removes the
+unfinished run. Downloaded content remains reusable. Repeated cancellation is safe;
+a late deployment request cannot revive cancelled work.
+
+A stalled disk can delay cancellation; networking remains available, but a replacement
+deployment waits for cleanup. Cleanup failure remains visible and blocks target reuse.
+Once recovery commits to reboot, use `recovery_return` after the candidate connects.
+Cancellation does not stop controller-side candidate preparation.
+
+## Separate transfer, boot and discard
+
+`recovery_deploy_ostree` creates fresh files without selecting a boot. The agent can
+inspect progress and recovery before `recovery_boot_ostree(run_id)` boots them.
+After return and confirmed diagnostics receipt, boot again to keep persistent files,
+or use `recovery_discard_ostree` before deploying a fresh candidate. Both normal and
+unexpected returns retain files. A repeat boot gets new evidence and command IDs.
+Recovery enforces these requests; it never interprets upload receipt as permission
+to remove OS files. Old recovery images without these actions must be updated.
+
+OSTree's terminal output supplies transfer progress, with changing object totals
+treated as estimates. Other stages show activity without invented percentages.
+Bazzite preparation masks its automatic hardware-setup reboot and update services;
+these changes are reported with the base and target-tools source identity.

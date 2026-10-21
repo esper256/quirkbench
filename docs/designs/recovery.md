@@ -33,6 +33,9 @@ file permissions and expose only needed directories to candidate programs.
 
 Mount recovery OS files read-only. Keep saved settings, downloads and diagnostics
 in shared data, and temporary runtime files in writable runtime directories.
+Prepare authentication and fixed system defaults during image creation. Network
+services write runtime configuration under `/run`, not read-only `/etc`. Generic
+media uses worldwide Wi-Fi limits rather than guessing a country from a timezone.
 Remote inspection cannot install software or edit recovery files. Managed
 deployment writes candidate data and the one-time boot request; it does not rewrite
 the recovery OS. The human local root terminal remains an explicit exception.
@@ -60,7 +63,7 @@ a modified kernel.
 2. Pull the controller's completed OSTree candidate and create fresh run files,
    including `/etc`, `/var` and homes, from its defaults. Supply saved connection
    settings read-only. Recovery deploys software; it does not compile agent code.
-3. Record a one-time boot request only when preparation succeeds. The bootloader
+3. Wait for an explicit controller boot request after preparation succeeds. The bootloader
    clears the request before attempting the candidate, so the next boot returns
    to recovery even if the candidate never starts successfully. Candidate package
    tools do not change this selection or recovery's boot files.
@@ -73,9 +76,10 @@ a modified kernel.
 6. Upload evidence. Delete the USB copy only after the controller confirms it has
    stored it durably. Retry interrupted uploads; a lost reply must not duplicate
    results or cause evidence loss. The controller keeps investigation results.
-7. Discard finished runs' mutable OS and temporary files after collecting available
-   diagnostics, including after interruption. Files the agent needs returned
-   belong in evidence, not temporary storage. Do not remove active-run files.
+7. Retain mutable OS files after return, including interruption. The controller
+   explicitly requests another boot or discard after diagnostics receipt. Uploaded
+   evidence is still deleted from the target. Temporary `ostree admin unlock` edits
+   do not survive reboot; persistent configuration and application files do.
 
 A newly booted candidate has a target-side startup connection deadline, supplied
 when requesting the boot. Its startup code starts this timer and saves the reason
@@ -147,6 +151,13 @@ connection, address and last contact. Internet access is not a prerequisite.
 Show actual recovery mount and shared-storage status, including unknown values.
 Keep the action menu usable while disconnected or busy.
 A persistent Current work row shows idle, active work or what it is waiting for.
+Label available shared storage “Data free”, regardless of the device type.
+Below Activity, reserve one row and a divider for progress. Show the current step
+and elapsed time during transfers, deployment, cleanup, diagnostics and report
+uploads. Use an animated ASCII bar when no reliable percentage is available;
+do not invent a percentage or add machinery just to estimate one. Report collection
+and upload must leave the menu responsive. Child tools such as `nmtui` own their
+screen until they return.
 Update it from the same work records as Activity. Connection and storage problems
 stay visible in their status fields; do not add pinned warnings to the activity log.
 
@@ -164,8 +175,23 @@ do not invent incoming commands or percentages. Hide connection heartbeats and
 credentials. Keep recent activity bounded, using existing work records and a small
 status file from the target process; no new daemon or event database. Reconnection
 must not label interrupted work successful. Viewing activity never approves work.
-Power offers restart into recovery and shutdown, with confirmation if work or
-uploads would be interrupted. Do not imply that restarting resumes a candidate.
+Keep this disposable status file in RAM under `/run`, outside the shared-data
+mount. Refreshing the screen must not flush USB writes or delay SSH replies during
+a transfer. Evidence and saved work records still belong on shared storage.
+Power offers Reboot and Shut down in recovery; the candidate calls its action
+Reboot into recovery. Idle recovery acts directly; confirm when work or uploads
+would be interrupted. Show stopping work and the system power request on screen
+without freezing the TUI. Show command failures and retain terminal access.
+Tell the user to wait for power-off before disconnecting the drive. Do not imply
+that restarting resumes a candidate.
+
+Provide a separate, human-confirmed emergency reboot or power-off when normal
+shutdown fails. Keep the small emergency control and its dependencies in RAM;
+launching another tool from the lost recovery drive is not a fallback. Explain
+that unsaved data may be lost. Do not force power-off automatically after a timeout.
+This is best effort: losing the system drive can also stop the console or hang
+the kernel. Test the emergency control without access to the recovery filesystem,
+replacing the final power action in fast tests.
 
 Initialize temporary networking without evidence-storage or pairing prerequisites; use
 `nmtui`. Save settings automatically when storage works. If it does not, explain
@@ -176,12 +202,25 @@ optional. The human accepts unrestricted shell risk. The agent gets recovery
 inspection through `ssh_recovery_inspect`, plus managed deployment and boot controls,
 not its unrestricted terminal. Full remote command access,
 including root within investigation scope, belongs in the candidate.
+Give interactive child programs terminal input, output and errors; the console's
+own errors go to the journal. Keep a child launch or exit failure visible until
+Enter, so returning to the menu does not erase the explanation.
 
-Provide Quirkbench internal debugging reports for repairing recovery itself:
-boot logs, service errors and system information. They are not experiment
-evidence. Collection works without an investigation or successful setup. Allow
-preview, local export or upload to the paired controller. Omit credentials and do
-not post publicly. Pairing is required for upload, not local collection.
+Provide an explicit Quirkbench internal debugging report through
+`ssh_recovery_inspect` with `view: report` and the menu's Logs & reports actions.
+Include boot logs, failed services, process states and waits, mounts, networking,
+current work and the latest deployment log. Reports are not experiment evidence.
+Menu uploads use HTTPS independently of SSH and require confirmation of storage
+before claiming success. Keep credentials out of reports. No automatic report
+capture or upload is required. Show connection failure reasons when known.
+
+Keep blocking recovery file operations off the network event loop using Python's
+bounded thread pool. Await durable writes before acknowledging work; do not cancel
+a write and release its ownership while its thread is still running. Limit work
+in flight rather than creating an unbounded queue. Status reads use memory.
+Disk stalls may delay the affected operation, but must not prevent unrelated
+network requests. This cannot guarantee responsiveness when the kernel or system
+drive fails. The human terminal keeps a visible prompt and readable errors.
 
 Disable internal-disk automount/discovery, swap/resume, repair and firmware-update
 helpers. Exclude internal-storage drivers where practical. NVMe stays available
@@ -203,3 +242,10 @@ programs; avoid exact screen snapshots. These are fast integration tests, withou
 QEMU. After implementing boot/display changes, manually confirm once in QEMU that
 late kernel/service messages stay off tty2 while remaining readable in logs.
 Inspect the real console at 80×24; do not add a slow TUI regression suite.
+
+Emergency inspection reads `/proc` and the kernel message buffer without launching
+disk-backed programs. It can help when executables return I/O errors, but cannot
+guarantee survival if the running process needs unreadable code or libraries.
+Saved reports have distinct names and bounded reads. Missing report sections are
+reported individually. Complete candidate journals are saved as files; MCP does
+not paste them into every response.

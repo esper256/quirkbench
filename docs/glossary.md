@@ -22,6 +22,7 @@ that a feature exists. Keep entries short and change them with the designs.
 | Quirkbench project | The source code, documentation and development work that produce Quirkbench. |
 | Quirkbench binary | The `quirkbench` program used to enter commands and view results. |
 | Quirkbench controller | The foreground process serving agent tools, target connections and investigation results. |
+| Quirkbench target tools | Software installed on the target for controller connections, diagnostics and experiment control. |
 | Controller config | The editable file containing settings for the Quirkbench controller. |
 | Agent | An AI coding tool that plans experiments, edits code and interprets results. |
 | Quirkbench user's agent | The coding agent using Quirkbench to investigate the user's target, not to develop Quirkbench. |

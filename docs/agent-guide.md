@@ -1,40 +1,43 @@
 # Agent entry point
 
-Use plain English and the [glossary](glossary.md) when explaining work.
-This rewrite branch has no runnable application yet. These are intended interfaces.
+Use plain English and the [glossary](glossary.md). The human configures the MCP URL
+and installation token once. Address the authorized target by its friendly name;
+you do not need its private pairing credential.
 
-The user configures the local MCP URL and installation token once in their agent
-client. The user's agent then accesses the authorized target by its friendly
-reference; it does not need the target's private pairing credential.
-Context names the applicable tools: `ssh_command_start` for target commands,
-`sftp_upload` for files, `rpm_overlay_install` for supported live package changes,
-and `rpm_ostree_prepare_candidate` for saved candidates.
-In recovery, use `ssh_recovery_inspect` for hardware, network, storage and boot logs;
-general shell access and file writes are unavailable. Recovery inspection and
-candidate deployment arrive in milestone 1; candidate interactive tools follow.
-Use the returned next-tool names; do not assume a universal `run` or `deploy`.
-Read investigation context, inspect the target and try to reproduce the problem.
-Run commands, send probes, install packages or modify candidate software live.
-Use incremental build/deploy helpers when larger changes need them. Prepared tests
-remain available, but every inspection does not require a new experiment or reboot.
+Read investigation context and the available MCP tool descriptions first. They
+report current target mode, work, results and next actions. Inspect the target and
+try to reproduce the problem before changing software. Never edit Quirkbench to
+perform an investigation. Internal disks and persistent firmware are excluded.
 
-Tools return bounded output, saved results and instructions for the next action.
-Start long commands, do other work, then wait for completion, an agreed deadline
-or an error without periodic polling. Output is saved independently of reading it.
-Commands have separate process environments but share the target's files and
-services. Set working directory and environment explicitly; `cd` and `export` do
-not carry into another command. Do not replay uncertain work after a lost
-connection. Observe the current target boot and mode. The agent owns reasoning,
-code edits and patch generation; never edit Quirkbench to perform an investigation.
-Ordinary target commands continue through controller/network loss and keep output
-locally. Reconnect to retrieve their status; interactive terminal reattachment is
-not guaranteed. The target enforces independent command timeouts. There is no
-overall run deadline; waiting or compiling elsewhere does not expire the run.
+## Available workflow
 
-The human authorizes scope once. Internal disks and persistent firmware remain
-excluded. Pause stops new work and allows bounded work to recover/upload. Force
-stop is best effort. See the [interactive design](designs/interactive-debugging.md)
-and [agent mockup](mockups/agent-experiment.md). The first candidate uses rpm-ostree. Live changes belong to one run; prepare a
-named candidate from explicit packages/files to retain them. Recovery selects
-the next boot. Candidate networking starts from read-only saved connection
-settings; experimental network changes do not update recovery settings.
+- `ssh_recovery_inspect` reads recovery diagnostics; `emergency` avoids launching
+  external programs. Recovery provides no unrestricted agent shell.
+- `rpm_ostree_prepare_candidate` prepares a candidate. `recovery_deploy_ostree`
+  transfers it and prepares its files without booting.
+- `recovery_boot_ostree` requests one candidate boot. `ssh_command_start` runs
+  commands there with explicit arguments, working directory and environment.
+- `ssh_command_read`, `ssh_command_wait` and `ssh_command_stop` follow commands.
+  Output is saved independently of reading it. Each command has its own timeout;
+  runs have no overall deadline. Processes have separate environments but share
+  files and services. `cd` and `export` do not carry into another command.
+- `recovery_return` requests return and diagnostic upload. `run_results` lists
+  received files; `saved_output_read` reads bounded portions.
+- Repeat boot keeps persistent edits but receives a new run ID. Plain
+  `ostree admin unlock` edits disappear on reboot. `recovery_discard_ostree`
+  removes retained files explicitly before a fresh deployment.
+
+Use the returned quiet-wait command through your local process tool for long
+preparations. MCP waits are bounded; do not spend tokens repeatedly asking for
+unchanged progress. Commands continue through controller/network loss. After a
+lost reply, retrieve existing work rather than blindly replaying it. Reboot does
+not restart commands automatically. Check boot identity and mode before acting.
+
+Candidate networking reads saved connection settings; experimental changes do not
+update recovery settings. Save reusable software changes in a prepared candidate,
+not just a retained disk. The agent owns reasoning, code edits and patch generation.
+
+The [mockups](mockups/agent-experiment.md) also show intended later features,
+including interactive terminal input, SFTP transfer and live package helpers.
+Check the actual tool list instead of assuming those examples are available.
+See [installation and observed checks](controller-installation.md) for build status.
