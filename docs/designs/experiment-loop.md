@@ -4,7 +4,11 @@ Revisable design supporting the [requirements](../requirements/product.md).
 See [interactive debugging](interactive-debugging.md) for the architecture and
 [agent mockup](../mockups/agent-experiment.md) for the intended interaction.
 
-A human authorizes the problem, target and allowed changes once. The user's agent
+A human authorizes the target, investigation goals and allowed changes once.
+One investigation may watch for several suspected bugs simultaneously. Run compatible
+probes together and examine shared evidence for all relevant symptoms. Keep findings
+distinguishable; fixing one bug does not close the others. Separate investigations
+are optional, not required for each bug. The user's agent
 connects to Quirkbench through MCP and reads context, current software, connection
 status and existing evidence. It edits candidate software and tests, not Quirkbench.
 

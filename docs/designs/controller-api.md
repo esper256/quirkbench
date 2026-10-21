@@ -51,6 +51,22 @@ are not replayed. A disconnected target cannot receive queued commands intended 
 its previous boot. Current recovery/candidate status and control availability are
 visible to both the human and agent.
 
+Deployment, boot, discard and return admission commits the retry request, any run
+changes and the dispatchable status in one SQLite transaction. Dispatch happens
+after commit. An interrupted transaction leaves none of those changes; a committed
+request with an uncertain dispatch is reconciled against target records, never
+automatically replayed. Deployment includes the expected recovery boot ID; a
+restarted recovery rejects it before writing candidate files. Older recovery images
+without this check need an update before deployment.
+
+Target status reports `target_source` (installed runtime identity),
+`recovery_base` (selected package-set ID and platform), and `operations` supported
+in the current mode. The controller checks operations before dispatch, including
+file transfer; recovery still validates requests. Different source or base IDs
+are diagnostic facts, not grounds for rejecting an otherwise supported operation.
+A missing operation produces an update instruction; do not guess support from a
+version string or add a compatibility framework.
+
 ## Name MCP tools by mechanism
 
 Callable MCP actions are **tools**. A skill is a guide for an agent using tools,
@@ -63,10 +79,8 @@ Use names such as these in the [mockup](../mockups/agent-experiment.md):
 | --- | --- |
 | `investigation_context` | Read the investigation and discover applicable tools. |
 | `ssh_recovery_inspect` | Read bounded hardware, network, storage or boot-log output through recovery's SSH connection. |
-| `ssh_command_start/input/read/wait/stop` | Separate tools for starting, interacting with, waiting for and stopping SSH commands. |
-| `sftp_upload` | Transfer a file over the existing SSH connection. |
-| `controller_build_script_start` | Execute the supplied build script on the controller computer. |
-| `rpm_overlay_install` | Install supported RPM changes in the run’s temporary writable layer. |
+| `ssh_command_start/read/wait/stop` | Separate tools for starting, reading, waiting for and stopping SSH commands. Interactive input is later work. |
+| `sftp_upload` / `sftp_download` | Transfer a probe to the candidate or retrieve completed experiment evidence. |
 | `rpm_ostree_prepare_candidate` | Prepare an OSTree candidate from an explicit base and changes. |
 | `recovery_cancel_ostree` | Request cancellation by deployment work ID; wait for target-confirmed stop and cleanup. |
 | `recovery_deploy_ostree` | Transfer and prepare fresh files without rebooting. |
@@ -74,7 +88,6 @@ Use names such as these in the [mockup](../mockups/agent-experiment.md):
 | `recovery_discard_ostree` | Discard retained files after diagnostics receipt. |
 | `run_results` / `saved_output_read` | Find received results and read bounded portions of saved files. |
 | `recovery_return` | Stop remaining commands, flush available output and return to recovery. |
-| `https_evidence_wait` | Wait for named evidence files to reach the controller through HTTPS upload. |
 | `controller_work_wait` | Wait for already accepted controller work; never select or start a mechanism. |
 
 Avoid universal `run`, `execute`, `build` or `deploy` tools with a growing mechanism
@@ -158,3 +171,11 @@ process/task support. A timed-out wait never cancels the work.
 Run summaries distinguish evidence pending from missing output. Uploaded command
 records update controller status. Software identity, target capabilities and
 candidate base/target-tools identity are visible before deployment.
+
+Live evidence: `sftp_download(run_id, file)` reads a completed file relative to
+`QUIRKBENCH_EVIDENCE_DIR` through the existing SSH connection. It returns a local
+controller path, byte size and digest. Final recovery upload still controls target
+cleanup. Recovery advertises `kernel-args` before optional debugging arguments may
+be sent; candidates advertise `sftp-download` before live evidence may be read.
+Command reads distinguish `connection-lost` from a confirmed `interrupted` boot.
+`saving_pending` keeps quiet waits open until output and completion are saved.

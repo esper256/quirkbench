@@ -42,7 +42,7 @@ In another terminal: quirkbench recovery build
 $ quirkbench recovery build
 Quirkbench recovery image
 
-✓ Download packages
+✓ Select and retain Fedora packages
   Build recovery system          00:38 elapsed
   Latest activity: preparing boot files, 2 seconds ago
 
@@ -57,7 +57,8 @@ Next: quirkbench recovery flash
 
 $ quirkbench recovery build
 Recovery image recovery-1 already matches these build settings.
-No build needed. Use --force to rebuild.
+No build needed. Use --force to rebuild with the same packages.
+Use --update-base to select newer Fedora packages.
 
 $ quirkbench recovery flash
 ┌─ Prepare a Quirkbench USB ─────────────────────────────────┐
@@ -247,9 +248,10 @@ Agent · Quirkbench tools
 
 ```text
 Agent · Quirkbench tools
-✓ rpm_overlay_install      Add a diagnostic tool to this run
-✓ controller_build_script_start  Build changed PipeWire RPMs
-✓ rpm_overlay_install      Install those RPMs · This run only
+✓ ssh_command_start        Install a diagnostic tool
+  Agent builds changed software with local tools
+✓ sftp_upload              Send completed packages
+✓ ssh_command_start        Install those packages for this run
 ✓ ssh_command_start           Restart the affected service
 ↻ ssh_command_start           Start another recording
 ↻ ssh_command_wait            Wait quietly for the new recording to finish

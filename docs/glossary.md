@@ -28,7 +28,7 @@ that a feature exists. Keep entries short and change them with the designs.
 | Quirkbench user's agent | The coding agent using Quirkbench to investigate the user's target, not to develop Quirkbench. |
 | Controller computer | The computer that runs the Quirkbench controller and prepares experiments. |
 | Target | The computer on which experiments run. |
-| Investigation | Work on one problem, with a target and human-approved limits. |
+| Investigation | Work on one or more suspected problems on a target, within human-approved limits. |
 | Experiment | A test question explored with selected software, live actions or a prepared procedure. |
 | Run | One execution of an experiment, including live commands and changes before returning to recovery. |
 | Baseline | The investigation's unchanged starting software and build settings, used for comparison and reuse. |
@@ -49,6 +49,7 @@ that a feature exists. Keep entries short and change them with the designs.
 | Image | A file containing a system that can be written to a device and booted. |
 | Flash | Write an image to a selected device, replacing its contents. |
 | Recovery system | A working target system collecting diagnostics and restoring the ability to investigate after failure. |
+| Recovery base | The retained OS packages used to build recovery, separate from Quirkbench target code. |
 | Recovery image | The file written to USB to install the recovery system. |
 | Recovery partition | The USB partition holding the recovery system, separate from writable experimental software. |
 | Shared data partition | USB storage shared by candidates, recovery settings, evidence and temporary files. |

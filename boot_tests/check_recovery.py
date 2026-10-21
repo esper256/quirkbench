@@ -137,9 +137,10 @@ async def check(image, work, firmware, timeout):
                         await asyncio.sleep(.5)
                     storage = await controller.inspect('vm-recovery', 'storage', 1000)
                     report = await controller.inspect('vm-recovery', 'boot-log', 1000)
-                    (work/'storage.json').write_text(storage['output'])
-                    (work/'boot.log').write_text(report['output'])
-                    entries = {m['target']: m for m in mounts(json.loads(storage['output'])['filesystems'])}
+                    storage_text = Path(storage['output_file']).read_text()
+                    (work/'storage.json').write_text(storage_text)
+                    (work/'boot.log').write_text(Path(report['output_file']).read_text())
+                    entries = {m['target']: m for m in mounts(json.loads(storage_text)['filesystems'])}
                     assert 'ro' in entries['/']['options'].split(','), 'Recovery root is writable'
                     assert 'rw' in entries['/run/quirkbench-data']['options'].split(','), 'Shared data is not writable'
                     # Connection readiness need not coincide with the console starting.

@@ -4,10 +4,28 @@ from pathlib import Path
 import re
 import shutil
 
-from .files import disk, identifier, read_json
+from .files import disk, identifier, read_json, atomic_write
+
+
+def debugging_kernel_args(arguments):
+    if arguments is None:
+        return []
+    if not isinstance(arguments, list):
+        raise ValueError('kernel_args must be a list of individual kernel arguments.')
+    protected = {'root', 'rootfstype', 'rootflags', 'ro', 'rw', 'init', 'rdinit',
+                 'ostree', 'panic', 'noresume', 'resume', 'resume_offset',
+                 'modprobe.blacklist', 'module_blacklist', 'selinux', 'enforcing'}
+    for arg in arguments:
+        if not isinstance(arg, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+(?:=[^\s\x00-\x1f\x7f\"'\\]+)?", arg):
+            raise ValueError('Each kernel argument must be a single unquoted name or name=value.')
+        name = arg.split('=', 1)[0].replace('-', '_')
+        if name in protected or name.startswith(('quirkbench.', 'rd.', 'systemd.')) or name == '__':
+            raise ValueError(f'Kernel argument {name} is managed by Quirkbench for boot and recovery.')
+    return list(arguments)
 
 
 async def deploy_candidate(data: Path, boot: Path, linux, request, settings, progress):
+    arguments = debugging_kernel_args(request.get('kernel_args'))
     run_id = identifier(request['run_id'])
     commit = request['commit']
     if not re.fullmatch('[a-f0-9]{64}', commit):
@@ -63,7 +81,18 @@ async def deploy_candidate(data: Path, boot: Path, linux, request, settings, pro
                         '--karg=panic=10', '--karg=console=tty1', '--karg=rd.shell=0', '--karg=rd.emergency=reboot',
                         f'--karg=quirkbench.run={run_id}', f'--karg=quirkbench.data={media["data_uuid"]}',
                         '--karg=selinux=0', '--karg=noresume', '--karg=rd.systemd.gpt_auto=0', '--karg=systemd.gpt_auto=0', '--karg=rd.driver.blacklist=ahci,mmc_block',
-                        '--karg=modprobe.blacklist=ahci,mmc_block', commit, log=log)
+                        '--karg=modprobe.blacklist=ahci,mmc_block', *(f'--karg={arg}' for arg in arguments), commit, log=log)
+    def configure_mounts():
+        deployments = list((os_root / 'deploy').glob('*/etc'))
+        if len(deployments) != 1:
+            raise ValueError('Expected one fresh candidate configuration directory.')
+        fstab = deployments[0] / 'fstab'
+        existing = fstab.read_text() if fstab.exists() else ''
+        # A fresh external candidate must not inherit another machine's mounts.
+        if any(line.strip() and not line.lstrip().startswith('#') for line in existing.splitlines()):
+            raise ValueError('Candidate includes filesystem mounts; review them before external deployment.')
+        atomic_write(fstab, existing + f'\nUUID={media["boot_uuid"]} /boot ext4 defaults 0 0\n', mode=0o644)
+    await disk(configure_mounts)
     def matching_entries():
         return [p for p in (data / 'boot' / 'loader' / 'entries').glob('*.conf')
                 if f'quirkbench.run={run_id}' in p.read_text()]

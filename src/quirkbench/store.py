@@ -1,4 +1,5 @@
 """Controller-only SQLite records. Configuration and large outputs remain files."""
+from contextlib import contextmanager
 import hashlib
 import json
 from pathlib import Path
@@ -19,8 +20,11 @@ class Store:
 
     def put(self, kind, key, **data):
         data = dict(data, id=key)
-        with self.db:
+        if self.db.in_transaction:
             self.db.execute('INSERT OR REPLACE INTO records VALUES (?,?,?)', (kind, key, json.dumps(data)))
+        else:
+            with self.db:
+                self.db.execute('INSERT OR REPLACE INTO records VALUES (?,?,?)', (kind, key, json.dumps(data)))
         return data
 
     def get(self, kind, key):
@@ -36,6 +40,18 @@ class Store:
         data = self.get(kind, key)
         data.pop('id')
         return self.put(kind, key, **(data | fields))
+
+    @contextmanager
+    def admission(self):
+        """Commit related request/run records together, before any dispatch.
+
+        Controller-only synchronous use: never await or start physical work here.
+        """
+        if self.db.in_transaction:
+            raise RuntimeError('Admission transactions cannot be nested.')
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            yield
 
     def request(self, kind, scope, request_id, inputs):
         if not request_id or len(request_id) > 200:

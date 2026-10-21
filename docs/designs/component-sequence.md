@@ -16,6 +16,7 @@ sequenceDiagram
     participant Target
     Human->>Quirkbench: Configure and run the foreground controller
     Human->>Quirkbench: Build recovery image and flash selected USB
+    Note over Quirkbench: Reuse selected recovery packages; update the base explicitly
     Quirkbench->>USB: Write bootable software, settings and shared storage
     Note over Quirkbench,USB: Later compatible recovery updates keep shared data and pairing
     Human->>Target: Boot USB and connect network
@@ -35,6 +36,7 @@ sequenceDiagram
     Agent->>Quirkbench: ssh_recovery_inspect
     Quirkbench->>Target: Run selected recovery diagnostic through SSH
     Target->>Target: Show received action and progress in recovery Activity
+    Note over Quirkbench,Target: Check advertised operations; identities need not match
     Target-->>Quirkbench: Command output and exit status
     Quirkbench-->>Agent: Bounded output and saved file
     opt Human requests Send report in recovery menu
@@ -78,7 +80,7 @@ sequenceDiagram
     Target->>Quirkbench: Connect with stable paired identity and new boot ID
     Quirkbench-->>Agent: Current software, available tools and instructions
     loop Inspect and improvise on the same boot
-        Agent->>Quirkbench: Start command, send input or upload a probe
+        Agent->>Quirkbench: Start command or sftp_upload a probe
         Quirkbench->>Target: Execute through SSH, save output independently
         Quirkbench-->>Agent: Command ID, available output and next action
         Note over Agent,Target: Other commands can run concurrently; each has its own timeout
@@ -86,15 +88,15 @@ sequenceDiagram
         Note over Agent,Quirkbench: Wait without periodic model calls
         Target-->>Quirkbench: Command output and completion, or interruption
         Quirkbench-->>Agent: Saved output and status
-        Agent->>Quirkbench: https_evidence_wait for named files
-        Target->>Quirkbench: Upload completed evidence files
+        Agent->>Quirkbench: sftp_download a completed evidence file
+        Quirkbench->>Target: Read file over existing SSH connection
+        Target->>Quirkbench: Completed binary or text file
         Quirkbench-->>Agent: Received files or missing evidence reported
     end
     opt Software change
         Agent->>Agent: Edit source
-        Agent->>Quirkbench: controller_build_script_start
-        Quirkbench-->>Agent: Build output or errors to fix
-        Agent->>Quirkbench: rpm_overlay_install or rpm_ostree_prepare_candidate
+        Agent->>Agent: Build changed software with ordinary tools
+        Agent->>Quirkbench: rpm_ostree_prepare_candidate with captured package changes
         Quirkbench->>Target: Transfer changes, new candidate boots go through recovery
         Target-->>Quirkbench: Current software and connection status
         Quirkbench-->>Agent: Ready for more inspection
@@ -125,7 +127,7 @@ sequenceDiagram
         Target->>Target: Boot recovery when possible
         Target->>Quirkbench: Reconnect and send surviving evidence
         Quirkbench-->>Target: Confirm stored files
-        Target->>Target: Delete confirmed evidence and finished run files, keep settings
+        Target->>Target: Delete confirmed evidence; retain run files until explicit discard
         Quirkbench-->>Agent: Interrupted commands, results and current availability
     end
     Human->>Quirkbench: Pause investigation

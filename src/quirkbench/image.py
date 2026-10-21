@@ -5,6 +5,9 @@ import json
 from pathlib import Path
 import shutil
 
+from .recovery_base import select_base, verify_base
+from .runtime import stage_runtime, runtime_hash, recovery_hash, files_hash
+
 from .files import atomic_write, digest_file, read_json, save_json, build_lock
 
 ASSETS = Path(str(importlib.resources.files('quirkbench') / 'assets'))
@@ -40,40 +43,49 @@ async def build_tools(root, linux, log):
     return tag
 
 
+async def tools_identity(linux, tools):
+    info = await linux.command('podman', 'image', 'inspect', tools)
+    return json.loads(info['output'])[0]['Id']
+
+
 async def build_target_rpm(root, linux, tools, log):
-    folder = root / 'cache' / 'target-rpm' / source_hash()
+    tools_id = await tools_identity(linux, tools)
+    key = hashlib.sha256((runtime_hash() + files_hash(('assets/target.spec', 'image.py')) + tools_id).encode()).hexdigest()
+    folder = root / 'cache' / 'target-rpm' / key
     output = folder / 'output'
     existing = list(output.glob('*.rpm'))
-    if len(existing) == 1 and (folder / 'complete.json').exists():
+    complete = read_json(folder / 'complete.json', {})
+    if len(existing) == 1 and complete.get('sha256') == digest_file(existing[0]):
         return existing[0]
-    folder.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(Path(__file__).parent, folder / 'quirkbench', dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
-    save_json(folder / 'quirkbench' / 'source.json', {'source': folder.name})
+    if folder.exists():
+        shutil.rmtree(folder)
+    folder.mkdir(parents=True)
+    stage_runtime(folder / 'root')
     shutil.copy2(ASSETS / 'target.spec', folder / 'target.spec')
-    output.mkdir(exist_ok=True)
+    output.mkdir()
     await linux.command('podman', 'run', '--rm', '--userns=keep-id', '-v', f'{folder.resolve()}:/work:Z',
-                        tools, 'bash', '-ec', 'rpmbuild -bb --define "_topdir /tmp/rpmbuild" /work/target.spec; cp /tmp/rpmbuild/RPMS/noarch/*.rpm /work/output/', log=log)
+                        tools_id, 'bash', '-ec', 'rpmbuild -bb --define "_topdir /tmp/rpmbuild" /work/target.spec; cp /tmp/rpmbuild/RPMS/noarch/*.rpm /work/output/', log=log)
     files = list(output.glob('*.rpm'))
     if len(files) != 1:
         raise ValueError('Target RPM build did not produce one package. Read the build log.')
-    save_json(folder / 'complete.json', {'sha256': digest_file(files[0])})
+    save_json(folder / 'complete.json', {'sha256': digest_file(files[0]), 'source': runtime_hash(), 'tools_image': tools_id})
     return files[0]
 
 
-async def build_recovery(root, linux, force=False, progress=print):
+async def build_recovery(root, linux, force=False, progress=print, update_base=False):
     with build_lock(root):
-        return await _build_recovery(root, linux, force, progress)
+        return await _build_recovery(root, linux, force, progress, update_base)
 
 
-async def _build_recovery(root, linux, force, progress):
+async def _build_recovery(root, linux, force, progress, update_base):
     log = root / 'logs' / 'recovery-build.log'
     progress(f'Preparing recovery build tools. Log: {log}')
     tools = await build_tools(root, linux, log)
     # The built tools image retains downloaded tool/package versions for this cache entry.
-    info = await linux.command('podman', 'image', 'inspect', tools)
-    tools_id = json.loads(info['output'])[0]['Id']
-    key = hashlib.sha256((source_hash() + tools_id).encode()).hexdigest()[:24]
+    tools_id = await tools_identity(linux, tools)
+    progress('Checking selected recovery base packages')
+    base_folder, base = await select_base(root, linux, tools_id, ASSETS, log, update_base)
+    key = hashlib.sha256((base['id'] + recovery_hash() + files_hash(('image.py',)) + tools_id).encode()).hexdigest()[:24]
     selection_path = root / 'cache' / 'recovery-selections' / (key + '.json')
     selected = read_json(selection_path, {})
     result = root / 'images' / selected.get('id', key)
@@ -81,18 +93,20 @@ async def _build_recovery(root, linux, force, progress):
     if existing and not force:
         progress(f'Recovery image {key} is already available. Use --force to rebuild.')
         return existing
+    verify_base(base_folder, base)
     stage = root / 'images' / (key + '.building')
     if stage.exists():
         shutil.rmtree(stage)
     stage.mkdir(parents=True)
-    rpm = await build_target_rpm(root, linux, tools, log)
-    shutil.copy2(rpm, stage / 'target.rpm')
+    stage_runtime(stage / 'target-root')
+    save_json(stage / 'target-root/usr/lib/quirkbench/quirkbench/recovery-base.json',
+              {'id': base['id'], 'release': base['release'], 'architecture': base['architecture']})
     shutil.copy2(ASSETS / 'build-recovery.sh', stage / 'build.sh')
     shutil.copy2(ASSETS / 'build-efi.sh', stage / 'build-efi.sh')
     shutil.copy2(ASSETS / 'configure-recovery.sh', stage / 'configure-recovery.sh')
     progress('Installing recovery packages and preparing boot files')
     await linux.command('podman', 'run', '--rm', '--user', '0', '-v', f'{stage.resolve()}:/work:Z',
-                        tools, 'bash', '/work/build.sh', log=log)
+                        '-v', f'{base_folder.resolve()}:/base:ro,Z', '--network=none', tools_id, 'bash', '/work/build.sh', log=log)
     files = ['recovery.img', 'BOOTX64.EFI', 'packages.txt']
     for name in files:
         if not (stage / name).is_file() or not (stage / name).stat().st_size:
@@ -101,7 +115,7 @@ async def _build_recovery(root, linux, force, progress):
     image_id = hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()[:24]
     result = root / 'images' / image_id
     record = {'id': image_id, 'inputs': key, 'files': hashes,
-              'source': source_hash(), 'tools_image': tools_id, 'secure_boot': False,
+              'base': base['id'], 'source': runtime_hash(), 'recovery_source': recovery_hash(), 'tools_image': tools_id, 'secure_boot': False,
               'architecture': 'x86_64', 'settings_format': 1, 'boot_checked': False}
     save_json(stage / 'image.json', record)
     if result.exists():

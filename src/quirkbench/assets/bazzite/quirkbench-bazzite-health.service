@@ -1,0 +1,10 @@
+[Unit]
+Description=Bazzite health diagnostics
+After=network-online.target quirkbench-prepare.service
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/quirkbench-bazzite-health
+TimeoutStartSec=180
+[Install]
+WantedBy=multi-user.target

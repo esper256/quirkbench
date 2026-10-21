@@ -1,42 +1,31 @@
 # Build software for an investigation
 
-Builds support [interactive debugging](interactive-debugging.md). Quirkbench prepares
-the baseline, workspace and build instructions. The user's agent edits software,
-chooses builds and resolves compilation errors. No agent edits to Quirkbench are needed.
+Quirkbench prepares unchanged baselines and assembles completed outputs into a
+[candidate](candidate-deployment.md). The user's agent edits software, runs ordinary
+build tools and fixes compilation errors. Investigations never require edits to
+Quirkbench. Specialized module-build or driver-reload MCP tools are unnecessary.
 
-Expose the supplied incremental build scripts through an MCP helper as well as
-ordinary local execution. The helper runs the selected script, returns useful logs
-and retains completed output. It does not diagnose or fix code. Retain useful build
-directories and do not rebuild unchanged software or repeat a successful agent build.
-
-Provide context and short guides for the supported kernel/userspace builds, required
-output, debugging symbols and deployment choices. Include matching source/package
-references and build dependencies so the agent can prepare source without guessing.
-Quirkbench's supported build helpers supply `BUILD.md`, `DEPLOY.md` and incremental
-scripts using a pinned build container. Resolve sources and patches from the actual
-selected Bazzite packages, including custom repositories; Fedora sources alone may
-not match. The agent prepares and edits source and fixes compilation errors.
-Package output as RPMs where useful for OS assembly or installation. A standalone probe or file change needs no RPM.
-Use official packages and cache selected versions without becoming a distribution
-mirror. Record resolved packages when they affect the experiment.
+Build against the running candidate's actual source, patches, configuration and
+symbol versions. Similar package names do not establish a match. Use package
+metadata to find sources and dependencies, including distribution-specific sources.
+Keep source, symbols and useful incremental build directories on the controller.
 
 Publish completed output separately from active build files. Record relevant source
-and build settings. Copy completed output before deployment; later edits must
-not change retained output. Do not require control over the agent's editor.
-Keep symbols and source on the controller unless needed on the target.
+and build settings. Quirkbench captures supplied files before preparing a candidate;
+later edits must not change that candidate. No control over the agent's editor is
+required. Additions and replacements may be RPMs for the first OS assembly mechanism.
+A standalone probe or live file change needs no RPM.
 
-Candidate hooks support startup/shutdown tests. They are optional alongside
-live commands, not the only way to run diagnostic code. Supply evidence and working
-directories to both. Never require the agent to predict every future inspection at
-build time. Earlier boot instrumentation remains a candidate-source change.
+For suitable modules, use ordinary upload and command tools to stop users, unload,
+reload and verify changed code. Do not force unloading or bypass signature checks.
+Built-in drivers, incompatible interfaces and startup changes need a new candidate
+boot. Live changes are disposable unless explicitly incorporated into a candidate.
 
-Before producing the first bootable image, record whether the initial path supports
-Secure Boot and how experimental kernels meet that choice. Never automatically
-change firmware settings or enroll keys. Ask for any required human action.
+Candidate hooks are optional alongside live commands. A startup probe receives
+run, evidence and scratch directories before networking and has an independent
+execution timeout. Earlier boot instrumentation remains a candidate-source change.
+Hardware-specific probes and failure detectors belong in the investigation workspace.
 
-Recovery image builds remain Quirkbench's responsibility. Start with matching
-kernel/modules and PipeWire RPM builds for the selected rpm-ostree base. The agent
-chooses and fixes builds; the controller assembles completed outputs into a
-[candidate](candidate-deployment.md). Saved candidates name their base, package
-changes and selected files explicitly. No universal build system or automatic
-capture of every live edit.
+Recovery image builds remain Quirkbench's responsibility. The first image is unsigned
+and requires Secure Boot disabled; Quirkbench does not change firmware settings or
+enroll keys. No universal build system or automatic capture of every live edit.

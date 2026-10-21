@@ -603,7 +603,8 @@ async def test_parallel_candidate_commands_timeout_stop_and_separate_environment
 
     assert quick['output'] == 'separate\n' and quick['exit_code'] == 0
     assert timed['status'] == 'timed-out'
-    assert stopped['status'] == 'stopped'
+    assert stopped['status'] in ('stopped', 'stopping')
+    assert (await lab.call('ssh_command_wait', command_id=third['command_id'], timeout_seconds=5))['status'] == 'stopped'
     assert lab.tools.reboots == 1
 
 
@@ -629,7 +630,8 @@ async def test_candidate_output_limit_and_repeated_stop_are_safe(lab):
 
     assert result['status'] == 'failed' and 'output limit' in result['error']
     assert result['output_bytes'] <= 100
-    assert all(r['status']=='stopped' for r in stopped)
+    assert all(r['status'] in ('stopped', 'stopping') for r in stopped)
+    assert (await lab.call('ssh_command_wait', command_id=stubborn['command_id'], timeout_seconds=5))['status'] == 'stopped'
     with pytest.raises(ProcessLookupError):
         os.kill(int((lab.data/'pid').read_text()),0)
 
@@ -707,7 +709,7 @@ async def test_cancelled_recovery_admission_keeps_its_saved_request(lab, monkeyp
     import pytest
     from tests.support.lab import stalled_target_write, COMMIT
     request = dict(action='deploy', work_id='cancelled-admission', run_id='cancelled-run',
-                   commit=COMMIT, startup_timeout=30)
+                   commit=COMMIT, startup_timeout=30, recovery_boot=lab.target.boot_id)
 
     async with stalled_target_write(monkeypatch, lab) as entered:
         admission = asyncio.create_task(lab.target.dispatch(dict(request)))
@@ -983,3 +985,80 @@ async def test_repeated_terminal_cancel_still_kills_a_stubborn_writer(tmp_path):
             await transfer
     with pytest.raises(ProcessLookupError):
         os.kill(int(ready.read_text()), 0)
+
+
+async def test_agent_files_and_changed_candidate_inputs(lab, tmp_path):
+    package = tmp_path / 'diagnostic.rpm'
+    package.write_bytes(b'agent built package')
+    probe = tmp_path / 'probe'
+    probe.write_text('#!/bin/sh\necho early diagnostic\n')
+
+    work = await lab.call('rpm_ostree_prepare_candidate', investigation='wifi-case', request_id='custom',
+                          packages=[str(package)], startup_probe=str(probe))
+    ready = await lab.call('controller_work_wait', work_id=work['work_id'], timeout_seconds=5)
+    run = await lab.start_run(ready['candidate_id'])
+    await lab.boot_target('candidate', run['run_id'])
+    uploaded = await lab.call('sftp_upload', run_id=run['run_id'], file=str(probe), name='probe')
+
+    assert ready['next_tool'] == 'recovery_deploy_ostree'
+    staged = lab.root / 'candidates' / ready['candidate_id']
+    assert (staged / 'packages-0.rpm').read_bytes() == package.read_bytes()
+    assert (staged / 'startup-probe').read_bytes() == probe.read_bytes()
+    assert 'Before=NetworkManager.service' in (staged / 'quirkbench-probe.service').read_text()
+    assert ready['candidate']['inputs']['packages'][0]['name'] == package.name
+    assert (lab.target.workspace / 'probe').read_bytes() == probe.read_bytes()
+    assert uploaded['sha256'] == ready['candidate']['inputs']['startup_probe']['sha256']
+    assert uploaded['next_tool'] == 'ssh_command_start'
+    package.write_bytes(b'changed package')
+    conflict = await lab.raw_call('rpm_ostree_prepare_candidate', investigation='wifi-case', request_id='custom',
+                                 packages=[str(package)], startup_probe=str(probe))
+    assert conflict.isError
+
+
+async def test_unchanged_preparation_reuses_completed_content(lab):
+    first = await lab.candidate()
+    builds = len(lab.tools.calls)
+
+    next_work = await lab.call('rpm_ostree_prepare_candidate', investigation='wifi-case', request_id='reuse', name='repeat')
+    repeat = await lab.call('controller_work_wait', work_id=next_work['work_id'], timeout_seconds=5)
+
+    assert repeat['candidate']['commit'] == first['candidate']['commit']
+    assert not any(c[0] == "podman" and c[1] in ("run", "save") for c in lab.tools.calls[builds:])
+
+
+async def test_file_upload_does_not_block_commands_or_publish_partial_files(lab, tmp_path, monkeypatch):
+    from tests.support.lab import stalled_sftp_write
+    probe = tmp_path / 'probe.py'
+    probe.write_text('print("probe ready")\n')
+    candidate = await lab.candidate()
+    run = await lab.start_run(candidate['candidate_id'])
+    denied = await lab.raw_call('sftp_upload', run_id=run['run_id'], file=str(probe), name='probe.py')
+    assert denied.isError
+    await lab.boot_target('candidate', run['run_id'])
+
+    async with stalled_sftp_write(monkeypatch) as entered:
+        transfer = asyncio.create_task(lab.call('sftp_upload', run_id=run['run_id'], file=str(probe), name='probe.py'))
+        await entered.wait()
+        status = await lab.call('investigation_context', investigation='wifi-case')
+        command = await lab.call('ssh_command_start', run_id=run['run_id'], request_id='parallel',
+                                 argv=[sys.executable, '-c', 'print("connected")'], timeout_seconds=5)
+        assert status['mode'] == 'candidate'
+        assert not (lab.target.workspace / 'probe.py').exists()
+    await transfer
+    finished = await lab.call('ssh_command_wait', command_id=command['command_id'], timeout_seconds=5)
+
+    assert 'connected' in finished['output']
+    assert (lab.target.workspace / 'probe.py').read_bytes() == probe.read_bytes()
+    results = await lab.call('run_results', run_id=run['run_id'])
+    assert results['transfers'][0]['name'] == 'probe.py'
+
+
+async def test_recovery_report_retains_early_boot_diagnostics(lab):
+    lab.tools.journal_text = 'Early diagnostic: controller adapter failed\n' + 'later activity\n' * 300
+
+    preview = await lab.call('ssh_recovery_inspect', target='unrelated-laptop', view='boot-log', max_lines=80)
+    report = await lab.call('ssh_recovery_inspect', target='unrelated-laptop', view='report')
+
+    assert 'Early diagnostic' not in Path(preview['output_file']).read_text()
+    assert 'Early diagnostic: controller adapter failed' in Path(report['output_file']).read_text()
+    assert report['boot_id'] == lab.target.boot_id

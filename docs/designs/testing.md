@@ -265,3 +265,29 @@ boot, unexpected return with uploaded diagnostics, retained edits on a repeat
 boot, separate command/evidence identities, and explicit discard. Emergency
 inspection must work when spawning diagnostic programs fails. Read saved output
 in bounded pages; do not assert exact diagnostic prose.
+
+## Target packaging
+
+Exercise the real staged target files outside the checkout, including deferred
+imports used by deployment and command execution. Fast build tests replace only
+external tools: controller edits reuse recovery, target edits invalidate it, and
+changed builders or damaged cached RPMs trigger package rebuilding. Recovery
+staging must not invoke the RPM builder. Actual image boot remains a separate check.
+
+Admission checks interrupt actual controller record writes, restart and retry the
+journey. They check rollback, one run per request, no replay after a committed but
+unsent action, and rejection when recovery restarts before deployment dispatch.
+
+Recovery base checks exercise first selection, unchanged-package rebuilds, explicit
+updates, failed acquisition and missing/changed retained RPMs. Run the acquisition
+script with small process substitutes; no downloads or image builds. Connection
+checks use a different runtime identity and an omitted operation to verify that
+identity differences remain usable while unsupported work is never dispatched.
+
+Live debugging checks run a collector and uploaded probe concurrently, download
+binary evidence, then return through confirmed upload and cleanup. Hold an output
+write with a signal to check control and stop without waiting for a fake timeout.
+Also cover connection loss, new boots, incomplete/changing downloads, read-only
+SFTP evidence, debugging boot arguments and early probe files. Verify target-service
+priority settings and actual child execution. Elevated service scheduling and live
+module replacement still need the separate authorized hardware check.

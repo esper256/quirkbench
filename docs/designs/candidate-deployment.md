@@ -18,6 +18,24 @@ Keep MCP, reverse SSH, command recording, evidence and recovery common.
 `bazzite.py` prepares the first OS; `candidates.py` handles OSTree deployment and
 cleanup without selecting a distribution. Other deployment mechanisms can be added
 alongside it. Start with small modules, not a plugin framework.
+The target RPM packages the staged connection and execution files also used by
+recovery; recovery copies those files directly. Neither contains controller/MCP
+implementation modules. Keep the explicit file list shared with build hashing.
+Include package instructions and the actual builder image identity in its cache
+key, and check the recorded RPM digest before reuse. Candidate preparation also
+includes OS-specific preparation code/assets, the base and captured inputs.
+Source identities describe installed code; unequal controller and target hashes
+are expected, not compatibility failures. New actions needing newer target code
+must explain that an update is required. Bazzite preparation
+adds its service overrides and diagnostic health-check runner before publishing the
+candidate; MCP does not repair OS policy after deployment.
+[Greenboot](https://github.com/fedora-iot/greenboot-rs) combines checks with automatic
+reboot/rollback. The Bazzite adaptation runs its installed required/wanted scripts
+as diagnostics, honoring disabled checks, without running green/red actions. Disable competing update,
+rollback and automount services, while preserving desktop/audio services. Report
+these differences with the candidate. Boot setup supplies target network settings
+and connection details, not distribution policy.
+
 A future Debian implementation can reuse the same target program and provide a
 `.deb`; the first packages that program as an RPM. MCP stays on the controller.
 
@@ -55,7 +73,10 @@ each run, with a fresh deployment, `--no-merge` configuration defaults and its o
 directories before dependent services start. Reuse unchanged OS content; do not
 undo the previous run's edits. Check service initialization and OSTree's mount
 ordering before treating this arrangement as working.
-Mount the USB boot filesystem at the candidate's `/boot` before target tools start.
+Write a normal `/boot` fstab entry into the fresh candidate configuration, so
+systemd mounts the boot filesystem before ordinary services. Reject unexplained
+inherited filesystem mounts rather than mounting another machine's disks.
+Recovery continues to own boot selection.
 On explicit discard, let OSTree undeploy and clean up before removing the run's remaining
 writable directories. Keep references to reusable candidates in its repository.
 
@@ -141,3 +162,26 @@ OSTree's terminal output supplies transfer progress, with changing object totals
 treated as estimates. Other stages show activity without invented percentages.
 Bazzite preparation masks its automatic hardware-setup reboot and update services;
 these changes are reported with the base and target-tools source identity.
+
+## Agent inputs and reuse
+
+`rpm_ostree_prepare_candidate` accepts controller-local RPM `packages`, RPM
+`replacements`, and an optional executable `startup_probe`. The agent builds or
+acquires these; Quirkbench copies their bytes before starting asynchronous work.
+A changed input with the same request ID conflicts. Keep originals in the
+investigation workspace, not Quirkbench source.
+
+The startup probe runs after shared storage is available and before networking,
+with `startup_probe_timeout_seconds` (default 60 seconds) and output in the journal. It is for early
+userspace diagnosis, not instrumentation before the kernel or initramfs starts.
+Kernel/initramfs instrumentation belongs in the supplied packages.
+
+Reuse completed preparation for the same selected base, target-tools source and
+captured inputs. Export and import are separate visible stages. This cache avoids
+repeating work; it does not replace retained investigation results.
+
+`recovery_deploy_ostree` accepts optional `kernel_args` for debugging. They are
+recorded with the deployment and survive repeat boots. Quirkbench retains control
+of root/deployment selection, internal-disk protections, recovery behavior and
+hibernation-resume settings. Startup probes receive their evidence and scratch
+directories before networking, so early failures can leave retrievable files.

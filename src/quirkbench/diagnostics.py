@@ -1,5 +1,6 @@
 """Explicit recovery reports shared by the console and remote inspection."""
 import asyncio
+import tempfile
 from .files import disk
 from pathlib import Path
 
@@ -20,6 +21,16 @@ async def recovery_report(linux, data, status=None):
             sections.append(f'=== {view} unavailable ===\n{type(result).__name__}: {result}')
             continue
         sections.append(f'=== {view} (exit {result["exit_code"]}) ===\n{result["output"]}')
+    # Keep early failures: the short boot-log section is only a preview.
+    try:
+        with tempfile.TemporaryDirectory(prefix='quirkbench-journal-') as temporary:
+            journal = Path(temporary) / 'journal.txt'
+            result = await linux.command('journalctl', '-b', '--no-pager', '-o', 'short-monotonic',
+                                         log=journal, timeout=20, check=False)
+            text = await disk(journal.read_text, errors='replace')
+            sections.append(f'=== Complete available current boot journal (exit {result["exit_code"]}) ===\n{text}')
+    except (OSError, RuntimeError, TimeoutError) as error:
+        sections.append(f'=== Complete boot journal unavailable ===\n{error}')
     if status:
         import json
         sections.append('=== Current work and connection ===\n' + json.dumps({**status, 'events': [{k:v for k,v in event.items() if k != 'detail'} for event in status.get('events', [])]}, indent=2))

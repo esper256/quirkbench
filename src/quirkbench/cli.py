@@ -54,6 +54,7 @@ def parser():
     actions = r.add_subparsers(dest='action', required=True)
     b = actions.add_parser('build', help='Build or reuse a cached recovery image')
     b.add_argument('--force', action='store_true', help='Rebuild while retaining the previous completed image')
+    b.add_argument('--update-base', action='store_true', help='Explicitly select and retain a fresh Fedora package set')
     actions.add_parser('list', help='List completed recovery images')
     f = actions.add_parser('flash', help='Install recovery or update an existing USB while keeping its data')
     f.add_argument('--device', help='External drive to install or update, for example /dev/sdb or /dev/nvme2n1')
@@ -115,7 +116,7 @@ async def execute(args):
         linux = Linux(progress=lambda text: print(text, file=sys.stderr))
         if args.action == 'build':
             from .image import build_recovery
-            return await build_recovery(root, linux, args.force, progress=lambda s: print(s, file=sys.stderr))
+            return await build_recovery(root, linux, args.force, progress=lambda s: print(s, file=sys.stderr), update_base=args.update_base)
         images = [read_json(p) for p in sorted((root / 'images').glob('*/image.json')) if not p.parent.name.endswith(('.building', '.previous'))]
         if args.action == 'list':
             return {'images': images}

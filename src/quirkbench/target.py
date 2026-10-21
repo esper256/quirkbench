@@ -35,6 +35,7 @@ class Target:
         self.linux = linux or Linux()
         self.settings = read_json(self.settings_dir / 'connection.json')
         self.software_source = read_json(Path(__file__).with_name('source.json'), {}).get('source', 'checkout')
+        self.recovery_base = read_json(Path(__file__).with_name('recovery-base.json')) if mode == 'recovery' else None
         self.record_lock = asyncio.Lock()
         self.action_lock = asyncio.Lock()
         self.work = read_json(self.home / 'work.json', {})
@@ -55,6 +56,7 @@ class Target:
         self.uploading = False
         self.upload_stage = 'Uploading evidence'
         self.commands = None
+        self.workspace = Path('/var/tmp/quirkbench')
         self.progress_label = None
         self.progress_started = None
 
@@ -113,8 +115,11 @@ class Target:
     def status(self):
         return {'target_id': self.settings.get('target_id'), 'name': self.settings.get('name'),
                 'mode': self.mode, 'boot_id': self.boot_id, 'run_id': self.run_id, 'target_source': self.software_source,
+                'recovery_base': self.recovery_base,
+                'operations': (['inspect', 'deploy', 'boot', 'discard', 'cancel-deploy'] if self.mode == 'recovery'
+                               else ['command-start', 'command-read', 'command-stop', 'sftp-upload', 'sftp-download', 'return']),
                 'work': self.work, 'message': self.message, 'retained_run': self.active,
-                'capabilities': ['deploy-only', 'boot-prepared', 'discard-run', 'retain-run'],
+                'capabilities': ['deploy-only', 'deploy-boot-id', 'kernel-args', 'boot-prepared', 'discard-run', 'retain-run'],
                 'ready_for_deploy': self.mode == 'recovery' and not self.active and not self.busy}
 
     def screen_status(self):
@@ -186,12 +191,12 @@ class Target:
                 raise ValueError('Command requires the connected candidate run and boot. Recovery has no agent shell.')
             key = identifier(request['command_id'])
             if action == 'command-start':
-                result = self.commands.start(key,request['argv'],request['cwd'],request['env'],request['timeout_seconds'],request['max_output_bytes'])
+                result = await self.commands.start(key,request['argv'],request['cwd'],request['env'],request['timeout_seconds'],request['max_output_bytes'])
                 self.event('MCP','Command accepted',key)
                 return result
             if action == 'command-stop':
                 return await self.commands.stop(key)
-            return self.commands.read(key,request.get('offset',0))
+            return await self.commands.read(key,request.get('offset',0))
         if action == 'inspect' and self.mode == 'recovery':
             if set(request) - {'view', 'max_lines'}:
                 raise ValueError('Unexpected diagnostic options.')
@@ -276,8 +281,10 @@ class Target:
             self.spawn(self.boot_prepared(request) if action == 'boot' else self.discard(request))
             return {'status': 'accepted'}
         if action == 'deploy' and self.mode == 'recovery':
-            if set(request) != {'work_id', 'run_id', 'commit', 'startup_timeout'}:
+            if set(request) - {'kernel_args'} != {'work_id', 'run_id', 'commit', 'startup_timeout', 'recovery_boot'}:
                 raise ValueError('Incomplete deployment request.')
+            from .candidates import debugging_kernel_args
+            debugging_kernel_args(request.get('kernel_args'))
             key = identifier(request['work_id'])
             identifier(request['run_id'])
             if not isinstance(request['startup_timeout'], (int, float)) or not 1 <= request['startup_timeout'] <= 3600:
@@ -288,6 +295,8 @@ class Target:
                 if self.work[key]['request'] != request:
                     raise ValueError('Work ID already has different inputs.')
                 return self.work[key]
+            if request.get('recovery_boot') != self.boot_id:
+                raise ValueError('Recovery restarted before deployment. Refresh target status and submit a new request.')
             if self.busy or self.active:
                 raise ValueError('Finish the existing run before preparing another candidate.')
             self.busy = True
@@ -480,8 +489,13 @@ class Target:
                 await self.collect(run_id, 'interrupted')
             journal = self.data / 'ostree' / 'deploy' / self.active['deployment_id'] / 'var' / 'log' / 'journal'
             if await disk(journal.is_dir):
-                await self.linux.command('journalctl', f'--directory={journal}', '--no-pager',
-                                         log=folder / 'candidate-journal.log', timeout=60, check=False)
+                attempt = await disk(read_json, self.home / 'boot-attempts' / (run_id + '.json'), {})
+                selection = ['-b', attempt['boot_id']] if attempt.get('boot_id') else []
+                filename = 'candidate-journal.log' if selection else 'candidate-journal-all-boots.log'
+                await self.linux.command('journalctl', f'--directory={journal}', *selection, '--no-pager', '-o', 'short-monotonic',
+                                         log=folder / filename, timeout=60, check=False)
+                await disk(save_json, folder / 'boot-attempt.json', attempt or {'run_id': run_id, 'boot_id': None,
+                    'note': 'Candidate did not record its boot ID; journal may include earlier boots.'})
             pstore = Path('/sys/fs/pstore')
             try:
                 if pstore.is_dir():
@@ -519,6 +533,7 @@ class Target:
             if not receipt.get('stored'):
                 raise ValueError('Controller did not confirm the run report.')
         await disk(shutil.rmtree, folder, ignore_errors=True)
+        await disk(shutil.rmtree, self.home / 'work' / run_id, ignore_errors=True)
         self.active['evidence_received'] = True
         await disk(save_json, self.home / 'active.json', self.active)
         self.message = 'Diagnostics received. Run files retained; controller can boot again or discard them.'
@@ -550,7 +565,8 @@ class Target:
         self.event('RECOVERY', f'{self.mode.capitalize()} started')
         if self.mode == 'candidate':
             from .commands import Commands
-            self.commands = Commands(self.home,self.run_id,self.boot_id,lambda message: self.event('MCP',message))
+            await disk(self.workspace.mkdir, parents=True, exist_ok=True)
+            self.commands = await disk(Commands, self.home, self.run_id, self.boot_id, lambda message: self.event('MCP', message))
         self.spawn(self.update_screen())
         tls = ssl.create_default_context(cafile=self.settings_dir / 'controller.crt')
         self.spawn(self.startup_deadline())
@@ -577,6 +593,15 @@ class Target:
                 target.message = 'Connected'
                 target.event('RECOVERY', 'Controller connected')
 
+        async def sftp_server(channel):
+            from .transfer import CandidateSFTP
+            if self.mode != 'candidate' or self.boot_committed:
+                raise asyncssh.ChannelOpenError(asyncssh.OPEN_ADMINISTRATIVELY_PROHIBITED, 'File upload requires a running candidate.')
+            server = await disk(CandidateSFTP, channel, chroot=str(self.workspace), evidence=str(self.commands.evidence))
+            if self.mode != 'candidate' or self.boot_committed:
+                raise asyncssh.ChannelOpenError(asyncssh.OPEN_ADMINISTRATIVELY_PROHIBITED, 'Candidate is returning to recovery.')
+            return server
+
         try:
             async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=tls), timeout=aiohttp.ClientTimeout(total=120)) as http:
                 self.ready.set()
@@ -587,7 +612,7 @@ class Target:
                         if host_key is None:
                             host_key = await disk(asyncssh.read_private_key, self.settings_dir / 'target.key')
                         self.connection = await asyncssh.connect_reverse(urlparse(self.settings['url']).hostname,
-                            self.settings['ssh_port'], server_factory=Server, process_factory=self.process,
+                            self.settings['ssh_port'], server_factory=Server, process_factory=self.process, sftp_factory=sftp_server, sftp_version=4,
                             server_host_keys=[host_key], config=None,
                             keepalive_interval=10, keepalive_count_max=3)
                         await self.connected.wait()
@@ -660,7 +685,15 @@ async def mount_boot_files(data, boot, linux, system_boot=None):
     await linux.command('mount', '--bind', boot, data / 'boot')
     if system_boot is not None:
         system_boot.mkdir(parents=True, exist_ok=True)
-        await linux.command('mount', '--bind', boot, system_boot)
+        mounted = await linux.command('mountpoint', '-q', system_boot, check=False)
+        if mounted['exit_code']:
+            await linux.command('mount', f'UUID={media["boot_uuid"]}', system_boot)
+
+
+def prepare_experiment_environment(home, run_id, environment_file):
+    from .commands import run_environment
+    environment = run_environment(home, run_id)
+    atomic_write(environment_file, ''.join(f'{key}={json.dumps(value)}\n' for key, value in environment.items()))
 
 
 async def prepare_boot():
@@ -672,8 +705,15 @@ async def prepare_boot():
     if 'quirkbench.data' not in args:
         raise ValueError('Missing shared USB identifier in the boot options.')
     uuid = identifier(args['quirkbench.data'])
+    print('Quirkbench startup: protecting internal disks', flush=True)
     await protect_other_disks(linux, uuid)
     await linux.command('mount', '-o', 'rw', f'UUID={uuid}', data)
+    print('Quirkbench startup: shared data mounted', flush=True)
+    if 'quirkbench.run' in args:
+        run = identifier(args['quirkbench.run'])
+        prepare_experiment_environment(data / 'quirkbench', run, Path('/run/quirkbench-experiment.env'))
+        save_json(data / 'quirkbench' / 'boot-attempts' / (run + '.json'),
+                  {'run_id': run, 'boot_id': Path('/proc/sys/kernel/random/boot_id').read_text().strip()})
     settings = data / 'quirkbench' / 'settings'
     view = Path('/run/quirkbench-settings')
     view.mkdir(exist_ok=True)
@@ -684,12 +724,15 @@ async def prepare_boot():
     for p in (settings / 'network').glob('*'):
         if p.is_file():
             atomic_write(network / p.name, p.read_bytes())
+    print('Quirkbench startup: network settings copied; mounting boot files', flush=True)
     await mount_boot_files(data, Path('/run/quirkbench-boot'), linux,
                            system_boot=Path('/boot') if 'quirkbench.run' in args else None)
     # Journald writes into the per-run /var; recovery can retrieve it after a crash.
     if 'quirkbench.run' in args:
         Path('/var/log/journal').mkdir(parents=True, exist_ok=True)
+        print('Quirkbench startup: saving early journal', flush=True)
         await linux.command('journalctl', '--flush', check=False)
+    print('Quirkbench startup: storage and network preparation complete', flush=True)
 
 
 def main():

@@ -14,6 +14,21 @@ quirkbench recovery flash
 
 **Build:** automatically acquire the selected pinned inputs and build the generic recovery image. Cache by relevant code, included files, build instructions, packages and build tools—not paths or unrelated settings. A hit says the image is available; `--force` rebuilds without deleting the last good image first. Show phases/logs; incomplete output is not selectable.
 
+Recovery installs its selected target files directly; it does not build or install
+Quirkbench's candidate RPM. One explicit target file list and staging function
+serve both image and RPM builders. Hash the selected files and build inputs, not
+the entire controller package. Controller-only edits leave recovery reusable.
+Shared target code changes still affect both environments.
+
+The first build resolves a complete Fedora RPM set against an empty system and
+retains the files, package versions and digests under `recovery-bases/`. Later
+builds, including `--force`, install that selection without repository access.
+`recovery build --update-base` explicitly selects current packages and keeps the
+previous base. Missing or changed retained RPMs stop the build; restore the exact
+files or explicitly select a new base. They never silently select newer packages.
+The base ID and target runtime identity are embedded separately in recovery.
+This retains package inputs, not a promise of byte-identical rebuilt images.
+
 This command builds the recovery image. Experiment candidates use the separate
 [candidate deployment path](candidate-deployment.md); ordinary experiments do not
 reflash the USB. Include tools for the selected deployment and outbound target connection.

@@ -58,8 +58,8 @@ complete the physical milestone.
    concurrent sessions, interactive input, durable output, quiet waiting, file
    transfer, command stop and investigation pause/resume. Exercise controller
    restart and candidate interruption through evidence receipt and cleanup.
-3. **Changed software and the patch journey.** Add kernel/PipeWire build helpers,
-   explicit saved candidates and live-change helpers; complete the investigation
+3. **Changed software and the patch journey.** Provide generic build guidance,
+   explicit saved candidates and ordinary command/file tools; complete the investigation
    screens. Verify temporary writable-layer package changes without disturbing
    recovery boot selection. Keep general live replacement and patch generation
    out of milestone 1's completion criteria.

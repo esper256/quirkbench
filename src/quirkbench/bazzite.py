@@ -4,8 +4,11 @@ from pathlib import Path
 import re
 import shutil
 
-from .files import atomic_write, identifier, read_json, save_json, build_lock
-from .image import build_target_rpm, build_tools
+from .files import atomic_write, identifier, read_json, save_json, build_lock, disk
+from .image import build_target_rpm, build_tools, tools_identity
+from .runtime import files_hash, runtime_hash
+from .files import digest_file
+from .preparation import preparation_key
 
 BASE = 'ghcr.io/ublue-os/bazzite:stable'
 
@@ -36,26 +39,45 @@ async def _prepare_candidate(root, linux, work, progress):
         selection = {'requested': base, 'image': 'ghcr.io/ublue-os/bazzite@' + digest,
                      'version': info.get('Labels', {}).get('org.opencontainers.image.version', 'not reported')}
         save_json(selection_file, selection)
+    changes = work['inputs'].get('changes', {})
     tools = await build_tools(root, linux, log)
+    tools = await tools_identity(linux, tools)
     rpm = await build_target_rpm(root, linux, tools, log)
+    preparation = files_hash(('bazzite.py', 'assets/bazzite/health-report', 'assets/bazzite/quirkbench-bazzite-health.service'))
+    cache_key = preparation_key(selection, preparation + digest_file(rpm) + tools, changes)
+    cache_file = root / 'cache' / 'prepared-candidates' / (cache_key + '.json')
+    cached = read_json(cache_file)
+    if cached and (root / 'repository' / 'objects' / cached['commit'][:2] / (cached['commit'][2:] + '.commit')).exists():
+        progress('Reusing the prepared candidate')
+        save_json(folder / 'candidate.json', cached)
+        return cached
     shutil.copy2(rpm, folder / 'target.rpm')
+    assets = Path(__file__).with_name('assets') / 'bazzite'
+    shutil.copy2(assets / 'health-report', folder / 'health-report')
+    shutil.copy2(assets / 'quirkbench-bazzite-health.service', folder / 'quirkbench-bazzite-health.service')
+    additions = await disk(stage_changes, root, folder, changes)
     atomic_write(folder / 'Containerfile', f'''FROM {selection['image']}
 COPY target.rpm /tmp/quirkbench-target.rpm
+COPY health-report /usr/libexec/quirkbench-bazzite-health
+COPY quirkbench-bazzite-health.service /usr/lib/systemd/system/quirkbench-bazzite-health.service
 RUN rpm-ostree install /tmp/quirkbench-target.rpm && rm /tmp/quirkbench-target.rpm && \\
-    systemctl enable quirkbench-prepare.service quirkbench-target.service quirkbench-console.service && \\
-    systemctl mask uupd.timer uupd.service bazzite-hardware-setup.service udisks2.service fwupd.service fwupd-refresh.service fwupd-refresh.timer rpm-ostreed-automatic.timer bootc-fetch-apply-updates.timer && \\
+    chmod 755 /usr/libexec/quirkbench-bazzite-health && systemctl enable quirkbench-bazzite-health.service quirkbench-prepare.service quirkbench-target.service quirkbench-console.service && \\
+    systemctl mask uupd.timer uupd.service bazzite-hardware-setup.service udisks2.service ublue-os-media-automount.service bootloader-update.service greenboot-healthcheck.service greenboot-rollback.service redboot-auto-reboot.service fwupd.service fwupd-refresh.service fwupd-refresh.timer rpm-ostreed-automatic.timer bootc-fetch-apply-updates.timer && \\
     ostree container commit
+{additions}
 ''')
     tag = 'localhost/quirkbench-candidate:' + work['id']
     progress('Adding target connection support to Bazzite')
     await linux.command('podman', 'build', '-t', tag, str(folder), log=log)
     archive = folder / 'candidate.oci'
+    progress('Exporting the prepared container image')
     await linux.command('podman', 'save', '--format', 'oci-archive', '-o', archive, tag, log=log)
     # Import in the tools container, so the controller host needs only Podman.
     progress('Importing candidate into the shared OSTree repository')
     commit = await import_candidate(root, linux, tools, folder, work['id'], log)
-    result = dict(commit=commit, base=selection, source=rpm.parent.parent.name, changes=['Quirkbench target RPM', 'Bazzite automatic hardware-setup deployment/reboot disabled', 'Automatic updates, automount and firmware update services disabled'])
+    result = dict(commit=commit, base=selection, source=runtime_hash(), inputs=changes, changes=['Quirkbench target RPM', 'Bazzite automatic bootloader updates disabled', 'Greenboot checks run as bounded diagnostics without reboot or rollback actions', 'Bazzite automatic hardware-setup deployment/reboot disabled', 'Automatic updates, automount and firmware update services disabled'])
     save_json(folder / 'candidate.json', result)
+    save_json(cache_file, result)
     archive.unlink(missing_ok=True)
     return result
 
@@ -89,3 +111,41 @@ printf '%s\\n' "$commit" > /work/commit
     if not re.fullmatch('[a-f0-9]{64}', commit):
         raise ValueError('OSTree import did not produce a commit.')
     return commit
+
+
+def stage_changes(root, folder, changes):
+    """Bazzite/RPM-specific image edits; never execute agent probes on the controller."""
+    lines = []
+    for kind, operation in (('packages', 'install'), ('replacements', 'override replace')):
+        names = []
+        for index, item in enumerate(changes.get(kind, [])):
+            name = f'{kind}-{index}.rpm'
+            shutil.copy2(root / 'inputs' / item['sha256'], folder / name)
+            lines.append(f'COPY {name} /tmp/{name}')
+            names.append('/tmp/' + name)
+        if names:
+            files = ' '.join(names)
+            lines.append(f'RUN rpm-ostree {operation} {files} && rm {files} && ostree container commit')
+    probe = changes.get('startup_probe')
+    if probe:
+        shutil.copy2(root / 'inputs' / probe['sha256'], folder / 'startup-probe')
+        atomic_write(folder / 'quirkbench-probe.service', f"""[Unit]
+Description=Investigation startup probe
+DefaultDependencies=no
+After=local-fs.target quirkbench-prepare.service
+Requires=quirkbench-prepare.service
+Before=NetworkManager.service
+[Service]
+Type=oneshot
+EnvironmentFile=/run/quirkbench-experiment.env
+ExecStart=/usr/libexec/quirkbench-startup-probe
+TimeoutStartSec={changes['startup_probe_timeout_seconds']}
+StandardOutput=journal+console
+StandardError=journal+console
+[Install]
+WantedBy=multi-user.target
+""", mode=0o644)
+        lines += ['COPY startup-probe /usr/libexec/quirkbench-startup-probe',
+                  'COPY quirkbench-probe.service /usr/lib/systemd/system/quirkbench-probe.service',
+                  'RUN chmod 755 /usr/libexec/quirkbench-startup-probe && systemctl enable quirkbench-probe.service && ostree container commit']
+    return '\n'.join(lines)

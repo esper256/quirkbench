@@ -172,14 +172,10 @@ target and controller. Reuse completed file segments and the evidence upload hel
 do not build independent logging systems that must reconcile each other.
 After a crash, recovery uploads surviving files and deletes confirmed copies.
 Interactive command records and uploaded files contribute to the same run's results.
-A live-output stream is not proof that all requested evidence has arrived. Commands
-may name expected evidence files relative to the evidence directory. Upload completed
-files using the same HTTPS helper: command completion triggers upload of its
-declared evidence files; completed output segments may upload earlier. Recovery
-retries surviving files after interruption. A command result
-reports whether those files reached the controller; `https_evidence_wait` waits for
-named files and returns local paths only after receipt, or reports missing files/errors.
-Command completion alone must not imply evidence receipt.
+A live-output stream is not proof that all requested evidence has arrived. The agent
+retrieves completed experiment files through `sftp_download`. Recovery uploads the
+remaining files after return and deletes confirmed copies. Command completion alone
+must not imply evidence receipt.
 
 ## First implementation
 
@@ -188,8 +184,7 @@ build/flash recovery, connect, inspect through MCP, deploy a candidate and demon
 boot and return. The full interactive command behavior above follows in milestone 2.
 
 Use [rpm-ostree candidate preparation](candidate-deployment.md), fresh mutable files
-per deployment and explicit persistence. Recovery owns boot selection. Add kernel and
-PipeWire build paths in milestone 3; other OS support can reuse the same command,
+per deployment and explicit persistence. Recovery owns boot selection. Use ordinary agent builds for changed software; other OS support can reuse the same command,
 connection and evidence code. Start with latest stable Bazzite, record its exact
 version when preparing the baseline and disclose differences from the reported environment. Available debugging tools do not substitute for reproducing the problem.
 
@@ -211,3 +206,44 @@ References: [MCP connections](https://modelcontextprotocol.io/specification/2025
 [MCP tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools),
 [MCP task support](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks),
 [AsyncSSH reverse-direction connections](https://asyncssh.readthedocs.io/en/latest/#reverse-direction-example).
+
+## Candidate file transfer
+
+`sftp_upload(run_id, file, name)` copies a controller-local file over the existing
+SSH connection into `/var/tmp/quirkbench`. Publish the name only after the transfer
+finishes; return its digest and candidate path. Repeating a transfer replaces that
+name but never executes it. Recovery does not offer SFTP. File reads/writes run
+off the connection event loop.
+
+Commands default to writable `/var/tmp`; set `cwd` explicitly when sharing a
+working directory. Files there survive repeat boots until the deployment is
+discarded. Transfers are recorded against the run and boot.
+
+## Keep control responsive under load
+
+The root target connection service uses `Nice=-5` and
+`CPUSchedulingResetOnFork=yes`. Its child commands use normal scheduling priority;
+stress programs must not inherit the connection's preference. No real-time policy,
+CPU reservation or automatic tuning of other services is needed. This helps under
+CPU load; it cannot overcome kernel hangs, memory exhaustion or broken networking.
+
+Command output and records use background file operations with bounded chunks.
+A stop can kill the process while storage is stalled. `saving_pending` means the
+result is not yet safely saved; returning to recovery waits for those writes.
+A disconnected command has an unknown outcome. A confirmed new boot ends its wait.
+Execution timeouts do not provide a way to wake a suspended computer.
+
+Commands and startup probes receive `QUIRKBENCH_RUN_ID`,
+`QUIRKBENCH_EVIDENCE_DIR` and `QUIRKBENCH_WORK_DIR`. Evidence files are separate
+from command records and credentials. Scratch files are removed after confirmed
+recovery upload. For live retrieval, finish a file and rename it into place, then
+call `sftp_download(run_id, file)` relative to the evidence directory. Downloads
+return a local controller path, size and digest; they do not delete target files.
+A changing file or boot prevents publication of the incomplete local copy.
+
+Agent guidance stays generic. Start with baseline diagnostics; run bounded
+collectors and probes together. Build changed software locally with matching build
+information and activate it through ordinary commands. No driver-specific build
+or reload MCP tools. Never force module unloading or bypass signature checks. Use
+candidate preparation and a new boot when live replacement is unsuitable.
+Bounded batches come first; investigation-wide pause remains later work.

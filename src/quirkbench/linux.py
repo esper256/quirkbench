@@ -128,8 +128,16 @@ class Linux:
     async def inspect(self, view, max_lines=80):
         if not 1 <= max_lines <= 1000:
             raise ValueError('max_lines must be between 1 and 1000.')
+        if view == 'hardware':
+            results = []
+            for command in (('lscpu',), ('lspci', '-nnk'), ('lsusb',)):
+                try:
+                    result = await self.command(*command, timeout=10, check=False)
+                    results.append(f'=== {command[0]} (exit {result["exit_code"]}) ===\n{result["output"]}')
+                except (OSError, TimeoutError) as error:
+                    results.append(f'{command[0]} unavailable: {error}')
+            return {'exit_code': 0, 'output': '\n'.join(results)}
         commands = {
-            'hardware': ('lscpu',),
             'network': ('nmcli', '-t', '-f', 'DEVICE,TYPE,STATE,CONNECTION', 'device'),
             'storage': ('findmnt', '--json', '-o', 'TARGET,SOURCE,FSTYPE,OPTIONS,SIZE,AVAIL,USE%'),
             'processes': ('ps', '-eo', 'pid,ppid,stat,wchan:30,comm'),

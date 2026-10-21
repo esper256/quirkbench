@@ -5,6 +5,9 @@ Requires=quirkbench-prepare.service
 Wants=NetworkManager.service
 
 [Service]
+User=root
+Nice=-5
+CPUSchedulingResetOnFork=yes
 ExecStart=/usr/bin/quirkbench-target run
 Restart=on-failure
 RestartSec=5

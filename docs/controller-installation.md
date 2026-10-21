@@ -60,8 +60,10 @@ run evidence is stored separately.
 See the [milestone mockup](mockups/recovery-to-candidate.md) for the agent interaction.
 Candidate MCP commands support explicit arguments, working directories, environment
 variables and individual timeouts, with saved output, waiting and stopping. Recovery
-still offers inspection tools only. Interactive terminal input, file transfer and
-live package helpers remain later work.
+still offers inspection tools only. Candidate file transfer is available through `sftp_upload` and `sftp_download`.
+Commands and startup probes receive evidence and scratch directory variables.
+Completed binary evidence can be downloaded before returning to recovery. Interactive terminal
+input and live package helpers remain later work.
 
 ## Deploy, boot, inspect and discard
 
@@ -77,11 +79,28 @@ Saved results are available through `run_results` and `saved_output_read`.
 programs. This helps when disk-backed programs cannot start, but cannot guarantee operation
 if the running process needs unreadable code or libraries.
 
-The latest built recovery is `896043b1a791323576c10942`, with source
-`3ff91dbda25b2e98fdae8228cd52456eac6de452e46febac9fda995461cfaa54`.
-Its packaged source identity and x86-64 EFI file were checked. Its boot has not yet
-been checked. Fast tests and review do not substitute for that check.
+The previously checked recovery is `a07f65dafb2a15013dd8a199`, with source
+`ecd82de0ee7f109cc042d3310a5dbe05b91fce20bd14820c2d9f7f42811af6d2`.
+On 2026-10-21 its packaged source was verified and the separate QEMU check passed:
+connection, diagnostics, read-only root and writable shared data. The captured TUI
+was also inspected. Local check record: `.quirkbench/boot-checks/a9d97f1e08aaf19b6806e599.json`.
+The image is 1,621,098,496 bytes and fits the currently inspected Sandisk recovery
+partition. Physical boot and the new Bazzite candidate integration still need checks.
+The QEMU helper now reads complete saved diagnostics instead of the shortened preview.
 
 Fresh flashes reserve the recovery image size plus 1 GiB. Existing-media updates
 only require the image to fit; they do not enforce unused headroom or repartition.
 An erase is needed to enlarge the old layout, not merely because the software changed.
+
+
+The live-debugging update built recovery `8654181680aaae2e4765b345` on 2026-10-21,
+with target runtime `5b43fa38267c3f8584fcc6d08be5899d6ac0f2adc7b352485e7845f3bbb758f2`
+and retained recovery base `14f0a9cfbe84bb0fd0b37504`. This image has **not** been
+boot-checked or flashed. The fast suite passed 81 tests; independent review findings
+were corrected. The foreground controller was restarted with the update.
+
+Next physical checks: confirm the external flash device, update recovery and the
+candidate target RPM, verify service/child priorities under bounded load, retrieve
+live binary evidence, exercise a changed module and one timed suspend/resume, then
+confirm return and evidence upload. Successful compilation and software tests do
+not establish those hardware results.

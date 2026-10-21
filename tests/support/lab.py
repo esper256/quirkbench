@@ -38,7 +38,12 @@ class ToolResults(Linux):
         self.diagnostic_started = asyncio.Event()
         self.release_diagnostic = asyncio.Event()
         self.release_diagnostic.set()
+        self.journal_text = "wifi diagnosis: probe observed\n"
         self.disk_inventory = []
+        self.mount_sources = {}
+        self.package_version = "1"
+        self.fail_acquisition = False
+        self.tools_id = "sha256:" + "c" * 64
 
     async def command(self, *argv, **kwargs):
         args = list(map(str, argv))
@@ -56,7 +61,7 @@ class ToolResults(Linux):
             self.read_only_disks.add(args[2])
         elif args[0] == 'podman':
             if args[1:3] == ['image', 'inspect']:
-                result['output'] = json.dumps([{'Digest': 'sha256:' + 'b'*64, 'Id': 'sha256:' + 'c'*64, 'Labels': {'org.opencontainers.image.version': 'test-build'}}])
+                result['output'] = json.dumps([{'Digest': 'sha256:' + 'b'*64, 'Id': self.tools_id, 'Labels': {'org.opencontainers.image.version': 'test-build'}}])
             elif args[1:3] == ['image', 'exists']:
                 result['exit_code'] = 1
             elif args[1] == 'run':
@@ -64,18 +69,25 @@ class ToolResults(Linux):
                 folder = volumes['/work']
                 if '/work/target.spec' in args[-1]:
                     atomic_write(folder / 'output' / 'target.noarch.rpm', b'fixture RPM')
+                elif args[-1] == '/work/acquire.sh':
+                    if self.fail_acquisition:
+                        raise ValueError('Package download failed')
+                    name = f'kernel-core-{self.package_version}-1.x86_64.rpm'
+                    atomic_write(folder / 'rpms' / name, b'retained RPM ' + self.package_version.encode())
+                    atomic_write(folder / 'packages.tsv', f'{name}\tkernel-core-0:{self.package_version}-1.x86_64\n')
                 elif args[-1] == '/work/import.sh':
                     atomic_write(folder / 'commit', COMMIT)
                     atomic_write(volumes['/publish'] / 'config', '[core]\nmode=archive\n')
-                    atomic_write(volumes['/publish'] / 'objects' / 'fixture', b'candidate content')
+                    atomic_write(volumes['/publish'] / 'objects' / COMMIT[:2] / (COMMIT[2:] + '.commit'), b'candidate content')
                 elif args[-1] == '/work/build.sh':
                     from tests.support.recovery_image import prepare_root, configure, check_configuration
                     image_root, env = prepare_root(folder)
+                    shutil.copytree(folder / 'target-root', image_root, dirs_exist_ok=True)
                     configured = configure(folder/'configure-recovery.sh', image_root, env)
                     assert configured.returncode == 0, configured.stderr
                     check_configuration(image_root)
                     for name in ('recovery.img', 'BOOTX64.EFI', 'packages.txt'):
-                        atomic_write(folder / name, name + ' fixture bytes')
+                        atomic_write(folder / name, name + ' fixture bytes' + (folder/'target-root/usr/lib/quirkbench/quirkbench/source.json').read_text() + (folder/'target-root/usr/lib/quirkbench/quirkbench/recovery-base.json').read_text())
                 else:
                     raise AssertionError(args)
             elif args[1] == 'save':
@@ -85,7 +97,15 @@ class ToolResults(Linux):
         elif args[0] == 'mountpoint':
             result['exit_code'] = 0 if Path(args[-1]).is_symlink() else 1
         elif args[0] == 'mount' and args[1].startswith('UUID='):
-            Path(args[2]).mkdir(parents=True,exist_ok=True)
+            target = Path(args[2])
+            source = self.mount_sources.setdefault(args[1], target)
+            if source == target:
+                target.mkdir(parents=True, exist_ok=True)
+            else:
+                if target.exists() and not target.is_symlink():
+                    target.rmdir()
+                target.unlink(missing_ok=True)
+                target.symlink_to(source, target_is_directory=True)
         elif args[0] == 'mount' and args[1] == '--bind':
             target = Path(args[3])
             if target.exists() and not target.is_symlink():
@@ -131,13 +151,15 @@ class ToolResults(Linux):
             atomic_write(Path(args[1]), args[-1])
         elif args[0] == 'sync':
             pass
-        elif args[0] in ('journalctl', 'lscpu', 'nmcli', 'findmnt', 'ps', 'systemctl'):
+        elif args[0] in ('journalctl', 'lscpu', 'lspci', 'lsusb', 'nmcli', 'findmnt', 'ps', 'systemctl'):
             self.diagnostic_started.set()
             await self.release_diagnostic.wait()
             if self.fail_diagnostics:
                 raise OSError('No space left for diagnostics')
             # Still execute an actual short process through the production runner.
-            text = 'wifi diagnosis: probe observed\n' if args[0] == 'journalctl' else 'fixture diagnostic output\n'
+            text = self.journal_text if args[0] == 'journalctl' else 'fixture diagnostic output\n'
+            if args[0] == 'journalctl' and '-n' in args:
+                text = '\n'.join(text.splitlines()[-int(args[args.index('-n') + 1]):])
             return await super().command(sys.executable, '-c', 'print(' + repr(text) + ')', **kwargs)
         else:
             raise AssertionError(f'Unexpected external command: {args}')
@@ -211,7 +233,7 @@ class Lab:
     async def start_controller(self):
         self.controller = InterruptedReplyController(self.root, self.tools)
         # Exercise the real reconnect/status loops without production pacing.
-        self.controller.poll_interval = .02
+        self.controller.poll_interval = self.controller.command_poll_interval = .02
         self.controller_task = asyncio.create_task(self.controller.serve())
         await self.until(self.controller.ready.is_set)
 
@@ -234,6 +256,7 @@ class Lab:
                                self.data/'candidate-boot' if mode=='candidate' else None)
         self.boot_number += 1
         self.target = Target(self.data, self.boot, mode=mode, boot_id=f'boot-{self.boot_number}', run_id=run_id, linux=self.tools)
+        self.target.workspace = self.data / 'test-workspace'
         self.target.poll_interval = self.target.reconnect_delay = .02
         self.target_task = asyncio.create_task(self.target.run())
         await self.until(lambda: any(t['boot_id'] == self.target.boot_id for t in self.controller.targets.values()))
@@ -361,3 +384,38 @@ def interrupt_after_admission(monkeypatch, target):
     def abandon(coroutine):
         coroutine.close()
     monkeypatch.setattr(target, 'spawn', abandon)
+
+
+@asynccontextmanager
+async def stalled_sftp_write(monkeypatch):
+    import threading
+    import asyncssh
+    loop = asyncio.get_running_loop()
+    entered, release = asyncio.Event(), threading.Event()
+    original = asyncssh.SFTPServer.write
+
+    def write(server, file, offset, data):
+        loop.call_soon_threadsafe(entered.set)
+        release.wait()
+        return original(server, file, offset, data)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(asyncssh.SFTPServer, 'write', write)
+        try:
+            yield entered
+        finally:
+            release.set()
+
+
+@asynccontextmanager
+async def interrupted_admission(monkeypatch, store, kind, status):
+    """Fail after a real SQLite write, before admission can commit."""
+    original = store.put
+    def put(record_kind, key, **data):
+        result = original(record_kind, key, **data)
+        if record_kind == kind and data.get('status') == status:
+            raise RuntimeError('interrupted admission')
+        return result
+    with monkeypatch.context() as patch:
+        patch.setattr(store, 'put', put)
+        yield

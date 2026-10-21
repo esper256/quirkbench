@@ -1,0 +1,27 @@
+#!/bin/bash
+# Run installed Bazzite checks as diagnostics, without green/red reboot actions.
+set -u
+DISABLED_HEALTHCHECKS=()
+if [[ -f /etc/greenboot/greenboot.conf ]]; then
+    source /etc/greenboot/greenboot.conf
+fi
+failed=0
+for group in required.d wanted.d; do
+    declare -A checks=()
+    for directory in /usr/lib/greenboot/check /etc/greenboot/check; do
+        for script in "$directory/$group/"*; do
+            [[ -f "$script" && -x "$script" ]] || continue
+            checks["${script##*/}"]="$script"
+        done
+    done
+    for name in "${!checks[@]}"; do
+        [[ " ${DISABLED_HEALTHCHECKS[*]} " == *" $name "* ]] && continue
+        echo "Health check: $group/$name"
+        timeout --kill-after=5 30 "${checks[$name]}"
+        result=$?
+        echo "Health check result: $result"
+        [[ "$group" == required.d && "$result" != 0 ]] && failed=1
+    done
+    unset checks
+done
+exit "$failed"

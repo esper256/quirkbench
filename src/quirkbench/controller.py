@@ -33,6 +33,7 @@ class RequestRejected(ValueError):
 
 class Controller:
     poll_interval = 1
+    command_poll_interval = .5
 
     def __init__(self, root: Path, linux=None):
         self.root = root
@@ -100,18 +101,32 @@ class Controller:
         t = self.store.get('target', inv['target'])
         status = self.targets.get(t['id'], {'mode': 'offline', 'last_contact': t.get('last_contact'),
                                                   'last_boot_id': t.get('last_boot_id'), 'last_mode': t.get('last_mode')})
+        status = dict(status)
+        runs = [r for r in self.store.find('run') if r['investigation'] == investigation]
+        completed = {r['id'] for r in runs if r.get('evidence')}
+        status['work'] = {key: value for key, value in status.get('work', {}).items()
+                          if value.get('request', {}).get('run_id') not in completed}
         return {'controller_source': self.software_source, 'installed_source_differs': source_hash() != self.software_source, 'investigation': investigation, 'problem': inv['problem'], 'target': t['name'],
                 **status, 'tools': ['ssh_recovery_inspect', 'rpm_ostree_prepare_candidate',
                                    'recovery_deploy_ostree', 'recovery_boot_ostree', 'recovery_discard_ostree', 'run_results', 'saved_output_read', 'recovery_cancel_ostree', 'controller_work_wait', 'recovery_return',
-                                   'ssh_command_start', 'ssh_command_read', 'ssh_command_wait', 'ssh_command_stop'],
-                'runs': [r for r in self.store.find('run') if r['investigation'] == investigation],
-                'instructions': 'Inspect recovery, prepare and deploy a candidate, then explicitly boot it. Returned files are retained until recovery_discard_ostree. Plain ostree admin unlock edits to /usr are lost on reboot. Candidate SSH commands run as root with explicit argv/cwd/env and individual deadlines. Recovery has no agent shell.'}
+                                   'sftp_upload', 'sftp_download', 'ssh_command_start', 'ssh_command_read', 'ssh_command_wait', 'ssh_command_stop'],
+                'runs': runs,
+                'working_directory': '/var/tmp',
+                'command_environment': {'QUIRKBENCH_RUN_ID': 'Current run ID', 'QUIRKBENCH_EVIDENCE_DIR': 'Completed experiment files; uploaded on recovery return', 'QUIRKBENCH_WORK_DIR': 'Scratch files; removed after confirmed recovery upload'},
+                'workspace_lifetime': 'Writable candidate /var/tmp survives repeat boots until deployment discard; /run and /tmp may not. Commands share files, not shell environments.',
+                'instructions': 'Watch for all investigation symptoms across shared runs. Inspect recovery, prepare and deploy a candidate, then explicitly boot it. Returned files are retained until recovery_discard_ostree. Plain ostree admin unlock edits to /usr are lost on reboot. Candidate SSH commands run as root with explicit argv/cwd/env and individual deadlines. Use concurrent bounded collectors and probes. Finish evidence files with an atomic rename, then use sftp_download. Quiet waits do not stop commands; execution timeouts do not wake a suspended computer. Build changed software with matching sources/configuration/symbol versions using ordinary build tools; transfer and activate it with ordinary commands. Do not force module unloading or bypass signatures. Use a new candidate boot when live replacement is unsuitable. Recovery has no agent shell.'}
+
+    def require_operation(self, target_id, action):
+        if action not in self.targets.get(target_id, {}).get('operations', []):
+            raise RequestRejected(f'Target does not advertise {action}. Update its Quirkbench target software before using this operation.')
 
     async def rpc(self, target_id, action, **fields):
         conn = self.connections.get(target_id)
         if conn is None:
             raise RequestRejected('Target is disconnected. Wait for it to reconnect; work is not replayed automatically.')
-        async with asyncio.timeout(30):
+        if action != 'status':
+            self.require_operation(target_id, action)
+        async with asyncio.timeout(60 if action == 'inspect' and fields.get('view') == 'report' else 30):
             response = await conn.run(json.dumps({'action': action, **fields}), check=True)
         result = json.loads(response.stdout)
         if 'error' in result and 'status' not in result:
@@ -153,7 +168,7 @@ class Controller:
                 result = await self.command_read(work['id'])
                 commands.append({k:v for k,v in result.items() if k != 'output'})
         return dict(run=run, evidence='received' if run.get('evidence') else 'pending',
-                    files=files, commands=commands, next_tool='saved_output_read',
+                    files=files, commands=commands, transfers=[t for t in self.store.find('transfer') if t['run_id'] == run_id], next_tool='saved_output_read',
                     cause='Not inferred. Inspect the saved journal; a return to recovery alone does not establish a crash.')
 
     def command_run(self, run_id):
@@ -163,6 +178,42 @@ class Controller:
         if not inv['authorized'] or run['status'] != 'running' or target.get('mode') != 'candidate' or target.get('run_id') != run_id:
             raise ValueError('Connect the authorized candidate run before executing commands.')
         return run, target
+
+    async def upload_file(self, run_id, file, name):
+        from .preparation import capture_inputs
+        from .transfer import upload
+        run, target = self.command_run(run_id)
+        identifier(name)
+        self.require_operation(run['target'], 'sftp-upload')
+        connection = self.connections[run['target']]
+        captured = await disk(capture_inputs, self.root, [], [], file)
+        item = captured['startup_probe']
+        _, current = self.command_run(run_id)
+        if current['boot_id'] != target['boot_id'] or self.connections.get(run['target']) is not connection:
+            raise ValueError('Candidate connection changed while capturing the file; retry after inspecting context.')
+        await upload(connection, self.root / 'inputs' / item['sha256'], name)
+        current, connected = self.command_run(run_id)
+        if connected['boot_id'] != target['boot_id']:
+            raise ValueError('Candidate changed boot during transfer; inspect it before executing the file.')
+        self.store.put('transfer', new_id('transfer'), run_id=run_id, boot_id=target['boot_id'], name=name, sha256=item['sha256'])
+        return {'run_id': run_id, 'boot_id': target['boot_id'], 'file': '/var/tmp/quirkbench/' + name,
+                'sha256': item['sha256'], 'next_tool': 'ssh_command_start',
+                'instructions': 'File uploaded, not executed. Use chmod if executable permission is needed. Files survive repeat boots until deployment discard.'}
+
+    async def download_file(self, run_id, file):
+        from .transfer import download
+        run, target = self.command_run(run_id)
+        self.require_operation(run['target'], 'sftp-download')
+        connection = self.connections[run['target']]
+        destination = contained(self.root / 'results' / run_id / 'downloads' / new_id('file'), file)
+        def check_connection():
+            _, current = self.command_run(run_id)
+            if current['boot_id'] != target['boot_id'] or self.connections.get(run['target']) is not connection:
+                raise ValueError('Candidate connection changed during download; retry after inspecting context.')
+        result = await download(connection, file, destination, check_connection)
+        return dict(result, run_id=run_id, boot_id=target['boot_id'], file=str(destination),
+                    saved_file=destination.relative_to(self.root).as_posix(),
+                    instructions='Local copy ready. Target evidence remains until final recovery upload is confirmed.')
 
     async def command_start(self, run_id, request_id, argv, cwd, env, timeout_seconds, max_output_bytes):
         run, target = self.command_run(run_id)
@@ -181,28 +232,38 @@ class Controller:
             raise ValueError('Not an SSH command ID.')
         run = self.store.get('run',work['run_id'])
         target = self.targets.get(run['target'])
-        if target and target.get('boot_id') == work['boot_id'] and target.get('mode') == 'candidate':
-            result = await self.rpc(run['target'],'command-stop' if stop else 'command-read',
-                run_id=run['id'],boot_id=work['boot_id'],command_id=command_id,offset=offset)
-            self.update_work(command_id,status=result['status'])
-            return result
+        if run['target'] in self.connections and target and target.get('boot_id') == work['boot_id'] and target.get('mode') == 'candidate':
+            try:
+                result = await self.rpc(run['target'],'command-stop' if stop else 'command-read',
+                    run_id=run['id'],boot_id=work['boot_id'],command_id=command_id,offset=offset)
+            except (asyncssh.Error, OSError, TimeoutError):
+                pass  # Lost transport is not proof of process completion.
+            else:
+                self.update_work(command_id,status=result['status'])
+                return result
         if not isinstance(offset,int) or offset < 0:
             raise ValueError('Output offset must be nonnegative.')
         folder = self.root/'results'/run['id']/'commands'
-        saved = read_json(folder/(command_id+'.json'),{})
-        output = b''
-        path = folder/(command_id+'.txt')
-        if path.exists():
-            with path.open('rb') as f:
-                f.seek(offset)
-                output = f.read(32768)
-        status = saved.get('status') if saved.get('status') in ('finished','failed','timed-out','stopped','interrupted') else ('interrupted' if run.get('evidence') else 'awaiting-evidence')
+        def read_saved():
+            saved = read_json(folder/(command_id+'.json'), {})
+            path = folder/(command_id+'.txt')
+            if not path.exists():
+                return saved, b''
+            with path.open('rb') as stream:
+                stream.seek(offset)
+                return saved, stream.read(32768)
+        saved, output = await disk(read_saved)
+        known = target or self.store.get('target', run['target'])
+        observed_boot = known.get('boot_id') or known.get('last_boot_id')
+        new_boot = observed_boot is not None and observed_boot != work['boot_id']
+        status = saved.get('status') if saved.get('status') in ('finished','failed','timed-out','stopped','interrupted') else ('interrupted' if new_boot or run.get('evidence') else 'connection-lost')
         if saved:
             self.update_work(command_id, status=status)
         return dict(command_id=command_id,run_id=run['id'],boot_id=work['boot_id'], status=status,
             output=output.decode(errors='replace'),next_offset=offset+len(output),
-            message='Candidate is disconnected. Waiting for recovery evidence.' if status == 'awaiting-evidence' else 'Reading saved command evidence.',
-            next_tool='ssh_command_wait' if status == 'awaiting-evidence' else 'ssh_command_read',
+            message='Connection lost; command outcome is unknown. It will not be replayed.' if status == 'connection-lost' else 'Reading saved command evidence; a new boot ends earlier commands.',
+            evidence='received' if run.get('evidence') else 'pending',
+            next_tool='ssh_command_wait' if status == 'connection-lost' else 'ssh_command_read',
             **({'exit_code':saved['exit_code']} if 'exit_code' in saved else {}))
 
     async def command_wait(self, command_id, timeout_seconds=25, offset=0):
@@ -211,14 +272,20 @@ class Controller:
         deadline = asyncio.get_running_loop().time()+timeout_seconds
         while True:
             result = await self.command_read(command_id,offset)
-            if result['status'] not in ('accepted','running','awaiting-evidence') or asyncio.get_running_loop().time() >= deadline:
+            if result.get('saving_error') or (result['status'] not in ('accepted','running','saving','stopping','connection-lost') and not result.get('saving_pending')) or asyncio.get_running_loop().time() >= deadline:
                 return result
-            await asyncio.sleep(min(.5,max(0,deadline-asyncio.get_running_loop().time())))
+            await asyncio.sleep(min(self.command_poll_interval,max(0,deadline-asyncio.get_running_loop().time())))
 
-    async def prepare(self, investigation, base, name, request_id):
+    async def prepare(self, investigation, base, name, request_id, packages=None, replacements=None, startup_probe=None, startup_probe_timeout_seconds=60):
         inv = self.store.get('investigation', investigation)
         identifier(name)
-        work, fresh = self.store.request('prepare', investigation, request_id, {'base': base, 'name': name})
+        from .preparation import capture_inputs
+        if not isinstance(startup_probe_timeout_seconds, int) or startup_probe_timeout_seconds <= 0:
+            raise ValueError('Startup probe timeout must be a positive number of seconds.')
+        changes = await disk(capture_inputs, self.root, packages or [], replacements or [], startup_probe)
+        if startup_probe:
+            changes['startup_probe_timeout_seconds'] = startup_probe_timeout_seconds
+        work, fresh = self.store.request('prepare', investigation, request_id, {'base': base, 'name': name, 'changes': changes})
         if fresh:
             self.spawn(self._prepare(work, inv))
         return self.work_result(work['id'])
@@ -243,6 +310,11 @@ class Controller:
         result = {k: v for k, v in work.items() if k not in ('inputs', 'scope', 'action')}
         result['work_id'] = result.pop('id')
         result['next_tool'] = 'controller_work_wait'
+        if work['status'] in ('ready', 'finished', 'failed', 'cancelled', 'interrupted'):
+            result['next_tool'] = {'prepare': 'recovery_deploy_ostree', 'deploy': 'recovery_boot_ostree',
+                'boot': 'ssh_command_start', 'return': 'run_results', 'discard': 'investigation_context'}.get(work['action'], 'investigation_context')
+            if work['status'] in ('failed', 'interrupted', 'cancelled'):
+                result['next_tool'] = 'run_results' if work.get('run_id') else 'investigation_context'
         if work['action'] != 'ssh-command':
             import shlex
             result['quiet_wait_command'] = shlex.join(['quirkbench', '--state', str(self.root), '--json',
@@ -261,7 +333,9 @@ class Controller:
                 result['recent_output'] = f.read().decode(errors='replace')
         return result
 
-    async def deploy(self, investigation, candidate, request_id):
+    async def deploy(self, investigation, candidate, request_id, kernel_args=None):
+        from .candidates import debugging_kernel_args
+        kernel_args = debugging_kernel_args(kernel_args)
         timeout = 300
         if not 1 <= timeout <= 3600:
             raise ValueError('Startup connection timeout must be between 1 and 3600 seconds.')
@@ -269,31 +343,36 @@ class Controller:
         if not inv['authorized']:
             raise ValueError('Investigation is not authorized.')
         software = self.store.get('candidate', candidate)
-        work, fresh = self.store.request('deploy', investigation, request_id, {'candidate': candidate})
-        if not fresh:
-            return self.work_result(work['id'])
-        t = inv['target']
-        if 'deploy-only' not in self.targets.get(t, {}).get('capabilities', []):
-            self.update_work(work['id'], status='failed', stage='Update recovery before deployment: this image does not support separate deployment and boot.')
-            return self.work_result(work['id'])
-        if self.targets.get(t, {}).get('mode') != 'recovery':
-            self.update_work(work['id'], status='failed', stage='Connect the target in recovery before requesting a boot.')
-            return self.work_result(work['id'])
-        if any(r['target'] == t and r['status'] not in ('finished', 'failed') for r in self.store.find('run')):
-            self.update_work(work['id'], status='failed', stage='This target already has unfinished work.')
-            return self.work_result(work['id'])
-        run = new_id('run')
-        self.store.put('run', run, target=t, investigation=investigation, candidate=candidate,
-                       status='preparing', work_id=work['id'], deployment_id=run, evidence=None,
-                       recovery_boot=self.targets[t]['boot_id'])
-        self.update_work(work['id'], status='starting', stage='Deploying candidate on target', run_id=run)
+        if kernel_args and 'kernel-args' not in self.targets.get(inv['target'], {}).get('capabilities', []):
+            raise ValueError('Update recovery before requesting debugging kernel arguments.')
+        with self.store.admission():
+            work, fresh = self.store.request('deploy', investigation, request_id, {'candidate': candidate, 'kernel_args': kernel_args})
+            if not fresh:
+                return self.work_result(work['id'])
+            t = inv['target']
+            if 'deploy-boot-id' not in self.targets.get(t, {}).get('capabilities', []):
+                self.update_work(work['id'], status='failed', stage='Update recovery before deployment: this image cannot check the expected recovery boot.')
+                return self.work_result(work['id'])
+            if self.targets.get(t, {}).get('mode') != 'recovery':
+                self.update_work(work['id'], status='failed', stage='Connect the target in recovery before requesting a boot.')
+                return self.work_result(work['id'])
+            if any(r['target'] == t and r['status'] not in ('finished', 'failed') for r in self.store.find('run')):
+                self.update_work(work['id'], status='failed', stage='This target already has unfinished work.')
+                return self.work_result(work['id'])
+            run = new_id('run')
+            self.store.put('run', run, target=t, investigation=investigation, candidate=candidate,
+                           status='preparing', work_id=work['id'], deployment_id=run, evidence=None, kernel_args=kernel_args,
+                           recovery_boot=self.targets[t]['boot_id'])
+            self.update_work(work['id'], status='starting', stage='Deploying candidate on target', run_id=run)
         self.spawn(self._dispatch_boot(t, work['id'], run, software, timeout))
         return self.work_result(work['id'])
 
     async def _dispatch_boot(self, target, work_id, run, software, timeout):
         try:
             await self.rpc(target, 'deploy', work_id=work_id, run_id=run,
-                           commit=software['commit'], startup_timeout=timeout)
+                           commit=software['commit'], startup_timeout=timeout,
+                           **({'kernel_args': self.store.get('run', run)['kernel_args']} if self.store.get('run', run)['kernel_args'] else {}),
+                           recovery_boot=self.store.get('run', run)['recovery_boot'])
         except RequestRejected as e:
             self.store.change('run', run, status='failed')
             self.update_work(work_id, status='failed', stage=str(e))
@@ -308,26 +387,27 @@ class Controller:
             raise ValueError('Investigation is not authorized.')
         if not 1 <= timeout <= 3600:
             raise ValueError('Startup connection timeout must be between 1 and 3600 seconds.')
-        work, fresh = self.store.request(action, previous['investigation'], request_id,
-                                         {'run_id': run_id, 'timeout': timeout})
-        if not fresh:
-            return self.work_result(work['id'])
-        target = self.targets.get(previous['target'], {})
-        active = target.get('retained_run') or {}
-        if target.get('mode') != 'recovery' or active.get('run_id') != run_id:
-            self.update_work(work['id'], status='failed', stage='Connect recovery with this retained run before acting.')
-            return self.work_result(work['id'])
-        if previous['status'] not in ('prepared', 'finished', 'failed'):
-            self.update_work(work['id'], status='failed', stage='Wait for preparation or diagnostics upload to finish.')
-            return self.work_result(work['id'])
-        # A repeat boot gets new evidence and command identities, while OS files stay put.
-        attempt = new_id('run') if action == 'boot' and (previous['status'] == 'finished' or previous.get('evidence') is not None or previous.get('boot_id')) else run_id
-        if attempt != run_id:
-            self.store.put('run', attempt, **{k:v for k,v in previous.items() if k not in ('id','evidence','boot_id')}, evidence=None)
-        self.store.change('run', attempt, status='starting' if action == 'boot' else 'discarding',
-                          work_id=work['id'], recovery_boot=target['boot_id'])
-        self.update_work(work['id'], status='starting', run_id=attempt, previous_run=run_id,
-                         stage='Requesting candidate boot' if action == 'boot' else 'Discarding retained run files')
+        with self.store.admission():
+            work, fresh = self.store.request(action, previous['investigation'], request_id,
+                                             {'run_id': run_id, 'timeout': timeout})
+            if not fresh:
+                return self.work_result(work['id'])
+            target = self.targets.get(previous['target'], {})
+            active = target.get('retained_run') or {}
+            if target.get('mode') != 'recovery' or active.get('run_id') != run_id:
+                self.update_work(work['id'], status='failed', stage='Connect recovery with this retained run before acting.')
+                return self.work_result(work['id'])
+            if previous['status'] not in ('prepared', 'finished', 'failed'):
+                self.update_work(work['id'], status='failed', stage='Wait for preparation or diagnostics upload to finish.')
+                return self.work_result(work['id'])
+            # A repeat boot gets new evidence and command identities, while OS files stay put.
+            attempt = new_id('run') if action == 'boot' and (previous['status'] == 'finished' or previous.get('evidence') is not None or previous.get('boot_id')) else run_id
+            if attempt != run_id:
+                self.store.put('run', attempt, **{k:v for k,v in previous.items() if k not in ('id','evidence','boot_id')}, evidence=None)
+            self.store.change('run', attempt, status='starting' if action == 'boot' else 'discarding',
+                              work_id=work['id'], recovery_boot=target['boot_id'])
+            self.update_work(work['id'], status='starting', run_id=attempt, previous_run=run_id,
+                             stage='Requesting candidate boot' if action == 'boot' else 'Discarding retained run files')
         self.spawn(self._dispatch_retained(previous['target'], action, work['id'], run_id, attempt, timeout))
         return self.work_result(work['id'])
 
@@ -369,13 +449,14 @@ class Controller:
 
     async def return_recovery(self, run_id, request_id):
         run = self.store.get('run', run_id)
-        work, fresh = self.store.request('return', run['investigation'], request_id, {'run_id': run_id})
-        if fresh:
-            self.update_work(work['id'], status='returning', stage='Waiting for recovery and uploaded diagnostics', run_id=run_id)
-            if run['status'] == 'finished':
-                self.update_work(work['id'], status='finished', stage='Already returned', run_id=run_id)
-            else:
-                self.spawn(self._dispatch_return(run, work['id']))
+        with self.store.admission():
+            work, fresh = self.store.request('return', run['investigation'], request_id, {'run_id': run_id})
+            if fresh:
+                self.update_work(work['id'], status='returning', stage='Waiting for recovery and uploaded diagnostics', run_id=run_id)
+                if run['status'] == 'finished':
+                    self.update_work(work['id'], status='finished', stage='Already returned', run_id=run_id)
+        if fresh and run['status'] != 'finished':
+            self.spawn(self._dispatch_return(run, work['id']))
         return self.work_result(work['id'])
 
     async def _dispatch_return(self, run, key):
@@ -533,8 +614,18 @@ class Controller:
             return await self.run_results(run_id)
 
         @mcp.tool()
+        async def sftp_upload(run_id: str, file: str, name: str) -> dict:
+            """Upload a controller-local file into the connected candidate's /var/tmp/quirkbench. Name is a simple filename. Publish only after the transfer completes; replaces that name. Does not execute it. Recovery cannot accept agent files."""
+            return await self.upload_file(run_id, file, name)
+
+        @mcp.tool()
+        async def sftp_download(run_id: str, file: str) -> dict:
+            """Download a completed binary or text file relative to QUIRKBENCH_EVIDENCE_DIR. Finish and rename files into place first. Returns a controller file path, byte size and digest. Does not delete target evidence."""
+            return await self.download_file(run_id, file)
+
+        @mcp.tool()
         async def ssh_command_start(run_id: str, request_id: str, argv: list[str],
-                                    timeout_seconds: int, cwd: str = '/', env: dict[str,str] | None = None,
+                                    timeout_seconds: int, cwd: str = '/var/tmp', env: dict[str,str] | None = None,
                                     max_output_bytes: int = 16777216) -> dict:
             """Start a candidate command as root. Explicit argv: no implicit shell. Each command has its own cwd/env; files and services are shared. Output is saved on target. Use ssh_command_wait/read/stop. Output defaults to 16 MiB; increase max_output_bytes explicitly if needed. No interactive input yet."""
             return await self.command_start(run_id,request_id,argv,cwd,env or {},timeout_seconds,max_output_bytes)
@@ -556,14 +647,16 @@ class Controller:
 
         @mcp.tool()
         async def rpm_ostree_prepare_candidate(investigation: str, request_id: str,
-                base: str = 'ghcr.io/ublue-os/bazzite:stable', name: str = 'baseline') -> dict:
-            """Prepare Bazzite plus target support. Returns promptly; wait with controller_work_wait."""
-            return await self.prepare(investigation, base, name, request_id)
+                base: str = 'ghcr.io/ublue-os/bazzite:stable', name: str = 'baseline',
+                packages: list[str] | None = None, replacements: list[str] | None = None,
+                startup_probe: str | None = None, startup_probe_timeout_seconds: int = 60) -> dict:
+            """Prepare Bazzite with local RPM additions/replacements and an optional executable startup probe. Paths are on the controller; files are captured before building. Probe runs before networking with an explicit timeout (default 60 seconds); output goes to the boot journal. Kernel changes require a new boot. Wait with controller_work_wait."""
+            return await self.prepare(investigation, base, name, request_id, packages, replacements, startup_probe, startup_probe_timeout_seconds)
 
         @mcp.tool()
-        async def recovery_deploy_ostree(investigation: str, candidate: str, request_id: str) -> dict:
-            """Transfer and prepare fresh run files. Does not select a boot or reboot. Inspect progress with controller_work_wait, then use recovery_boot_ostree."""
-            return await self.deploy(investigation, candidate, request_id)
+        async def recovery_deploy_ostree(investigation: str, candidate: str, request_id: str, kernel_args: list[str] | None = None) -> dict:
+            """Transfer and prepare fresh run files, with optional debugging kernel_args retained on repeat boots. Boot/recovery arguments are managed by Quirkbench. Does not select a boot or reboot. Inspect progress with controller_work_wait, then use recovery_boot_ostree."""
+            return await self.deploy(investigation, candidate, request_id, kernel_args)
 
         @mcp.tool()
         async def recovery_boot_ostree(run_id: str, request_id: str, startup_connect_timeout_seconds: int = 300) -> dict:
