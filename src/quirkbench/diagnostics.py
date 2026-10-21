@@ -43,7 +43,7 @@ async def recovery_report(linux, data, status=None):
 
 
 def emergency_report():
-    """Read kernel memory interfaces without launching programs from a failed disk."""
+    """Read bounded kernel information without waiting for shared storage."""
     import os
     sections = []
     for name in ('/proc/self/status', '/proc/uptime', '/proc/mounts', '/proc/diskstats', '/proc/pressure/io', '/proc/net/route', '/proc/net/dev'):

@@ -1,24 +1,9 @@
 """Small Linux controls which need no programs or files from recovery media."""
-import ctypes
 import fcntl
 import os
 from pathlib import Path
 import socket
 import struct
-
-# Load this while the recovery drive is healthy, not on the emergency path.
-_LIBC = ctypes.CDLL(None, use_errno=True)
-
-
-def keep_resident():
-    """Fault in and lock existing mappings; no unbounded locking of future memory."""
-    # SSL loads this codec on its first connection, even for numeric addresses.
-    # Load it before losing the drive, then lock its dependencies too.
-    "controller.invalid".encode("idna")
-    if _LIBC.mlockall(1) != 0:  # MCL_CURRENT
-        return f'Emergency controls may need the drive: {os.strerror(ctypes.get_errno())}'
-    return ''
-
 
 class EmergencyPower:
     def __init__(self):

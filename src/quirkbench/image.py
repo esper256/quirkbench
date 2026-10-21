@@ -127,7 +127,7 @@ async def _build_recovery(root, linux, force, progress, update_base):
     result = root / 'images' / image_id
     record = {'id': image_id, 'inputs': key, 'files': hashes,
               'base': base['id'], 'source': runtime_hash(), 'recovery_source': recovery_hash(), 'tools_image': tools_id, 'secure_boot': False,
-              'architecture': 'x86_64', 'settings_format': 1, 'boot_checked': False}
+              'architecture': 'x86_64', 'boot_method': 'dracut-live-ram', 'settings_format': 1, 'boot_checked': False}
     save_json(stage / 'image.json', record)
     if result.exists():
         shutil.rmtree(stage)

@@ -17,7 +17,7 @@ import aiohttp
 
 from .files import atomic_write, read_json
 from .linux import Linux
-from .recovery_runtime import EmergencyPower, keep_resident, network_facts
+from .recovery_runtime import EmergencyPower, network_facts
 from .diagnostics import emergency_report, recovery_report
 
 MENU = [('n', 'Network'), ('c', 'Controller'), ('a', 'Activity'),
@@ -73,7 +73,6 @@ class Console:
         self.power_action = None
         self.power_error = ''
         self.emergency = EmergencyPower()
-        self.resident_warning = ''
         self.network_save = None
         self.emergency_report_task = None
 
@@ -210,7 +209,7 @@ class Console:
         if self.page == 'emergency-confirm':
             return ['EMERGENCY POWER', '', 'Unsaved data may be lost. This skips shutdown and storage cleanup.',
                     'Force reboot cannot change the next boot selection.',
-                    'If the kernel cannot respond, use the physical power button.', self.emergency.error, self.resident_warning, '',
+                    'If the kernel cannot respond, use the physical power button.', self.emergency.error, '',
                     *[('> ' if i==self.choice else '  ')+label for i,label in enumerate(self.options())]]
         if self.page == 'power-progress':
             return ['REBOOTING' if self.power_action=='restart' else 'SHUTTING DOWN', '',
@@ -483,7 +482,6 @@ class Console:
             next_check = time.monotonic()+3
             self.emergency.prepare()
             self.facts.update(network_facts())
-            self.resident_warning = keep_resident()
             next_network = 0
             switched = False
             while True:

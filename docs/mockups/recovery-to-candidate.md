@@ -7,6 +7,11 @@ The user completes [setup, recovery build and USB flash](installation-to-patch.m
 boots the target and connects recovery to the controller.
 
 ```text
+Copying live image to RAM...
+Done copying live image to RAM.
+```
+
+```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ QUIRKBENCH / RECOVERY                                                        │
 ├────────────────────────┬─────────────────────────────────────────────────────┤

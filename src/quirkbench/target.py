@@ -17,7 +17,6 @@ import asyncssh
 from .files import disk, atomic_write, identifier, read_json, save_json
 from .linux import Linux
 from .diagnostics import emergency_report
-from .recovery_runtime import keep_resident
 
 
 class Target:
@@ -31,7 +30,6 @@ class Target:
         self.screen = data.parent / 'quirkbench-runtime' / 'screen.json'
         self.settings_dir = self.home / 'settings'
         self.mode, self.run_id = mode, run_id
-        self.lock_memory = False
         self.boot_id = boot_id or Path('/proc/sys/kernel/random/boot_id').read_text().strip()
         identifier(self.boot_id)
         self.linux = linux or Linux()
@@ -652,10 +650,6 @@ class Target:
                 target.last_contact = time.time()
                 target.message = 'Connected'
                 target.event('RECOVERY', 'Controller connected')
-                if target.lock_memory:
-                    warning = keep_resident()
-                    if warning:
-                        target.event('RECOVERY', warning)
 
         async def sftp_server(channel):
             from .transfer import CandidateSFTP
@@ -802,11 +796,6 @@ def main():
             run_id = cmdline.get('quirkbench.run')
             target = Target(Path('/run/quirkbench-data'), Path('/run/quirkbench-boot'),
                             mode='candidate' if run_id else 'recovery', run_id=run_id)
-            if not run_id:
-                target.lock_memory = True
-                warning = keep_resident()
-                if warning:
-                    print(warning, flush=True)
             asyncio.run(target.run())
     except KeyboardInterrupt:
         pass
