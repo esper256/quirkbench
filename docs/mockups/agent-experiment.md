@@ -111,3 +111,47 @@ Output: {"status":"ready","run_id":"run-2","target_mode":"candidate"}
 
 The agent repeats selected measurements and writes the investigation patch using its
 own coding tools. A completed command alone does not establish a fix.
+
+## Optional ordered operations
+
+**Another example, not a required investigation sequence.**
+
+```text
+Tool: controller_sequence_start
+Input: {
+  "investigation":"intermittent-fault", "request_id":"prepare-and-boot-1",
+  "steps":[
+    {"name":"prepare", "tool":"rpm_ostree_prepare_candidate",
+     "arguments":{"name":"baseline","repository_packages":["perf"]}},
+    {"name":"deploy", "tool":"recovery_deploy_ostree",
+     "arguments":{"candidate":{"from_step":"prepare","field":"candidate_id"}}},
+    {"name":"boot", "tool":"recovery_boot_ostree",
+     "arguments":{"run_id":{"from_step":"deploy","field":"run_id"}}}
+  ]
+}
+Output: {"work_id":"sequence-1","status":"running","next_tool":"controller_work_wait",
+ "quiet_wait_command":"/home/sam/dev/quirkbench/.venv/bin/python -m quirkbench.cli --state /home/sam/.quirkbench --json investigation wait intermittent-fault --work sequence-1 --timeout 3600"}
+
+Tool: controller_work_wait
+Input: {"work_id":"sequence-1","timeout_seconds":50}
+Output: {"work_id":"sequence-1","status":"finished","stage":"All ordered operations finished",
+ "steps":[{"name":"prepare","status":"finished","result":{"candidate_id":"candidate-1"}},
+          {"name":"deploy","status":"finished","result":{"run_id":"run-1"}},
+          {"name":"boot","status":"finished","result":{"run_id":"run-1","target_mode":"candidate"}}]}
+
+Tool: ssh_candidate_inventory
+Input: {"run_id":"run-1"}
+Output: {"run_id":"run-1","boot_id":"boot-1","output":"OS, kernel and build files...",
+ "output_truncated":true,"saved_file":"results/run-1/inventory-boot-1.txt","next_tool":"saved_output_read"}
+
+$ quirkbench investigation pause intermittent-fault
+Investigation status: pausing
+
+$ quirkbench investigation show intermittent-fault
+Investigation status: paused
+Mode: recovery
+
+$ quirkbench investigation resume intermittent-fault
+Investigation status: active
+Mode: recovery
+```

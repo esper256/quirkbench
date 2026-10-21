@@ -192,3 +192,43 @@ cleanup. Recovery advertises `kernel-args` before optional debugging arguments m
 be sent; candidates advertise `sftp-download` before live evidence may be read.
 Command reads distinguish `connection-lost` from a confirmed `interrupted` boot.
 `saving_pending` keeps quiet waits open until output and completion are saved.
+
+## Ordered operations and investigation controls
+
+`controller_sequence_start(investigation, request_id, steps)` records an ordered
+list before starting it. Each step names an existing supported tool and its
+arguments. `{ "from_step": "name", "field": "run_id" }` reads an earlier result.
+There are no loops, branches, implicit retries or general plugins. Individual
+calls remain available; a sequence is optional.
+
+Preparation, deployment, boot, return and transfers finish before the next step.
+`ssh_command_start` returns immediately; explicitly wait or stop each started
+command later. Wait checks exit codes, default `[0]`. Failure stops progression
+and requests cleanup only for this sequence's work. Cancellation cannot undo a
+committed boot. Uncertain actions need inspection, never automatic replay.
+
+Store steps/results with existing work records. After controller restart,
+`controller_sequence_resume` is required; already admitted work is observed rather
+than dispatched again. A step interrupted without an identifiable result stops
+for attention. `controller_sequence_cancel` stops progression and requests cleanup.
+
+`investigation_control` offers pause, force-stop and resume through the same service
+as the CLI. Pause stops new work, finishes bounded work, returns to recovery and
+waits for evidence. Force stop also cancels preparation/deployment and stops commands.
+Resume permits new work; it does not boot or resume a sequence. Read access and
+uploads remain available. A disconnected or frozen target can leave stopping or
+return pending. Recorded command stop requests are sent after reconnection.
+
+`investigation_problem_update` maintains named problems with optional references
+and open/resolved/not-reproduced status. No mandatory reasoning form. Timeline
+records controller-observed work stages, connections and evidence receipt with
+one clock; external agent builds are not timed automatically.
+
+Every successful MCP tool returns both JSON text and structured content. File and
+work references stay outside bounded output previews. Quiet-wait commands use the
+controller's Python executable, so a missing shell PATH entry does not break them.
+
+Repeated controls preserve completed outcomes: cancelling a finished sequence does
+nothing, and pause cannot downgrade an ongoing force stop. Keep operation sequences
+limited to the current explicit list until actual investigation use demonstrates a
+need for more. Prefer individual tools over adding another sequence language feature.

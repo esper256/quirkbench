@@ -139,7 +139,7 @@ class Target:
                 'mode': self.mode, 'boot_id': self.boot_id, 'run_id': self.run_id, 'target_source': self.software_source,
                 'recovery_base': self.recovery_base,
                 'operations': (['inspect', 'deploy', 'boot', 'discard', 'cancel-deploy'] if self.mode == 'recovery'
-                               else ['command-start', 'command-read', 'command-stop', 'sftp-upload', 'sftp-download', 'return']),
+                               else ['candidate-inventory', 'command-start', 'command-read', 'command-stop', 'sftp-upload', 'sftp-download', 'return']),
                 'work': self.work, 'message': self.message, 'retained_run': self.active,
                 'capabilities': ['deploy-only', 'deploy-boot-id', 'kernel-args', 'boot-prepared', 'discard-run', 'retain-run'],
                 'ready_for_deploy': self.mode == 'recovery' and not self.active and not self.busy}
@@ -213,12 +213,21 @@ class Target:
                 raise ValueError('Command requires the connected candidate run and boot. Recovery has no agent shell.')
             key = identifier(request['command_id'])
             if action == 'command-start':
-                result = await self.commands.start(key,request['argv'],request['cwd'],request['env'],request['timeout_seconds'],request['max_output_bytes'])
+                try:
+                    result = await self.commands.start(key,request['argv'],request['cwd'],request['env'],request['timeout_seconds'],request['max_output_bytes'])
+                except ValueError as error:
+                    if key not in self.commands.records:
+                        return {'error': str(error), 'not_started': True}
+                    raise
                 self.event('MCP','Command accepted',key)
                 return result
             if action == 'command-stop':
                 return await self.commands.stop(key)
             return await self.commands.read(key,request.get('offset',0))
+        if action == 'candidate-inventory' and self.mode == 'candidate':
+            if request.get('run_id') != self.run_id or request.get('boot_id') != self.boot_id:
+                raise ValueError('Candidate boot changed; inspect current investigation context.')
+            return dict(await self.linux.inspect('inventory'), boot_id=self.boot_id)
         if action == 'inspect' and self.mode == 'recovery':
             if set(request) - {'view', 'max_lines'}:
                 raise ValueError('Unexpected diagnostic options.')
@@ -415,6 +424,7 @@ class Target:
         key = request['work_id']
         try:
             await self.cancel_boot()
+            self.message = 'Run files discarded. Ready for another deployment.'
             await self.record(key, status='finished', stage='Run files discarded; downloaded candidate content retained')
         except Exception as error:
             await self.record(key, status='failed', error=str(error))
@@ -441,13 +451,30 @@ class Target:
             self.busy = False
             self.publish_screen()
 
+    async def collect_journal(self, folder, filename, selection):
+        """Save full journal output; keep collection failures separate from successful logs."""
+        temporary = folder / (filename + '.partial')
+        try:
+            await disk(temporary.unlink, missing_ok=True)
+            result = await self.linux.command('journalctl', *selection, '--no-pager', '-o', 'short-monotonic',
+                                             log=temporary, timeout=60, check=False)
+            if result['exit_code']:
+                raise ValueError(f"journalctl exited {result['exit_code']}: {result['output'][-2000:]}")
+            size = await disk(lambda: temporary.stat().st_size)
+            await disk(temporary.replace, folder / filename)
+            status = dict(status='collected' if size else 'empty', bytes=size, file=filename)
+        except (OSError, ValueError, RuntimeError, TimeoutError) as error:
+            status = dict(status='failed', error=str(error))
+            await disk(temporary.unlink, missing_ok=True)
+        await disk(save_json, folder / (filename + '.status.json'), status)
+        return status
+
     async def collect(self, run_id, outcome):
         evidence = self.home / 'evidence' / identifier(run_id)
         await disk(evidence.mkdir, parents=True, exist_ok=True)
-        log = await self.linux.inspect('boot-log', 1000)
-        # One file per boot avoids overwriting candidate output from recovery.
-        await disk(atomic_write, evidence / (self.boot_id + '.log'), log['output'])
+        status = await self.collect_journal(evidence, self.boot_id + '.log', ['-b'])
         await disk(save_json, evidence / 'outcome.json', {'outcome': outcome, 'boot_id': self.boot_id})
+        return status
 
     async def cancel_boot(self):
         # Do not release ownership if clearing the one-time selection fails.
@@ -462,7 +489,9 @@ class Target:
         try:
             if self.commands:
                 await self.commands.close()
-            await self.collect(self.run_id, outcome)
+            collected = await self.collect(self.run_id, outcome)
+            if collected['status'] == 'failed':
+                raise ValueError(collected['error'])
         except Exception as e:
             self.message = f'Diagnostics could not be saved: {e}'
             print(self.message, flush=True)
@@ -510,14 +539,20 @@ class Target:
             if not await disk((folder / 'outcome.json').exists):
                 await self.collect(run_id, 'interrupted')
             journal = self.data / 'ostree' / 'deploy' / self.active['deployment_id'] / 'var' / 'log' / 'journal'
+            attempt = await disk(read_json, self.home / 'boot-attempts' / (run_id + '.json'), {})
+            await disk(save_json, folder / 'boot-attempt.json', attempt or {'run_id': run_id, 'boot_id': None,
+                'note': 'Candidate boot ID was not recorded. This alone does not establish whether userspace started.'})
             if await disk(journal.is_dir):
-                attempt = await disk(read_json, self.home / 'boot-attempts' / (run_id + '.json'), {})
-                selection = ['-b', attempt['boot_id']] if attempt.get('boot_id') else []
-                filename = 'candidate-journal.log' if selection else 'candidate-journal-all-boots.log'
-                await self.linux.command('journalctl', f'--directory={journal}', *selection, '--no-pager', '-o', 'short-monotonic',
-                                         log=folder / filename, timeout=60, check=False)
-                await disk(save_json, folder / 'boot-attempt.json', attempt or {'run_id': run_id, 'boot_id': None,
-                    'note': 'Candidate did not record its boot ID; journal may include earlier boots.'})
+                import uuid
+                try:
+                    selection = ['-b', uuid.UUID(attempt['boot_id']).hex] if attempt.get('boot_id') else []
+                except ValueError:
+                    await disk(save_json, folder / 'candidate-journal-status.json', {'status': 'failed', 'error': 'Recorded candidate boot ID is invalid.'})
+                else:
+                    filename = 'candidate-journal.log' if selection else 'candidate-journal-all-boots.log'
+                    await self.collect_journal(folder, filename, [f'--directory={journal}', *selection])
+            else:
+                await disk(save_json, folder / 'candidate-journal-status.json', {'status': 'unavailable', 'reason': 'No saved candidate journal directory.'})
             pstore = Path('/sys/fs/pstore')
             try:
                 if pstore.is_dir():

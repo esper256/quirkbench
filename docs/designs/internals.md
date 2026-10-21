@@ -27,3 +27,9 @@ do not leave tests to work around an already completed implementation.
 - One foreground controller process serves MCP over local Streamable HTTP, HTTPS and AsyncSSH reverse-direction connections. Human commands share its application behavior. No separate persistent MCP process, SSH daemon or worker service. Use child processes for commands/builds and keep blocking work out of the connection event loop.
 
 Changes should leave fewer concepts and fewer sources of truth. A filename changing should not make every subsystem panic.
+
+Keep controller network registration in `controller_mcp.py` and
+`controller_http.py`; ordinary application operations stay in `controller.py`.
+These are modules in one process, not additional services. Share completion rules
+in `work_status.py`. Repeated status observations must not rewrite unchanged records
+or advance their progress timestamp. Last contact is separate from work progress.

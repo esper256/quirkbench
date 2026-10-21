@@ -13,6 +13,10 @@ class Linux:
     def __init__(self, progress=None):
         self.progress = progress
 
+    def tool_path(self, name):
+        import shutil
+        return shutil.which(name)
+
     async def command(self, *args, log: Path | None = None, timeout=3600, check=True, cwd=None, terminal=False):
         # Long tool output goes to a file, never an unbounded in-memory PIPE.
         import tempfile
@@ -128,6 +132,25 @@ class Linux:
     async def inspect(self, view, max_lines=80):
         if not 1 <= max_lines <= 1000:
             raise ValueError('max_lines must be between 1 and 1000.')
+        if view in ('storage', 'inventory'):
+            sections = []
+            commands = [('lsblk', '--json', '--tree', '-o', 'NAME,PATH,TYPE,SIZE,TRAN,RM,RO,LABEL,MOUNTPOINTS'),
+                        ('findmnt', '--json', '-o', 'TARGET,SOURCE,FSTYPE,OPTIONS,SIZE,AVAIL,USE%')]
+            if view == 'inventory':
+                commands = [('uname', '-a'), ('cat', '/etc/os-release'),
+                    ('sh', '-c', 'k=$(uname -r); for p in /lib/modules/"$k"/build /lib/modules/"$k"/source /boot/config-"$k" /proc/config.gz /sys/kernel/tracing /sys/kernel/debug; do ls -ld "$p" 2>&1; done; for t in strace gdb eu-readelf readelf vmstat iostat lspci lsusb ethtool iw tcpdump jq rg file lsof fuser trace-cmd stress-ng gcc make rpm rpm-ostree; do command -v "$t" || printf "%s: unavailable\\n" "$t"; done')] + commands
+            for command in commands:
+                try:
+                    result = await self.command(*command, timeout=10, check=False)
+                    sections.append(f'{command[0]} (exit {result["exit_code"]}):\n{result["output"]}')
+                except (OSError, TimeoutError) as error:
+                    sections.append(f'{command[0]} unavailable: {error}')
+            sections.append('Quirkbench partition labels: QB-DATA holds experiments and diagnostics; QB-RECOVERY holds recovery; QB-BOOT holds candidate boot files. Other disk roles are not inferred from their names.')
+            sections.append('Internal disks are intentionally excluded from experiments and are not mounted by Quirkbench. An unmounted disk is not proof that it was never changed. Availability of tools or files does not prove that a debugging feature works.')
+            return dict(exit_code=0, output='\n'.join(sections))
+        if view == 'services':
+            result = await self.command('systemctl', '--failed', '--no-pager', '--plain', timeout=20, check=False)
+            return dict(result, output='Failed systemd units (not all services):\n' + result['output'])
         if view == 'hardware':
             results = []
             for command in (('lscpu',), ('lspci', '-nnk'), ('lsusb',)):
@@ -139,9 +162,7 @@ class Linux:
             return {'exit_code': 0, 'output': '\n'.join(results)}
         commands = {
             'network': ('nmcli', '-t', '-f', 'DEVICE,TYPE,STATE,CONNECTION', 'device'),
-            'storage': ('findmnt', '--json', '-o', 'TARGET,SOURCE,FSTYPE,OPTIONS,SIZE,AVAIL,USE%'),
             'processes': ('ps', '-eo', 'pid,ppid,stat,wchan:30,comm'),
-            'services': ('systemctl', '--failed', '--no-pager', '--plain'),
             'boot-log': ('journalctl', '-b', '--no-pager', '-n', str(max_lines)),
         }
         if view not in commands:

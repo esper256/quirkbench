@@ -246,4 +246,4 @@ collectors and probes together. Build changed software locally with matching bui
 information and activate it through ordinary commands. No driver-specific build
 or reload MCP tools. Never force module unloading or bypass signature checks. Use
 candidate preparation and a new boot when live replacement is unsuitable.
-Bounded batches come first; investigation-wide pause remains later work.
+Bounded commands and ordered operation lists share investigation pause/resume controls.
