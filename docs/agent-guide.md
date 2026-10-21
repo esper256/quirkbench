@@ -9,6 +9,39 @@ report current target mode, work, results and next actions. Inspect the target a
 try to reproduce the problem before changing software. Never edit Quirkbench to
 perform an investigation. Internal disks and persistent firmware are excluded.
 
+## Choosing a starting point
+
+These are suggested routes, not a required sequence. Use investigation context and
+actual tool availability to choose the next useful action. A debug kernel, fresh
+candidate, or recovery update is not required for every investigation.
+
+- In recovery, inspect available diagnostics. To run arbitrary diagnostic programs,
+  boot a suitable prepared candidate; recovery's inspection-only interface does not
+  restrict candidate command access.
+- On a suitable running candidate, inspect and run bounded probes with SSH commands;
+  use `sftp_upload` and `sftp_download` for files. No new deployment is needed merely
+  to collect more data.
+- When a different OS or persistent software change is needed, prepare a candidate
+  with the desired RPM inputs, wait for success, then deploy and explicitly boot it.
+  If replacing retained run files, first retrieve needed results and wait for final
+  diagnostics receipt, then discard those files before deployment. Preparation can
+  finish while the previous deployment remains available.
+- To reuse retained persistent changes, boot that deployment again instead of
+  discarding it. Temporary `ostree admin unlock` changes do not survive reboot.
+
+| Observed state | Meaning for the next action |
+| --- | --- |
+| Different controller/target source identities, or a newer unflashed image | Not by itself a blocker. Check support for the requested operation. |
+| `ready_for_deploy: false` | Fresh deployment is unavailable now. Controller preparation is independent; inspect target mode and current work. |
+| Retained run | Boot it again, or discard before fresh deployment after required diagnostics receipt. It does not prevent preparation. |
+| Recovery has no unrestricted shell | Use named inspections there; ordinary commands and file transfer run on candidates. |
+| Packaging or candidate build instructions changed in a running controller's checkout | Preparation reports a maintenance error. Ask the operator to coordinate a restart; do not interrupt another investigation. Existing inspection/command access is unaffected. |
+
+A prepared candidate records a fixed OSTree commit. With the current RPM mechanism,
+provide kernel replacements as RPMs before preparation; raw kernel files are not
+accepted package inputs. Later edits to input files do not change the prepared
+candidate. Make another preparation request for different software.
+
 ## Available workflow
 
 - `ssh_recovery_inspect` reads recovery diagnostics; `emergency` avoids launching
@@ -21,6 +54,8 @@ perform an investigation. Internal disks and persistent firmware are excluded.
   Output is saved independently of reading it. Each command has its own timeout;
   runs have no overall deadline. Processes have separate environments but share
   files and services. `cd` and `export` do not carry into another command.
+- `sftp_upload` transfers candidate files; `sftp_download` retrieves completed
+  experiment evidence while the candidate runs.
 - `recovery_return` requests return and diagnostic upload. `run_results` lists
   received files; `saved_output_read` reads bounded portions.
 - Repeat boot keeps persistent edits but receives a new run ID. Plain
@@ -38,6 +73,6 @@ update recovery settings. Save reusable software changes in a prepared candidate
 not just a retained disk. The agent owns reasoning, code edits and patch generation.
 
 The [mockups](mockups/agent-experiment.md) also show intended later features,
-including interactive terminal input, SFTP transfer and live package helpers.
+including interactive terminal input and live package helpers.
 Check the actual tool list instead of assuming those examples are available.
 See [installation and observed checks](controller-installation.md) for build status.

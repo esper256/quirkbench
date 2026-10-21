@@ -87,7 +87,7 @@ writable directories. Keep references to reusable candidates in its repository.
 | Probe or script | Transfer through SSH and execute in the run's working directory. No RPM required. |
 | Live package change | Try supported RPM installation in the temporary writable layer; report unsupported transactions as requiring a prepared candidate and new boot. |
 | Direct installed-file edit | Use a temporary writable layer for this run; leave prepared content unchanged. |
-| Retain changes or replace a kernel | Prepare a named candidate from an explicit base, package additions/replacements and selected files or instructions. Boot through recovery. |
+| Retain changes or replace a kernel | For the current RPM mechanism, supply local RPM additions/replacements before preparation, including kernel replacements. Inputs are copied; the resulting commit stays unchanged. Raw kernel files and later kernel swaps are not preparation inputs. Boot through recovery. |
 
 Use `ostree admin unlock` for disposable `/usr` edits first. Those edits are lost on reboot, including a repeat boot of a retained deployment. Persistent `/etc`, `/var` and home files remain until discard. No custom overlay is needed. Do not build custom
 overlay management unless the actual supported image exposes a concrete need. The proposed `rpm_overlay_install` helper must
@@ -149,6 +149,11 @@ Once recovery commits to reboot, use `recovery_return` after the candidate conne
 Cancellation does not stop controller-side candidate preparation.
 
 ## Separate transfer, boot and discard
+
+`ready_for_deploy` describes target readiness for fresh deployment, not permission
+to prepare software on the controller. Preparation can proceed while a previous
+run is retained. Keep those files until the replacement is ready and needed results
+are retrieved; discard requires final diagnostics receipt for a booted run.
 
 `recovery_deploy_ostree` creates fresh files without selecting a boot. The agent can
 inspect progress and recovery before `recovery_boot_ostree(run_id)` boots them.

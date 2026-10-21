@@ -294,7 +294,7 @@ class Target:
                 raise ValueError('Wait for diagnostics to reach the controller before reusing or discarding this run.')
             if action == 'boot':
                 if not self.active.get('entry'):
-                    raise ValueError('Deployment is incomplete; discard it before preparing another candidate.')
+                    raise ValueError('Deployment is incomplete; discard it before deploying another candidate.')
                 if not 1 <= request['startup_timeout'] <= 3600:
                     raise ValueError('Startup connection timeout must be between 1 and 3600 seconds.')
                 identifier(request['run_id'])
@@ -320,7 +320,7 @@ class Target:
             if request.get('recovery_boot') != self.boot_id:
                 raise ValueError('Recovery restarted before deployment. Refresh target status and submit a new request.')
             if self.busy or self.active:
-                raise ValueError('Finish the existing run before preparing another candidate.')
+                raise ValueError('Finish the existing run before deploying another candidate.')
             self.busy = True
             try:
                 await self.admit(key, request, 'deploying')

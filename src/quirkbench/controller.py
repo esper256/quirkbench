@@ -106,7 +106,10 @@ class Controller:
         completed = {r['id'] for r in runs if r.get('evidence')}
         status['work'] = {key: value for key, value in status.get('work', {}).items()
                           if value.get('request', {}).get('run_id') not in completed}
-        return {'controller_source': self.software_source, 'installed_source_differs': source_hash() != self.software_source, 'investigation': investigation, 'problem': inv['problem'], 'target': t['name'],
+        guide = Path(__file__).resolve().parents[2] / 'docs/agent-guide.md'
+        return {'agent_guide': str(guide) if guide.is_file() else 'https://github.com/esper256/quirkbench/blob/main/docs/agent-guide.md',
+                'deployment_guidance': 'ready_for_deploy describes fresh deployment on the target, not controller preparation. Prepare while retained files remain; discard only when replacing them and required diagnostics have arrived. Compatible source identities need not match.',
+                'controller_source': self.software_source, 'installed_source_differs': source_hash() != self.software_source, 'investigation': investigation, 'problem': inv['problem'], 'target': t['name'],
                 **status, 'tools': ['ssh_recovery_inspect', 'rpm_ostree_prepare_candidate',
                                    'recovery_deploy_ostree', 'recovery_boot_ostree', 'recovery_discard_ostree', 'run_results', 'saved_output_read', 'recovery_cancel_ostree', 'controller_work_wait', 'recovery_return',
                                    'sftp_upload', 'sftp_download', 'ssh_command_start', 'ssh_command_read', 'ssh_command_wait', 'ssh_command_stop'],
@@ -114,7 +117,7 @@ class Controller:
                 'working_directory': '/var/tmp',
                 'command_environment': {'QUIRKBENCH_RUN_ID': 'Current run ID', 'QUIRKBENCH_EVIDENCE_DIR': 'Completed experiment files; uploaded on recovery return', 'QUIRKBENCH_WORK_DIR': 'Scratch files; removed after confirmed recovery upload'},
                 'workspace_lifetime': 'Writable candidate /var/tmp survives repeat boots until deployment discard; /run and /tmp may not. Commands share files, not shell environments.',
-                'instructions': 'Watch for all investigation symptoms across shared runs. Inspect recovery, prepare and deploy a candidate, then explicitly boot it. Returned files are retained until recovery_discard_ostree. Plain ostree admin unlock edits to /usr are lost on reboot. Candidate SSH commands run as root with explicit argv/cwd/env and individual deadlines. Use concurrent bounded collectors and probes. Finish evidence files with an atomic rename, then use sftp_download. Quiet waits do not stop commands; execution timeouts do not wake a suspended computer. Build changed software with matching sources/configuration/symbol versions using ordinary build tools; transfer and activate it with ordinary commands. Do not force module unloading or bypass signatures. Use a new candidate boot when live replacement is unsuitable. Recovery has no agent shell.'}
+                'instructions': 'Watch for all investigation symptoms across shared runs. Choose the next useful action: inspect recovery, work on a running candidate, boot retained files, or prepare/deploy different software and explicitly boot it. Returned files are retained until recovery_discard_ostree. Plain ostree admin unlock edits to /usr are lost on reboot. Candidate SSH commands run as root with explicit argv/cwd/env and individual deadlines. Use concurrent bounded collectors and probes. Finish evidence files with an atomic rename, then use sftp_download. Quiet waits do not stop commands; execution timeouts do not wake a suspended computer. Build changed software with matching sources/configuration/symbol versions using ordinary build tools; transfer and activate it with ordinary commands. Do not force module unloading or bypass signatures. Use a new candidate boot when live replacement is unsuitable. Recovery has no agent shell.'}
 
     def require_operation(self, target_id, action):
         if action not in self.targets.get(target_id, {}).get('operations', []):
@@ -280,6 +283,8 @@ class Controller:
         inv = self.store.get('investigation', investigation)
         identifier(name)
         from .preparation import capture_inputs
+        from .image import check_packaging_source
+        check_packaging_source()
         if not isinstance(startup_probe_timeout_seconds, int) or startup_probe_timeout_seconds <= 0:
             raise ValueError('Startup probe timeout must be a positive number of seconds.')
         changes = await disk(capture_inputs, self.root, packages or [], replacements or [], startup_probe)
@@ -354,10 +359,10 @@ class Controller:
                 self.update_work(work['id'], status='failed', stage='Update recovery before deployment: this image cannot check the expected recovery boot.')
                 return self.work_result(work['id'])
             if self.targets.get(t, {}).get('mode') != 'recovery':
-                self.update_work(work['id'], status='failed', stage='Connect the target in recovery before requesting a boot.')
+                self.update_work(work['id'], status='failed', stage='Connect the target in recovery before deploying a candidate.')
                 return self.work_result(work['id'])
             if any(r['target'] == t and r['status'] not in ('finished', 'failed') for r in self.store.find('run')):
-                self.update_work(work['id'], status='failed', stage='This target already has unfinished work.')
+                self.update_work(work['id'], status='failed', stage='Fresh deployment is blocked by existing run work. Inspect investigation_context; finish active work or discard retained run files before deploying another candidate. Controller preparation remains available.')
                 return self.work_result(work['id'])
             run = new_id('run')
             self.store.put('run', run, target=t, investigation=investigation, candidate=candidate,
@@ -650,12 +655,12 @@ class Controller:
                 base: str = 'ghcr.io/ublue-os/bazzite:stable', name: str = 'baseline',
                 packages: list[str] | None = None, replacements: list[str] | None = None,
                 startup_probe: str | None = None, startup_probe_timeout_seconds: int = 60) -> dict:
-            """Prepare Bazzite with local RPM additions/replacements and an optional executable startup probe. Paths are on the controller; files are captured before building. Probe runs before networking with an explicit timeout (default 60 seconds); output goes to the boot journal. Kernel changes require a new boot. Wait with controller_work_wait."""
+            """Prepare Bazzite with local RPM additions/replacements and an optional executable startup probe. Preparation can run while a target retains an earlier deployment. Paths are on the controller; files are captured before building. The resulting commit is unchanged; kernel replacements must be RPMs, not raw kernel images. Probe runs before networking with an explicit timeout (default 60 seconds); output goes to the boot journal. Kernel changes require a new boot. Wait with controller_work_wait."""
             return await self.prepare(investigation, base, name, request_id, packages, replacements, startup_probe, startup_probe_timeout_seconds)
 
         @mcp.tool()
         async def recovery_deploy_ostree(investigation: str, candidate: str, request_id: str, kernel_args: list[str] | None = None) -> dict:
-            """Transfer and prepare fresh run files, with optional debugging kernel_args retained on repeat boots. Boot/recovery arguments are managed by Quirkbench. Does not select a boot or reboot. Inspect progress with controller_work_wait, then use recovery_boot_ostree."""
+            """Transfer and prepare fresh run files, with optional debugging kernel_args retained on repeat boots. Boot/recovery arguments are managed by Quirkbench. Discard retained run files first if replacing them; preparation itself does not require discard. Does not select a boot or reboot. Inspect progress with controller_work_wait, then use recovery_boot_ostree."""
             return await self.deploy(investigation, candidate, request_id, kernel_args)
 
         @mcp.tool()

@@ -46,6 +46,11 @@ sequenceDiagram
     end
     Agent->>Quirkbench: rpm_ostree_prepare_candidate, then controller_work_wait
     Quirkbench-->>Agent: Prepared baseline with target connection support
+    opt Replacing retained run files
+        Agent->>Quirkbench: Retrieve needed results; confirm diagnostics receipt
+        Agent->>Quirkbench: recovery_discard_ostree, then wait for completion
+        Quirkbench->>Target: Remove retained run files
+    end
     Agent->>Quirkbench: recovery_deploy_ostree
     Quirkbench->>Target: Supply candidate content to recovery
     Target->>Target: Deploy on shared data with fresh /etc and /var
@@ -72,6 +77,11 @@ sequenceDiagram
     participant Target
     Agent->>Quirkbench: investigation_context, then rpm_ostree_prepare_candidate if needed
     Quirkbench-->>Agent: Baseline preparation progress, then completed candidate
+    opt Replacing retained run files
+        Agent->>Quirkbench: Retrieve needed results; confirm diagnostics receipt
+        Agent->>Quirkbench: recovery_discard_ostree, then wait for completion
+        Quirkbench->>Target: Remove retained run files
+    end
     Agent->>Quirkbench: recovery_deploy_ostree
     Quirkbench->>Target: Supply prepared OSTree candidate to recovery
     Target->>Target: Deploy with fresh run files and read-only connection settings

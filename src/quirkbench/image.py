@@ -6,12 +6,21 @@ from pathlib import Path
 import shutil
 
 from .recovery_base import select_base, verify_base
-from .runtime import stage_runtime, runtime_hash, recovery_hash, files_hash
+from .runtime import stage_runtime, runtime_hash, recovery_hash, files_hash, check_manifest
 
 from .files import atomic_write, digest_file, read_json, save_json, build_lock
 
 ASSETS = Path(str(importlib.resources.files('quirkbench') / 'assets'))
 TOOLS_BASE = 'registry.fedoraproject.org/fedora:43'
+_LOADED_BUILDER = (ASSETS.parent / 'image.py').read_bytes()
+
+
+def check_packaging_source():
+    check_manifest()
+    if (ASSETS.parent / 'image.py').read_bytes() != _LOADED_BUILDER:
+        raise ValueError('Package builder changed while this process was running. '
+                         'Ask the controller operator to coordinate a restart before preparing software. '
+                         'Existing target inspection and command access remain available.')
 
 
 def source_hash():
@@ -49,6 +58,7 @@ async def tools_identity(linux, tools):
 
 
 async def build_target_rpm(root, linux, tools, log):
+    check_packaging_source()
     tools_id = await tools_identity(linux, tools)
     key = hashlib.sha256((runtime_hash() + files_hash(('assets/target.spec', 'image.py')) + tools_id).encode()).hexdigest()
     folder = root / 'cache' / 'target-rpm' / key
@@ -73,6 +83,7 @@ async def build_target_rpm(root, linux, tools, log):
 
 
 async def build_recovery(root, linux, force=False, progress=print, update_base=False):
+    check_packaging_source()
     with build_lock(root):
         return await _build_recovery(root, linux, force, progress, update_base)
 

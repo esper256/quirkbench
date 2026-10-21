@@ -6,6 +6,7 @@ import shutil
 from .files import atomic_write, save_json
 
 ROOT = Path(__file__).parent
+_LOADED_MANIFEST = (ROOT / "runtime.py").read_bytes()
 # target.py currently serves both modes and imports these modules in deferred paths.
 # Keep that real dependency shared; do not infer dependencies from import syntax.
 COMMON = ('__init__.py', 'target.py', 'files.py', 'linux.py', 'diagnostics.py',
@@ -31,8 +32,16 @@ def recovery_hash():
     return files_hash((*COMMON, 'runtime.py', *RECOVERY))
 
 
+def check_manifest():
+    if (ROOT / "runtime.py").read_bytes() != _LOADED_MANIFEST:
+        raise ValueError("Target packaging instructions changed while this process was running. "
+                         "Ask the controller operator to coordinate a restart before preparing software. "
+                         "Existing target inspection and command access remain available.")
+
+
 def stage_runtime(destination):
     """Stage an installable /usr tree; both builders consume this exact layout."""
+    check_manifest()
     package = destination / 'usr/lib/quirkbench/quirkbench'
     for name in COMMON:
         target = package / name

@@ -22,6 +22,19 @@ process, SSH daemon, tunnel or service manager.
 Child processes perform commands and builds; blocking work must not stall connections.
 An MCP client disconnect does not end the investigation.
 
+Investigation context links to the agent guide and explains deployment readiness
+separately from controller preparation. The guide offers possible routes, not a
+mandatory experiment sequence. Supported operations, not matching source hashes,
+determine whether an older recovery can be used.
+
+For checkout development, packaging uses loaded Python instructions and files on
+disk. If the runtime file list, package builder or candidate builder changed after import, preparation
+must fail before reusing or building software with mixed instructions. The operator
+coordinates a controller restart; investigation agents do not restart it routinely.
+Ordinary target file edits with an unchanged packaging mechanism can be rebuilt.
+This check neither updates recovery nor blocks existing target command access.
+Avoid editing packaging sources during a build; this is not a hot-reload system.
+
 MCP, SSH and HTTPS use the same run records. Target mode, boot and command status
 come through the SSH connection, including after reconnection.
 

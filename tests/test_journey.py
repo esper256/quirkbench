@@ -1114,3 +1114,22 @@ async def test_first_emergency_upload_without_recovery_os_files(lab):
     received = lab.root/'reports'/lab.target.settings['target_id']/report.name
     assert received.read_bytes() == report.read_bytes()
     assert '/proc/uptime' in received.read_text()
+
+
+async def test_prepare_replacement_while_retained_deployment_is_not_ready_for_deploy(lab):
+    original = await lab.candidate()
+    deployed = await lab.call('recovery_deploy_ostree', investigation='wifi-case', candidate=original['candidate_id'], request_id='original')
+    await lab.call('controller_work_wait', work_id=deployed['work_id'], timeout_seconds=5)
+    await lab.until(lambda: any(t.get('retained_run') for t in lab.controller.targets.values()))
+
+    context = await lab.call('investigation_context', investigation='wifi-case')
+    replacement = await lab.call('rpm_ostree_prepare_candidate', investigation='wifi-case', request_id='replacement', name='replacement')
+    ready = await lab.call('controller_work_wait', work_id=replacement['work_id'], timeout_seconds=5)
+    refused = await lab.call('recovery_deploy_ostree', investigation='wifi-case', candidate=ready['candidate_id'], request_id='too-early')
+    refused = await lab.call('controller_work_wait', work_id=refused['work_id'], timeout_seconds=5)
+
+    assert context['ready_for_deploy'] is False
+    assert ready['status'] == 'ready'
+    assert refused['status'] == 'failed' and 'before deploying' in refused['stage']
+    assert lab.target.active['run_id'] == deployed['run_id']
+    assert lab.tools.reboots == 0

@@ -5,15 +5,22 @@ import re
 import shutil
 
 from .files import atomic_write, identifier, read_json, save_json, build_lock, disk
-from .image import build_target_rpm, build_tools, tools_identity
+from .image import build_target_rpm, build_tools, tools_identity, check_packaging_source
 from .runtime import files_hash, runtime_hash
 from .files import digest_file
 from .preparation import preparation_key
 
 BASE = 'ghcr.io/ublue-os/bazzite:stable'
+_BUILDER_PATH = Path(__file__)
+_LOADED_BUILDER = _BUILDER_PATH.read_bytes()
 
 
 async def prepare_candidate(root, linux, work, progress):
+    check_packaging_source()
+    if _BUILDER_PATH.read_bytes() != _LOADED_BUILDER:
+        raise ValueError('Candidate builder changed while this process was running. '
+                         'Ask the controller operator to coordinate a restart before preparing software. '
+                         'Existing target inspection and command access remain available.')
     with build_lock(root):
         return await _prepare_candidate(root, linux, work, progress)
 

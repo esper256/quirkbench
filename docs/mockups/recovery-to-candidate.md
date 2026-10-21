@@ -56,6 +56,27 @@ Give your agent this request:
 
 The user configures their agent client and gives it the displayed request.
 
+If replacing a retained deployment, the interaction can instead include:
+
+```text
+Investigation context: Recovery · Retained run run-old · ready_for_deploy: false
+Preparation remains available. Retained files must be discarded before deployment.
+
+rpm_ostree_prepare_candidate → controller_work_wait
+Candidate replacement-1 ready. Existing deployment unchanged.
+
+run_results(run-old)
+Diagnostics received. Files: /home/sam/.quirkbench/results/run-old/
+
+recovery_discard_ostree(run-old) → controller_work_wait
+Retained run files removed. Saved controller results kept.
+
+recovery_deploy_ostree(replacement-1) → controller_work_wait
+Deployment ready. Still in recovery; boot when needed.
+```
+
+The following example starts without a retained deployment.
+
 ```text
 Tool: investigation_context
 Input: {"investigation":"first-boot"}
@@ -78,7 +99,10 @@ Available tools:
   ssh_command_start            Start a bounded command on the candidate
   ssh_command_read/wait/stop    Read output, wait or stop that command
 
-Start with recovery inspection. Diagnostic output is saved on the controller.
+Agent guide: docs/agent-guide.md
+For this example, start with recovery inspection. Other investigations may reuse
+an existing candidate. Diagnostic output is saved on the controller.
+Fresh deployment readiness does not restrict controller-side preparation.
 Recovery has no agent shell, file-upload or package-install interface.
 ```
 

@@ -79,28 +79,12 @@ Saved results are available through `run_results` and `saved_output_read`.
 programs. This helps when disk-backed programs cannot start, but cannot guarantee operation
 if the running process needs unreadable code or libraries.
 
-The previously checked recovery is `a07f65dafb2a15013dd8a199`, with source
-`ecd82de0ee7f109cc042d3310a5dbe05b91fce20bd14820c2d9f7f42811af6d2`.
-On 2026-10-21 its packaged source was verified and the separate QEMU check passed:
-connection, diagnostics, read-only root and writable shared data. The captured TUI
-was also inspected. Local check record: `.quirkbench/boot-checks/a9d97f1e08aaf19b6806e599.json`.
-The image is 1,621,098,496 bytes and fits the currently inspected Sandisk recovery
-partition. Physical boot and the new Bazzite candidate integration still need checks.
-The QEMU helper now reads complete saved diagnostics instead of the shortened preview.
-
 Fresh flashes reserve the recovery image size plus 1 GiB. Existing-media updates
 only require the image to fit; they do not enforce unused headroom or repartition.
 An erase is needed to enlarge the old layout, not merely because the software changed.
 
-
-The live-debugging update built recovery `8654181680aaae2e4765b345` on 2026-10-21,
-with target runtime `5b43fa38267c3f8584fcc6d08be5899d6ac0f2adc7b352485e7845f3bbb758f2`
-and retained recovery base `14f0a9cfbe84bb0fd0b37504`. This image has **not** been
-boot-checked or flashed. The fast suite passed 81 tests; independent review findings
-were corrected. The foreground controller was restarted with the update.
-
-Next physical checks: confirm the external flash device, update recovery and the
-candidate target RPM, verify service/child priorities under bounded load, retrieve
-live binary evidence, exercise a changed module and one timed suspend/resume, then
-confirm return and evidence upload. Successful compilation and software tests do
-not establish those hardware results.
+Build and physical check records belong in [dated observations](observations/2026-10-21-recovery-build-notes.md),
+not setup prerequisites. Inspect live context for current target state and supported
+operations. A newer unflashed image does not prevent supported operations on the
+connected recovery. For possible investigation routes, see the
+[agent guide](agent-guide.md#choosing-a-starting-point).
