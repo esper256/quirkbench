@@ -29,7 +29,20 @@ do not leave tests to work around an already completed implementation.
 Changes should leave fewer concepts and fewer sources of truth. A filename changing should not make every subsystem panic.
 
 Keep controller network registration in `controller_mcp.py` and
-`controller_http.py`; ordinary application operations stay in `controller.py`.
+`controller_http.py`; application operations are grouped in `controller.py`, `controller_commands.py`,
+`investigations.py` and `storage.py`.
 These are modules in one process, not additional services. Share completion rules
 in `work_status.py`. Repeated status observations must not rewrite unchanged records
 or advance their progress timestamp. Last contact is separate from work progress.
+
+SQLite has one owner thread. Asynchronous calls share a lock; admission holds it
+until all related records commit or roll back, before target dispatch. Status
+queries select relevant records. Finished command metadata avoids target reads;
+recent completed output pages are cached separately without claiming unread bytes
+are available. Target action records use one JSON file per request under `actions/`;
+heartbeats request only unresolved action IDs. No migration reads old `work.json`.
+Use fresh development target state for that format change; do not erase owner data.
+
+Operator failures go to a bounded rotating `logs/controller.log`, separately from
+MCP activity and experiment evidence. Do not log credentials, command bodies or
+environments. Failed diagnostic logging must not stop networking.

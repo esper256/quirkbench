@@ -25,8 +25,7 @@ See [installation](../controller-installation.md) and the
 
 The [1.1 changelog](../../CHANGELOG.md) records work since the first agent
 investigation. Use the [agent guide](../agent-guide.md) for available tools.
-Interactive terminal input, user-session selection and dedicated live-package
-helpers remain later work. Do not rebuild completed stages or treat old milestone
+User-session selection and dedicated live-package helpers remain later work. Do not rebuild completed stages or treat old milestone
 ordering as a restriction on useful fixes.
 
 Develop substantial connected changes with fast integration tests. Exercise actual

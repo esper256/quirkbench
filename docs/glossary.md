@@ -43,6 +43,7 @@ that a feature exists. Keep entries short and change them with the designs.
 | OSTree | A tool for storing system versions, sharing unchanged files and deploying them. |
 | Writable layer | Temporary changes over the candidate OS; plain OSTree unlock changes disappear on reboot. |
 | GRUB | The bootloader first selected to start recovery or a one-time candidate run. |
+| SELinux | Linux policy controls that can restrict even privileged programs. |
 | SQLite | The embedded database used for controller work records. |
 | Deployment requirements | Required files, layout and compatibility details for Quirkbench to assemble and deploy a candidate. |
 | Candidate hook | A named point in candidate execution where an investigation test program can run. |

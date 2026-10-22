@@ -16,7 +16,7 @@ quirkbench-console = "quirkbench.console:main"
 quirkbench-disk-writer = "quirkbench.media:writer_main"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=1", "pytest-timeout>=2", "build>=1", "hatchling>=1", "installer>=0.7"]
+dev = ["pytest>=8", "pytest-asyncio>=1", "pytest-timeout>=2", "build>=1", "hatchling>=1", "installer>=0.7", "ruff>=0.14"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -25,3 +25,9 @@ timeout = 30
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/quirkbench"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

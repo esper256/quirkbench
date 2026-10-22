@@ -54,6 +54,13 @@ candidate. Make another preparation request for different software.
   Output is saved independently of reading it. Each command has its own timeout;
   runs have no overall deadline. Processes have separate environments but share
   files and services. `cd` and `export` do not carry into another command.
+- Set `interactive: true` when a command needs a terminal. `ssh_terminal_input`
+  sends a line, control character or size change. Continue reading the same command
+  ID. Do not retry input after a lost reply: delivery is uncertain.
+- `stop_grace_seconds` gives a collector time to finish after TERM (default 10).
+  Output continues saving until exit; SIGKILL follows if it does not stop.
+- `ssh_target_notify` can display a human request. A chime is optional, short and
+  may be unavailable; it does not change volume or imply the human has responded.
 - `sftp_upload` transfers candidate files; `sftp_download` retrieves completed
   experiment evidence while the candidate runs.
 - `recovery_return` requests return and diagnostic upload. `run_results` lists
@@ -156,3 +163,12 @@ Context stays focused on current work. `investigation_runs` pages through histor
 `deployment_id` identifies retained files while each boot gets its own `run_id`.
 Optional `controller_mcp_activity` shows call counts, time, response size and
 unchanged reads/waits. It is useful for evaluating a workflow, not a required step.
+
+Deployment accepts an explicit `selinux` policy. Default `disabled` differs from
+normal Bazzite; use inventory to check the actual environment. Enabled policy needs
+correct candidate labels and may affect boot. It is not changed by ordinary commands.
+
+After discarding retained deployment files, `recovery_prune_ostree_cache` explicitly
+removes downloaded candidate content from idle recovery. Use it when space is
+needed; later deployments will download that content again. It keeps diagnostics
+and connection settings. Follow completion with `controller_work_wait`.
