@@ -1,0 +1,12 @@
+#!/bin/sh
+# Development-only host entry point. The application knows nothing about Distrobox.
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ "${QUIRKBENCH_DEV_ON_HOST:-}" != 1 ] && { [ -n "${CONTAINER_ID:-}" ] || [ -f /run/.containerenv ]; }; then
+    if ! command -v distrobox-host-exec >/dev/null 2>&1; then
+        echo "Run $root/dev from the host, or from Distrobox with distrobox-host-exec available." >&2
+        exit 1
+    fi
+    exec distrobox-host-exec env QUIRKBENCH_DEV_ON_HOST=1 "$root/dev" "$@"
+fi
+exec /usr/bin/python3 "$root/development/launch.py" "$@"

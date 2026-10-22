@@ -6,33 +6,66 @@ does not establish that every newer image works. See [earlier boot checks](obser
 [physical run findings](observations/2026-10-20-nvme-first-candidate.md) and the
 [separate boot test](../boot_tests/README.md).
 
-Use Python 3.12 or newer:
+## Release installation
+
+A release RPM installs `quirkbench` and its dependencies for all users. Each user
+owns `~/.quirkbench`; the controller runs as that user in a foreground terminal.
+See [release packaging](releases.md) for package creation and distribution status.
+No published recovery is selected in the source checkout yet.
 
 ```sh
-uv sync --locked
-uv run quirkbench setup
-uv run quirkbench controller run
-# In another terminal:
-uv run quirkbench recovery build
-uv run quirkbench recovery flash
+quirkbench setup
+quirkbench controller run
+# In another terminal, with a published release installed:
+quirkbench recovery flash
 ```
 
-For an ordinary user installation, `uv tool install .` installs the CLI. Setup
-saves editable `~/.quirkbench/config.toml`; the controller stays in the foreground.
-Use a target-reachable HTTPS address. The same process serves local MCP and target
-HTTPS/reverse SSH. Configure the agent with its printed MCP URL and the Bearer token
-from the printed token file. There is no controller service manager.
+Flashing downloads the recovery chosen for that installed release, or reuses its
+cached download. `recovery download` downloads it ahead of time for offline use.
+Use a target-reachable HTTPS address in setup. Configure the agent with the MCP
+URL and Bearer token file printed by the controller. Keep the controller terminal
+open. There is no controller service manager.
 
-From Distrobox, use `distrobox-host-exec` to run commands on the host when its
-Podman and block devices are not available inside the container. The selected
-Python installation and controller directory must be accessible there.
+## Development without host RPM installation
 
-If `controller run` reports that the directory is already in use, check
-`quirkbench status` from the same host environment. A responding controller can
-be reused; do not delete its lock file or start another copy.
+```sh
+./dev quirkbench setup
+./dev quirkbench controller run
+# In another terminal:
+./dev quirkbench recovery build
+./dev quirkbench recovery flash --built
+```
+
+`./dev` forwards from Distrobox to the host, then manages private Python
+dependencies under the checkout's ignored `.dev-runtime/` directory. Initial
+setup needs network access; unchanged dependencies are reused. Host Python must
+be 3.12 or newer. No RPMs are installed by this launcher. It uses the host's
+existing Podman and disk tools. Build and flash check their required tools before work starts.
+The checkout must be accessible at the same path from the host.
+
+Both entry points use `~/.quirkbench` by default, never the current working
+directory. An older controller using a different directory still needs its
+explicit `--data-dir PATH`; the launcher does not move or reset that data. Stop and
+restart a development controller explicitly to load edited code. Do not run the
+installed and development controllers against the same directory simultaneously.
+A stopped controller is reported by `status`; `controller status` also compares
+installed and running software. CLI requests refuse a different running software
+revision with a restart message, before sending work or interpreting its response.
+`controller check` and `controller stop` remain available. No restart is automatic.
+Never delete a lock file to bypass a running process.
+
+## Recovery media
+
+`recovery flash --built` selects the last successful local build, including an
+explicit build that reused cached results. Failed builds keep the previous
+selection. `recovery list` shows dates, sizes and release/local defaults; `--image ID`
+remains available for exact scripts. Unknown IDs fail without prompting. JSON
+flashing requires an explicit device and confirmation, plus a target name for
+new media. Human flashing lists drives by model, size and serial, then asks for
+one final write confirmation.
 
 Builds require rootless Podman. The build container supplies Fedora tools; no
-Distrobox is required. `quirkbench doctor` lists host tools. Flashing additionally
+Distrobox is required. Flashing additionally
 needs sudo, parted, util-linux, e2fsprogs, dosfstools and GRUB tools. It refuses
 mounted disks and disks not reported as USB or hot-pluggable, requires confirmation,
 and elevates only its writer. USB4/Thunderbolt NVMe drives are supported by the
@@ -93,7 +126,7 @@ connected recovery. For possible investigation routes, see the
 
 ## Controller and storage maintenance
 
-Use the same `--state` and host/container environment as the running controller.
+Use the same `--data-dir` and host/container environment as the running controller.
 `controller status` identifies both running and installed software. Before an
 update restart, run `controller check`, then `controller stop`, then `controller run`.
 A locked directory with an unreachable port may mean the command is in a different
@@ -104,8 +137,21 @@ After changing the address in setup, `recovery flash --refresh-connection` expli
 updates that controller's address and certificate on compatible media. Pairing and
 Wi-Fi remain. A different controller identity requires new pairing, not this option.
 
-`storage` shows controller disk use. `storage clean --images --cache` previews
-removal and asks before deleting; choose `--candidates` or `--reports` separately.
-Results and retained candidates remain. `investigation export NAME DIRECTORY`
-creates ordinary files containing problems, run/candidate metadata and received
-results. It does not include credentials or claim missing evidence has arrived.
+The controller terminal reports target connections and disconnections. If a status
+reply takes more than 10 seconds, it warns once and reports when replies resume.
+A status request still times out after 30 seconds. Normal SSH session traffic is
+quiet; requested reboots are identified separately from unexpected disconnects.
+
+## Freeing space
+
+Use `quirkbench storage` to see groups and investigation names.
+`storage clean --cache`, `--recovery-images`, `--unassigned-diagnostics` or `--logs`
+previews eligible files and asks before removal. Add `--yes` for scripts; JSON
+mode previews without prompting unless `--yes` is supplied. Selected recovery
+images, exact recovery rebuild inputs and the current controller log are kept.
+
+To remove an investigation, return/discard its retained runs, pause it, then run
+`quirkbench investigation delete NAME`. Export anything you want to keep first with `investigation export NAME DIRECTORY`.
+Shared software stays until no remaining investigation needs it. If deletion
+fails, correct the reported problem and retry the same command. These commands
+do not clear Podman storage or operate on target drives.

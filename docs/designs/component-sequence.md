@@ -8,6 +8,10 @@ The first candidate uses rpm-ostree; see [candidate deployment](candidate-deploy
 
 ## Setup and connection
 
+Development uses `./dev quirkbench` to run the same application on the host.
+The launcher handles Distrobox forwarding and private Python dependencies before
+this sequence; neither belongs in the running controller.
+
 ```mermaid
 sequenceDiagram
     actor Human
@@ -15,8 +19,8 @@ sequenceDiagram
     participant USB as USB drive
     participant Target
     Human->>Quirkbench: Configure and run the foreground controller
-    Human->>Quirkbench: Build recovery image and flash selected USB
-    Note over Quirkbench: Reuse selected recovery packages; update the base explicitly
+    Human->>Quirkbench: Flash recovery onto selected external drive
+    Note over Quirkbench: Download the release recovery or explicitly select a local build
     Quirkbench->>USB: Write bootable software, settings and shared storage
     Note over Quirkbench,USB: Later compatible recovery updates keep shared data and pairing
     Human->>Target: Boot USB and connect network
@@ -180,4 +184,22 @@ sequenceDiagram
     Recovery-->>Quirkbench: Return diagnostics without external programs
     Human->>Recovery: Confirm force power off
     Recovery->>Kernel: Power off without waiting for disk cleanup
+```
+
+## Delete a finished investigation
+
+```mermaid
+sequenceDiagram
+    actor Human
+    participant Quirkbench
+    participant Files
+    Human->>Quirkbench: Delete a paused investigation
+    Quirkbench->>Quirkbench: Refuse unfinished work or retained target deployment
+    Quirkbench-->>Human: Preview removal
+    Human->>Quirkbench: Confirm
+    Quirkbench->>Quirkbench: Stop accepting work for this investigation
+    Quirkbench->>Files: Remove its diagnostics and unused software
+    Note over Quirkbench,Files: Keep software referenced by other investigations; prune OSTree with its own tools
+    Quirkbench->>Quirkbench: Remove investigation records
+    Quirkbench-->>Human: Deletion complete
 ```

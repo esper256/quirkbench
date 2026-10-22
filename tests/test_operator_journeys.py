@@ -19,7 +19,7 @@ async def cli(root, *arguments):
         sys.executable,
         "-m",
         "quirkbench.cli",
-        "--state",
+        "--data-dir",
         str(root),
         "--json",
         *arguments,
@@ -78,14 +78,14 @@ async def test_storage_preview_preserves_retained_candidate_and_exports_bytes(la
     unused = lab.root / "cache" / "unused"
     unused.mkdir(parents=True)
     (unused / "data").write_bytes(b"cache")
-    preview = await lab.controller.local("storage", {"categories": ["cache", "candidates"]})
+    preview = await lab.controller.local("storage", {"categories": ["cache"]})
     assert not any(
         i["path"] == "candidates/" + candidate["candidate_id"] for i in preview["cleanup"]
     )
     result = await lab.controller.local(
         "storage",
         {
-            "categories": ["cache", "candidates"],
+            "categories": ["cache"],
             "selected": [i["path"] for i in preview["cleanup"]],
         },
     )
@@ -219,22 +219,6 @@ async def test_explicit_policy_cache_cleanup_and_progress_display(lab):
     ]
 
 
-async def test_cached_candidate_survives_cleanup_of_original_and_stale_deploy(lab):
-    original = await lab.candidate()
-    reused = await lab.call(
-        "rpm_ostree_prepare_candidate", investigation="wifi-case", request_id="reuse"
-    )
-    reused = await lab.call("controller_work_wait", work_id=reused["work_id"], timeout_seconds=5)
-    await lab.start_run(reused["candidate_id"])
-    preview = await lab.controller.storage(["candidates"])
-    await lab.controller.storage(["candidates"], [i["path"] for i in preview["cleanup"]])
-    candidate = await lab.controller.store.get("candidate", reused["candidate_id"])
-    commit = candidate["commit"]
-    assert (lab.root / "repository/objects" / commit[:2] / (commit[2:] + ".commit")).exists()
-    with pytest.raises(ValueError, match="cleaned"):
-        await lab.controller.deploy("wifi-case", original["candidate_id"], "stale")
-
-
 async def test_deploy_rechecks_candidate_after_waiting_for_cleanup(lab):
     candidate = await lab.candidate()
     async with lab.controller.candidate_files_lock:
@@ -246,3 +230,38 @@ async def test_deploy_rechecks_candidate_after_waiting_for_cleanup(lab):
     with pytest.raises(ValueError, match="cleaned"):
         await deploy
     assert not await lab.controller.store.find("run")
+
+
+async def test_cli_reports_old_controller_before_reading_response_and_still_allows_stop(
+    lab, monkeypatch
+):
+    from quirkbench.files import read_json, save_json
+    from quirkbench.cli import execute, parser
+
+    identity = lab.root / "controller-process.json"
+    saved = read_json(identity)
+    save_json(identity, saved | {"source": "previous-controller-code"})
+    original = lab.controller.local
+    requests = []
+
+    async def tracked(action, data):
+        requests.append(action)
+        return await original(action, data)
+
+    monkeypatch.setattr(lab.controller, "local", tracked)
+    code, output, error = await cli(lab.root, "storage")
+    assert code != 0 and "different software" in json.loads(output)["error"]
+    assert "controller stop" in output and "controller run" in output
+    assert "Traceback" not in error and not requests
+    with pytest.raises(ValueError, match="different software"):
+        await execute(
+            parser().parse_args(
+                ["--data-dir", str(lab.root), "storage", "clean", "--cache", "--yes"]
+            )
+        )
+    assert not requests
+
+    assert (await cli(lab.root, "controller", "check"))[0] == 0
+    assert (await cli(lab.root, "controller", "stop"))[0] == 0
+    await asyncio.wait_for(lab.controller_task, 5)
+    assert requests == ["controller-stop"]

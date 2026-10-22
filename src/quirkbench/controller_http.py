@@ -71,6 +71,9 @@ def https_app(controller):
         if "run" in request.match_info:
             run_id = identifier(request.match_info["run"])
             run = await controller.store.get("run", run_id)
+            inv = await controller.store.get("investigation", run["investigation"])
+            if inv["status"] == "deleting":
+                raise web.HTTPConflict(text="Investigation is being deleted.")
             if run["target"] != target["id"]:
                 raise web.HTTPForbidden()
             folder = controller.root / "results" / run_id
@@ -114,6 +117,10 @@ def https_app(controller):
                 return digest
 
             async with controller.upload_publish_lock:
+                if "run" in request.match_info:
+                    inv = await controller.store.get("investigation", run["investigation"])
+                    if inv["status"] == "deleting":
+                        raise web.HTTPConflict(text="Investigation is being deleted.")
                 digest = await disk(publish)
             return web.json_response({"stored": True, "sha256": digest})
         finally:
@@ -134,22 +141,27 @@ def https_app(controller):
             raise ValueError("Expected a run outcome and completed file list.")
         if not all(isinstance(name, str) for name in report["files"]):
             raise ValueError("Completed files must be a list of relative file names.")
-        for name in report["files"]:
-            if not contained(controller.root / "results" / run_id, name).is_file():
-                raise web.HTTPConflict(text=f"Evidence file not received: {name}")
-        if run.get("evidence") is not None and run["evidence"] != report:
-            raise web.HTTPConflict(text="The final report already has different contents.")
-        await disk(save_json, controller.root / "results" / run_id / "result.json", report)
-        (await controller.store.change("run", run_id, evidence=report))
-        (
-            await controller.store.event(
-                "run", run_id, run["investigation"], "Evidence received", files=report["files"]
+        async with controller.upload_publish_lock:
+            run = await controller.store.get("run", run_id)
+            inv = await controller.store.get("investigation", run["investigation"])
+            if inv["status"] == "deleting":
+                raise web.HTTPConflict(text="Investigation is being deleted.")
+            for name in report["files"]:
+                if not contained(controller.root / "results" / run_id, name).is_file():
+                    raise web.HTTPConflict(text=f"Evidence file not received: {name}")
+            if run.get("evidence") is not None and run["evidence"] != report:
+                raise web.HTTPConflict(text="The final report already has different contents.")
+            await disk(save_json, controller.root / "results" / run_id / "result.json", report)
+            (await controller.store.change("run", run_id, evidence=report))
+            (
+                await controller.store.event(
+                    "run", run_id, run["investigation"], "Evidence received", files=report["files"]
+                )
             )
-        )
-        for work in await controller.store.find("work"):
-            if work["action"] == "ssh-command" and work.get("run_id") == run_id:
-                await controller.command_read(work["id"], status_only=True)
-        (await controller.finish_return(run_id))
+            for work in await controller.store.find("work"):
+                if work["action"] == "ssh-command" and work.get("run_id") == run_id:
+                    await controller.command_read(work["id"], status_only=True)
+            (await controller.finish_return(run_id))
         return web.json_response({"stored": True})
 
     async def repository(request):

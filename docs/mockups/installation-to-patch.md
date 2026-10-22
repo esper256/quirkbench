@@ -6,72 +6,38 @@
 
 ## Controller computer · Install
 
-The user downloads a Quirkbench release archive for their Linux computer.
+The user downloads a Quirkbench RPM from a published release. This example uses Fedora.
 
 ```console
-$ tar -xf quirkbench-linux-x86_64.tar.gz
-$ cd quirkbench-linux-x86_64
-$ ./install
-Installed: ~/.local/bin/quirkbench
-
-Next: quirkbench setup
+$ sudo dnf install ./quirkbench-1.2.0-1.fc44.noarch.rpm
+Installed: quirkbench
 
 $ quirkbench setup
-Press Enter to accept the value in brackets.
-
-Address your target computers will connect to [https://192.168.1.20:7443]:
-Target SSH port [7444]:
-
-Controller config saved: ~/.quirkbench/config.toml
-
+Address target computers will connect to [https://controller:7443]: https://192.168.1.20:7443
+Controller config saved: /home/sam/.quirkbench/config.toml
 Next: quirkbench controller run
 
 $ quirkbench controller run
-Quirkbench controller listening at https://192.168.1.20:7443
-Target SSH: 192.168.1.20:7444
+Controller: https://192.168.1.20:7443
 Agent MCP: http://127.0.0.1:7442/mcp
-MCP token file: ~/.quirkbench/mcp-token
-Keep this terminal open. Ctrl+C stops the controller.
-
-In another terminal: quirkbench recovery build
+MCP token file: /home/sam/.quirkbench/mcp-token
+Controller log: /home/sam/.quirkbench/logs/controller.log
+Keep this terminal open. Ctrl+C or quirkbench controller stop stops it.
 ```
 
 ## Controller computer · Prepare USB
 
-```console
-$ quirkbench recovery build
-Quirkbench recovery image
-
-✓ Select and retain Fedora packages
-  Build recovery system          00:38 elapsed
-  Latest activity: preparing boot files, 2 seconds ago
-
-Log: ~/.quirkbench/logs/recovery-build.log
-Ctrl+C Cancel build
-```
+In another terminal:
 
 ```console
-✓ Recovery image ready: recovery-1
-
-Next: quirkbench recovery flash
-
-$ quirkbench recovery build
-Recovery image recovery-1 already matches these build settings.
-No build needed. Use --force to rebuild with the same packages.
-Use --update-base to select newer Fedora packages.
-
 $ quirkbench recovery flash
-┌─ Prepare a Quirkbench USB ─────────────────────────────────┐
-│ Recovery image: recovery-1                                │
-│ Controller: https://192.168.1.20:7443                      │
-│                                                          │
-│ Select the external drive to erase                       │
-│ > USB Flash Drive     32 GB     /dev/sdb                   │
-│                                                          │
-│ Internal system disk excluded from selection.             │
-│                                                          │
-│ ↑↓ Select     Enter Continue     Esc Cancel               │
-└──────────────────────────────────────────────────────────┘
+Recovery for Quirkbench 1.2.0
+Downloading recovery: 134,217,728 / 1,300,000,000 bytes
+Recovery: x86_64 · 2026-10-22T12:00:00+00:00 · source 8e475fe431aa
+Select an external drive to install or update. Internal system disks are excluded.
+1. /dev/sdb SanDisk USB 32.0 GB Serial: example-drive-01
+Drive number (Enter cancels): 1
+Target name [target-01]: workshop-computer
 
 [sudo] password for sam:
 WARNING: This will erase the entire drive and all its partitions.
@@ -288,7 +254,7 @@ Resume: quirkbench investigation resume microphone-dropout
 ## Controller computer · Update recovery later
 
 ```console
-$ quirkbench recovery flash --device /dev/sdb --image recovery-2
+$ quirkbench recovery flash --device /dev/sdb
 Update recovery and boot files only. Wi-Fi, pairing, candidates and diagnostics will be kept.
 Requested path: /dev/sdb
 Resolved device: /dev/sdb

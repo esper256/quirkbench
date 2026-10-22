@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Detect CLI/controller software mismatches before requests and explain how to restart, instead of failing on an incompatible response.
+
+- Group storage by cleanup action and support deleting paused investigations while preserving shared software.
+
+- Replace `--state` with `--data-dir`, remove `doctor`, and check build/flash tools where needed.
+- Keep status output factual and replace routine SSH messages with target connection health reports.
+
+- Native controller RPM packaging and release recovery download preparation.
+- Human recovery defaults, readable image listings and `flash --built` for local development.
+- Host development launcher with private Python dependencies and no host RPM installation.
+- Clearer controller status, setup and host-tool reporting; explicit noninteractive choices.
+
 - Graceful command cleanup, interactive terminals and optional human notifications.
 - Whole-file evidence uploads survive slow links; confirmed receipts still control deletion.
 - Candidate startup fallback runs independently of target preparation and Python startup.

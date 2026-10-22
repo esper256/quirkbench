@@ -2,6 +2,7 @@
 
 import fcntl
 import json
+import os
 import sqlite3
 
 from . import __version__
@@ -27,7 +28,11 @@ def preflight(root):
 def installed():
     from .image import source_hash
 
-    return {"version": __version__, "source": source_hash()}
+    return {
+        "version": __version__,
+        "source": source_hash(),
+        "source_label": os.environ.get("QUIRKBENCH_SOURCE_LABEL"),
+    }
 
 
 def process_status(root):

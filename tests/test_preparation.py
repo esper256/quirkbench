@@ -17,7 +17,7 @@ async def test_recovery_build_cache_and_packaged_cli(tmp_path):
         sys.executable,
         "-m",
         "quirkbench.cli",
-        "--state",
+        "--data-dir",
         str(tmp_path / "unused"),
         "--help",
         stdout=asyncio.subprocess.PIPE,
@@ -41,7 +41,7 @@ async def test_installed_wheel_setup_and_help_have_the_packaged_assets(tmp_path)
 
     process = await asyncio.create_subprocess_exec(
         scripts / "quirkbench",
-        "--state",
+        "--data-dir",
         str(state),
         "--json",
         "setup",

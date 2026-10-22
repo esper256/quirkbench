@@ -25,7 +25,7 @@ yet available.
 - [Contributing](CONTRIBUTING.md): development and review workflow.
 
 The intended human journey is setup, a foreground controller, then recovery image
-build and USB flash. See the [mockups](docs/mockups/README.md).
+download and external-drive flash. Developers can explicitly build locally. See the [mockups](docs/mockups/README.md).
 After one investigation authorization, an external agent can interactively debug
 the target and run prepared experiments within its limits. A human can pause, resume or intervene.
 Quirkbench does not choose the agent, generate its patches or prescribe its reasoning.

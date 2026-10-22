@@ -11,12 +11,30 @@ import httpx
 
 from . import __version__
 from .config import Config, setup
-from .files import read_json, save_json
+from .files import save_json
 from .linux import Linux
 
 
 async def local(root, action, data=None, timeout=30):
+    from .controller_process import process_status
+
     config = Config.load(root)
+    if action != "controller-stop":
+        status = process_status(root)
+        if status["directory_in_use"] and any(
+            status["running"].get(key) != status["installed"][key] for key in ("version", "source")
+        ):
+            import shlex
+
+            command = ["quirkbench"]
+            if root.resolve() != (Path.home() / ".quirkbench").resolve():
+                command += ["--data-dir", str(root)]
+            prefix = shlex.join(command)
+            raise ValueError(
+                "The CLI and running controller use different software. "
+                "Restart the controller when current work can be interrupted:\n"
+                f"  {prefix} controller stop\n  {prefix} controller run"
+            )
     token = (root / "mcp-token").read_text().strip()
     async with httpx.AsyncClient(trust_env=False, timeout=timeout) as client:
         try:
@@ -26,8 +44,6 @@ async def local(root, action, data=None, timeout=30):
                 headers={"Authorization": "Bearer " + token},
             )
         except httpx.ConnectError:
-            from .controller_process import process_status
-
             if process_status(root)["directory_in_use"]:
                 raise ValueError(
                     "Controller holds this data directory but its local port is unreachable here. Run this command in the same host or container network environment as the controller."
@@ -50,14 +66,15 @@ def ask(label, default=None):
 
 def parser():
     p = argparse.ArgumentParser(
-        description="Quirkbench — investigate Linux hardware problems and test patches."
+        description="Quirkbench — investigate Linux hardware problems and test patches.",
+        epilog="Start with: quirkbench setup, then quirkbench controller run. In another terminal: quirkbench recovery flash.",
     )
     p.add_argument("--version", action="version", version=f"Quirkbench {__version__}")
     p.add_argument(
-        "--state",
+        "--data-dir",
         type=Path,
         default=Path.home() / ".quirkbench",
-        help="Controller configuration and data directory",
+        help="Advanced: use a different data directory (default: ~/.quirkbench)",
     )
     p.add_argument("--json", action="store_true", help="Print structured output")
     commands = p.add_subparsers(dest="command", required=True)
@@ -67,8 +84,8 @@ def parser():
         description="Save configuration and credentials. Example: quirkbench setup",
     )
     s.add_argument("--url", help="HTTPS address reachable from targets")
-    s.add_argument("--ssh-port", type=int, default=7444, help="Target SSH port (default: 7444)")
-    s.add_argument("--mcp-port", type=int, default=7442, help="Local MCP port (default: 7442)")
+    s.add_argument("--ssh-port", type=int, help="Target SSH port (default: 7444)")
+    s.add_argument("--mcp-port", type=int, help="Local MCP port (default: 7442)")
     c = commands.add_parser(
         "controller", help="Run the controller", description="Example: quirkbench controller run"
     )
@@ -82,15 +99,10 @@ def parser():
     commands.add_parser(
         "status", help="Show connected targets and work", description="Example: quirkbench status"
     )
-    commands.add_parser(
-        "doctor",
-        help="Check tools for controller builds and USB writing",
-        description="Example: quirkbench doctor",
-    )
     r = commands.add_parser(
         "recovery",
-        help="Build and flash recovery media",
-        description="Example: quirkbench recovery build",
+        help="Download, build and flash recovery media",
+        description="Example: quirkbench recovery flash",
     )
     actions = r.add_subparsers(dest="action", required=True)
     b = actions.add_parser("build", help="Build or reuse a cached recovery image")
@@ -102,14 +114,19 @@ def parser():
         action="store_true",
         help="Explicitly select and retain a fresh Fedora package set",
     )
-    actions.add_parser("list", help="List completed recovery images")
+    actions.add_parser("download", help="Download the recovery selected for this release")
+    actions.add_parser("list", help="Show recovery images, dates and default selections")
     f = actions.add_parser(
         "flash", help="Install recovery or update an existing USB while keeping its data"
     )
     f.add_argument(
         "--device", help="External drive to install or update, for example /dev/sdb or /dev/nvme2n1"
     )
-    f.add_argument("--image", help="Completed recovery image ID (default: only available image)")
+    selection = f.add_mutually_exclusive_group()
+    selection.add_argument("--image", help="Use an exact completed image ID from recovery list")
+    selection.add_argument(
+        "--built", action="store_true", help="Use the last successful local recovery build"
+    )
     f.add_argument("--target", help="Name for the target computer")
     f.add_argument(
         "--refresh-connection",
@@ -124,13 +141,16 @@ def parser():
     f.add_argument("--yes", action="store_true", help="Confirm writing the explicitly selected USB")
     storage = commands.add_parser("storage", help="Show storage use and preview safe cleanup")
     sa = storage.add_subparsers(dest="action")
-    clean = sa.add_parser(
-        "clean", help="Preview cleanup; results and retained deployments are kept"
-    )
-    for category in ("candidates", "images", "cache", "reports"):
-        clean.add_argument("--" + category, action="store_true")
+    clean = sa.add_parser("clean", help="Preview or remove unused files")
+    for flag, destination, description in (
+        ("cache", "cache", "Clear rebuildable files"),
+        ("recovery-images", "images", "Remove old images; keep selected images"),
+        ("unassigned-diagnostics", "reports", "Remove recovery diagnostics outside investigations"),
+        ("logs", "logs", "Clear old controller and build logs; keep the current controller log"),
+    ):
+        clean.add_argument("--" + flag, dest=destination, action="store_true", help=description)
     clean.add_argument(
-        "--yes", action="store_true", help="Apply the displayed cleanup without prompting"
+        "--yes", action="store_true", help="Remove the previewed files without prompting"
     )
     i = commands.add_parser(
         "investigation",
@@ -145,6 +165,9 @@ def parser():
     start.add_argument(
         "--yes", action="store_true", help="Authorize candidate preparation and boot on the USB"
     )
+    delete = acts.add_parser("delete", help="Delete a paused investigation and its unused files")
+    delete.add_argument("name")
+    delete.add_argument("--yes", action="store_true", help="Delete without prompting")
     export = acts.add_parser(
         "export", help="Export investigation and received evidence as ordinary files"
     )
@@ -178,14 +201,27 @@ def parser():
 
 
 async def execute(args):
-    root = args.state.expanduser()
+    root = args.data_dir.expanduser()
     if args.command == "setup":
         import socket
 
-        url = args.url or ask(
-            "HTTPS address reachable from your targets", f"https://{socket.gethostname()}:7443"
+        if args.json and not args.url:
+            raise ValueError("Provide --url when using setup with --json.")
+        previous = (
+            Config.load(root)
+            if (root / "config.toml").exists()
+            else Config(url=f"https://{socket.gethostname()}:7443")
         )
-        setup(root, Config(url=url, ssh_port=args.ssh_port, mcp_port=args.mcp_port))
+        url = args.url or ask("Address target computers will connect to", previous.url)
+        setup(
+            root,
+            Config(
+                url=url,
+                ssh_port=args.ssh_port if args.ssh_port is not None else previous.ssh_port,
+                mcp_port=args.mcp_port if args.mcp_port is not None else previous.mcp_port,
+                bind=previous.bind,
+            ),
+        )
         return {
             "message": f"Controller config saved: {root / 'config.toml'}",
             "next": "quirkbench controller run",
@@ -208,43 +244,27 @@ async def execute(args):
         await Controller(root).serve()
         return None
     if args.command == "status":
-        return await local(root, "status")
-    if args.command == "doctor":
-        import shutil
+        from .controller_process import process_status
 
-        names = [
-            "podman",
-            "sudo",
-            "lsblk",
-            "parted",
-            "mkfs.vfat",
-            "mkfs.ext4",
-            "tune2fs",
-            "grub2-editenv",
-        ]
-        return {
-            "tools": {
-                name: bool(
-                    shutil.which(name)
-                    or (shutil.which("grub-editenv") if name == "grub2-editenv" else None)
-                )
-                for name in names
-            },
-            "message": "Podman builds images. USB writer uses the remaining Linux disk tools. ",
-        }
+        status = process_status(root)
+        if not status["directory_in_use"]:
+            return status | {"message": "Controller is stopped."}
+        return await local(root, "status")
     if args.command == "storage":
-        categories = [
-            c for c in ("candidates", "images", "cache", "reports") if getattr(args, c, False)
-        ]
+        categories = [c for c in ("images", "cache", "reports", "logs") if getattr(args, c, False)]
         if args.action == "clean" and not categories:
-            raise ValueError("Choose --candidates, --images, --cache or --reports.")
+            raise ValueError(
+                "Choose --cache, --recovery-images, --unassigned-diagnostics or --logs."
+            )
         preview = await local(root, "storage", {"categories": categories})
         if args.action != "clean" or not preview["cleanup"]:
             return preview
         if args.json and not args.yes:
             return preview
         if not args.json:
-            display(preview)
+            from .presentation import show
+
+            show(args, preview)
         if not args.yes and ask("Remove these items? y/N", "n").lower() != "y":
             return {"message": "Cancelled; nothing removed."}
         return await local(
@@ -254,6 +274,22 @@ async def execute(args):
             timeout=3600,
         )
     if args.command == "investigation":
+        if args.action == "delete":
+            preview = await local(root, "investigation-delete", {"name": args.name})
+            if args.json and not args.yes:
+                return preview
+            if not args.json:
+                from .presentation import show
+
+                show(args, preview)
+            if (
+                not args.yes
+                and ask("Delete this investigation and its diagnostics? y/N", "n").lower() != "y"
+            ):
+                return {"message": "Cancelled; nothing removed."}
+            return await local(
+                root, "investigation-delete", {"name": args.name, "confirm": True}, timeout=3600
+            )
         if args.action == "export":
             return await local(
                 root,
@@ -278,6 +314,8 @@ async def execute(args):
             )
         if args.action == "show":
             return await local(root, "investigation-show", {"name": args.name})
+        if args.json and (not args.problem or not args.yes):
+            raise ValueError("Provide --problem and --yes for investigation start with --json.")
         problem = args.problem or ask("What problem do you want to investigate?")
         if (
             not args.yes
@@ -301,55 +339,62 @@ async def execute(args):
             "next": f"Configure your agent with this MCP URL and Bearer token, then ask it to use investigation_context for {args.name}.",
         }
     if args.command == "recovery":
-        Config.load(root)
-        linux = Linux(progress=lambda text: print(text, file=sys.stderr))
+        from .recovery_images import download, list_images, built_image, exact_image
+
+        def progress(text):
+            print(text, file=sys.stderr)
+
+        linux = Linux(progress=progress)
         if args.action == "build":
             from .image import build_recovery
 
             return await build_recovery(
-                root,
-                linux,
-                args.force,
-                progress=lambda s: print(s, file=sys.stderr),
-                update_base=args.update_base,
+                root, linux, args.force, progress=progress, update_base=args.update_base
             )
-        images = [
-            read_json(p)
-            for p in sorted((root / "images").glob("*/image.json"))
-            if not p.parent.name.endswith((".building", ".previous"))
-        ]
+        if args.action == "download":
+            return await download(root, progress)
         if args.action == "list":
-            return {"images": images}
-        # Require a running configured controller before acquiring an invitation or writing.
-        await local(root, "status")
-        selected = (
-            next((i for i in images if i["id"] == args.image), None)
-            if args.image
-            else (images[0] if len(images) == 1 else None)
-        )
-        if not selected:
-            if not images:
-                raise ValueError("No recovery image is available. Run quirkbench recovery build.")
-            for index, image in enumerate(images, 1):
-                print(f"{index}. {image['id']}")
-            choice = int(ask("Choose recovery image number"))
-            if not 1 <= choice <= len(images):
-                raise ValueError("Invalid image selection.")
-            selected = images[choice - 1]
-        from .media import usb_disks, in_use, disk_identity, existing_media
-
+            return {"images": list_images(root)}
+        if args.json and (not args.device or not args.yes):
+            raise ValueError("Provide --device and --yes to flash noninteractively with --json.")
         if args.yes and not args.device:
             raise ValueError("--yes requires an explicitly selected --device.")
+        # Check setup and the running controller before downloading or writing.
+        await local(root, "status")
+        selected = (
+            exact_image(root, args.image)
+            if args.image
+            else built_image(root)
+            if args.built
+            else await download(root, progress)
+        )
+        if not args.json:
+            from .presentation import image_label
+
+            print("Recovery: " + image_label(selected))
+        from .media import usb_disks, in_use, disk_identity, existing_media
+
+        linux.require_tools("sudo", "lsblk")
         disks = await usb_disks(linux)
         if args.device:
             device = str(Path(args.device).resolve())
         else:
-            print("Select an external drive to erase. Internal system disks are excluded.")
+            if not disks:
+                raise ValueError("No external drives found. Connect a drive, then retry.")
+            print(
+                "Select an external drive to install or update. Internal system disks are excluded."
+            )
             for index, disk in enumerate(disks, 1):
                 print(
                     f"{index}. {disk['path']} {disk.get('model', '')} {int(disk['size']) / 1e9:.1f} GB  Serial: {disk.get('serial', 'unknown')}"
                 )
-            choice = int(ask("USB number"))
+            answer = ask("Drive number (Enter cancels)")
+            if not answer:
+                return {"message": "Cancelled. Nothing was written."}
+            try:
+                choice = int(answer)
+            except ValueError:
+                raise ValueError("Choose a drive number from the list.") from None
             if not 1 <= choice <= len(disks):
                 raise ValueError("Invalid USB selection.")
             device = disks[choice - 1]["path"]
@@ -368,6 +413,8 @@ async def execute(args):
                     ca=(root / "controller.crt").read_text(),
                 )
         else:
+            if args.json and not args.target:
+                raise ValueError("Provide --target when preparing new media with --json.")
             name = args.target or ask("Target name", "target-01")
             connection = await local(root, "invitation", {"name": name})
         with tempfile.TemporaryDirectory(prefix="quirkbench-flash-request-") as tmp:
@@ -387,6 +434,7 @@ async def execute(args):
                 str(path),
                 *(["--yes"] if args.yes else []),
                 *(["--erase"] if args.erase else []),
+                stdout=sys.stderr if args.json else None,
             )
             if await proc.wait():
                 raise ValueError("USB writer failed. Review its message before retrying.")
@@ -402,7 +450,9 @@ def main(argv=None):
             if args.json:
                 print(json.dumps(result))
             else:
-                display(result)
+                from .presentation import show
+
+                show(args, result)
     except KeyboardInterrupt:
         pass
     except (ValueError, OSError, RuntimeError, httpx.HTTPError) as e:
@@ -410,22 +460,6 @@ def main(argv=None):
             print(json.dumps({"error": str(e)}))
             raise SystemExit(1)
         p.exit(1, f"{e}\n")
-
-
-def display(value, indent=""):
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if isinstance(item, (dict, list)):
-                print(f"{indent}{key.replace('_', ' ').capitalize()}:")
-                display(item, indent + "  ")
-            else:
-                print(f"{indent}{key.replace('_', ' ').capitalize()}: {item}")
-    elif isinstance(value, list):
-        if not value:
-            print(indent + "None")
-        for item in value:
-            display(item, indent)
-            print()
 
 
 if __name__ == "__main__":

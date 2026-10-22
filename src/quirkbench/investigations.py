@@ -55,25 +55,30 @@ class InvestigationControls:
         return problem
 
     async def investigation_control(self, investigation, action):
-        inv = await self.store.get("investigation", investigation)
-        if action not in ("pause", "resume", "force-stop"):
-            raise ValueError("Choose pause, resume or force-stop.")
-        if action == "resume":
-            if inv["status"] in ("pausing", "stopping"):
+        async with self.store.admission():
+            inv = await self.store.get("investigation", investigation)
+            if inv["status"] == "deleting":
                 raise ValueError(
-                    "Wait for the pause or force stop to finish. Read investigation context for progress."
+                    "Investigation deletion is unfinished. Retry investigation delete."
                 )
-            status = "active"
-        else:
-            status = "stopping" if action == "force-stop" else "pausing"
-            if inv["status"] == "paused":
-                status = "paused"
-            elif inv["status"] == "stopping":
-                status = "stopping"
-        if status == inv["status"]:
-            return await self.context(investigation)
-        (await self.store.change("investigation", investigation, status=status))
-        (await self.store.event("investigation", investigation, investigation, status))
+            if action not in ("pause", "resume", "force-stop"):
+                raise ValueError("Choose pause, resume or force-stop.")
+            if action == "resume":
+                if inv["status"] in ("pausing", "stopping"):
+                    raise ValueError(
+                        "Wait for the pause or force stop to finish. Read investigation context for progress."
+                    )
+                status = "active"
+            else:
+                status = "stopping" if action == "force-stop" else "pausing"
+                if inv["status"] == "paused":
+                    status = "paused"
+                elif inv["status"] == "stopping":
+                    status = "stopping"
+            if status == inv["status"]:
+                return await self.context(investigation)
+            (await self.store.change("investigation", investigation, status=status))
+            (await self.store.event("investigation", investigation, investigation, status))
         self.changed.set()
         return await self.context(investigation)
 

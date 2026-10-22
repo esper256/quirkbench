@@ -106,7 +106,10 @@ async def test_pause_completed_before_admission_prevents_new_deployment(lab, mon
 
     @asynccontextmanager
     async def paused_first():
-        await lab.controller.investigation_control("wifi-case", "pause")
+        # Pause now uses admission too; intercept only the deployment admission.
+        with monkeypatch.context() as pause_context:
+            pause_context.setattr(lab.controller.store, "admission", admission)
+            await lab.controller.investigation_control("wifi-case", "pause")
         async with admission():
             yield
 

@@ -19,6 +19,20 @@ class Linux:
 
         return shutil.which(name)
 
+    def require_tools(self, *names):
+        missing = [
+            name
+            for name in names
+            if not self.tool_path(name)
+            and not (name == "grub2-editenv" and self.tool_path("grub-editenv"))
+        ]
+        if missing:
+            raise ValueError(
+                "Missing required tools: "
+                + ", ".join(missing)
+                + ". Install them before retrying. Nothing was written."
+            )
+
     async def command(
         self, *args, log: Path | None = None, timeout=3600, check=True, cwd=None, terminal=False
     ):
