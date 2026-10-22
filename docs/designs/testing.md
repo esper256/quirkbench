@@ -1,6 +1,6 @@
 # Testing strategy
 
-## Agreed starting point
+## Testing approach
 
 - Start with broad, fast integration tests. No unit tests initially.
 - Cover one significant part of the mockup journey per integration test.
@@ -12,8 +12,8 @@
 - Do not invent detailed specifications merely to divide tests. Python is the
   chosen language; detailed implementation and test-tool choices remain open.
 
-These are the user's testing directions. This document is a starting design,
-not a detailed implementation plan or a claim about existing coverage.
+These are the user's testing directions. Tests establish application behavior,
+not successful hardware boot.
 
 ## Build for integration testing
 
@@ -108,7 +108,7 @@ be interrupted, evidence is incomplete, files must survive, and only completed
 software may become bootable. A mock that simply says “reboot succeeded” can hide
 nearly every important mistake. Making every test boot a real OS is too costly.
 
-Build the fast tests alongside [milestone 1](development.md#milestone-1-bootable-recovery-and-agent-driven-deployment):
+Keep the recovery/deployment journey covered:
 
 1. Run real setup/pairing and connect a local MCP client to the controller and a
    separate recovery process through reverse SSH. Read bounded diagnostic output
@@ -127,14 +127,14 @@ Use ordinary temporary directories and child processes, not an entire simulated
 Linux boot. A process restart proves application behavior, not firmware boot or
 power-loss survival. Read-only mount behavior needs the separate image check.
 
-In milestone 2, extend the same helpers with real concurrent commands and terminals.
+Use the same helpers for concurrent commands. Add terminal cases when interactive
+input is implemented.
 Restart the controller while a target command continues, then retrieve its saved
 result without relaunching it. Interrupt a candidate and confirm recovery reports
 old commands as interrupted while uploading surviving output.
 
-The first authorized image check must exercise the actual Bazzite/OSTree mount and
-GRUB boot arrangement early. Milestone 1 also needs real flash and boot observation;
-keep these slow checks separate from the fast suite. Record unperformed checks as
+Changes to the Bazzite/OSTree mount and GRUB boot arrangement need an authorized
+image check; keep slow flash and boot checks separate from the fast suite. Record unperformed checks as
 missing evidence, not a pass from directory fixtures. Live package replacement is
 checked when that later capability is implemented.
 
@@ -168,7 +168,7 @@ tool and refresh it when changing supported versions.
 | --- | --- | --- |
 | Install, configure, prepare USB and pair | Editable config saved; prepared media has connection settings; real pairing establishes a target | Cached image reused; controller unavailable; external preparation fails |
 | Inspect recovery and provision a candidate | MCP returns recovery diagnostics, prepares a candidate and requests deployment, one-time boot and return | Incomplete deployment; initial connection failure; reconnect; recovery shell request rejected |
-| Investigate and change software | MCP context leads to concurrent commands, interactive input, file transfer, a changed candidate and received evidence | One command times out or is stopped; live install requires reboot; evidence arrives after command completion |
+| Investigate and change software | MCP context leads to concurrent commands, file transfer, a changed candidate and received evidence | One command times out or is stopped; changed boot interrupts work; evidence arrives after command completion |
 | Interrupt and continue | Saved output and attribution survive reconnection; uncertain work is not replayed; pause stops new work and finishes active commands | Controller restart; candidate crash; lost upload acknowledgement; force stop |
 | Recovery and next run | Real recovery UI explains the problem; upload and cleanup preserve the right files; explicit discard permits a fresh deployment; repeat boot retains persistent edits | Missing settings; storage failure; incomplete candidate; internal debugging report without an investigation |
 

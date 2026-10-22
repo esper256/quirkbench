@@ -1,249 +1,96 @@
 # Interactive debugging through MCP
 
-Quirkbench makes the user's agent faster at investigating low-level Linux problems.
-The normal interaction is inspect, try something, read what happened and choose
-what to do next on the same running target. A prepared experiment is one useful
-tool in that interaction, not a requirement before every probe.
+Quirkbench accelerates the user's agent: inspect a target, try a probe, read the
+result and choose the next action. A prepared procedure is optional. Keep the
+candidate close enough to the reported environment to reproduce the problem;
+a convenient debugging base that cannot reproduce it is not a fix.
 
-## What should make Quirkbench valuable
-
-Provide useful MCP tools, a debugging-ready base system, quick improvised tests
-and the highest practical chance of returning to a connected system after failure.
-Build and transfer acceleration support that experience. Measure successful
-reconnections and surviving diagnostics across representative failures; a configured
-watchdog is not proof of recovery. Keep the limits honest without abandoning useful
-software measures.
-
-The base should include a curated set of command-line inspection, tracing, profiling,
-debugger and evidence tools with working instructions. Add specialized tools easily.
-Do not bundle every possible tool or enable intrusive tracing by default.
-
-That base is a convenient starting point, not the only test environment. Distro
-package versions, configuration, services, permissions and boot behavior can be the
-bug. Support tailored candidates close to where it was reported, with only the
-needed control connection and evidence support added. Missing reproduction is not
-evidence of a fix. Keep the dedicated recovery system separate from that candidate.
-
-## Agreed direction
-
-- The user's agent runs on the controller computer first. Quirkbench supplies a
-  local MCP server. Remote agent access can follow later.
-- The human authorizes an investigation once. The agent can execute commands,
-  use interactive debuggers, transfer files and make live changes in the candidate,
-  including root commands, within that scope. No fixed list of permitted probes.
-- Live changes include package installation and replacement of installed OS files.
-  Recovery diagnostics are inspection-only; separate managed actions deploy and boot
-  candidates. Its local human terminal remains unrestricted.
-- Keep practical internal-disk and firmware protections. Ordinary permissions and
-  clear instructions help cooperative code; a modified kernel cannot be contained.
-- Build/deployment helpers accelerate larger changes. Do not require an RPM, full
-  experiment description or reboot just to run a new diagnostic program.
-
-Run one foreground controller process. It serves MCP, HTTPS and incoming target
-connections. Use the official Python MCP SDK with Streamable HTTP on a local-only
-address; the agent connects by URL. No separate MCP process or controller daemon.
-Human CLI and TUI use the same application behavior. Builds and commands may run
-as child processes without becoming separate services. Reconnecting an agent must
-not restart commands or runs.
-
-Use [mechanism-specific tool names](controller-api.md#name-mcp-tools-by-mechanism):
-SSH command tools, SFTP file transfer and rpm-ostree preparation. Different
-mechanisms can coexist as separate tools without changing what an old name means.
+The [agent guide](../agent-guide.md) describes available use. The
+[controller API](controller-api.md) owns tool and connection details; the
+[candidate design](candidate-deployment.md) owns deployment and persistence.
 
 ## Command behavior
 
-The agent can start a command, receive output, send more input, stop it and retrieve
-saved output. Support overlapping work: a stress program may run while another
-command inspects logs. Normal commands return directly when short. Longer commands
-return a command ID with bounded output and a quiet wait action. An interactive
-terminal is available when needed by a debugger, rather than required for every call.
+Candidate commands run as root within the authorized investigation. Recovery
+provides named inspections and managed deployment actions, not an agent shell.
+The human recovery terminal remains available.
+
+Accept exact arguments or an explicit script, working directory, environment,
+execution timeout and output limit. Shell expressions expand only in a shell.
+Commands have separate environments but share files, services, devices and resources.
+There is no fixed parallel-command cap. Serialize only actions needing exclusive
+access. A desktop service may require a real user session; root is not a substitute.
+
+A short command can finish in its initial call. Longer commands return an ID for
+read, wait or stop. The target owns execution, deadlines and output files; agent
+or controller disconnection does not stop them. A retry ID identifies the same
+work, not permission to run it again. Confirmed reboot ends old processes.
+A disconnected target leaves their outcome unknown until observed again.
+
+Save output in bounded chunks, independently of reads. The default output limit
+is 16 MiB; report recording limits and failures. `saving_pending` means output is
+not safely saved yet. Completion, success and final evidence receipt are different
+facts. Use the same command records for live reads and recovered results.
 
 ### Long commands and quiet waiting
 
-Starting a long command returns promptly. It keeps running independently of an
-MCP call, so the agent can do other work. Save output to files as it arrives;
-do not hold the only copy in memory or require the agent to read it.
-Save completion and received output before announcing that results are ready.
-Retain them across agent disconnects and controller restarts. After a crash,
-report partial output and unknown outcomes honestly; recent unwritten bytes may
-be lost. A recording failure, including a full disk, is an error to report. The first command
-tools accept an explicit output byte limit (16 MiB by default) and stop recording
-before exhausting shared storage; the outcome explains why the command stopped.
+Execution deadlines stop commands; wait deadlines only return control. There is
+no summed run deadline. A healthy target can wait while the agent thinks or builds.
+Neither command deadlines nor network waits wake a suspended computer.
 
-Ordinary commands survive a network disconnect or controller restart. The target
-owns their processes, deadlines and saved output; it records request IDs before
-launch and returns existing work on retry. If launch outcome is uncertain, report
-that rather than launching again. Reconnect queries this record and retrieves
-missing output. The target enforces each command timeout without the controller.
-Interactive terminal reattachment is not guaranteed initially; report a lost
-session and stop its process where possible. No process survives a target reboot.
+MCP waits last at most 50 seconds and return on completion, connection loss or
+attention-worthy failure. For long controller work, return a copyable quiet CLI
+wait command. The agent's process tool can wait without repeated model calls.
+Automatic wake-up depends on the client; do not promise MCP notifications that
+it cannot deliver. Prefer completion waits over repeated status reads.
 
-The desired experience is one wait, then an agent wake-up only when:
+The longer-term goal is one wait for relevant completion or failure, including
+across several commands. Interactive terminal input, terminal reattachment and
+explicit user-session selection are not implemented. They must not change ordinary
+command semantics or require another persistent service.
 
-- A command finishes and its saved output is ready.
-- The agreed command deadline or wait deadline is reached.
-- A failure needs attention, including a confirmed reboot that ends the command.
+Investigation pause finishes bounded work and returns to recovery. Force stop
+attempts interruption; stopping one command does not end the run. Read access and
+uploads remain available. Resume permits work without replaying it. See
+[operation controls](controller-api.md#ordered-operations-and-investigation-controls).
 
-Wait for one command or the first relevant event among several. Do not wake the
-model for new log lines, keepalives or periodic “still running” replies. Reading
-partial output and interacting with a terminal remain explicit agent actions.
-A wait deadline ends waiting; a command deadline stops the command.
-Neither should be confused with a network request timeout.
+## Files and evidence
 
-Use a pending tool response or supported MCP task completion handling. Whether
-an event can wake an idle agent depends on its client; MCP alone does not guarantee
-that behavior. Prefer client-managed waiting/reconnection without model calls.
-Document and test the supported client behavior; do not silently replace this
-goal with repeated model polling or add another controller service to achieve it.
-Saved results remain retrievable if a notification is missed.
+Uploads go to `/var/tmp/quirkbench`; commands default to `/var/tmp`. Those files
+survive repeat boots until deployment discard. Plain `ostree admin unlock` edits
+are temporary. Each boot has a new run ID even when persistent files are retained.
 
-Connection loss is an error worth reporting, not proof that the process exited.
-Once a new boot is confirmed, end waits for commands from the old boot promptly.
-Return available saved output and say whether recovery is still uploading more
-evidence; do not wait indefinitely for files that may never arrive.
+Commands and startup probes receive `QUIRKBENCH_RUN_ID`,
+`QUIRKBENCH_EVIDENCE_DIR` and `QUIRKBENCH_WORK_DIR`. Evidence is separate from
+credentials and command records. Scratch files are deleted after final upload.
+Finish evidence files with an atomic rename before live SFTP download. A changed
+file or boot prevents publishing an incomplete download. Live downloads do not
+delete target evidence; recovery deletes it only after confirmed final receipt.
 
-### Parallel commands and their environment
-
-Each execution starts a separate process with its own SSH command channel.
-Accept explicit arguments, working directory, environment overrides and user.
-Show the resolved working directory, user and base environment in context; make
-the effective environment available without inserting it into every reply.
-Do not inherit the controller computer's environment accidentally.
-Report the candidate's actual user/session context and required services. A probe
-using a desktop service needs that session's environment; root access is not a
-substitute for it. Report unavailable services instead of inventing working defaults.
-
-Direct argument execution does not expand shell expressions or load shell startup
-files. The agent can explicitly launch a shell when wanted. A `cd` or `export`
-in one command cannot change another command's environment. Input sent to an
-existing interactive shell does preserve that shell's state until it exits.
-Identify that session by its command ID; never silently reuse it for a new command.
-
-Separate processes are not isolated machines: they share the candidate's files,
-services, devices and resources. Package installs and service restarts affect
-other commands. Document this directly in tool instructions. Allow concurrent
-inspection and stress programs; serialize only operations that require exclusive
-access, and explain any wait.
-
-Record the run, boot, command, working directory, privilege choice, timing, exit
-status and available output. A request ID prevents a repeated tool call after a
-lost reply from executing twice. A connection loss leaves execution status
-unconfirmed until the target reports it, not automatically failed or retried.
-Identify a changed boot before accepting further input.
-Do not replay terminal input after an uncertain disconnect. No command can remain
-attached to a process across a reboot.
-
-Each command has its own agent-selected execution timeout within human limits.
-There is no overall run deadline and no sum of command durations. A healthy target
-stays available while the agent thinks or builds elsewhere. Wait timeouts return
-control without stopping work. Boot/reconnect waits are bounded and report failure.
-Separately, the [candidate startup deadline](recovery.md#boot-run-return) returns a
-new candidate to recovery if it never connects. Neither limits the run's lifetime
-after connection succeeds. No arbitrary memory cap.
-
-Investigation pause stops new commands/builds/deployments, lets active bounded work
-finish, then returns to recovery; if idle, return immediately. `ssh_command_stop`
-stops one command and its children without ending the run. Explicit `recovery_return`
-stops remaining run commands, allows bounded output flushing and reboots. Force stop
-attempts immediate interruption. Read access and uploads remain available while paused.
-After the first connection, controller loss neither cancels commands nor reboots
-a healthy target. Commands
-keep their timeouts; once done the target waits for reconnection. Any future policy
-for prolonged disconnection must be explicit, not a hidden overall deadline.
-
-Live changes are attributed to the current run and reported as changes to its
-starting candidate. Keep command history, explicit transferred files and useful
-outputs. Do not claim to capture every effect of arbitrary root commands. A repeatable
-result uses retained source/build output and an explicit test or saved procedure;
-Quirkbench does not automatically turn a shell history into a reliable experiment.
-
-## Connection and persistence
-
-Use the [controller connections](controller-api.md): reverse-direction AsyncSSH
-for commands and file transfer, HTTPS for evidence. The target initiates both;
-the controller needs reachable HTTPS and SSH ports served by its single process.
-Quirkbench connects SSH requests to local processes and real terminals, handling
-input, resize, stop and exit. Reconnection identifies the boot and queries saved
-command records before accepting more work.
-
-Keep target control separate from evidence receipt. Use one saved command-output
-format for live reads, reconnect retrieval and recovery upload, with copies on the
-target and controller. Reuse completed file segments and the evidence upload helper;
-do not build independent logging systems that must reconcile each other.
-After a crash, recovery uploads surviving files and deletes confirmed copies.
-Interactive command records and uploaded files contribute to the same run's results.
-A live-output stream is not proof that all requested evidence has arrived. The agent
-retrieves completed experiment files through `sftp_download`. Recovery uploads the
-remaining files after return and deletes confirmed copies. Command completion alone
-must not imply evidence receipt.
-
-## First implementation
-
-Start with [milestone 1](development.md#milestone-1-bootable-recovery-and-agent-driven-deployment):
-build/flash recovery, connect, inspect through MCP, deploy a candidate and demonstrate
-boot and return. The full interactive command behavior above follows in milestone 2.
-
-Use [rpm-ostree candidate preparation](candidate-deployment.md), fresh mutable files
-per deployment and explicit persistence. Recovery owns boot selection. Use ordinary agent builds for changed software; other OS support can reuse the same command,
-connection and evidence code. Start with latest stable Bazzite, record its exact
-version when preparing the baseline and disclose differences from the reported environment. Available debugging tools do not substitute for reproducing the problem.
-
-## Judge acceleration
-
-Compare the same agent/model, target, problem, starting software and success criterion
-with and without Quirkbench. Use competent ordinary Linux tooling as the comparison.
-For a completed task, report speedup as comparison elapsed time divided by Quirkbench
-elapsed time. Report failed/incomplete attempts too; never count a quick failure as
-speedup. Use repeated tasks before drawing broad conclusions.
-
-Also report time to first useful evidence, agent tool calls/tokens, build/transfer/
-reboot time and human interventions. Include cold setup and warm repeat work
-separately. Include an ad-hoc probe, a live userspace change and a kernel replacement.
-Use those results to choose tools, not the appeal of a particular architecture.
-These measurements are occasional development work, not costly routine CI.
-
-References: [MCP connections](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports),
-[MCP tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools),
-[MCP task support](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks),
-[AsyncSSH reverse-direction connections](https://asyncssh.readthedocs.io/en/latest/#reverse-direction-example).
-
-## Candidate file transfer
-
-`sftp_upload(run_id, file, name)` copies a controller-local file over the existing
-SSH connection into `/var/tmp/quirkbench`. Publish the name only after the transfer
-finishes; return its digest and candidate path. Repeating a transfer replaces that
-name but never executes it. Recovery does not offer SFTP. File reads/writes run
-off the connection event loop.
-
-Commands default to writable `/var/tmp`; set `cwd` explicitly when sharing a
-working directory. Files there survive repeat boots until the deployment is
-discarded. Transfers are recorded against the run and boot.
+Record actions and transferred files without claiming to capture every effect of
+root commands. The agent retains source, build output and procedures for repeatable
+results. Quirkbench does not turn shell history into a reliable experiment.
 
 ## Keep control responsive under load
 
-The root target connection service uses `Nice=-5` and
-`CPUSchedulingResetOnFork=yes`. Its child commands use normal scheduling priority;
-stress programs must not inherit the connection's preference. No real-time policy,
-CPU reservation or automatic tuning of other services is needed. This helps under
-CPU load; it cannot overcome kernel hangs, memory exhaustion or broken networking.
+The root connection service uses `Nice=-5` and `CPUSchedulingResetOnFork=yes`;
+experiment commands and external build/deployment processes start at normal priority.
+Do not add real-time scheduling, CPU reservations or blanket throttling.
 
-Command output and records use background file operations with bounded chunks.
-A stop can kill the process while storage is stalled. `saving_pending` means the
-result is not yet safely saved; returning to recovery waits for those writes.
-A disconnected command has an unknown outcome. A confirmed new boot ends its wait.
-Execution timeouts do not provide a way to wake a suspended computer.
+Keep file operations off the connection event loop, with bounded chunks and
+backpressure. Stop the process group promptly even if saving output stalls; report
+unfinished saving separately. These choices help under load but cannot overcome
+kernel hangs, memory exhaustion, saturated networks or failed devices.
 
-Commands and startup probes receive `QUIRKBENCH_RUN_ID`,
-`QUIRKBENCH_EVIDENCE_DIR` and `QUIRKBENCH_WORK_DIR`. Evidence files are separate
-from command records and credentials. Scratch files are removed after confirmed
-recovery upload. For live retrieval, finish a file and rename it into place, then
-call `sftp_download(run_id, file)` relative to the evidence directory. Downloads
-return a local controller path, size and digest; they do not delete target files.
-A changing file or boot prevents publication of the incomplete local copy.
+## Judge acceleration
 
-Agent guidance stays generic. Start with baseline diagnostics; run bounded
-collectors and probes together. Build changed software locally with matching build
-information and activate it through ordinary commands. No driver-specific build
-or reload MCP tools. Never force module unloading or bypass signature checks. Use
-candidate preparation and a new boot when live replacement is unsuitable.
-Bounded commands and ordered operation lists share investigation pause/resume controls.
+Compare the same agent, target, problem and starting software with competent
+ordinary Linux tools. Measure time to useful evidence, build/transfer/reboot time,
+tool calls, tokens where available and human interventions. Separate cold setup
+from repeated work. Report unsuccessful attempts too; a quick failure is not speedup.
+
+`investigation_timeline` records controller-observed work. `controller_mcp_activity`
+records tool traffic, including reads and waits. Unchanged output is a clue to
+avoidable calls, not proof of waste. External agent builds and token usage are not
+automatically measured. Use occasional representative investigations, not expensive
+routine benchmarks, to choose the next acceleration.

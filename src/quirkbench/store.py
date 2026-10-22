@@ -14,6 +14,7 @@ class Store:
         self.db.execute('PRAGMA journal_mode=WAL')
         self.db.execute('CREATE TABLE IF NOT EXISTS records (kind TEXT, id TEXT, data TEXT NOT NULL, PRIMARY KEY(kind,id))')
         self.db.execute("CREATE TABLE IF NOT EXISTS events (cursor INTEGER PRIMARY KEY, at REAL, kind TEXT, id TEXT, scope TEXT, data TEXT)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS mcp_call_lookup ON events(kind,id,cursor)")
         self.db.commit()
 
     def event(self, kind, key, scope, stage, **fields):
@@ -29,7 +30,7 @@ class Store:
 
     def events(self, scope, after, limit):
         return [dict(cursor=c, at=t, kind=k, id=i, **json.loads(d)) for c,t,k,i,d in self.db.execute(
-            'SELECT cursor,at,kind,id,data FROM events WHERE scope=? AND cursor>? ORDER BY cursor LIMIT ?',
+            "SELECT cursor,at,kind,id,data FROM events WHERE scope=? AND cursor>? AND kind!='mcp-call' ORDER BY cursor LIMIT ?",
             (scope, after, limit))]
 
     def close(self):

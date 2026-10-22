@@ -15,54 +15,24 @@ This does not authorize image builds or hardware runs.
 
 ## Milestone 1: bootable recovery and agent-driven deployment
 
-Build and flash a USB, boot recovery, connect to the controller, inspect recovery
-through MCP, and deploy a Bazzite candidate that boots once and returns to recovery.
-See the [recovery-to-candidate mockup](../mockups/recovery-to-candidate.md).
+The original journey was build/flash, recovery connection and inspection,
+candidate preparation/deployment, one-time boot and return with diagnostics.
+It has been exercised on hardware; later image changes need their own checks.
+See [installation](../controller-installation.md) and the
+[recovery-to-candidate example](../mockups/recovery-to-candidate.md).
 
-Deliver this as one coherent working journey:
+## Current implementation
 
-- Setup and one foreground controller, with local MCP, pairing, reverse SSH and
-  HTTPS downloads/uploads. Keep credentials stable across reboots.
-- Recovery image build/cache and USB flashing with progress; recovery TUI for
-  networking, connection status, diagnostics and the human terminal.
-- Read-only recovery OS files, with settings, downloaded candidates and diagnostics
-  in shared data. MCP offers specific inspection actions, not an unrestricted shell.
-- Controller preparation of the selected Bazzite baseline. Recovery deploys it on
-  shared data with fresh writable directories and GRUB one-time boot selection.
-- Minimal candidate connection, boot identification, startup connection deadline
-  and return-to-recovery control. The next proof also includes bounded candidate MCP
-  commands, saved output and disposable `/usr` edits through `ostree admin unlock`.
+The [1.1 changelog](../../CHANGELOG.md) records work since the first agent
+investigation. Use the [agent guide](../agent-guide.md) for available tools.
+Interactive terminal input, user-session selection and dedicated live-package
+helpers remain later work. Do not rebuild completed stages or treat old milestone
+ordering as a restriction on useful fixes.
 
-Completion means an actual built/flashed USB boots recovery, an agent retrieves
-useful recovery command output through MCP, provisions and boots a candidate, then
-requests return and observes recovery reconnect with the same target identity and
-a new boot ID. Read-only recovery and preserved settings/diagnostics are checked.
-Fast tests alone cannot establish this result. Perform the separate image/physical
-checks with the required authorization; if they remain unperformed, say the milestone
-is not yet demonstrated.
-
-Start with the [fast recovery/deployment journey](testing.md#confront-the-hardest-part-first)
-while implementing this result. Use real application processes, connections and
-files; replace expensive or privileged OS work in routine tests. Do not build a
-separate simulated product. Confirm the actual mount/boot arrangement early rather
-than finishing every screen before the first boot check. Record the initial Secure
-Boot choice and measured USB space before declaring supported setup instructions.
-
-The current implementation and outstanding real checks are described in
-[local installation](../controller-installation.md). Software test success does not
-complete the physical milestone.
-
-## After milestone 1
-
-2. **Interactive candidate debugging.** Add arbitrary candidate commands,
-   concurrent sessions, interactive input, durable output, quiet waiting, file
-   transfer, command stop and investigation pause/resume. Exercise controller
-   restart and candidate interruption through evidence receipt and cleanup.
-3. **Changed software and the patch journey.** Provide generic build guidance,
-   explicit saved candidates and ordinary command/file tools; complete the investigation
-   screens. Verify temporary writable-layer package changes without disturbing
-   recovery boot selection. Keep general live replacement and patch generation
-   out of milestone 1's completion criteria.
+Develop substantial connected changes with fast integration tests. Exercise actual
+controller/target code and replace expensive or privileged OS operations. Mocks
+are test substitutes, never production placeholders. Complete independent software
+work when hardware checks need the human; state what remains undemonstrated.
 
 ## Agent decisions and when to ask
 
@@ -95,9 +65,8 @@ running suites. Follow the [testing strategy](testing.md), including real recove
 separate image checks. Start with integration
 tests, not unit tests. Documentation needs link checks and `git diff --check`.
 
-The rewrite branch already excludes the previous implementation; commit `b807199`
-preserves it for specific reference questions. Use fresh development state for
-breaking changes, without migrations or compatibility layers. Preserve owner data.
+Use fresh development state for breaking formats. No migrations or compatibility
+machinery; never reset owner state or activate an installation incidentally.
 
 [AGENTS.md](../../AGENTS.md) governs review, push/merge and live-operation approval.
 No image builds, flashing, QEMU or kernel compilation for routine edits. Obtain one
@@ -106,12 +75,3 @@ does not need reviewer agents. Do not repeat reviews or full suites per small st
 
 Designs describe intended behavior. Documentation edits do not establish working
 features or authorize live installations and hardware operations.
-
-## Quirkbench 1.1
-
-Implement issues #192–#202 from the investigation feedback in #191 as one coherent
-change: named problems, timing, ordered operations and pause controls first;
-candidate toolkit/package requests, inventory and diagnostics next. No migrations
-or owner-state reset. Use fresh development state and preserve old files for manual
-reference. Fast tests establish software behavior; updated target tools, image
-builds, flashing and hardware confirmation remain separately authorized work.

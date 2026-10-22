@@ -212,15 +212,15 @@ async def test_unchanged_target_status_does_not_write_or_claim_progress(lab):
     before = lab.controller.store.db.total_changes
 
     await wait_for_status_polls(lab)
+    assert lab.controller.store.db.total_changes == before
     after = await lab.call('controller_work_wait', work_id=work['work_id'], timeout_seconds=0)
 
     assert after['updated'] == ready['updated']
-    assert lab.controller.store.db.total_changes == before
 
 
 async def test_rejected_command_does_not_block_pause_or_results(lab):
     run = await running_candidate(lab)
-    rejected = await lab.raw_call('ssh_command_start', run_id=run, request_id='invalid', argv=[], timeout_seconds=5)
+    rejected = await lab.raw_call('ssh_command_start', run_id=run, request_id='invalid', argv=['\0'], timeout_seconds=5)
     assert rejected.isError
     # Investigation files may use any extension and need not contain JSON objects.
     evidence = lab.target.home / 'evidence' / run / 'files'

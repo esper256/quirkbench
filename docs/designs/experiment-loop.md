@@ -28,20 +28,21 @@ retained deployment again, keeping persistent edits but assigning a new run ID.
 Plain `ostree admin unlock` edits disappear on reboot. For a reusable candidate,
 prepare selected packages/files explicitly; a retained disk is not a saved candidate.
 
-For software changes, use [build helpers](experiment-builds.md) and choose the
+For software changes, follow [build guidance](experiment-builds.md) and choose the
 appropriate [deployment](candidate-deployment.md). Small probes and suitable
 userspace changes can run live. Replacing the running kernel normally needs a new
 boot. Report when a reboot or service restart is needed rather than doing it silently.
 
 MCP tools return useful bounded output, current mode/run, next actions and references
 to full saved results or instructions. Tool descriptions explain how to use them;
-context supplies build commands and relevant guides without requiring the agent to
-guess filenames. Do not flood agent context with raw logs. Save long-command output
+context links to the agent guide. The agent finds matching build instructions
+using candidate package and build information. Do not flood agent context with raw logs. Save long-command output
 durably and wake a waiting agent on completion, an agreed deadline or an error,
 without periodic model polling. Other commands can run concurrently. Each starts
 with its own explicit working directory and environment; files and services remain
 shared. See the [command rules](interactive-debugging.md#command-behavior).
-Humans have a separate progress monitor.
+The intended human monitor is shown in the mockups; current use has CLI status
+and the recovery dashboard.
 
 The agent chooses independent command timeouts; runs have no overall deadline.
 Investigation pause stops new work, lets bounded active work finish, then returns

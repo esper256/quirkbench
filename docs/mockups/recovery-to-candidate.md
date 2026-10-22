@@ -1,6 +1,6 @@
 # Milestone 1: recovery inspection and candidate boot
 
-> **EXAMPLE ONLY — intended design, not current functionality.** Names, output,
+> **EXAMPLE ONLY — illustrative screens and responses, not an exact transcript.** Names, output,
 > addresses and timing are illustrative. Any compatible agent can use these tools.
 
 The user completes [setup, recovery build and USB flash](installation-to-patch.md),
@@ -114,15 +114,15 @@ Recovery has no agent shell, file-upload or package-install interface.
 ```text
 Tool: ssh_recovery_inspect
 Input: {"target":"lab-target","view":"boot-log","max_lines":80}
-Output: {"status":"finished","exit_code":0,"output":"…recovery boot messages…","output_file":"/home/sam/.quirkbench/reports/lab-target/boot-1/boot.log"}
+Output: {"status":"finished","exit_code":0,"output":"…recovery boot messages…","controller_path":"/home/sam/.quirkbench/reports/lab-target/boot-1/boot.log"}
 
 Tool: ssh_recovery_inspect
 Input: {"target":"lab-target","view":"storage"}
-Output: {"status":"finished","exit_code":0,"output":"Recovery filesystem: read-only\nShared data: mounted read-write\nNo internal disks mounted","output_file":"/home/sam/.quirkbench/reports/lab-target/boot-1/storage.txt"}
+Output: {"status":"finished","exit_code":0,"output":"Recovery filesystem: read-only\nShared data: mounted read-write\nNo internal disks mounted","controller_path":"/home/sam/.quirkbench/reports/lab-target/boot-1/storage.txt"}
 
 Tool: ssh_recovery_inspect
 Input: {"target":"lab-target","view":"report"}
-Output: {"status":"finished","output":"=== processes ===\n…\n=== services ===\n…\n=== Current work and connection ===\n…","output_file":"/home/sam/.quirkbench/reports/lab-target/boot-1/report.txt"}
+Output: {"status":"finished","output":"=== processes ===\n…\n=== services ===\n…\n=== Current work and connection ===\n…","controller_path":"/home/sam/.quirkbench/reports/lab-target/boot-1/report.txt"}
 
 Tool: rpm_ostree_prepare_candidate
 Input: {"investigation":"first-boot","base":"ghcr.io/ublue-os/bazzite:stable","name":"baseline","request_id":"prepare-1"}
@@ -178,7 +178,7 @@ Output: {"status":"finished","target":"lab-target","target_mode":"recovery","boo
 
 Tool: ssh_recovery_inspect
 Input: {"target":"lab-target","view":"storage"}
-Output: {"status":"finished","exit_code":0,"output":"Recovery filesystem: read-only\nShared data: mounted read-write\nNo internal disks mounted","output_file":"/home/sam/.quirkbench/reports/lab-target/boot-3/storage.txt"}
+Output: {"status":"finished","exit_code":0,"output":"Recovery filesystem: read-only\nShared data: mounted read-write\nNo internal disks mounted","controller_path":"/home/sam/.quirkbench/reports/lab-target/boot-3/storage.txt"}
 ```
 
 ## Cancel a superseded deployment
@@ -205,7 +205,7 @@ Input: {"run_id":"run-1"}
 Output: {"evidence":"received","files":["results/run-1/candidate-journal.log"],"next_tool":"saved_output_read"}
 
 Tool: saved_output_read
-Input: {"file":"results/run-1/candidate-journal.log","limit":4096}
+Input: {"saved_file":"results/run-1/candidate-journal.log","limit":4096}
 Output: {"output":"…","next_offset":4096,"more":true}
 
 Tool: recovery_boot_ostree

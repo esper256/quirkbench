@@ -20,7 +20,7 @@ async def test_recovery_candidate_boot_and_return_with_diagnostics(lab):
 
     assert ready['target_mode'] == 'candidate'
     assert finished['status'] == 'finished'
-    assert 'probe observed' in Path(inspection['output_file']).read_text()
+    assert 'probe observed' in Path(inspection['controller_path']).read_text()
     results = Path(finished['results'])
     assert 'probe observed' in (results / 'boot-2.log').read_text()
     await lab.until(lambda: lab.target.active.get('evidence_received'))
@@ -100,7 +100,7 @@ async def test_separate_target_process_reconnects_with_existing_pairing(lab):
         await lab.until(lambda: any(t['boot_id'] == 'separate-process' for t in lab.controller.targets.values()))
         result = await lab.call('ssh_recovery_inspect', target='unrelated-laptop', view='boot-log')
         assert result['boot_id'] == 'separate-process'
-        assert 'probe observed' in Path(result['output_file']).read_text()
+        assert 'probe observed' in Path(result['controller_path']).read_text()
         assert len(lab.controller.store.find('target')) == 1
     finally:
         process.send_signal(__import__('signal').SIGINT)
@@ -250,7 +250,12 @@ async def test_failed_discard_then_repeat_has_new_evidence(lab):
     await lab.until(lambda: lab.controller.store.get('run', second['run_id'])['status']=='finished')
 
     result = await lab.call('ssh_command_read', command_id=command['command_id'])
+    history = await lab.call('investigation_runs', investigation='wifi-case', limit=1)
+    older = await lab.call('investigation_runs', investigation='wifi-case', after=history['next_cursor'])
     assert second['run_id'] != first['run_id']
+    assert history['more'] and history['runs'][0]['run_id'] == second['run_id']
+    assert older['runs'][0]['run_id'] == first['run_id']
+    assert history['runs'][0]['deployment_id'] == older['runs'][0]['deployment_id']
     assert result['output'] == 'new evidence\n' and result['status'] == 'finished'
 
 

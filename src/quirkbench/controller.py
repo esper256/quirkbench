@@ -17,7 +17,7 @@ from .config import Config
 from .files import disk, atomic_write, contained, identifier, read_json
 from .linux import Linux
 from .investigations import InvestigationControls
-from .work_status import WORK_DONE, COMMAND_DONE, work_finished, wait_finished, command_finished
+from .work_status import WORK_DONE, COMMAND_DONE, work_finished, wait_finished, command_finished, completion
 from .store import Store, new_id
 
 
@@ -121,14 +121,36 @@ class Controller(InvestigationControls):
         return {'agent_guide': str(guide) if guide.is_file() else 'https://github.com/esper256/quirkbench/blob/main/docs/agent-guide.md',
                 'deployment_guidance': 'ready_for_deploy describes fresh deployment on the target, not controller preparation. Prepare while retained files remain; discard only when replacing them and required diagnostics have arrived. Compatible source identities need not match.',
                 'controller_source': self.software_source, 'installed_source_differs': source_hash() != self.software_source, 'investigation': investigation, 'problems': inv['problems'], 'investigation_status': inv['status'], 'attention': inv.get('attention'), 'target': t['name'],
-                **status, 'preparation_readiness': self.preparation_readiness(), 'tools': ['investigation_control', 'investigation_problem_update', 'investigation_timeline', 'controller_sequence_start', 'controller_sequence_resume', 'controller_sequence_cancel', 'ssh_candidate_inventory', 'ssh_recovery_inspect', 'rpm_ostree_prepare_candidate',
-                                   'recovery_deploy_ostree', 'recovery_boot_ostree', 'recovery_discard_ostree', 'run_results', 'saved_output_read', 'recovery_cancel_ostree', 'controller_work_wait', 'recovery_return',
-                                   'sftp_upload', 'sftp_download', 'ssh_command_start', 'ssh_command_read', 'ssh_command_wait', 'ssh_command_stop'],
-                'runs': runs,
+                **status, 'preparation_readiness': self.preparation_readiness(),
+                'current_run': next((self.run_summary(r) for r in runs if r['id'] == status.get('run_id')), None),
+                'run_count': len(runs), 'history_tool': 'investigation_runs',
                 'working_directory': '/var/tmp',
                 'command_environment': {'QUIRKBENCH_RUN_ID': 'Current run ID', 'QUIRKBENCH_EVIDENCE_DIR': 'Completed experiment files; uploaded on recovery return', 'QUIRKBENCH_WORK_DIR': 'Scratch files; removed after confirmed recovery upload'},
                 'workspace_lifetime': 'Writable candidate /var/tmp survives repeat boots until deployment discard; /run and /tmp may not. Commands share files, not shell environments.',
-                'instructions': 'Watch for all investigation symptoms across shared runs. Choose the next useful action: inspect recovery, work on a running candidate, boot retained files, or prepare/deploy different software and explicitly boot it. Returned files are retained until recovery_discard_ostree. Plain ostree admin unlock edits to /usr are lost on reboot. Candidate SSH commands run as root with explicit argv/cwd/env and individual deadlines. Use concurrent bounded collectors and probes. Candidates with the optional toolkit offer quirkbench-load --help for synthetic load; it is not a required step. Finish evidence files with an atomic rename, then use sftp_download. Quiet waits do not stop commands; execution timeouts do not wake a suspended computer. Build changed software with matching sources/configuration/symbol versions using ordinary build tools; transfer and activate it with ordinary commands. Do not force module unloading or bypass signatures. Use a new candidate boot when live replacement is unsuitable. Recovery has no agent shell.'}
+                'instructions': 'Choose a tool for the current target mode. Read agent_guide when starting or when persistence and recovery behavior are unclear; it describes options, not mandatory steps.'}
+
+    @staticmethod
+    def run_summary(run):
+        return dict(run_id=run['id'], candidate_id=run['candidate'], deployment_id=run['deployment_id'],
+                    status=run['status'], boot_id=run.get('boot_id'), evidence_received=bool(run.get('evidence')),
+                    created_at=run.get('created_at'))
+
+    def investigation_runs(self, investigation, after=None, limit=20):
+        self.store.get('investigation', investigation)
+        if not 1 <= limit <= 100:
+            raise ValueError('Choose 1–100 runs per page.')
+        runs = sorted((r for r in self.store.find('run') if r['investigation'] == investigation),
+                      key=lambda r:(r.get('created_at', 0), r['id']), reverse=True)
+        start = 0
+        if after is not None:
+            matches = [i for i,r in enumerate(runs) if r['id'] == after]
+            if not matches:
+                raise ValueError('Use next_cursor from this investigation or omit after to start again.')
+            start = matches[0]+1
+        page = runs[start:start+limit]
+        return dict(runs=[self.run_summary(r) for r in page], more=start+limit<len(runs),
+                    next_cursor=page[-1]['id'] if page else after)
+
 
     def preparation_readiness(self):
         path = self.linux.tool_path('podman')
@@ -163,7 +185,7 @@ class Controller(InvestigationControls):
         path = self.root / 'reports' / t['id'] / boot / (identifier(view) + '-' + secrets.token_hex(6) + '.txt')
         await disk(atomic_write, path, result['output'])
         return dict(result, output=result['output'][:2000], output_truncated=len(result['output']) > 2000,
-                    output_file=str(path), saved_file=path.relative_to(self.root).as_posix(), next_tool='saved_output_read', status='finished')
+                    controller_path=str(path), saved_file=path.relative_to(self.root).as_posix(), next_tool='saved_output_read', status='finished')
 
     async def candidate_inventory(self, run_id):
         run, target = self.command_run(run_id)
@@ -172,7 +194,7 @@ class Controller(InvestigationControls):
         await disk(atomic_write, path, result['output'])
         return dict(run_id=run_id, boot_id=target['boot_id'], output=result['output'][:2000],
                     output_truncated=len(result['output']) > 2000, saved_file=path.relative_to(self.root).as_posix(),
-                    output_file=str(path), next_tool='saved_output_read')
+                    controller_path=str(path), next_tool='saved_output_read')
 
 
     async def saved_output(self, file, offset=0, limit=8192):
@@ -186,7 +208,7 @@ class Controller(InvestigationControls):
                 stream.seek(offset)
                 value = stream.read(limit)
                 more = bool(stream.read(1))
-            return dict(output=value.decode(errors='replace'), next_offset=offset+len(value), more=more)
+            return dict(saved_file=file, output=value.decode(errors='replace'), offset=offset, next_offset=offset+len(value), output_bytes=path.stat().st_size, more=more)
         return await disk(read)
 
     async def run_results(self, run_id):
@@ -244,7 +266,7 @@ class Controller(InvestigationControls):
         if connected['boot_id'] != target['boot_id']:
             raise ValueError('Candidate changed boot during transfer; inspect it before executing the file.')
         self.store.put('transfer', new_id('transfer'), run_id=run_id, boot_id=target['boot_id'], name=name, sha256=item['sha256'])
-        return {'run_id': run_id, 'boot_id': target['boot_id'], 'file': '/var/tmp/quirkbench/' + name,
+        return {'run_id': run_id, 'boot_id': target['boot_id'], 'target_path': '/var/tmp/quirkbench/' + name,
                 'sha256': item['sha256'], 'next_tool': 'ssh_command_start',
                 'instructions': 'File uploaded, not executed. Use chmod if executable permission is needed. Files survive repeat boots until deployment discard.'}
 
@@ -259,11 +281,21 @@ class Controller(InvestigationControls):
             if current['boot_id'] != target['boot_id'] or self.connections.get(run['target']) is not connection:
                 raise ValueError('Candidate connection changed during download; retry after inspecting context.')
         result = await download(connection, file, destination, check_connection)
-        return dict(result, run_id=run_id, boot_id=target['boot_id'], file=str(destination),
+        return dict(result, run_id=run_id, boot_id=target['boot_id'], controller_path=str(destination),
                     saved_file=destination.relative_to(self.root).as_posix(),
                     instructions='Local copy ready. Target evidence remains until final recovery upload is confirmed.')
 
-    async def command_start(self, run_id, request_id, argv, cwd, env, timeout_seconds, max_output_bytes):
+    async def command_start(self, run_id, request_id, argv, cwd, env, timeout_seconds, max_output_bytes, *, script=None, shell='/bin/sh', wait_seconds=0):
+        if not 0 <= wait_seconds <= 5:
+            raise ValueError('Brief start wait must be between 0 and 5 seconds.')
+        if (argv is None) == (script is None):
+            raise ValueError('Provide exactly one of argv or script.')
+        if script is not None:
+            if not isinstance(script, str) or not script.strip():
+                raise ValueError('Provide a nonempty script.')
+            argv = [shell, '-c', script]
+        elif shell != '/bin/sh':
+            raise ValueError('shell applies only to script; argv executes exactly as supplied.')
         run, target = self.command_run(run_id)
         self.require_active(run['investigation'])
         inputs = dict(argv=argv,cwd=cwd,env=env,timeout_seconds=timeout_seconds,max_output_bytes=max_output_bytes)
@@ -276,14 +308,27 @@ class Controller(InvestigationControls):
         if work.get('not_started'):
             raise RequestRejected(work['error'], not_started=True)
         try:
-            return await self.rpc(run['target'],'command-start',run_id=run_id,boot_id=target['boot_id'],
-                                  command_id=work['id'],**inputs)
+            result = await self.rpc(run['target'],'command-start',run_id=run_id,boot_id=target['boot_id'],
+                                    command_id=work['id'],**inputs)
+            return await self.command_wait(work['id'], wait_seconds) if wait_seconds else self.command_result(result)
         except RequestRejected as error:
             if error.not_started:
                 self.update_work(work['id'], status='failed', not_started=True, error=str(error))
             raise
 
+    @staticmethod
+    def command_result(result):
+        result = completion(result, command=True)
+        if 'output_bytes' in result and 'next_offset' in result:
+            result['more'] = result['next_offset'] < result['output_bytes']
+        result['next_tool'] = ('ssh_command_read' if result.get('more') else
+                               'ssh_command_wait' if not result['complete'] else None)
+        return result
+
     async def command_read(self, command_id, offset=0, stop=False):
+        return self.command_result(await self._command_read(command_id, offset, stop))
+
+    async def _command_read(self, command_id, offset=0, stop=False):
         work = self.store.get('work',command_id)
         if work['action'] != 'ssh-command':
             raise ValueError('Not an SSH command ID.')
@@ -311,11 +356,11 @@ class Controller(InvestigationControls):
             saved = read_json(folder/(command_id+'.json'), {})
             path = folder/(command_id+'.txt')
             if not path.exists():
-                return saved, b''
+                return saved, b'', 0
             with path.open('rb') as stream:
                 stream.seek(offset)
-                return saved, stream.read(32768)
-        saved, output = await disk(read_saved)
+                return saved, stream.read(32768), __import__('os').fstat(stream.fileno()).st_size
+        saved, output, output_bytes = await disk(read_saved)
         known = target or self.store.get('target', run['target'])
         observed_boot = known.get('boot_id') or known.get('last_boot_id')
         new_boot = observed_boot is not None and observed_boot != work['boot_id']
@@ -323,7 +368,7 @@ class Controller(InvestigationControls):
         if saved or new_boot:
             self.update_work(command_id, status=status, stop_requested=False if status in COMMAND_DONE else work.get('stop_requested', False))
         return dict(command_id=command_id,run_id=run['id'],boot_id=work['boot_id'], status=status,
-            output=output.decode(errors='replace'),next_offset=offset+len(output),
+            output=output.decode(errors='replace'),offset=offset,next_offset=offset+len(output),output_bytes=output_bytes,
             message='Connection lost; command outcome is unknown. It will not be replayed.' if status == 'connection-lost' else 'Reading saved command evidence; a new boot ends earlier commands.',
             evidence='received' if run.get('evidence') else 'pending',
             next_tool='ssh_command_wait' if status == 'connection-lost' else 'ssh_command_read',
@@ -335,7 +380,7 @@ class Controller(InvestigationControls):
         deadline = asyncio.get_running_loop().time()+timeout_seconds
         while True:
             result = await self.command_read(command_id,offset)
-            if result.get('saving_error') or command_finished(result) or asyncio.get_running_loop().time() >= deadline:
+            if result.get('saving_error') or result.get('status') == 'connection-lost' or command_finished(result) or asyncio.get_running_loop().time() >= deadline:
                 return result
             await asyncio.sleep(min(self.command_poll_interval,max(0,deadline-asyncio.get_running_loop().time())))
 
@@ -406,12 +451,15 @@ class Controller(InvestigationControls):
             result['candidate'] = self.store.get('candidate', run['candidate'])
         log = self.root / 'logs' / (key + '.log')
         if log.exists():
-            result['log_file'] = str(log)
+            result['log_file'] = log.relative_to(self.root).as_posix()
+            result['saved_file'] = result['log_file']
             result['last_activity'] = max(work['updated'], log.stat().st_mtime)
             with log.open('rb') as f:
                 f.seek(max(0, log.stat().st_size - 4000))
                 result['recent_output'] = f.read().decode(errors='replace')
-        return result
+        if work.get('run_id'):
+            result['deployment_id'] = self.store.get('run', work['run_id'])['deployment_id']
+        return completion(result)
 
     async def deploy(self, investigation, candidate, request_id, kernel_args=None):
         from .candidates import debugging_kernel_args
@@ -440,7 +488,7 @@ class Controller(InvestigationControls):
                 return self.work_result(work['id'])
             run = new_id('run')
             self.store.put('run', run, target=t, investigation=investigation, candidate=candidate,
-                           status='preparing', work_id=work['id'], deployment_id=run, evidence=None, kernel_args=kernel_args,
+                           status='preparing', work_id=work['id'], deployment_id=run, created_at=time.time(), evidence=None, kernel_args=kernel_args,
                            recovery_boot=self.targets[t]['boot_id'])
             self.update_work(work['id'], status='starting', stage='Deploying candidate on target', run_id=run)
         self.spawn(self._dispatch_boot(t, work['id'], run, software, timeout))
@@ -484,7 +532,7 @@ class Controller(InvestigationControls):
             # A repeat boot gets new evidence and command identities, while OS files stay put.
             attempt = new_id('run') if action == 'boot' and (previous['status'] == 'finished' or previous.get('evidence') is not None or previous.get('boot_id')) else run_id
             if attempt != run_id:
-                self.store.put('run', attempt, **{k:v for k,v in previous.items() if k not in ('id','evidence','boot_id')}, evidence=None)
+                self.store.put('run', attempt, **{k:v for k,v in previous.items() if k not in ('id','evidence','boot_id','created_at')}, evidence=None, created_at=time.time())
             self.store.change('run', attempt, status='starting' if action == 'boot' else 'discarding',
                               work_id=work['id'], recovery_boot=target['boot_id'])
             self.update_work(work['id'], status='starting', run_id=attempt, previous_run=run_id,

@@ -36,7 +36,7 @@ Waiting for the agent's next action.
 ## Controller computer · Force stop
 
 ```console
-$ quirkbench investigation stop wake-wifi --force
+$ quirkbench investigation force-stop wake-wifi
 Force stop requested. New work stopped.
 Waiting for target lab-target to respond.
 ```

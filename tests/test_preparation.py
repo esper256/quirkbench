@@ -90,7 +90,7 @@ async def test_agent_files_and_changed_candidate_inputs(lab, tmp_path):
     ready = await lab.call('controller_work_wait', work_id=work['work_id'], timeout_seconds=5)
     run = await lab.start_run(ready['candidate_id'])
     await lab.boot_target('candidate', run['run_id'])
-    uploaded = await lab.call('sftp_upload', run_id=run['run_id'], file=str(probe), name='probe')
+    uploaded = await lab.call('sftp_upload', run_id=run['run_id'], controller_path=str(probe), target_name='probe')
 
     assert ready['next_tool'] == 'recovery_deploy_ostree'
     staged = lab.root / 'candidates' / ready['candidate_id']

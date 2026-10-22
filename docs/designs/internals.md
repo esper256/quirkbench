@@ -14,7 +14,7 @@ keep ordinary file access real rather than introducing a universal filesystem
 proxy. Follow the [testable application design](testing.md#keep-the-application-easy-to-exercise);
 do not leave tests to work around an already completed implementation.
 
-- Implement afresh in Python. The old code at Git commit `b807199` is reference material, not an architecture or stored-format constraint. Reuse useful ideas or code selectively. Share application behavior between human and agent interfaces. Preserve owner data; do not migrate it or reset it.
+- Share application behavior between human and agent interfaces. Preserve owner data; no new migrations or compatibility layers.
 - Use SQLite for controller work records, request IDs and results metadata; the foreground controller is the only writer. CLI, MCP and HTTPS use its application functions through the existing local interface. Keep editable config in TOML and output/evidence in ordinary files. Target command records remain target-owned; a controller database does not replace them.
 - Single-user software needs locks, not accounts/tenants. Ordinary data is not invalid merely because of group-readable permissions or symlinked ancestors. Create secrets privately and authenticate network peers.
 - This is a personal experiment tool, not a hardened OS distribution service. Use ordinary tool-supported authentication and package checks. Do not add a release-security system, extra signing approvals or repeated verification rituals for experiments. Keep practical disk protection separate from this choice.
