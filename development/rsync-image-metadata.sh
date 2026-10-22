@@ -7,7 +7,7 @@ import io
 import tarfile
 
 with tarfile.open('fixture.tar', 'w', format=tarfile.PAX_FORMAT) as archive:
-    for name in ('usr', 'usr/bin', 'var'):
+    for name in ('.', 'usr', 'usr/bin', 'var'):
         item = tarfile.TarInfo(name)
         item.type = tarfile.DIRTYPE
         item.mode = 0o755
@@ -32,13 +32,17 @@ with tarfile.open('fixture.tar', 'w', format=tarfile.PAX_FORMAT) as archive:
     item.type, item.linkname = tarfile.LNKTYPE, 'usr/bin/probe'
     archive.addfile(item)
 PY
+cc -Wall -Wextra -Werror /export-root.c -o /work/export-root $(pkg-config --cflags --libs ostree-1 libarchive)
+ostree --repo=repo init --mode=archive
+ostree --repo=repo commit --branch=fixture --tree=tar=fixture.tar
+/work/export-root /work/repo fixture /work/export.tar
 truncate -s 64M rootfs.img
 export LIBGUESTFS_BACKEND=direct LIBGUESTFS_BACKEND_SETTINGS=force_tcg
 guestfish --format=raw -a rootfs.img <<'GUEST'
 run
 mkfs ext4 /dev/sda
 mount /dev/sda /
-tar-in fixture.tar / xattrs:true selinux:true acls:true
+tar-in export.tar / xattrs:true selinux:true acls:true
 sync
 umount-all
 shutdown

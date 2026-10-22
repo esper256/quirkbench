@@ -4,6 +4,7 @@ on:
     paths:
       - .github/workflows/rsync-image.yml
       - development/rsync-image-metadata.sh
+      - src/quirkbench/assets/bazzite/export-root.c
       - src/quirkbench/root_image.py
       - src/quirkbench/assets/bazzite/build-root-image.sh
 jobs:
@@ -23,7 +24,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/qb-tools"
           cat > "$RUNNER_TEMP/qb-tools/Containerfile" <<'EOF'
           FROM registry.fedoraproject.org/fedora:43
-          RUN dnf -y install ostree e2fsprogs python3 libguestfs-tools-c kernel-core && dnf clean all
+          RUN dnf -y install ostree ostree-devel libarchive-devel gcc e2fsprogs python3 libguestfs-tools-c kernel-core && dnf clean all
           EOF
           podman build -t localhost/qb-metadata "$RUNNER_TEMP/qb-tools"
           podman image inspect localhost/qb-metadata --format '{{.Id}}'
@@ -32,5 +33,6 @@ jobs:
           mkdir -p "$RUNNER_TEMP/qb-image-proof"
           podman run --rm --user 0 --network=none --security-opt label=disable \
             -v "$RUNNER_TEMP/qb-image-proof:/work" \
+            -v "$PWD/src/quirkbench/assets/bazzite/export-root.c:/export-root.c:ro" \
             -v "$PWD/development/rsync-image-metadata.sh:/check.sh:ro" \
             localhost/qb-metadata bash /check.sh
