@@ -122,6 +122,22 @@ class Store:
         data.pop("id")
         return self.put(kind, key, **(data | fields))
 
+    def delete_investigation(self, name, runs, works, transfers, candidates):
+        with self.db:
+            for kind, ids in (
+                ("investigation", {name}),
+                ("run", runs),
+                ("work", works),
+                ("transfer", transfers),
+                ("candidate", candidates),
+            ):
+                self.db.executemany(
+                    "DELETE FROM records WHERE kind=? AND id=?", [(kind, key) for key in ids]
+                )
+            self.db.executemany(
+                "DELETE FROM events WHERE scope=?", [(key,) for key in runs | {name}]
+            )
+
     @contextmanager
     def admission(self):
         """Commit related request/run records together, before any dispatch.

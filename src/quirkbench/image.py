@@ -1,5 +1,6 @@
 """Cached container-based recovery and target RPM builds. Never runs at import."""
 
+from datetime import datetime, timezone
 import hashlib
 import importlib.resources
 import json
@@ -76,6 +77,7 @@ async def tools_identity(linux, tools):
 
 
 async def build_target_rpm(root, linux, tools, log):
+    linux.require_tools("podman")
     check_packaging_source()
     tools_id = await tools_identity(linux, tools)
     key = hashlib.sha256(
@@ -117,6 +119,7 @@ async def build_target_rpm(root, linux, tools, log):
 
 
 async def build_recovery(root, linux, force=False, progress=print, update_base=False):
+    linux.require_tools("podman")
     check_packaging_source()
     with build_lock(root):
         return await _build_recovery(root, linux, force, progress, update_base)
@@ -138,7 +141,8 @@ async def _build_recovery(root, linux, force, progress, update_base):
     result = root / "images" / selected.get("id", key)
     existing = read_json(result / "image.json")
     if existing and not force:
-        progress(f"Recovery image {key} is already available. Use --force to rebuild.")
+        save_json(root / "latest-build.json", {"id": existing["id"]})
+        progress("Recovery already matches these build settings. Use --force to rebuild.")
         return existing
     verify_base(base_folder, base)
     stage = root / "images" / (key + ".building")
@@ -179,6 +183,7 @@ async def _build_recovery(root, linux, force, progress, update_base):
     result = root / "images" / image_id
     record = {
         "id": image_id,
+        "built_at": datetime.now(timezone.utc).isoformat(),
         "inputs": key,
         "files": hashes,
         "base": base["id"],
@@ -196,8 +201,10 @@ async def _build_recovery(root, linux, force, progress, update_base):
         shutil.rmtree(stage)
     else:
         stage.rename(result)
+    record = read_json(result / "image.json")
     save_json(selection_path, {"id": image_id})
+    save_json(root / "latest-build.json", {"id": image_id})
     progress(
-        f"Recovery image {image_id} ready. Boot has not been checked. Next: quirkbench recovery flash"
+        "Recovery build ready. Boot has not been checked. Next: quirkbench recovery flash --built"
     )
     return record

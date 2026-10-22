@@ -2,15 +2,33 @@
 
 Revisable [design](../README.md); commands describe the destination, not current availability.
 
+**Distribution:** ship a native RPM with ordinary dependencies and one command
+available to all users. Each user owns `~/.quirkbench` and runs a foreground
+controller. Default recovery comes from a release download; keep local builds
+explicit. The package helper embeds an exact recovery download selection. Publishing is an
+explicit release task; the source checkout does not invent a published selection.
+
+**Development:** `./dev quirkbench ...` runs checkout code on the host with private
+Python dependencies. Distrobox forwarding belongs only in this launcher, never
+the application. Install no host RPMs as part of development setup. Use existing
+host tools and report missing ones; do not silently install or layer packages.
+Use normal user data by default, with `--data-dir` for explicit alternatives. Test
+release RPM installation in a disposable Fedora environment at packaging checkpoints.
+
 ```sh
 quirkbench setup
 quirkbench controller run
 # In another terminal:
-quirkbench recovery build
 quirkbench recovery flash
 ```
 
 **Setup:** ask short terminal questions with useful defaults; Enter accepts each default. Ask for the target-reachable controller URL, generate missing connection credentials and save `~/.quirkbench/config.toml`. Setup saves configuration; it does not start a background service. Print `quirkbench controller run` as the next step. The controller runs in the foreground in a separate terminal. Re-running edits choices. Direct edits apply at restart; unrelated edits preserve credentials. No controller systemd integration, automatic backgrounding or service manager.
+
+**Download:** default flashing downloads the recovery selected by the installed
+release, or reuses its completed cache entry. `recovery download` acquires it
+without flashing or controller setup. Verify the archive checksum and expected
+files before publishing the cache entry. Release selection is independent of
+connected targets and their supported operations.
 
 **Build:** automatically acquire the selected pinned inputs and build the generic recovery image. Cache by relevant code, included files, build instructions, packages and build tools—not paths or unrelated settings. A hit says the image is available; `--force` rebuilds without deleting the last good image first. Show phases/logs; incomplete output is not selectable.
 
@@ -33,7 +51,10 @@ This command builds the recovery image. Experiment candidates use the separate
 [candidate deployment path](candidate-deployment.md); ordinary experiments do not
 reflash the USB. Include tools for the selected deployment and outbound target connection.
 
-**Flash:** refuse missing setup before writes. Use the only compatible image or a short selector. Offer USB and hot-pluggable external drives, including USB4 NVMe. Show one clear confirmation in the writer after resolving the device path: model, serial, size and current partitions with their mount locations. Refuse mounted drives, including mounted partitions and active swap; recheck after confirmation. Elevate only the disk writer, retain system-disk exclusion and recheck the selected device before writing. Verify/flush completion before declaring success.
+**Flash:** refuse missing setup before writes. Default to the release selection;
+`--built` selects the last successful local build or cache reuse. Neither choice
+requires a hash. `--image ID` selects an exact image and fails if unknown.
+List dates, sizes and default labels in `recovery list`. Offer USB and hot-pluggable external drives, including USB4 NVMe. Show one clear confirmation in the writer after resolving the device path: model, serial, size and current partitions with their mount locations. Refuse mounted drives, including mounted partitions and active swap; recheck after confirmation. Elevate only the disk writer, retain system-disk exclusion and recheck the selected device before writing. Verify/flush completion before declaring success.
 
 Existing Quirkbench media defaults to updating recovery and boot files, keeping
 shared data, Wi-Fi settings and pairing. Check the existing layout, recovery
@@ -72,3 +93,21 @@ MCP command or tunnel setup.
 
 Scripting supplies explicit choices without prompts. Use the same configuration,
 image cache and disk writer as interactive setup.
+
+## Storage cleanup
+
+Group controller storage by how the user reduces it: build cache, investigations,
+recovery images, unassigned diagnostics, and controller/build logs. Podman storage
+is separate. Recovery images include their retained base packages.
+
+`storage clean` previews the selected group and asks before removal; `--yes`
+confirms explicitly. Keep selected recovery images, exact recovery rebuild inputs
+and the current rotating controller log. Clearing caches only removes rebuildable
+files. No automatic deletion of collected diagnostics.
+
+`investigation delete NAME` requires a paused investigation with no unfinished
+work or retained target deployment. Delete its diagnostics and records; reclaim
+candidate files and supplied packages only when no other investigation references
+them. OSTree removes unreferenced OS files using its own pruning command. Shared
+files are counted once, not charged in full to every investigation. If removal
+fails, keep the investigation unavailable and let the same command retry.

@@ -319,7 +319,7 @@ class Lab:
         self.boot_number = 0
 
     async def cli(self, *args):
-        return await execute(parser().parse_args(["--state", str(self.root), *args]))
+        return await execute(parser().parse_args(["--data-dir", str(self.root), *args]))
 
     async def start(self):
         self.ports = []

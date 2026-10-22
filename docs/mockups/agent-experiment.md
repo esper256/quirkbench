@@ -123,7 +123,7 @@ Input: {
   ]
 }
 Output: {"work_id":"sequence-1","status":"running","next_tool":"controller_work_wait",
- "quiet_wait_command":"/home/sam/dev/quirkbench/.venv/bin/python -m quirkbench.cli --state /home/sam/.quirkbench --json investigation wait intermittent-fault --work sequence-1 --timeout 3600"}
+ "quiet_wait_command":"/usr/bin/python3 -m quirkbench.cli --data-dir /home/sam/.quirkbench --json investigation wait intermittent-fault --work sequence-1 --timeout 3600"}
 
 Tool: controller_work_wait
 Input: {"work_id":"sequence-1","timeout_seconds":50}

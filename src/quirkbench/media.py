@@ -312,6 +312,20 @@ blscfg
 
 async def write_usb(device, expected, image, connection, linux=None, *, yes=False, erase=False):
     linux = linux or Linux()
+    linux.require_tools(
+        "lsblk",
+        "parted",
+        "mkfs.vfat",
+        "mkfs.ext4",
+        "tune2fs",
+        "grub2-editenv",
+        "mount",
+        "umount",
+        "blkid",
+        "blockdev",
+        "udevadm",
+        "sync",
+    )
     requested = str(device)
     device = str(Path(device).resolve())
     disks = await usb_disks(linux)

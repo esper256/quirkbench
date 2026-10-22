@@ -29,6 +29,7 @@ from .storage import Storage
 
 
 class Controller(InvestigationControls, Storage, CommandControl):
+    status_warn_after = 10
     poll_interval = 1
     command_poll_interval = 0.5
 
@@ -417,23 +418,24 @@ class Controller(InvestigationControls, Storage, CommandControl):
         check_packaging_source()
         if not isinstance(startup_probe_timeout_seconds, int) or startup_probe_timeout_seconds <= 0:
             raise ValueError("Startup probe timeout must be a positive number of seconds.")
-        changes = await disk(
-            capture_inputs, self.root, packages or [], replacements or [], startup_probe
-        )
-        from .bazzite import package_requests
-
-        changes["repository_packages"] = package_requests(repository_packages or [])
-        changes["debugging_tools"] = debugging_tools
-        if startup_probe:
-            changes["startup_probe_timeout_seconds"] = startup_probe_timeout_seconds
-        async with self.store.admission():
-            (await self.require_active(investigation))
-            work, fresh = await self.store.request(
-                "prepare",
-                investigation,
-                request_id,
-                {"base": base, "name": name, "changes": changes},
+        async with self.candidate_files_lock:
+            changes = await disk(
+                capture_inputs, self.root, packages or [], replacements or [], startup_probe
             )
+            from .bazzite import package_requests
+
+            changes["repository_packages"] = package_requests(repository_packages or [])
+            changes["debugging_tools"] = debugging_tools
+            if startup_probe:
+                changes["startup_probe_timeout_seconds"] = startup_probe_timeout_seconds
+            async with self.store.admission():
+                (await self.require_active(investigation))
+                work, fresh = await self.store.request(
+                    "prepare",
+                    investigation,
+                    request_id,
+                    {"base": base, "name": name, "changes": changes},
+                )
         if fresh:
             task = self.spawn(self._prepare(work, inv))
             self.preparations[work["id"]] = task
@@ -511,7 +513,7 @@ class Controller(InvestigationControls, Storage, CommandControl):
                     __import__("sys").executable,
                     "-m",
                     "quirkbench.cli",
-                    "--state",
+                    "--data-dir",
                     str(self.root),
                     "--json",
                     "investigation",
@@ -669,13 +671,13 @@ class Controller(InvestigationControls, Storage, CommandControl):
             )
 
     async def retained_action(self, run_id, request_id, action, timeout=300):
-        previous = await self.store.get("run", run_id)
-        inv = await self.store.get("investigation", previous["investigation"])
-        if not inv["authorized"]:
-            raise ValueError("Investigation is not authorized.")
         if not 1 <= timeout <= 3600:
             raise ValueError("Startup connection timeout must be between 1 and 3600 seconds.")
         async with self.store.admission():
+            previous = await self.store.get("run", run_id)
+            inv = await self.store.get("investigation", previous["investigation"])
+            if not inv["authorized"] or inv["status"] == "deleting":
+                raise ValueError("Investigation is not authorized or is being deleted.")
             if action == "boot":
                 await self.require_active(previous["investigation"])
             work, fresh = await self.store.request(
@@ -822,8 +824,11 @@ class Controller(InvestigationControls, Storage, CommandControl):
             pass
 
     async def return_recovery(self, run_id, request_id):
-        run = await self.store.get("run", run_id)
         async with self.store.admission():
+            run = await self.store.get("run", run_id)
+            inv = await self.store.get("investigation", run["investigation"])
+            if inv["status"] == "deleting":
+                raise ValueError("Investigation is being deleted.")
             work, fresh = await self.store.request(
                 "return", run["investigation"], request_id, {"run_id": run_id}
             )
@@ -887,6 +892,9 @@ class Controller(InvestigationControls, Storage, CommandControl):
         if old:
             old.close()
         self.connections[tid] = conn
+        announced = False
+        cancelled = False
+        failure = ""
         try:
             while not conn.is_closed():
                 pending_runs = await self.store.find(
@@ -904,10 +912,22 @@ class Controller(InvestigationControls, Storage, CommandControl):
                     if "status-selection" in self.targets.get(tid, {}).get("capabilities", [])
                     else {}
                 )
-                result = await self.rpc(tid, "status", **options)
+                from .controller_log import status_response
+
+                result = await status_response(
+                    self.rpc(tid, "status", **options),
+                    self.log,
+                    target.get("name", tid),
+                    warn_after=self.status_warn_after,
+                )
                 if result["target_id"] != tid:
                     raise ValueError("SSH identity does not match target status.")
                 identifier(result["boot_id"])
+                if not announced:
+                    self.log.info(
+                        "Target %s connected (%s)", target.get("name", tid), result["mode"]
+                    )
+                    announced = True
                 result["last_contact"] = time.time()
                 previous_status = self.targets.get(tid, {})
                 self.targets[tid] = result
@@ -1070,8 +1090,11 @@ class Controller(InvestigationControls, Storage, CommandControl):
                             )
                 self.changed.set()
                 await asyncio.sleep(self.poll_interval)
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
         except (asyncssh.Error, OSError, ValueError, TimeoutError, json.JSONDecodeError) as error:
-            self.log.warning("Target %s status connection ended: %s", tid, type(error).__name__)
+            failure = f" ({type(error).__name__})"
             reason = (
                 "Status request timed out after 30 seconds"
                 if isinstance(error, TimeoutError)
@@ -1080,8 +1103,29 @@ class Controller(InvestigationControls, Storage, CommandControl):
             conn.disconnect(asyncssh.DISC_BY_APPLICATION, reason)
         finally:
             if self.connections.get(tid) is conn:
+                # Release ownership before database reads can yield to a reconnect.
                 self.connections.pop(tid, None)
                 last = self.targets.pop(tid, {})
+                runs = {r["id"]: r for r in await self.store.find("run", target=tid)}
+                expected = any(
+                    r.get("status") == "starting" and r.get("recovery_boot") == last.get("boot_id")
+                    for r in runs.values()
+                ) or any(
+                    w.get("action") == "return"
+                    and w.get("status") == "returning"
+                    and w.get("run_id") in runs
+                    and runs[w["run_id"]].get("boot_id") == last.get("boot_id")
+                    for w in await self.store.find("work")
+                )
+                if not cancelled:
+                    self.log.log(
+                        logging.INFO if expected else logging.WARNING,
+                        "Target %s disconnected%s",
+                        target.get("name", tid),
+                        " during a requested reboot"
+                        if expected
+                        else failure + "; waiting for reconnection",
+                    )
                 (
                     await self.store.change(
                         "target",
@@ -1131,6 +1175,8 @@ class Controller(InvestigationControls, Storage, CommandControl):
     async def local(self, action, data):
         if action == "storage":
             return await self.storage(data.get("categories", ()), data.get("selected"))
+        if action == "investigation-delete":
+            return await self.delete_investigation(data["name"], data.get("confirm", False))
         if action == "investigation-export":
             return await self.export_investigation(data["name"], data["destination"])
         if action == "invitation":
@@ -1202,6 +1248,8 @@ class Controller(InvestigationControls, Storage, CommandControl):
         preflight(self.root)
         from .controller_log import start_log
 
+        # AsyncSSH INFO logs describe every status channel. Keep failures visible.
+        logging.getLogger("asyncssh").setLevel(logging.WARNING)
         self.log, log_listener, log_file = start_log(self.root)
         self.log.info("Controller starting")
         self.store = await AsyncStore.open(self.root)
@@ -1242,6 +1290,7 @@ class Controller(InvestigationControls, Storage, CommandControl):
         listener = None
         runner = web.AppRunner(self.https_app(), access_log=None)
         mcp_task = None
+        mcp_socket = None
         try:
             await runner.setup()
             tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -1260,6 +1309,12 @@ class Controller(InvestigationControls, Storage, CommandControl):
                 keepalive_interval=10,
                 keepalive_count_max=3,
             )
+            import socket
+
+            mcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            mcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            mcp_socket.bind(("127.0.0.1", self.config.mcp_port))
+            mcp_socket.setblocking(False)
             server = uvicorn.Server(
                 uvicorn.Config(
                     self.mcp_app(),
@@ -1273,7 +1328,7 @@ class Controller(InvestigationControls, Storage, CommandControl):
             import contextlib
 
             server.capture_signals = contextlib.nullcontext
-            mcp_task = asyncio.create_task(server.serve())
+            mcp_task = asyncio.create_task(server.serve(sockets=[mcp_socket]))
             while not server.started:
                 if mcp_task.done():
                     await mcp_task
@@ -1290,6 +1345,7 @@ class Controller(InvestigationControls, Storage, CommandControl):
                     pid=os.getpid(),
                     version=__version__,
                     source=self.software_source,
+                    source_label=os.environ.get("QUIRKBENCH_SOURCE_LABEL"),
                     started=time.time(),
                 ),
             )
@@ -1307,6 +1363,16 @@ class Controller(InvestigationControls, Storage, CommandControl):
                     await mcp_task
             finally:
                 stop_task.cancel()
+        except OSError as error:
+            import errno
+
+            if error.errno == errno.EADDRINUSE:
+                raise ValueError(
+                    f"A controller port is already in use (HTTPS {urlparse(self.config.url).port or 443}, "
+                    f"target SSH {self.config.ssh_port}, MCP {self.config.mcp_port}). "
+                    "Stop the other controller or choose different ports in setup."
+                ) from None
+            raise
         finally:
             if listener:
                 listener.close()
@@ -1321,6 +1387,8 @@ class Controller(InvestigationControls, Storage, CommandControl):
             if mcp_task and not mcp_task.done():
                 server.should_exit = True
                 await mcp_task
+            if mcp_socket:
+                mcp_socket.close()
             await runner.cleanup()
             (await self.store.close())
             self.log.info("Controller stopped")

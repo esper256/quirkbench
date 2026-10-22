@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 from quirkbench.files import save_json
 from quirkbench.media import disk_identity
-from tests.support.lab import flash_fixture
+from tests.support.lab import ToolResults, flash_fixture
 
 
 async def saved_usb(tmp_path, monkeypatch):
@@ -73,7 +73,7 @@ async def saved_usb(tmp_path, monkeypatch):
     make_temp = tempfile.mkdtemp
     monkeypatch.setattr(tempfile, "mkdtemp", lambda **kwargs: make_temp(dir=tmp_path, **kwargs))
 
-    class USB:
+    class USB(ToolResults):
         def __init__(self):
             self.disk, self.image, self.contents = disk, image, contents
             self.calls, self.mounts = [], {}

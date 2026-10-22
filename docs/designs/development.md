@@ -13,6 +13,12 @@ boot selection. Verify that integration early. Keep OS-specific preparation smal
 and separate from shared command/evidence code. Measure repeat-loop cost.
 This does not authorize image builds or hardware runs.
 
+Use `./dev quirkbench ...` for host execution of edited code, including from
+Distrobox. The launcher manages private Python dependencies; it installs no host
+RPMs and does not start a controller automatically. It uses normal user data by
+default. Test-only dependencies remain in the test environment. See the
+[development example](../mockups/development.md).
+
 ## Milestone 1: bootable recovery and agent-driven deployment
 
 The original journey was build/flash, recovery connection and inspection,

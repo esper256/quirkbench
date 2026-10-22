@@ -29,32 +29,33 @@ class CommandControl:
         identifier(name)
         self.require_operation(run["target"], "sftp-upload")
         connection = self.connections[run["target"]]
-        captured = await disk(capture_inputs, self.root, [], [], file)
-        item = captured["startup_probe"]
-        _, current = await self.command_run(run_id)
-        if (
-            current["boot_id"] != target["boot_id"]
-            or self.connections.get(run["target"]) is not connection
-        ):
-            raise ValueError(
-                "Candidate connection changed while capturing the file; retry after inspecting context."
+        async with self.candidate_files_lock:
+            captured = await disk(capture_inputs, self.root, [], [], file)
+            item = captured["startup_probe"]
+            _, current = await self.command_run(run_id)
+            if (
+                current["boot_id"] != target["boot_id"]
+                or self.connections.get(run["target"]) is not connection
+            ):
+                raise ValueError(
+                    "Candidate connection changed while capturing the file; retry after inspecting context."
+                )
+            await upload(connection, self.root / "inputs" / item["sha256"], name)
+            current, connected = await self.command_run(run_id)
+            if connected["boot_id"] != target["boot_id"]:
+                raise ValueError(
+                    "Candidate changed boot during transfer; inspect it before executing the file."
+                )
+            (
+                await self.store.put(
+                    "transfer",
+                    new_id("transfer"),
+                    run_id=run_id,
+                    boot_id=target["boot_id"],
+                    name=name,
+                    sha256=item["sha256"],
+                )
             )
-        await upload(connection, self.root / "inputs" / item["sha256"], name)
-        current, connected = await self.command_run(run_id)
-        if connected["boot_id"] != target["boot_id"]:
-            raise ValueError(
-                "Candidate changed boot during transfer; inspect it before executing the file."
-            )
-        (
-            await self.store.put(
-                "transfer",
-                new_id("transfer"),
-                run_id=run_id,
-                boot_id=target["boot_id"],
-                name=name,
-                sha256=item["sha256"],
-            )
-        )
         return {
             "run_id": run_id,
             "boot_id": target["boot_id"],

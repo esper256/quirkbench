@@ -8,6 +8,7 @@
 
 - [Recovery console](recovery-console.md)
 - [Installation to investigation patch](installation-to-patch.md)
+- [Development on the controller computer](development.md)
 - [Milestone 1: recovery inspection and candidate boot](recovery-to-candidate.md)
 - [Interruptions and troubleshooting](interruptions.md)
 - [Interactive agent debugging through MCP](agent-experiment.md)
@@ -18,3 +19,5 @@ Controller monitor screens shown in some mockups remain future designs.
 Show Quirkbench calls, guidance and responses. Agent-only coding, analysis and
 external build work can be a short sentence; do not invent Quirkbench tools merely
 to display those steps. Instructions should tell the agent what output is needed.
+
+- [Storage cleanup](storage.md): inspect usage and remove unused files or investigations.
