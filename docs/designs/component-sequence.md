@@ -58,7 +58,9 @@ sequenceDiagram
     Quirkbench-->>Agent: Prepared, still in recovery
     Agent->>Quirkbench: recovery_boot_ostree
     Quirkbench->>Target: Select one-time boot
+    Target->>Target: Arm startup fallback independently of target service
     Target->>Quirkbench: Candidate reconnects with same identity and new boot ID
+    Target->>Target: Disarm startup fallback for this boot
     Quirkbench-->>Agent: Candidate connected
     Agent->>Quirkbench: recovery_return
     Quirkbench->>Target: Save diagnostics and reboot
@@ -86,6 +88,10 @@ sequenceDiagram
         Note over Quirkbench: Record MCP call time and response size without copying command text
         Note over Agent,Target: Other commands can run concurrently; each has its own timeout
         Note over Target: Optional quirkbench-load uses ordinary command control; no separate service
+        opt Interactive command
+            Agent->>Quirkbench: ssh_terminal_input
+            Quirkbench->>Target: Input or resize, without replay
+        end
         Agent->>Quirkbench: ssh_command_wait
         Note over Agent,Quirkbench: Bounded MCP wait; quiet CLI wait for long controller work
         Target-->>Quirkbench: Command output and completion, or interruption

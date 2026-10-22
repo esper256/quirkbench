@@ -10,5 +10,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked --python 3.12
-      - run: timeout 60s uv run --no-sync pytest -q
+      - run: timeout 120s uv run --no-sync pytest -q --durations=10
+      - run: uv run --no-sync ruff check src tests
+      - run: uv run --no-sync ruff format --check src tests
       - run: bash -n src/quirkbench/assets/build-recovery.sh src/quirkbench/assets/build-efi.sh

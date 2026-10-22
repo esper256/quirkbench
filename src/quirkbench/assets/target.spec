@@ -27,6 +27,7 @@ cp -a /work/root/. %{buildroot}/
 /usr/bin/quirkbench-target
 /usr/bin/quirkbench-console
 /usr/lib/systemd/system/quirkbench-*.service
+/usr/lib/systemd/system-generators/quirkbench-startup-generator
 /usr/lib/modprobe.d/quirkbench.conf
 /usr/lib/sysctl.d/90-quirkbench.conf
 /usr/lib/systemd/system.conf.d/quirkbench.conf

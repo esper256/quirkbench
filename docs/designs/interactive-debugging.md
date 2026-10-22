@@ -45,8 +45,9 @@ Automatic wake-up depends on the client; do not promise MCP notifications that
 it cannot deliver. Prefer completion waits over repeated status reads.
 
 The longer-term goal is one wait for relevant completion or failure, including
-across several commands. Interactive terminal input, terminal reattachment and
-explicit user-session selection are not implemented. They must not change ordinary
+across several commands. Interactive commands use a terminal and `ssh_terminal_input` for text, control characters
+and size changes. Input is never replayed. Target-process restart cannot reattach
+a terminal; explicit user-session selection remains later work. They must not change ordinary
 command semantics or require another persistent service.
 
 Investigation pause finishes bounded work and returns to recovery. Force stop
@@ -79,7 +80,9 @@ Do not add real-time scheduling, CPU reservations or blanket throttling.
 
 Keep file operations off the connection event loop, with bounded chunks and
 backpressure. Stop the process group promptly even if saving output stalls; report
-unfinished saving separately. These choices help under load but cannot overcome
+unfinished saving separately. Stops allow `stop_grace_seconds` (default 10 seconds)
+for the process group to flush its own output before SIGKILL; collection continues
+during that interval. These choices help under load but cannot overcome
 kernel hangs, memory exhaustion, saturated networks or failed devices.
 
 ## Judge acceleration

@@ -90,3 +90,22 @@ not setup prerequisites. Inspect live context for current target state and suppo
 operations. A newer unflashed image does not prevent supported operations on the
 connected recovery. For possible investigation routes, see the
 [agent guide](agent-guide.md#choosing-a-starting-point).
+
+## Controller and storage maintenance
+
+Use the same `--state` and host/container environment as the running controller.
+`controller status` identifies both running and installed software. Before an
+update restart, run `controller check`, then `controller stop`, then `controller run`.
+A locked directory with an unreachable port may mean the command is in a different
+container network; it does not prove the controller stopped. Operator failures are
+in `logs/controller.log` (rotated and size-limited).
+
+After changing the address in setup, `recovery flash --refresh-connection` explicitly
+updates that controller's address and certificate on compatible media. Pairing and
+Wi-Fi remain. A different controller identity requires new pairing, not this option.
+
+`storage` shows controller disk use. `storage clean --images --cache` previews
+removal and asks before deleting; choose `--candidates` or `--reports` separately.
+Results and retained candidates remain. `investigation export NAME DIRECTORY`
+creates ordinary files containing problems, run/candidate metadata and received
+results. It does not include credentials or claim missing evidence has arrived.

@@ -186,3 +186,23 @@ Tool: controller_mcp_activity
 Input: {"investigation":"intermittent-fault","limit":10}
 Output includes totals: [{"tool":"ssh_command_wait","calls":3,"elapsed_seconds":25.2,"response_text_bytes":1800,"unchanged":1}]
 ```
+
+## Optional interactive command
+
+```text
+Tool: ssh_command_start
+Input: {"run_id":"run-2","request_id":"inspect-interactively","argv":["python3","-i"],"interactive":true,"timeout_seconds":120}
+Output: {"command_id":"command-7","status":"running","complete":false,"output":">>> "}
+
+Tool: ssh_terminal_input
+Input: {"command_id":"command-7","text":"print(2 + 2)\n","rows":24,"columns":100}
+Output: {"command_id":"command-7","status":"running","complete":false}
+
+Tool: ssh_command_read
+Input: {"command_id":"command-7"}
+Output includes: "4"
+
+Tool: ssh_target_notify
+Input: {"investigation":"intermittent-fault","message":"Please reconnect the external test peripheral, then tell your agent.","chime":false}
+Output: {"displayed":true,"chime":"not-requested"}
+```

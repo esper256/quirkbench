@@ -40,7 +40,7 @@ come through the SSH connection, including after reconnection.
 
 Recovery and candidate code use AsyncSSH `connect_reverse()`. The target initiates
 the network connection and acts as the SSH server; the controller acts as the SSH
-client. Commands and file transfers use standard SSH; interactive terminal input is later work.
+client. Commands and file transfers use standard SSH; interactive commands use the same command records and SSH connection.
 Pairing records the target's SSH public key and supplies the controller's public
 key. Keep the target's private pairing identity stable across reboots; use library
 key checks to recognize it. A friendly target reference and human authorization
@@ -89,7 +89,9 @@ Use names such as these in the [mockup](../mockups/agent-experiment.md):
 | --- | --- |
 | `investigation_context` | Read current investigation and target context; MCP discovery lists tools. |
 | `ssh_recovery_inspect` | Read bounded hardware, network, storage or boot-log output through recovery's SSH connection. |
-| `ssh_command_start/read/wait/stop` | Separate tools for starting, reading, waiting for and stopping SSH commands. Interactive input is later work. |
+| `ssh_terminal_input` | Send bounded input or resize one interactive command. |
+| `ssh_target_notify` | Show a human request, with an optional single short chime. |
+| `ssh_command_start/read/wait/stop` | Separate tools for starting, reading, waiting for and stopping SSH commands. Optional interactive commands accept `ssh_terminal_input`; input is never replayed. |
 | `sftp_upload` / `sftp_download` | Transfer a probe to the candidate or retrieve completed experiment evidence. |
 | `rpm_ostree_prepare_candidate` | Prepare an OSTree candidate from an explicit base and changes. |
 | `recovery_cancel_ostree` | Request cancellation by deployment work ID; wait for target-confirmed stop and cleanup. |

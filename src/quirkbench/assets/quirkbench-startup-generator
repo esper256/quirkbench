@@ -1,0 +1,33 @@
+#!/bin/sh
+# Candidate boot fallback must not depend on Python, shared data or networking.
+set -eu
+run=
+timeout=300
+for arg in $(cat /proc/cmdline); do
+    case "$arg" in
+        quirkbench.run=*) run=${arg#*=} ;;
+        quirkbench.connect_timeout=*) timeout=${arg#*=} ;;
+    esac
+done
+[ -n "$run" ] || exit 0
+case "$timeout" in ''|*[!0-9]*) timeout=300 ;; esac
+[ "$timeout" -ge 1 ] && [ "$timeout" -le 3600 ] || timeout=300
+mkdir -p "$1/timers.target.wants"
+cat > "$1/quirkbench-startup.timer" <<EOF
+[Unit]
+Description=Return to recovery if candidate cannot connect
+DefaultDependencies=no
+[Timer]
+OnBootSec=${timeout}s
+Unit=quirkbench-startup.service
+EOF
+cat > "$1/quirkbench-startup.service" <<'EOF'
+[Unit]
+Description=Candidate did not connect; return to recovery
+DefaultDependencies=no
+ConditionPathExists=!/run/quirkbench-startup-connected
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl --force reboot
+EOF
+ln -sf ../quirkbench-startup.timer "$1/timers.target.wants/quirkbench-startup.timer"

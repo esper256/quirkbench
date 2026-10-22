@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Graceful command cleanup, interactive terminals and optional human notifications.
+- Whole-file evidence uploads survive slow links; confirmed receipts still control deletion.
+- Candidate startup fallback runs independently of target preparation and Python startup.
+- Controller status, stop and update checks; bounded operator logs and clearer config errors.
+- Explicit connection refresh on existing media, keeping pairing and network settings.
+- Asynchronous SQLite access, filtered status reads and completed command output caching.
+- Storage cleanup previews, investigation export and selectable candidate SELinux policy.
+- Normalize terminal progress in recovery Activity; keep original logs unchanged.
+
+New target action records use individual files. No migration or owner-state reset is
+included. Updated boot behavior and SELinux modes still need separate image/hardware checks.
+
 ## 1.1 — 2026-10-21
 
 Changes since the first real-world agent investigation ([#191](https://github.com/esper256/quirkbench/issues/191)).

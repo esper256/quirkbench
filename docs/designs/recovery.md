@@ -83,12 +83,13 @@ a modified kernel.
    evidence is still deleted from the target. Temporary `ostree admin unlock` edits
    do not survive reboot; persistent configuration and application files do.
 
-A newly booted candidate has a target-side startup connection deadline, supplied
-when requesting the boot. Its startup code starts this timer and saves the reason
-before returning to recovery if no authenticated controller connection succeeds.
-Cancel the timer after the first successful connection; later network loss does
-not reactivate it. Recovery does not retry the failed candidate automatically.
-This cannot rescue a kernel that hangs before startup code runs.
+Candidate boot generates a systemd startup timer from `quirkbench.run` and
+`quirkbench.connect_timeout`. It does not depend on Python imports, storage
+preparation or the target connection service. Its expiry requests a force reboot
+to recovery. The first authenticated connection writes a boot-local `/run` marker
+and stops the timer; later disconnects do not rearm it. Recovery never arms it.
+The service journal identifies expiry; saving a reason on shared data is not
+required. This cannot rescue a kernel that hangs before systemd starts.
 
 Use panic reboot and supported hardware watchdogs for best-effort restart, not an
 overall run timer. The target enforces individual command timeouts while disconnected.

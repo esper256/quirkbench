@@ -221,3 +221,9 @@ feed delays, missed CPU frame timing and failures, with final counts. Reuse comm
 output retention and recovery collection rather than a separate logging system.
 Distinguish measured warnings from suspected glitches; software cannot reliably
 detect every audible fault. Keep synthetic workloads optional and generic.
+
+Deployment records an explicit `selinux` choice: `disabled` (the existing default),
+`permissive` or `enforcing`. It remains the same on repeat boots. Context must expose
+that difference; inventory reports actual target policy. Enabled modes require the
+candidate's policy and correct file labels. Software tests check boot arguments;
+they do not establish a working enforcing boot. Recovery keeps its own policy.

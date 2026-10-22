@@ -13,8 +13,7 @@
 - [Interactive agent debugging through MCP](agent-experiment.md)
 
 The [agent guide](../agent-guide.md) documents currently available actions.
-Controller monitor screens, interactive terminal tools and report-management CLI
-commands shown in some mockups are future designs, not available commands.
+Controller monitor screens shown in some mockups remain future designs.
 
 Show Quirkbench calls, guidance and responses. Agent-only coding, analysis and
 external build work can be a short sentence; do not invent Quirkbench tools merely
