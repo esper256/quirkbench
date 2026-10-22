@@ -1,0 +1,36 @@
+name: Rsync image assembly proof
+on:
+  pull_request:
+    paths:
+      - .github/workflows/rsync-image.yml
+      - development/rsync-image-metadata.sh
+      - src/quirkbench/root_image.py
+      - src/quirkbench/assets/bazzite/build-root-image.sh
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ordinary distribution tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+      - name: Build isolated Fedora metadata tools
+        run: |
+          mkdir -p "$RUNNER_TEMP/qb-tools"
+          cat > "$RUNNER_TEMP/qb-tools/Containerfile" <<'EOF'
+          FROM registry.fedoraproject.org/fedora:43
+          RUN dnf -y install ostree e2fsprogs attr libcap && dnf clean all
+          EOF
+          podman build -t localhost/qb-metadata "$RUNNER_TEMP/qb-tools"
+          podman image inspect localhost/qb-metadata --format '{{.Id}}'
+      - name: Check rootless ownership and security metadata through ext4
+        run: |
+          mkdir -p "$RUNNER_TEMP/qb-image-proof"
+          podman run --rm --user 0 --network=none --security-opt label=disable \
+            -v "$RUNNER_TEMP/qb-image-proof:/work" \
+            -v "$PWD/development/rsync-image-metadata.sh:/check.sh:ro" \
+            localhost/qb-metadata bash /check.sh
