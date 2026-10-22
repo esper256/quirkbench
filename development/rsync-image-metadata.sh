@@ -1,29 +1,48 @@
 #!/bin/bash
-# Bounded feasibility proof, using disposable files and no mounts or loop devices.
+# Bounded serialized-metadata proof. No host mounts or loop devices.
 set -euo pipefail
 cd /work
-mkdir -p tree/usr/bin tree/etc tree/var
-printf '#!/bin/sh\nexit 0\n' > tree/usr/bin/probe
-chmod 4755 tree/usr/bin/probe
-chown 0:0 tree/usr/bin/probe
-printf 'owned\n' > tree/var/owned
-chown 42:43 tree/var/owned
-ln -s probe tree/usr/bin/link
-setcap cap_net_bind_service=ep tree/usr/bin/probe
-setfattr -n user.quirkbench -v preserved tree/usr/bin/probe
-# Test the actual security namespace, not a stand-in user.* label.
-setfattr -n security.selinux -v 'system_u:object_r:bin_t:s0' tree/usr/bin/probe
-ostree --repo=repo init --mode=archive
-ostree --repo=repo commit --branch=fixture --tree=dir=tree
-ostree --repo=repo checkout --force-copy fixture root
-test "$(stat -c '%u:%g:%a' root/usr/bin/probe)" = '0:0:4755'
-test "$(stat -c '%u:%g' root/var/owned)" = '42:43'
-test "$(readlink root/usr/bin/link)" = probe
-getcap root/usr/bin/probe | grep -F 'cap_net_bind_service=ep'
-getfattr --only-values -n security.selinux root/usr/bin/probe | grep -F 'system_u:object_r:bin_t:s0'
-ln root/usr/bin/probe root/usr/bin/hardlink
+python3 - <<'PY'
+import io
+import tarfile
+
+with tarfile.open('fixture.tar', 'w', format=tarfile.PAX_FORMAT) as archive:
+    for name in ('usr', 'usr/bin', 'var'):
+        item = tarfile.TarInfo(name)
+        item.type = tarfile.DIRTYPE
+        item.mode = 0o755
+        archive.addfile(item)
+    item = tarfile.TarInfo('usr/bin/probe')
+    item.mode = 0o4755
+    body = b'#!/bin/sh\nexit 0\n'
+    item.size = len(body)
+    item.pax_headers = {
+        'SCHILY.xattr.security.capability': bytes.fromhex('0100000200040000000000000000000000000000').decode(),
+        'SCHILY.xattr.security.selinux': 'system_u:object_r:bin_t:s0',
+        'SCHILY.xattr.user.quirkbench': 'preserved',
+    }
+    archive.addfile(item, io.BytesIO(body))
+    item = tarfile.TarInfo('var/owned')
+    item.uid, item.gid, item.mode = 42, 43, 0o600
+    archive.addfile(item)
+    item = tarfile.TarInfo('usr/bin/link')
+    item.type, item.linkname = tarfile.SYMTYPE, 'probe'
+    archive.addfile(item)
+    item = tarfile.TarInfo('usr/bin/hardlink')
+    item.type, item.linkname = tarfile.LNKTYPE, 'usr/bin/probe'
+    archive.addfile(item)
+PY
 truncate -s 64M rootfs.img
-mkfs.ext4 -F -d root rootfs.img
+export LIBGUESTFS_BACKEND=direct LIBGUESTFS_BACKEND_SETTINGS=force_tcg
+guestfish --format=raw -a rootfs.img <<'GUEST'
+run
+mkfs ext4 /dev/sda
+mount /dev/sda /
+tar-in fixture.tar / xattrs:true selinux:true acls:true
+sync
+umount-all
+shutdown
+GUEST
 e2fsck -fn rootfs.img
 debugfs -R 'stat /usr/bin/probe' rootfs.img 2>&1 | tee inode.txt
 grep -E 'Mode: +04755' inode.txt
@@ -31,12 +50,13 @@ grep -E 'User: +0 +Group: +0' inode.txt
 grep -E 'Links: +2' inode.txt
 debugfs -R 'stat /var/owned' rootfs.img 2>&1 | grep -E 'User: +42 +Group: +43'
 debugfs -R 'stat /usr/bin/link' rootfs.img 2>&1 | grep -F 'probe'
-debugfs -R 'ea_list /usr/bin/probe' rootfs.img 2>&1 | tee attrs.txt
-grep -F 'security.selinux' attrs.txt
-grep -F 'security.capability' attrs.txt
-grep -F 'user.quirkbench' attrs.txt
-# Compare exact capability representation inside the image, not only its name.
-getfattr --only-values -n security.capability root/usr/bin/probe > capability.before
 debugfs -R 'ea_get -f capability.after /usr/bin/probe security.capability' rootfs.img
-cmp capability.before capability.after
-printf 'Rootless OSTree checkout and ext4 metadata round-trip passed.\n'
+debugfs -R 'ea_get -f selinux.after /usr/bin/probe security.selinux' rootfs.img
+debugfs -R 'ea_get -f user.after /usr/bin/probe user.quirkbench' rootfs.img
+python3 - <<'PY'
+from pathlib import Path
+assert Path('capability.after').read_bytes() == bytes.fromhex('0100000200040000000000000000000000000000')
+assert Path('selinux.after').read_bytes().rstrip(b'\0') == b'system_u:object_r:bin_t:s0'
+assert Path('user.after').read_bytes() == b'preserved'
+PY
+printf 'Unprivileged libguestfs ext4 metadata round-trip passed.\n'

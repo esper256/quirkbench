@@ -89,3 +89,19 @@ No draft PR has been published. The exploratory files are uncommitted.
 References: [dracut live boot implementation](https://github.com/dracut-ng/dracut/blob/16c0eadb0065833e3e7b961f1e196b2b5cba07b3/modules.d/70dmsquash-live/dmsquash-live-root.sh),
 [Linux capabilities](https://man7.org/linux/man-pages/man7/capabilities.7.html),
 [extended attributes](https://man7.org/linux/man-pages/man7/xattr.7.html).
+
+## Hosted assembly proof
+
+Draft PR 227 provides a bounded, read-only-permissions GitHub-hosted job.
+The first run at `54b8fd5` successfully built and ran rootless Podman, then
+failed setting the SELinux fixture label with `Operation not permitted`.
+The host-directory checkout/relabel recipe therefore is not portable to that
+ordinary supported controller environment. Do not weaken or omit the label test.
+
+The next bounded test uses packaged libguestfs with its direct QEMU backend
+and software emulation. Serialized ownership, capabilities, labels and links
+are imported into ext4 inside an unprivileged appliance, then checked directly
+in the image. It requires no host mounts, KVM access, privileged container,
+new service, secrets or host security changes. This is a proposed replacement
+for the host-directory assembly recipe, not a claim that its failed test passed.
+It adds controller tools and image-assembly cost; Recovery does not need it.

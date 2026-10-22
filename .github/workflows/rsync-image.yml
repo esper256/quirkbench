@@ -23,11 +23,11 @@ jobs:
           mkdir -p "$RUNNER_TEMP/qb-tools"
           cat > "$RUNNER_TEMP/qb-tools/Containerfile" <<'EOF'
           FROM registry.fedoraproject.org/fedora:43
-          RUN dnf -y install ostree e2fsprogs attr libcap && dnf clean all
+          RUN dnf -y install ostree e2fsprogs python3 libguestfs-tools-c kernel-core && dnf clean all
           EOF
           podman build -t localhost/qb-metadata "$RUNNER_TEMP/qb-tools"
           podman image inspect localhost/qb-metadata --format '{{.Id}}'
-      - name: Check rootless ownership and security metadata through ext4
+      - name: Check serialized metadata through an unprivileged appliance
         run: |
           mkdir -p "$RUNNER_TEMP/qb-image-proof"
           podman run --rm --user 0 --network=none --security-opt label=disable \
