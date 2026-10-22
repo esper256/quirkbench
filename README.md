@@ -1,3 +1,5 @@
+![Quirkbench: Refinement through questionable means.](docs/assets/quirkbench-banner.png)
+
 # Quirkbench
 
 An interactive Linux debugging lab for coding agents. Through MCP, the agent
