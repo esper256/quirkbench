@@ -61,7 +61,27 @@ async def prepare_candidate(root, linux, work, progress):
             "Existing target inspection and command access remain available."
         )
     with build_lock(root):
-        return await _prepare_candidate(root, linux, work, progress)
+        candidate = await _prepare_candidate(root, linux, work, progress)
+        if work["inputs"].get("backend", "ostree") == "rsync":
+            from .root_image import prepare_root_image
+
+            log = root / "logs" / (work["id"] + ".log")
+            tools = await build_tools(root, linux, log)
+            tools = await tools_identity(linux, tools)
+            bundle = await prepare_root_image(
+                root, linux, tools, candidate, root / "candidates" / work["id"], log, progress
+            )
+            candidate = dict(
+                candidate,
+                backend="rsync",
+                bundle=bundle,
+                changes=candidate["changes"]
+                + [
+                    "Independent ext4 root and dracut live boot; all run files writable and retained until discard"
+                ],
+            )
+            save_json(root / "candidates" / work["id"] / "candidate.json", candidate)
+        return candidate
 
 
 async def _prepare_candidate(root, linux, work, progress):
@@ -94,7 +114,11 @@ async def _prepare_candidate(root, linux, work, progress):
             ),
         }
         save_json(selection_file, selection)
-    changes = work["inputs"].get("changes", {})
+    changes = dict(work["inputs"].get("changes", {}))
+    if work["inputs"].get("backend", "ostree") == "rsync":
+        changes["repository_packages"] = sorted(
+            set(changes.get("repository_packages", [])) | {"dracut-live"}
+        )
     tools = await build_tools(root, linux, log)
     tools = await tools_identity(linux, tools)
     rpm = await build_target_rpm(root, linux, tools, log)

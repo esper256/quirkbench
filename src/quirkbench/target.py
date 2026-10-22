@@ -198,6 +198,7 @@ class Target:
             "message": self.message,
             "retained_run": self.active,
             "capabilities": [
+                "rsync-deployment-v1",
                 "status-selection",
                 "deploy-only",
                 "deploy-boot-id",
@@ -536,7 +537,7 @@ class Target:
             self.spawn(self.boot_prepared(request) if action == "boot" else self.discard(request))
             return {"status": "accepted"}
         if action == "deploy" and self.mode == "recovery":
-            if set(request) - {"kernel_args", "selinux"} != {
+            if set(request) - {"kernel_args", "selinux", "backend", "bundle"} != {
                 "work_id",
                 "run_id",
                 "commit",
@@ -547,6 +548,15 @@ class Target:
             from .candidates import debugging_kernel_args
 
             debugging_kernel_args(request.get("kernel_args"))
+            from .deployment import backend
+
+            if backend(request) == "rsync":
+                from .root_bundle import validate_bundle
+
+                validate_bundle(request.get("bundle"), request["commit"])
+                self.linux.require_tools("rsync")
+            elif "bundle" in request:
+                raise ValueError("OSTree deployment does not accept a root image bundle.")
             key = identifier(request["work_id"])
             identifier(request["run_id"])
             if (
@@ -612,16 +622,23 @@ class Target:
     async def prune_cache(self, key):
         repo = self.data / "ostree/repo"
         try:
-            refs = await self.linux.command(
-                "ostree", f"--repo={repo}", "refs", "quirkbench/candidates"
-            )
-            for ref in refs["output"].splitlines():
-                if not ref.startswith("quirkbench/candidates/"):
-                    raise ValueError(
-                        "Unexpected cache reference; no further references were removed."
-                    )
-                await self.linux.command("ostree", f"--repo={repo}", "refs", "--delete", ref)
-            await self.linux.command("ostree", f"--repo={repo}", "prune", "--refs-only")
+            if await disk((repo / "config").exists):
+                refs = await self.linux.command(
+                    "ostree", f"--repo={repo}", "refs", "quirkbench/candidates"
+                )
+                for ref in refs["output"].splitlines():
+                    if not ref.startswith("quirkbench/candidates/"):
+                        raise ValueError(
+                            "Unexpected cache reference; no further references were removed."
+                        )
+                    await self.linux.command("ostree", f"--repo={repo}", "refs", "--delete", ref)
+                await self.linux.command("ostree", f"--repo={repo}", "prune", "--refs-only")
+            from .image_deployment import owned
+            import shutil
+
+            cache = owned(self.data, "quirkbench/image-cache")
+            if await disk(cache.exists):
+                await disk(shutil.rmtree, cache)
             await self.record(key, status="finished", stage="Unused candidate content removed")
         except Exception as error:
             await self.record(key, status="failed", error=str(error))
@@ -629,13 +646,24 @@ class Target:
             self.busy = False
 
     async def deploy(self, request):
-        from .candidates import deploy_candidate
+        from .deployment import deploy_candidate
 
         key = request["work_id"]
         self.deployment_started = True
         try:
             if self.work.get(key, {}).get("status") == "cancelling":
                 raise asyncio.CancelledError
+            if request.get("backend") == "rsync":
+                # Persist ownership before any image or mount is created. Failed
+                # cleanup remains visible and retryable through explicit discard.
+                self.active = dict(
+                    request,
+                    deployment_id=request["run_id"],
+                    recovery_boot=self.boot_id,
+                    launched=False,
+                    evidence_received=False,
+                )
+                await disk(save_json, self.home / "active.json", self.active)
             prepared = await deploy_candidate(
                 self.data,
                 self.boot,
@@ -734,10 +762,9 @@ class Target:
         key = request["work_id"]
         try:
             await self.linux.command("grub2-editenv", self.boot / "grubenv", "unset", "next_entry")
-            from .candidates import cleanup_run
+            from .deployment import cleanup_run
 
-            if await disk((self.data / "ostree" / "repo" / "config").exists):
-                await cleanup_run(self.data, self.linux, request["run_id"])
+            await cleanup_run(self.data, self.boot, self.linux, request)
             if self.active and self.active["work_id"] == key:
                 await disk((self.home / "active.json").unlink, missing_ok=True)
                 self.active = None
@@ -796,9 +823,9 @@ class Target:
     async def cancel_boot(self):
         # Do not release ownership if clearing the one-time selection fails.
         await self.linux.command("grub2-editenv", self.boot / "grubenv", "unset", "next_entry")
-        from .candidates import cleanup_run
+        from .deployment import cleanup_run
 
-        await cleanup_run(self.data, self.linux, self.active["deployment_id"])
+        await cleanup_run(self.data, self.boot, self.linux, self.active)
         await disk((self.home / "active.json").unlink, missing_ok=True)
         self.active = None
         self.boot_committed = False
@@ -852,51 +879,64 @@ class Target:
             # A crash may leave no candidate-collected log. Collect what recovery can see.
             if not await disk((folder / "outcome.json").exists):
                 await self.collect(run_id, "interrupted")
-            journal = (
-                self.data
-                / "ostree"
-                / "deploy"
-                / self.active["deployment_id"]
-                / "var"
-                / "log"
-                / "journal"
-            )
-            attempt = await disk(read_json, self.home / "boot-attempts" / (run_id + ".json"), {})
-            await disk(
-                save_json,
-                folder / "boot-attempt.json",
-                attempt
-                or {
-                    "run_id": run_id,
-                    "boot_id": None,
-                    "note": "Candidate boot ID was not recorded. This alone does not establish whether userspace started.",
-                },
-            )
-            if await disk(journal.is_dir):
-                import uuid
+            from .deployment import journal_directory
 
-                try:
-                    selection = (
-                        ["-b", uuid.UUID(attempt["boot_id"]).hex] if attempt.get("boot_id") else []
+            try:
+                async with journal_directory(self.data, self.linux, self.active) as journal:
+                    attempt = await disk(
+                        read_json, self.home / "boot-attempts" / (run_id + ".json"), {}
                     )
-                except ValueError:
                     await disk(
                         save_json,
-                        folder / "candidate-journal-status.json",
-                        {"status": "failed", "error": "Recorded candidate boot ID is invalid."},
+                        folder / "boot-attempt.json",
+                        attempt
+                        or {
+                            "run_id": run_id,
+                            "boot_id": None,
+                            "note": "Candidate boot ID was not recorded. This alone does not establish whether userspace started.",
+                        },
                     )
-                else:
-                    filename = (
-                        "candidate-journal.log" if selection else "candidate-journal-all-boots.log"
-                    )
-                    await self.collect_journal(
-                        folder, filename, [f"--directory={journal}", *selection]
-                    )
-            else:
+                    if await disk(journal.is_dir):
+                        import uuid
+
+                        try:
+                            selection = (
+                                ["-b", uuid.UUID(attempt["boot_id"]).hex]
+                                if attempt.get("boot_id")
+                                else []
+                            )
+                        except ValueError:
+                            await disk(
+                                save_json,
+                                folder / "candidate-journal-status.json",
+                                {
+                                    "status": "failed",
+                                    "error": "Recorded candidate boot ID is invalid.",
+                                },
+                            )
+                        else:
+                            filename = (
+                                "candidate-journal.log"
+                                if selection
+                                else "candidate-journal-all-boots.log"
+                            )
+                            await self.collect_journal(
+                                folder, filename, [f"--directory={journal}", *selection]
+                            )
+                    else:
+                        await disk(
+                            save_json,
+                            folder / "candidate-journal-status.json",
+                            {
+                                "status": "unavailable",
+                                "reason": "No saved candidate journal directory.",
+                            },
+                        )
+            except Exception as error:
                 await disk(
                     save_json,
                     folder / "candidate-journal-status.json",
-                    {"status": "unavailable", "reason": "No saved candidate journal directory."},
+                    {"status": "failed", "error": str(error)},
                 )
             pstore = Path("/sys/fs/pstore")
             try:

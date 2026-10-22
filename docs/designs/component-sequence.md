@@ -203,3 +203,26 @@ sequenceDiagram
     Quirkbench->>Quirkbench: Remove investigation records
     Quirkbench-->>Human: Deletion complete
 ```
+
+## Explicit rsync candidate
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Controller
+    participant Appliance as Optional image-building appliance
+    participant Recovery
+    Agent->>Controller: Prepare candidate with backend rsync
+    Controller->>Appliance: Export exact commit as PAX; assemble and label root image
+    Appliance-->>Controller: Root image, kernel, matching live initramfs
+    Controller->>Controller: Record artifact hashes and build provenance
+    Agent->>Controller: Deploy candidate
+    Controller->>Recovery: Exact bundle identity; require supported backend
+    Recovery->>Controller: On-demand authenticated rsync stream
+    Recovery->>Recovery: Verify bytes; create fresh image; publish boot entry
+    Agent->>Controller: Explicit boot request
+    Controller->>Recovery: Select one-time entry using shared boot lifecycle
+```
+
+See [rsync deployment](rsync-deployment.md) for interrupted preparation and pending
+complete-image boot qualification. Merely booting Recovery starts no backend work.

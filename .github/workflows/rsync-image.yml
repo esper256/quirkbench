@@ -4,9 +4,12 @@ on:
     paths:
       - .github/workflows/rsync-image.yml
       - development/rsync-image-metadata.sh
-      - src/quirkbench/assets/bazzite/export-root.c
+      - src/quirkbench/assets/bazzite/**
       - src/quirkbench/root_image.py
-      - src/quirkbench/assets/bazzite/build-root-image.sh
+      - src/quirkbench/root_bundle.py
+      - src/quirkbench/image_deployment.py
+      - src/quirkbench/rsync_stream.py
+      - tests/test_image_transfer.py
 jobs:
   metadata:
     runs-on: ubuntu-24.04
@@ -36,3 +39,14 @@ jobs:
             -v "$PWD/src/quirkbench/assets/bazzite/export-root.c:/export-root.c:ro" \
             -v "$PWD/development/rsync-image-metadata.sh:/check.sh:ro" \
             localhost/qb-metadata bash /check.sh
+  transfer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: sudo apt-get update && sudo apt-get install -y rsync
+      - run: uv sync --locked --python 3.12
+      - run: QUIRKBENCH_REAL_TRANSFER=1 uv run --no-sync pytest -q tests/test_image_transfer.py

@@ -13,4 +13,4 @@ jobs:
       - run: timeout 120s uv run --no-sync pytest -q --durations=10
       - run: uv run --no-sync ruff check src tests development
       - run: uv run --no-sync ruff format --check src tests development
-      - run: bash -n dev src/quirkbench/assets/build-recovery.sh src/quirkbench/assets/build-efi.sh
+      - run: bash -n dev src/quirkbench/assets/build-recovery.sh src/quirkbench/assets/build-efi.sh src/quirkbench/assets/bazzite/build-root-image.sh src/quirkbench/assets/bazzite/normalize-root.sh development/rsync-image-metadata.sh

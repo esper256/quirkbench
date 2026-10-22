@@ -224,3 +224,24 @@ Tool: controller_work_wait
 Input: {"work_id":"discard-1"}
 Output: {"status":"finished","stage":"Run files discarded; downloaded candidate content retained"}
 ```
+
+## Optional independent rsync deployment
+
+Illustrative MCP sequence; complete converted-image boot qualification is pending.
+OSTree remains the default when `backend` is omitted.
+
+```text
+rpm_ostree_prepare_candidate(investigation="first-boot", request_id="image-1", backend="rsync")
+controller_work_wait(work_id=<preparation work ID>)
+recovery_deploy_candidate(investigation="first-boot", candidate=<candidate ID>, request_id="deploy-1")
+controller_work_wait(work_id=<deployment work ID>)
+recovery_boot_candidate(run_id=<prepared run ID>, request_id="boot-1")
+controller_work_wait(work_id=<boot work ID>)
+recovery_return(run_id=<run ID>, request_id="return-1")
+controller_work_wait(work_id=<return work ID>)
+recovery_discard_candidate(run_id=<run ID>, request_id="discard-1")
+```
+
+Use `recovery_cancel_deployment(work_id=<deployment work ID>)` to stop an active
+transfer. If interrupted preparation retains incomplete files, use explicit
+discard in Recovery before submitting another deployment.

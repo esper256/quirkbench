@@ -227,3 +227,10 @@ Deployment records an explicit `selinux` choice: `disabled` (the existing defaul
 that difference; inventory reports actual target policy. Enabled modes require the
 candidate's policy and correct file labels. Software tests check boot arguments;
 they do not establish a working enforcing boot. Recovery keeps its own policy.
+
+## Parallel ordinary-root deployment
+
+OSTree remains the default above. Explicit rsync candidates use the separate
+[ordinary-root image backend](rsync-deployment.md), including its distinct
+metadata, staging, mutability and boot-qualification limits. Shared Recovery boot
+selection and investigation/evidence handling apply to both.

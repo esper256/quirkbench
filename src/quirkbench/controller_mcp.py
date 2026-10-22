@@ -21,6 +21,9 @@ PageSize = Annotated[int, Field(ge=1, le=100)]
 SequenceTool = Literal[
     "rpm_ostree_prepare_candidate",
     "recovery_deploy_ostree",
+    "recovery_deploy_candidate",
+    "recovery_boot_candidate",
+    "recovery_discard_candidate",
     "recovery_boot_ostree",
     "recovery_discard_ostree",
     "recovery_return",
@@ -264,8 +267,9 @@ def mcp_app(controller):
         startup_probe_timeout_seconds: Annotated[int, Field(ge=1)] = 60,
         repository_packages: list[str] | None = None,
         debugging_tools: bool = True,
+        backend: Literal["ostree", "rsync"] = "ostree",
     ) -> ActionResult:
-        """Prepare Bazzite with a small optional debugging toolkit, repository_packages from its own repositories, local RPM additions/replacements and an optional executable startup probe. Preparation can run while a target retains an earlier deployment. Paths are on the controller; files are captured before building. The resulting commit is unchanged; kernel replacements must be RPMs, not raw kernel images. Probe runs before networking with an explicit timeout (default 60 seconds); output goes to the boot journal. Kernel changes require a new boot. Wait with controller_work_wait."""
+        """Prepare Bazzite with explicit backend ostree (default) or rsync (independent writable root image). Rsync image assembly uses an on-demand unprivileged appliance; complete converted Bazzite boot qualification is pending. Prepare with a small optional debugging toolkit, repository_packages from its own repositories, local RPM additions/replacements and an optional executable startup probe. Preparation can run while a target retains an earlier deployment. Paths are on the controller; files are captured before building. The resulting commit is unchanged; kernel replacements must be RPMs, not raw kernel images. Probe runs before networking with an explicit timeout (default 60 seconds); output goes to the boot journal. Kernel changes require a new boot. Wait with controller_work_wait."""
         return await controller.prepare(
             investigation,
             base,
@@ -277,6 +281,7 @@ def mcp_app(controller):
             startup_probe_timeout_seconds,
             repository_packages,
             debugging_tools,
+            backend,
         )
 
     @mcp.tool(structured_output=True)
@@ -312,10 +317,42 @@ def mcp_app(controller):
         return await controller.cancel_deployment(work_id)
 
     @mcp.tool(structured_output=True)
+    async def recovery_deploy_candidate(
+        investigation: str,
+        candidate: str,
+        request_id: RequestID,
+        kernel_args: list[str] | None = None,
+        selinux: Literal["disabled", "permissive", "enforcing"] = "disabled",
+    ) -> ActionResult:
+        """Use the candidate's explicit backend to transfer and prepare fresh run files, with debugging kernel_args and explicit SELinux policy retained on repeat boots. Default disabled differs from a normal Bazzite install. Permissive/enforcing require a correctly labelled candidate and its SELinux policy; boot/connectivity must be checked. Boot/recovery arguments are managed by Quirkbench. Discard retained run files first if replacing them; preparation itself does not require discard. Does not select a boot or reboot. Inspect progress with controller_work_wait, then use recovery_boot_candidate."""
+        return await controller.deploy(investigation, candidate, request_id, kernel_args, selinux)
+
+    @mcp.tool(structured_output=True)
+    async def recovery_boot_candidate(
+        run_id: str,
+        request_id: RequestID,
+        startup_connect_timeout_seconds: Annotated[int, Field(ge=1, le=3600)] = 300,
+    ) -> ActionResult:
+        """Boot a prepared or retained deployment once. The candidate selects its explicit backend. Rsync root edits persist; plain OSTree unlock /usr edits do not survive reboot. Repeat boots get a new run ID and never replay commands."""
+        return await controller.retained_action(
+            run_id, request_id, "boot", startup_connect_timeout_seconds
+        )
+
+    @mcp.tool(structured_output=True)
+    async def recovery_discard_candidate(run_id: str, request_id: RequestID) -> ActionResult:
+        """Remove retained run files after diagnostics receipt, or discard an unbooted prepared run. Keep downloaded candidates, settings and controller evidence. Recovery only."""
+        return await controller.retained_action(run_id, request_id, "discard")
+
+    @mcp.tool(structured_output=True)
+    async def recovery_cancel_deployment(work_id: str) -> ActionResult:
+        """Cancel a recovery_deploy_candidate transfer. Returns promptly; controller_work_wait confirms cleanup. Disconnected targets receive cancellation on reconnect. After boot is committed use recovery_return."""
+        return await controller.cancel_deployment(work_id)
+
+    @mcp.tool(structured_output=True)
     async def recovery_prune_ostree_cache(
         investigation: str, request_id: RequestID
     ) -> ActionResult:
-        """Explicitly remove downloaded candidate cache in idle recovery after retained deployment discard. Keeps settings and evidence. Downloads will be needed again. Follow with controller_work_wait."""
+        """Explicitly remove downloaded OSTree content and ordinary root image cache in idle recovery after retained deployment discard. Keeps settings and evidence. Downloads will be needed again. Follow with controller_work_wait."""
         return await controller.prune_target_cache(investigation, request_id)
 
     @mcp.tool(structured_output=True)

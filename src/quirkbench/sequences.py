@@ -24,6 +24,7 @@ class Sequences:
             startup_probe_timeout_seconds=60,
             repository_packages=None,
             debugging_tools=True,
+            backend="ostree",
         ):
             return await c.prepare(
                 investigation,
@@ -36,6 +37,7 @@ class Sequences:
                 startup_probe_timeout_seconds,
                 repository_packages,
                 debugging_tools,
+                backend,
             )
 
         async def deploy(candidate, kernel_args=None, selinux="disabled"):
@@ -95,8 +97,11 @@ class Sequences:
         return dict(
             rpm_ostree_prepare_candidate=prepare,
             recovery_deploy_ostree=deploy,
+            recovery_deploy_candidate=deploy,
             recovery_boot_ostree=boot,
+            recovery_boot_candidate=boot,
             recovery_discard_ostree=discard,
+            recovery_discard_candidate=discard,
             recovery_return=returned,
             ssh_command_start=command,
             ssh_command_wait=wait,

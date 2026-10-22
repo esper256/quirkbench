@@ -54,6 +54,7 @@ class Controller(InvestigationControls, Storage, CommandControl):
         self.preparations = {}
         self.command_pages = {}
         self.upload_publish_lock = asyncio.Lock()
+        self.rsync_transfers = set()
 
     def spawn(self, coro):
         task = asyncio.create_task(coro)
@@ -195,6 +196,7 @@ class Controller(InvestigationControls, Storage, CommandControl):
             deployment_id=run["deployment_id"],
             status=run["status"],
             selinux=run.get("selinux", "disabled"),
+            backend=run.get("backend", "ostree"),
             boot_id=run.get("boot_id"),
             evidence_received=bool(run.get("evidence")),
             created_at=run.get("created_at"),
@@ -404,7 +406,11 @@ class Controller(InvestigationControls, Storage, CommandControl):
         startup_probe_timeout_seconds=60,
         repository_packages=None,
         debugging_tools=True,
+        backend="ostree",
     ):
+        from .deployment import backend as validate_backend
+
+        validate_backend({"backend": backend})
         inv = await self.require_active(investigation)
         readiness = self.preparation_readiness()
         if not readiness["ready"]:
@@ -434,7 +440,12 @@ class Controller(InvestigationControls, Storage, CommandControl):
                     "prepare",
                     investigation,
                     request_id,
-                    {"base": base, "name": name, "changes": changes},
+                    {
+                        "base": base,
+                        "name": name,
+                        "changes": changes,
+                        **({"backend": backend} if backend != "ostree" else {}),
+                    },
                 )
         if fresh:
             task = self.spawn(self._prepare(work, inv))
@@ -554,6 +565,15 @@ class Controller(InvestigationControls, Storage, CommandControl):
         async with self.candidate_files_lock:
             inv = await self.store.get("investigation", investigation)
             software = await self.store.get("candidate", candidate)
+            from .deployment import backend
+
+            selected_backend = backend(software)
+            if selected_backend == "rsync":
+                self.linux.require_tools("rsync")
+                if "rsync-deployment-v1" not in self.targets.get(inv["target"], {}).get(
+                    "capabilities", []
+                ):
+                    raise ValueError("Update Recovery before deploying an rsync root image.")
             if software.get("removed"):
                 raise ValueError(
                     "Candidate files were cleaned. Prepare the candidate again with a new request."
@@ -620,6 +640,7 @@ class Controller(InvestigationControls, Storage, CommandControl):
                         status="preparing",
                         work_id=work["id"],
                         deployment_id=run,
+                        backend=selected_backend,
                         created_at=time.time(),
                         evidence=None,
                         kernel_args=kernel_args,
@@ -646,6 +667,11 @@ class Controller(InvestigationControls, Storage, CommandControl):
                 work_id=work_id,
                 run_id=run,
                 commit=software["commit"],
+                **(
+                    {"backend": "rsync", "bundle": software["bundle"]}
+                    if software.get("backend") == "rsync"
+                    else {}
+                ),
                 startup_timeout=timeout,
                 **(
                     {"selinux": (await self.store.get("run", run))["selinux"]}
