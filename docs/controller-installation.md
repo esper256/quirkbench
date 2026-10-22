@@ -27,6 +27,10 @@ From Distrobox, use `distrobox-host-exec` to run commands on the host when its
 Podman and block devices are not available inside the container. The selected
 Python installation and controller directory must be accessible there.
 
+If `controller run` reports that the directory is already in use, check
+`quirkbench status` from the same host environment. A responding controller can
+be reused; do not delete its lock file or start another copy.
+
 Builds require rootless Podman. The build container supplies Fedora tools; no
 Distrobox is required. `quirkbench doctor` lists host tools. Flashing additionally
 needs sudo, parted, util-linux, e2fsprogs, dosfstools and GRUB tools. It refuses
@@ -58,12 +62,8 @@ network setup, logs, report export/upload and a terminal. Reports debug Quirkben
 run evidence is stored separately.
 
 See the [milestone mockup](mockups/recovery-to-candidate.md) for the agent interaction.
-Candidate MCP commands support explicit arguments, working directories, environment
-variables and individual timeouts, with saved output, waiting and stopping. Recovery
-still offers inspection tools only. Candidate file transfer is available through `sftp_upload` and `sftp_download`.
-Commands and startup probes receive evidence and scratch directory variables.
-Completed binary evidence can be downloaded before returning to recovery. Interactive terminal
-input and live package helpers remain later work.
+See the [agent guide](agent-guide.md) for current command, transfer and investigation
+controls, and the [1.1 changelog](../CHANGELOG.md) for recent additions.
 
 ## Deploy, boot, inspect and discard
 

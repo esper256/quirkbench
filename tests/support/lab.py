@@ -295,7 +295,10 @@ class Lab:
         async with streamable_http_client(f'http://127.0.0.1:{self.ports[2]}/mcp', http_client=self.mcp_http) as (read, write, _):
             async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=12)) as mcp:
                 await mcp.initialize()
-                return await mcp.call_tool(tool, args)
+                return await mcp.call_tool(tool, args) if tool is not None else await mcp.list_tools()
+
+    async def tool_schemas(self):
+        return {tool.name: tool.inputSchema for tool in (await self.raw_call(None)).tools}
 
     async def call(self, tool, **args):
         result = await self.raw_call(tool, **args)

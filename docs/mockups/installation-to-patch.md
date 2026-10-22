@@ -209,7 +209,7 @@ Agent · Quirkbench tools
 ✓ ssh_command_start           Inspect service logs while recording continues
 ```
 
-## Controller computer · Monitor
+## Controller computer · Monitor (future screen)
 
 ```text
 ┌─ Quirkbench · microphone-dropout ────────────────────────┐
@@ -217,7 +217,7 @@ Agent · Quirkbench tools
 │                                                        │
 │ Target       lab-target · Connected                     │
 │ Software     Baseline with live changes                 │
-│ Persistence  Live changes apply to this run only        │
+│ Persistence  /usr resets on reboot; other files stay    │
 │ Active       Recording microphone · 04:12 elapsed       │
 │ Last action  Read service logs · 2 seconds ago           │
 │ Evidence     Logs arriving · Recording still open       │
@@ -229,7 +229,7 @@ Agent · Quirkbench tools
 └────────────────────────────────────────────────────────┘
 ```
 
-## Target · Live investigation
+## Target · Live investigation (future screen)
 
 ```text
 ┌─ Quirkbench ────────────────────────────────────────────┐

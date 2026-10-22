@@ -14,8 +14,10 @@ application journey. Recovery and Bazzite have booted on physical hardware,
 connected to the controller, run an MCP command and returned diagnostics.
 New images and changes still need their own boot checks. See [local installation](docs/controller-installation.md).
 The design documents describe the full intended product; later features are not
-yet available. Commit `b807199` preserves the previous code as reference.
+yet available.
 
+- [1.1 changelog](CHANGELOG.md): features and fixes since the first agent investigation.
+- [Agent guide](docs/agent-guide.md): available tools and suggested routes.
 - [Requirements](docs/requirements/product.md): short, human-approved product scope.
 - [Designs](docs/README.md): revisable choices for a simpler, enjoyable application.
 - [Contributing](CONTRIBUTING.md): development and review workflow.

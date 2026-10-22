@@ -23,17 +23,21 @@ class Sequences:
             return await c.retained_action(run_id, request_id, 'discard')
         async def returned(run_id):
             return await c.return_recovery(run_id, request_id)
-        async def command(run_id, argv, timeout_seconds, cwd='/var/tmp', env=None, max_output_bytes=16777216):
-            return await c.command_start(run_id, request_id, argv, cwd, env or {}, timeout_seconds, max_output_bytes)
+        async def command(run_id, timeout_seconds, argv=None, cwd='/var/tmp', env=None, max_output_bytes=16777216, script=None, shell='/bin/sh', wait_seconds=0):
+            return await c.command_start(run_id, request_id, argv, cwd, env or {}, timeout_seconds, max_output_bytes, script=script, shell=shell, wait_seconds=wait_seconds)
         async def wait(command_id):
             return await c.command_wait(command_id, 0)
         async def stop(command_id):
             return await c.command_read(command_id, stop=True)
+        async def upload(run_id, controller_path, target_name):
+            return await c.upload_file(run_id, controller_path, target_name)
+        async def download(run_id, evidence_file):
+            return await c.download_file(run_id, evidence_file)
         return dict(rpm_ostree_prepare_candidate=prepare, recovery_deploy_ostree=deploy,
                     recovery_boot_ostree=boot, recovery_discard_ostree=discard,
                     recovery_return=returned, ssh_command_start=command,
                     ssh_command_wait=wait, ssh_command_stop=stop,
-                    sftp_upload=c.upload_file, sftp_download=c.download_file)
+                    sftp_upload=upload, sftp_download=download)
 
     def validate(self, investigation, steps):
         if not isinstance(steps, list) or not 1 <= len(steps) <= 100:
@@ -211,6 +215,10 @@ class Sequences:
                     return {k:v for k,v in result.items() if k != 'output'}
                 if result.get('saving_error'):
                     raise ValueError(result['saving_error'])
+                if result['status'] == 'connection-lost':
+                    # Public waits report disconnects promptly; a sequence still
+                    # observes the same command without restarting it or busy polling.
+                    await asyncio.sleep(1)
         if result.get('work_id'):
             while not work_finished(result['status']):
                 result = await self.c.wait(result['work_id'], 1)

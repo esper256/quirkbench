@@ -140,12 +140,12 @@ async def test_file_upload_does_not_block_commands_or_publish_partial_files(lab,
     probe.write_text('print("probe ready")\n')
     candidate = await lab.candidate()
     run = await lab.start_run(candidate['candidate_id'])
-    denied = await lab.raw_call('sftp_upload', run_id=run['run_id'], file=str(probe), name='probe.py')
+    denied = await lab.raw_call('sftp_upload', run_id=run['run_id'], controller_path=str(probe), target_name='probe.py')
     assert denied.isError
     await lab.boot_target('candidate', run['run_id'])
 
     async with stalled_sftp_write(monkeypatch) as entered:
-        transfer = asyncio.create_task(lab.call('sftp_upload', run_id=run['run_id'], file=str(probe), name='probe.py'))
+        transfer = asyncio.create_task(lab.call('sftp_upload', run_id=run['run_id'], controller_path=str(probe), target_name='probe.py'))
         await entered.wait()
         status = await lab.call('investigation_context', investigation='wifi-case')
         command = await lab.call('ssh_command_start', run_id=run['run_id'], request_id='parallel',

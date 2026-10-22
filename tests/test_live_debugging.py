@@ -14,13 +14,13 @@ async def test_concurrent_probe_download_and_final_receipt(lab, tmp_path):
     run = await running_candidate(lab)
     program = tmp_path / 'probe.py'
     program.write_text("import os; from pathlib import Path; p=Path(os.environ['QUIRKBENCH_EVIDENCE_DIR']); (p/'pending').write_bytes(bytes(range(256))); (p/'pending').rename(p/'trace.bin'); print(os.getpriority(os.PRIO_PROCESS, 0))")
-    uploaded = await lab.call('sftp_upload', run_id=run, file=str(program), name='probe.py')
+    uploaded = await lab.call('sftp_upload', run_id=run, controller_path=str(program), target_name='probe.py')
     monitor = await start_python(lab, run, 'import time; time.sleep(60)', 'monitor', 120)
 
     probe = await lab.call('ssh_command_start', run_id=run, request_id='uploaded-probe',
                           argv=[sys.executable, str(lab.target.workspace/'probe.py')], timeout_seconds=5)
     result = await wait_command(lab, probe)
-    downloaded = await lab.call('sftp_download', run_id=run, file='trace.bin')
+    downloaded = await lab.call('sftp_download', run_id=run, evidence_file='trace.bin')
     await lab.call('ssh_command_stop', command_id=monitor['command_id'])
     await wait_command(lab, monitor)
     returned = await lab.call('recovery_return', run_id=run, request_id='done')
@@ -29,11 +29,11 @@ async def test_concurrent_probe_download_and_final_receipt(lab, tmp_path):
     final = await lab.call('controller_work_wait', work_id=returned['work_id'], timeout_seconds=5)
 
     assert result['exit_code'] == 0 and int(result['output']) == os.getpriority(os.PRIO_PROCESS, 0)
-    assert Path(downloaded['file']).read_bytes() == bytes(range(256))
+    assert Path(downloaded['controller_path']).read_bytes() == bytes(range(256))
     assert (Path(final['results'])/'files/trace.bin').read_bytes() == bytes(range(256))
     assert not (lab.data/'quirkbench/evidence'/run).exists()
     assert not (lab.data/'quirkbench/work'/run).exists()
-    assert uploaded['file'].endswith('/probe.py')
+    assert uploaded['target_path'].endswith('/probe.py')
 
 
 async def test_stop_and_status_work_while_command_storage_is_stalled(lab, monkeypatch):
@@ -81,7 +81,7 @@ async def test_interrupted_or_changed_download_is_not_published(lab, monkeypatch
     evidence = lab.target.commands.evidence/'trace.bin'
     evidence.write_bytes(b'original')
     async with held_download(monkeypatch) as entered:
-        download = asyncio.create_task(lab.raw_call('sftp_download', run_id=run, file='trace.bin'))
+        download = asyncio.create_task(lab.raw_call('sftp_download', run_id=run, evidence_file='trace.bin'))
         await asyncio.wait_for(entered.wait(), 3)
         if change == 'grow':
             evidence.write_bytes(b'changed and longer')
@@ -108,7 +108,7 @@ async def test_evidence_sftp_is_read_only_and_does_not_expose_settings(lab):
             await client.open('evidence/file', 'wb')
         with pytest.raises(asyncssh.SFTPPermissionDenied):
             await client.open('evidence/secret', 'rb')
-    assert (await lab.raw_call('sftp_download', run_id=run, file='../settings/controller.crt')).isError
+    assert (await lab.raw_call('sftp_download', run_id=run, evidence_file='../settings/controller.crt')).isError
 
 
 async def test_debugging_boot_arguments_and_early_probe_evidence(lab, tmp_path):

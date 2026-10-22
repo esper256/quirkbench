@@ -12,6 +12,10 @@
 - [Interruptions and troubleshooting](interruptions.md)
 - [Interactive agent debugging through MCP](agent-experiment.md)
 
+The [agent guide](../agent-guide.md) documents currently available actions.
+Controller monitor screens, interactive terminal tools and report-management CLI
+commands shown in some mockups are future designs, not available commands.
+
 Show Quirkbench calls, guidance and responses. Agent-only coding, analysis and
 external build work can be a short sentence; do not invent Quirkbench tools merely
 to display those steps. Instructions should tell the agent what output is needed.

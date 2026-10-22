@@ -86,7 +86,7 @@ async def test_emergency_report_does_not_launch_programs_and_reads_are_bounded(l
     calls = len(lab.tools.calls)
 
     report = await lab.call('ssh_recovery_inspect', target='unrelated-laptop', view='emergency')
-    output = await lab.call('saved_output_read', file=report['saved_file'], limit=128)
+    output = await lab.call('saved_output_read', saved_file=report['saved_file'], limit=128)
 
     assert report['exit_code'] == 0 and '/proc/uptime' in report['output']
     assert len(lab.tools.calls) == calls
@@ -100,8 +100,8 @@ async def test_recovery_report_retains_early_boot_diagnostics(lab):
     preview = await lab.call('ssh_recovery_inspect', target='unrelated-laptop', view='boot-log', max_lines=80)
     report = await lab.call('ssh_recovery_inspect', target='unrelated-laptop', view='report')
 
-    assert 'Early diagnostic' not in Path(preview['output_file']).read_text()
-    assert 'Early diagnostic: controller adapter failed' in Path(report['output_file']).read_text()
+    assert 'Early diagnostic' not in Path(preview['controller_path']).read_text()
+    assert 'Early diagnostic: controller adapter failed' in Path(report['controller_path']).read_text()
     assert report['boot_id'] == lab.target.boot_id
 
 

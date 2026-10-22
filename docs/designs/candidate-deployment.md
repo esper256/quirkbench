@@ -67,8 +67,7 @@ writable overlays. OSTree's usual shared `/var` and merged `/etc` are not a clea
 reset. Keep run files separate from reusable repository content; never modify
 shared hard-linked files in place. Keep returned run files until the controller explicitly discards them. Upload evidence immediately and delete only its confirmed copy. A repeat boot reuses persistent edits but receives a new run ID; commands are never replayed. A clean repeat requires discard followed by a new deployment. Preserve unuploaded evidence.
 
-First arrangement to verify: recovery creates a separate OSTree storage root for
-each run, with a fresh deployment, `--no-merge` configuration defaults and its own
+Recovery creates a separate OSTree storage root for each deployment, with a fresh deployment, `--no-merge` configuration defaults and its own
 `/var` and home directories. Mount those
 directories before dependent services start. Reuse unchanged OS content; do not
 undo the previous run's edits. Check service initialization and OSTree's mount
@@ -90,11 +89,9 @@ writable directories. Keep references to reusable candidates in its repository.
 | Retain changes or replace a kernel | For the current RPM mechanism, supply local RPM additions/replacements before preparation, including kernel replacements. Inputs are copied; the resulting commit stays unchanged. Raw kernel files and later kernel swaps are not preparation inputs. Boot through recovery. |
 
 Use `ostree admin unlock` for disposable `/usr` edits first. Those edits are lost on reboot, including a repeat boot of a retained deployment. Persistent `/etc`, `/var` and home files remain until discard. No custom overlay is needed. Do not build custom
-overlay management unless the actual supported image exposes a concrete need. The proposed `rpm_overlay_install` helper must
-establish package dependencies, scripts and affected files before promising live
-installation. An overlay alone is not a package manager. Verify diagnostic-package
-addition and PipeWire replacement early; do not implement every transaction as
-bare `rpm -Uvh` or silently reduce all changes to reboot-only operation.
+overlay management unless the actual supported image exposes a concrete need. A future live-package helper must handle dependencies, scripts and affected
+files. An overlay alone is not a package manager. Use ordinary commands for
+suitable live changes; report when preparation and a new boot are needed.
 
 Do not wrap `rpm-ostree --apply-live` and assume it is run-local: it also prepares a
 pending deployment. Use rpm-ostree for controller-side candidate preparation;
@@ -102,7 +99,7 @@ retain its live path only if explicitly shown to preserve recovery boot ownershi
 
 Retaining build output does not retain a live installation. Do not automatically
 save a running machine or turn shell history into a reproducible candidate.
-Context reports supported live modes and what lasts until run completion. Do not
+Context and the agent guide explain persistence. Do not
 promise arbitrary mixing or reversal of package changes and direct file overlays;
 explain when a fresh run is needed. An installed kernel is not the running kernel.
 
@@ -154,8 +151,9 @@ Cancellation does not stop controller-side candidate preparation.
 to prepare software on the controller. Preparation can proceed while a previous
 run is retained. Keep those files until the replacement is ready and needed results
 are retrieved; discard requires final diagnostics receipt for a booted run.
-Recovery’s refusal, “Finish the existing run before deploying another candidate,”
-applies to deployment only. Controller-side preparation remains available.
+“Fresh deployment is blocked by existing run work” refers to target deployment,
+not controller-side preparation. Read context to decide whether to finish active
+work or discard retained files.
 
 `recovery_deploy_ostree` creates fresh files without selecting a boot. The agent can
 inspect progress and recovery before `recovery_boot_ostree(run_id)` boots them.

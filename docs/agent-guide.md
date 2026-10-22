@@ -49,7 +49,7 @@ candidate. Make another preparation request for different software.
 - `rpm_ostree_prepare_candidate` prepares a candidate. `recovery_deploy_ostree`
   transfers it and prepares its files without booting.
 - `recovery_boot_ostree` requests one candidate boot. `ssh_command_start` runs
-  commands there with explicit arguments, working directory and environment.
+  commands there with explicit arguments or a script, working directory and environment.
 - `ssh_command_read`, `ssh_command_wait` and `ssh_command_stop` follow commands.
   Output is saved independently of reading it. Each command has its own timeout;
   runs have no overall deadline. Processes have separate environments but share
@@ -72,10 +72,21 @@ Candidate networking reads saved connection settings; experimental changes do no
 update recovery settings. Save reusable software changes in a prepared candidate,
 not just a retained disk. The agent owns reasoning, code edits and patch generation.
 
-The [mockups](mockups/agent-experiment.md) also show intended later features,
-including interactive terminal input and live package helpers.
-Check the actual tool list instead of assuming those examples are available.
+The [agent examples](mockups/agent-experiment.md) illustrate these tools.
+Interactive terminal input, user-session selection and dedicated live-package
+helpers are not available. Other mockups may show future screens; check the running
+controller's tool list. See the [1.1 changelog](../CHANGELOG.md) for recent changes.
 See [installation and observed checks](controller-installation.md) for build status.
+
+## Evidence files
+
+Candidate commands and startup probes receive `QUIRKBENCH_RUN_ID`,
+`QUIRKBENCH_EVIDENCE_DIR` and `QUIRKBENCH_WORK_DIR`. Put completed measurements in
+the evidence directory, not beside credentials or Quirkbench's command records.
+Close and rename a finished file into place before `sftp_download`. Live downloads
+keep the target copy; recovery deletes it only after final confirmed upload.
+Scratch files in the work directory are removed then too. Keep reusable source and
+build output on the controller. Startup probes can save evidence before networking.
 
 ## Optional accelerators
 
@@ -123,3 +134,25 @@ time and monotonic time help correlate other logs; observation time can lag the
 fault under load. `--late-ms` adjusts the CPU frame tolerance. Delayed feeding can
 also mean ordinary backpressure. These observations do not prove an audible glitch
 or certify graphics correctness; an unreported fault is still possible.
+
+### Efficient tool calls
+
+`ssh_command_start` accepts either `argv` or `script`, not both. Scripts run in a
+new shell (`/bin/sh` by default); exports do not persist into another command.
+The execution deadline is `timeout_seconds`. Its optional `wait_seconds` (default
+0.5) returns short-command output directly; zero starts without waiting. Long
+commands return the same command ID to read, wait or stop. `ssh_command_wait`
+waits at most 50 seconds; a wait deadline never stops the process. Reuse the request ID
+when retrying unchanged work; changing only the brief wait does not launch again.
+
+Use `complete` and `outcome`, not a status word alone. `complete` does not promise
+that evidence arrived. `more` and `next_offset` continue output without rereading
+it. File inputs are `controller_path`/`target_name` for upload, `evidence_file`
+for download (relative to `QUIRKBENCH_EVIDENCE_DIR`) and `saved_file`
+for saved-output reads. Use returned references
+without guessing path conversions.
+
+Context stays focused on current work. `investigation_runs` pages through history;
+`deployment_id` identifies retained files while each boot gets its own `run_id`.
+Optional `controller_mcp_activity` shows call counts, time, response size and
+unchanged reads/waits. It is useful for evaluating a workflow, not a required step.

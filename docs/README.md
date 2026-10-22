@@ -6,7 +6,9 @@ Start with the short [product requirements](requirements/product.md). Changes to
 
 See the [example screens and commands](mockups/README.md) for the intended experience,
 from installation to an investigation patch.
-See the implementation scope in [milestone 1: recovery and candidate deployment](designs/development.md#milestone-1-bootable-recovery-and-agent-driven-deployment).
+For current use, start with the [agent guide](agent-guide.md) or
+[installation](controller-installation.md). See the [1.1 changelog](../CHANGELOG.md)
+for changes since the first agent investigation.
 
 Then read only the design relevant to the task. Designs describe **how Quirkbench should work**, not a claim that the current code implements them. Agents may improve them without approval except for suspect changes: massive added complexity or a substantial loss of capability, performance or ease of use. Explain such a change and ask the human first.
 
@@ -28,9 +30,5 @@ Then read only the design relevant to the task. Designs describe **how Quirkbenc
 [Legacy documents](legacy/README.md) are historical reference, not current design
 instructions. Consult a specific file only for a concrete implementation question.
 
-See [choosing a starting point](agent-guide.md#choosing-a-starting-point) in the agent guide
-and [controller setup](controller-installation.md)
-for current commands and the checks completed so far. Mockups also include later
-features; do not assume every illustrated tool is implemented.
-
-[First physical NVMe candidate: debugging friction](observations/2026-10-20-nvme-first-candidate.md) records observed problems and proposed improvements, not requirements.
+Dated observations record historical checks, not current setup requirements.
+Mockups include future screens; use actual tool descriptions for available actions.

@@ -78,29 +78,16 @@ sequenceDiagram
     participant Target
     Agent->>Quirkbench: investigation_context and optional candidate inventory
     Note over Agent,Quirkbench: Optional ordered list calls the same tools; stop on failure
-    Agent->>Quirkbench: rpm_ostree_prepare_candidate if needed
-    Quirkbench-->>Agent: Baseline preparation progress, then completed candidate
-    opt Replacing retained run files
-        Agent->>Quirkbench: Retrieve needed results; confirm diagnostics receipt
-        Agent->>Quirkbench: recovery_discard_ostree, then wait for completion
-        Quirkbench->>Target: Remove retained run files
-    end
-    Agent->>Quirkbench: recovery_deploy_ostree
-    Quirkbench->>Target: Supply prepared OSTree candidate to recovery
-    Target->>Target: Deploy with fresh run files and read-only connection settings
-    Agent->>Quirkbench: recovery_boot_ostree
-    Quirkbench->>Target: Recovery selects one candidate boot, keeping recovery the default
-    Note over Quirkbench,Target: Return to recovery if candidate startup never connects before its deadline
-    Target->>Quirkbench: Connect with stable paired identity and new boot ID
-    Quirkbench-->>Agent: Current software, available tools and instructions
+    Note over Agent,Target: Candidate boot follows the deployment diagram above, when needed
     loop Inspect and improvise on the same boot
         Agent->>Quirkbench: Start command or sftp_upload a probe
         Quirkbench->>Target: Execute through SSH, save output independently
-        Quirkbench-->>Agent: Command ID, available output and next action
+        Quirkbench-->>Agent: Short command result or running command ID, output cursor and completion
+        Note over Quirkbench: Record MCP call time and response size without copying command text
         Note over Agent,Target: Other commands can run concurrently; each has its own timeout
         Note over Target: Optional quirkbench-load uses ordinary command control; no separate service
         Agent->>Quirkbench: ssh_command_wait
-        Note over Agent,Quirkbench: Wait without periodic model calls
+        Note over Agent,Quirkbench: Bounded MCP wait; quiet CLI wait for long controller work
         Target-->>Quirkbench: Command output and completion, or interruption
         Quirkbench-->>Agent: Saved output and status
         Agent->>Quirkbench: sftp_download a completed evidence file
@@ -112,7 +99,7 @@ sequenceDiagram
         Agent->>Agent: Edit source
         Agent->>Agent: Build changed software with ordinary tools
         Agent->>Quirkbench: rpm_ostree_prepare_candidate with captured package changes
-        Quirkbench->>Target: Transfer changes, new candidate boots go through recovery
+        Note over Agent,Target: Return, discard, deploy and boot through recovery as shown above
         Target-->>Quirkbench: Current software and connection status
         Quirkbench-->>Agent: Ready for more inspection
     end

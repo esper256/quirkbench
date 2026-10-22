@@ -40,7 +40,7 @@ come through the SSH connection, including after reconnection.
 
 Recovery and candidate code use AsyncSSH `connect_reverse()`. The target initiates
 the network connection and acts as the SSH server; the controller acts as the SSH
-client. Commands, interactive terminals and file transfers use standard SSH.
+client. Commands and file transfers use standard SSH; interactive terminal input is later work.
 Pairing records the target's SSH public key and supplies the controller's public
 key. Keep the target's private pairing identity stable across reboots; use library
 key checks to recognize it. A friendly target reference and human authorization
@@ -49,7 +49,7 @@ identify restarts, not new pairing identities. No per-run keys. Candidate root c
 read its credentials and shared USB storage; a reported recovery identity is not
 proof against malicious candidate software.
 
-The target connects SSH requests to local processes and terminals. Quirkbench
+The target connects SSH requests to local processes. Quirkbench
 restricts recovery diagnostics to inspection and checks investigation authorization.
 Recovery also performs the explicit candidate deployment and boot actions.
 Scope guides the agent and tool actions; it cannot contain arbitrary candidate
@@ -58,11 +58,8 @@ Reconnect identifies the current boot and queries target-owned command records.
 Ordinary commands continue through controller/network loss; old-boot commands
 and lost interactive terminals are not automatically recreated.
 
-Command responses distinguish target mode, boot, run, command ID, output and exit
-status. Repeated start requests identify existing work; uncertain commands or input
-are not replayed. A disconnected target cannot receive queued commands intended for
-its previous boot. Current recovery/candidate status and control availability are
-visible to both the human and agent.
+A disconnected target cannot receive queued commands intended for its previous
+boot. Repeated starts identify existing work; uncertain commands are not replayed.
 
 Deployment, boot, discard and return admission commits the retry request, any run
 changes and the dispatchable status in one SQLite transaction. Dispatch happens
@@ -90,7 +87,7 @@ Use names such as these in the [mockup](../mockups/agent-experiment.md):
 
 | Tool | Specific purpose |
 | --- | --- |
-| `investigation_context` | Read the investigation and discover applicable tools. |
+| `investigation_context` | Read current investigation and target context; MCP discovery lists tools. |
 | `ssh_recovery_inspect` | Read bounded hardware, network, storage or boot-log output through recovery's SSH connection. |
 | `ssh_command_start/read/wait/stop` | Separate tools for starting, reading, waiting for and stopping SSH commands. Interactive input is later work. |
 | `sftp_upload` / `sftp_download` | Transfer a probe to the candidate or retrieve completed experiment evidence. |
@@ -117,21 +114,14 @@ this naming choice. Tools share the existing run records and application code.
 Retire unused mechanisms rather than accumulating permanent alternatives.
 Human CLI commands may remain task-oriented.
 
-## Recovery tools in milestone 1
+## Recovery inspection
 
-`ssh_recovery_inspect` takes a target, a named view and bounded options such as
-the number of log lines. Recovery maps these to fixed diagnostic commands and
-returns their actual output, exit status and saved-output location. Do not accept
-shell text, arbitrary executables or arbitrary file paths. Reuse ordinary command
-and output handling rather than building a second diagnostic framework.
-
-Recovery exposes this tool alongside candidate preparation, deployment, progress
-and return controls. The first candidate command tools are `ssh_command_start`,
-`ssh_command_read`, `ssh_command_wait` and `ssh_command_stop`. They execute explicit
-arguments as root, with separate working directories and environment overrides,
-individual timeouts and durable output. They do not accept commands in recovery.
-Candidate file transfer is available through `sftp_upload` and `sftp_download`.
-Interactive input, user-session selection and live package helpers remain later work. No OS preparation code belongs in these command tools.
+`ssh_recovery_inspect` accepts a target, named view and bounded options. It maps
+these to fixed diagnostic commands and returns actual output, exit status and a
+saved-file reference. It accepts no shell text or arbitrary paths. `services`
+means failed units; `emergency` avoids external programs and shared-storage reads.
+Candidate commands remain separate and run as root. See the
+[agent guide](../agent-guide.md) for available workflows.
 
 ## Keep simple HTTP services
 
@@ -162,12 +152,9 @@ results. Retry an interrupted file from the beginning. Keep unfinished uploads
 separate, handle full disks and reject filenames escaping the run directory.
 Use standard HTTP libraries, not a second transfer framework.
 
-Keep a local file/receipt list until the run's final report is acknowledged. Live
-command output already stored on the controller and later USB evidence belong to
-the same run; neither alone proves collection is complete. Reports distinguish
-finished, interrupted and unknown outcomes, and identify missing evidence. Closed
-log segments may upload during execution. Never rewrite a completed file with a
-growing log. Recovery reports use the same upload helper but separate storage.
+Keep a local file/receipt list until the run's final report is acknowledged. Live downloads and later USB evidence belong to the same run; neither alone
+proves collection is complete. Reports distinguish
+finished, interrupted and unknown outcomes, and identify missing evidence. Do not overwrite a completed evidence file with a growing log. Recovery reports use the same upload helper but separate storage.
 
 Use clear normal HTTP errors and simple JSON. The controller writes its shared
 SQLite records as described in [internals](internals.md); no client generator is
@@ -185,13 +172,11 @@ Run summaries distinguish evidence pending from missing output. Uploaded command
 records update controller status. Software identity, target capabilities and
 candidate base/target-tools identity are visible before deployment.
 
-Live evidence: `sftp_download(run_id, file)` reads a completed file relative to
+Live evidence: `sftp_download(run_id, evidence_file)` reads a completed file relative to
 `QUIRKBENCH_EVIDENCE_DIR` through the existing SSH connection. It returns a local
 controller path, byte size and digest. Final recovery upload still controls target
 cleanup. Recovery advertises `kernel-args` before optional debugging arguments may
 be sent; candidates advertise `sftp-download` before live evidence may be read.
-Command reads distinguish `connection-lost` from a confirmed `interrupted` boot.
-`saving_pending` keeps quiet waits open until output and completion are saved.
 
 ## Ordered operations and investigation controls
 
@@ -202,7 +187,7 @@ There are no loops, branches, implicit retries or general plugins. Individual
 calls remain available; a sequence is optional.
 
 Preparation, deployment, boot, return and transfers finish before the next step.
-`ssh_command_start` returns immediately; explicitly wait or stop each started
+`ssh_command_start` defaults to no brief wait inside a sequence; explicitly wait or stop each started
 command later. Wait checks exit codes, default `[0]`. Failure stops progression
 and requests cleanup only for this sequence's work. Cancellation cannot undo a
 committed boot. Uncertain actions need inspection, never automatic replay.
@@ -232,3 +217,35 @@ Repeated controls preserve completed outcomes: cancelling a finished sequence do
 nothing, and pause cannot downgrade an ongoing force stop. Keep operation sequences
 limited to the current explicit list until actual investigation use demonstrates a
 need for more. Prefer individual tools over adding another sequence language feature.
+
+## MCP arguments and results
+
+- `ssh_command_start` accepts exactly one of `argv` or `script`. Scripts use
+  `shell -c` (default `/bin/sh`), not a persistent session. `timeout_seconds`
+  bounds execution; `wait_seconds` briefly waits for a result (default 0.5,
+  maximum 5). Zero returns immediately. Changing the wait does not change retry
+  identity. Long commands retain the same read/wait/stop tools.
+- Work and command replies expose `complete`, `outcome` and `needs_attention`.
+  Preserve detailed `status`. Lost connection means unknown outcome; an interrupted
+  boot can be complete with an unknown outcome. Evidence receipt remains separate.
+  `saving_pending` keeps command completion false. Output uses byte `offset`,
+  `next_offset`, `output_bytes` and `more` in live and saved reads. `next_tool`
+  is an optional suggestion; it is null when no continuation is needed.
+- File arguments identify their location: upload `controller_path` and `target_name`,
+  download `evidence_file`, read `saved_file`. Replies use `target_path`,
+  `controller_path`, and controller-relative `saved_file`. Preparation `log_file`
+  is also controller-relative and directly readable. Paths remain locations.
+- Context reports current work and a guide pointer. `investigation_runs` pages
+  through summaries, newest first. A stable `deployment_id` names retained files;
+  each boot attempt has its own `run_id`. Boot replies return both. No new storage
+  service or deployment mechanism is introduced.
+- Schemas publish fixed choices, existing bounds, sequence step names/tools and
+  common result fields. Sequence arguments still follow the selected tool; validate
+  them before work starts. Keep ordered lists optional, without loops or branches.
+- `controller_mcp_activity` reports call counts, elapsed time, successful response
+  text bytes, errors and unchanged status/output positions. It includes read/wait
+  calls and schema rejections, excludes internal polling, and persists in existing
+  events. Normal investigation timelines exclude this traffic. No command text,
+  environment or output copy is stored. Omit investigation to see unscoped calls.
+  Calls are recorded on return/cancellation; abrupt process loss can omit an
+  in-flight call. An unchanged reply is a measurement, not proof of wasted effort.

@@ -7,35 +7,28 @@ investigation goals. Paths and IDs below stand for values returned by the tools.
 Tool: investigation_context
 Input: {"investigation":"intermittent-fault"}
 
-Target: target-1
-Mode: candidate
-Run: run-1
-Commands: explicit argv, independent environment and deadline; shared files and services.
-QUIRKBENCH_RUN_ID: current run
-QUIRKBENCH_EVIDENCE_DIR: experiment files; uploaded when recovery returns
-QUIRKBENCH_WORK_DIR: scratch files; removed after confirmed recovery upload
-
-Inspect baseline behavior first. Watch for all investigation symptoms.
-Build changed software using matching sources, configuration and symbol versions.
-Use ordinary commands to transfer and activate changes. Do not force module unloads
-or bypass signatures. Prepare another candidate when a change needs a new boot.
+Output includes:
+{"investigation":"intermittent-fault","mode":"candidate",
+ "current_run":{"run_id":"run-1","deployment_id":"run-1","candidate_id":"candidate-1"},
+ "agent_guide":"/home/sam/dev/quirkbench/docs/agent-guide.md",
+ "working_directory":"/var/tmp","history_tool":"investigation_runs"}
 ```
 
-The agent inspects the environment, prepares a bounded collector and a probe using
+The agent reads the returned guide, inspects the environment, prepares a bounded collector and a probe using
 its usual tools, and builds changed software if the findings call for it.
 
 ```text
 Tool: sftp_upload
-Input: {"run_id":"run-1","file":"/home/sam/investigation/collector.py","name":"collector.py"}
-Output: {"file":"/var/tmp/quirkbench/collector.py","next_tool":"ssh_command_start"}
+Input: {"run_id":"run-1","controller_path":"/home/sam/investigation/collector.py","target_name":"collector.py"}
+Output: {"target_path":"/var/tmp/quirkbench/collector.py","next_tool":"ssh_command_start"}
 
 Tool: ssh_command_start
 Input: {"run_id":"run-1","request_id":"collect-1","argv":["python3","/var/tmp/quirkbench/collector.py"],"timeout_seconds":300}
 Output: {"command_id":"command-1","status":"running"}
 
 Tool: sftp_upload
-Input: {"run_id":"run-1","file":"/home/sam/investigation/probe","name":"probe"}
-Output: {"file":"/var/tmp/quirkbench/probe","next_tool":"ssh_command_start"}
+Input: {"run_id":"run-1","controller_path":"/home/sam/investigation/probe","target_name":"probe"}
+Output: {"target_path":"/var/tmp/quirkbench/probe","next_tool":"ssh_command_start"}
 
 Tool: ssh_command_start
 Input: {"run_id":"run-1","request_id":"probe-1","argv":["sh","-c","chmod +x /var/tmp/quirkbench/probe && /var/tmp/quirkbench/probe"],"timeout_seconds":120}
@@ -46,8 +39,8 @@ Input: {"command_id":"command-2","timeout_seconds":50}
 Output: {"command_id":"command-2","status":"finished","exit_code":0,"output":"Probe complete. Saved trace.bin in QUIRKBENCH_EVIDENCE_DIR.\n","saving_pending":false}
 
 Tool: sftp_download
-Input: {"run_id":"run-1","file":"trace.bin"}
-Output: {"file":"/home/sam/.quirkbench/results/run-1/downloads/file-1/trace.bin","size":4096,"sha256":"<digest>","instructions":"Local copy ready. Target evidence remains until final recovery upload is confirmed."}
+Input: {"run_id":"run-1","evidence_file":"trace.bin"}
+Output: {"controller_path":"/home/sam/.quirkbench/results/run-1/downloads/file-1/trace.bin","size":4096,"sha256":"<digest>","instructions":"Local copy ready. Target evidence remains until final recovery upload is confirmed."}
 ```
 
 The probe closes its output and renames the completed file into place before the
@@ -176,4 +169,20 @@ Tool: ssh_command_read
 Input: {"command_id":"command-5"}
 Output includes a JSON line when a CPU frame is late:
 {"event":"late_frame","observed_utc":"2026-10-21T23:30:02+00:00","monotonic_ns":5210000000,"run_id":"run-1","late_ms":84.2,"expected_monotonic_ns":5125800000,"interpretation":"Scheduling or CPU delay; not proof of a graphics or audio glitch"}
+```
+
+## Short command and optional call review
+
+```text
+Tool: ssh_command_start
+Input: {"run_id":"run-1","request_id":"inspect-kernel","script":"uname -r; cat /proc/cmdline","timeout_seconds":10,"wait_seconds":1}
+Output: {"command_id":"command-6","status":"finished","complete":true,"outcome":"succeeded","needs_attention":false,"output":"<kernel and boot arguments>\n","more":false,"next_tool":null}
+
+Tool: investigation_runs
+Input: {"investigation":"intermittent-fault","limit":10}
+Output: {"runs":[{"run_id":"run-2","deployment_id":"run-1","candidate_id":"candidate-1","status":"running","boot_id":"boot-2","evidence_received":false}],"more":false,"next_cursor":"run-2"}
+
+Tool: controller_mcp_activity
+Input: {"investigation":"intermittent-fault","limit":10}
+Output includes totals: [{"tool":"ssh_command_wait","calls":3,"elapsed_seconds":25.2,"response_text_bytes":1800,"unchanged":1}]
 ```

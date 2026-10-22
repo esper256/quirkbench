@@ -4,8 +4,6 @@ Revisable design supporting the [requirements](../requirements/product.md).
 Keep a dedicated recovery system separate from the writable candidate. Both
 connect outward to Quirkbench. The candidate provides live debugging; recovery
 provides inspection, evidence upload and deployment of the next candidate.
-The [first milestone](development.md#milestone-1-bootable-recovery-and-agent-driven-deployment)
-delivers this recovery-to-candidate boot journey before interactive candidate commands.
 
 ## USB and saved files
 
@@ -57,8 +55,8 @@ path, saved command output and retry records must be backed by shared USB storag
 even if exposed under `/run`; temporary memory alone is insufficient. Supply their
 locations through environment variables and the agent instructions. Tell the
 agent to leave recovery settings, boot selection and Quirkbench-managed files
-alone. Live software edits belong to this run; retaining them requires explicit
-candidate preparation. These protections reduce accidents; they cannot contain
+alone. Persistent run files may be kept for repeat boots; a reusable candidate requires
+explicit preparation. These protections reduce accidents; they cannot contain
 a modified kernel.
 
 ## Boot, run, return
@@ -107,17 +105,11 @@ separate lets it boot and explain the failure, but cannot guarantee evidence sur
 
 ## Evidence uploads
 
-Follow the [controller API](controller-api.md) for pairing and evidence receipt.
-Recovery initiates HTTPS uploads using its paired connection.
-The controller does not need to connect back to the target. Use established HTTP
-libraries to stream files into ordinary controller directories. Start with whole
-file retries; do not add rsync, a second transfer service or custom chunk handling.
-Keep incomplete uploads separate from received files and acknowledge stored files
-before recovery deletes them. A repeated upload must not duplicate results.
-
-This is a small file-transfer feature. Its implementation should be short and
-simple. If it grows into a complicated subsystem, reconsider the approach rather
-than treating that complexity as inevitable.
+Recovery uploads surviving evidence through the paired HTTPS connection. Use
+ordinary files and whole-file retries; keep unfinished uploads separate and delete
+target evidence only after confirmed final receipt. Collection failures remain
+visible even when some files arrived. See the
+[controller API](controller-api.md#keep-simple-http-services) for the shared rules.
 
 ## Screen and troubleshooting
 
@@ -189,13 +181,7 @@ without freezing the TUI. Show command failures and retain terminal access.
 Tell the user to wait for power-off before disconnecting the drive. Do not imply
 that restarting resumes a candidate.
 
-Provide a separate, human-confirmed emergency reboot or power-off when normal
-shutdown fails. Keep the small emergency control and its dependencies in RAM;
-launching another tool from the lost recovery drive is not a fallback. Explain
-that unsaved data may be lost. Do not force power-off automatically after a timeout.
-This is best effort: losing the system drive can also stop the console or hang
-the kernel. Test the emergency control without access to the recovery filesystem,
-replacing the final power action in fast tests.
+For failed shutdown and storage loss, use the [RAM-resident recovery controls](#when-the-recovery-drive-fails).
 
 Initialize temporary networking without evidence-storage or pairing prerequisites; use
 `nmtui`. Save settings automatically when storage works. If it does not, explain
