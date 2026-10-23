@@ -187,7 +187,10 @@ async def test_corruption_retry_and_cancel_never_select_partial_boot(lab, monkey
 
 
 async def test_lazy_startup_and_capability_rejection(lab, monkeypatch):
-    assert not any(c[0] in ("ostree", "rsync", "losetup", "podman") for c in lab.tools.calls)
+    assert not any(
+        c[0] in ("ostree", "rsync", "losetup", "podman", "guestmount", "guestunmount")
+        for c in lab.tools.calls
+    )
     assert not (lab.data / "quirkbench/image-cache").exists()
     image_tools(lab, monkeypatch)
     software = await candidate(lab)
@@ -402,3 +405,63 @@ async def test_interrupted_transfer_retains_ownership_across_recovery_restart(la
     )
     assert (await lab.controller.wait(discard["work_id"], 5))["status"] == "finished"
     assert not (lab.data / "quirkbench/image-deployments" / work["run_id"]).exists()
+
+
+async def test_update_reuses_filesystem_and_idempotent_request(lab, monkeypatch):
+    image_tools(lab, monkeypatch)
+    software = await candidate(lab)
+    first = await deploy(lab, software, kernel_args=["debug"])
+    assert (await lab.controller.wait(first["work_id"], 5))["status"] == "ready"
+    storage = lab.data / "quirkbench/image-deployments" / first["run_id"]
+    before = (storage / "rootfs.img").stat().st_ino
+    update = await deploy(
+        lab,
+        software,
+        "update",
+        destination_run_id=first["run_id"],
+        rsync_options={"mode": "delta", "update_boot": False},
+    )
+    assert (await lab.controller.wait(update["work_id"], 5))["status"] == "ready"
+    repeated = await deploy(
+        lab,
+        software,
+        "update",
+        destination_run_id=first["run_id"],
+        rsync_options={"mode": "delta", "update_boot": False},
+    )
+    assert repeated["work_id"] == update["work_id"]
+    assert (storage / "rootfs.img").stat().st_ino == before
+    assert lab.target.active["deployment_id"] == first["run_id"]
+    assert lab.target.active["kernel_args"] == ["debug"]
+    run = await lab.controller.store.get("run", update["run_id"])
+    assert run["kernel_args"] == ["debug"]
+    again = await deploy(lab, software, "boot-update", destination_run_id=update["run_id"])
+    result = await lab.controller.wait(again["work_id"], 5)
+    assert result["status"] == "ready", result
+    assert (storage / "mount/etc/fstab").read_text().count("UUID=") == 1
+    assert len([c for c in lab.tools.calls if c[0] == "mkfs.ext4"]) == 1
+
+
+async def test_failed_cancellation_keeps_original_deployment_ownership(lab, monkeypatch):
+    state = image_tools(lab, monkeypatch)
+    software = await candidate(lab)
+    first = await deploy(lab, software)
+    assert (await lab.controller.wait(first["work_id"], 5))["status"] == "ready"
+    state["started"].clear()
+    state["release"].clear()
+    update = await deploy(lab, software, "update", destination_run_id=first["run_id"])
+    await state["started"].wait()
+    original = lab.tools.command
+
+    async def fail_selection(*args, **kwargs):
+        if args[0] == "grub2-editenv" and "unset" in args:
+            raise ValueError("Simulated boot environment failure")
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(lab.tools, "command", fail_selection)
+    await lab.call("recovery_cancel_deployment", work_id=update["work_id"])
+    result = await lab.controller.wait(update["work_id"], 5)
+    assert result["status"] == "failed"
+    assert lab.target.active["deployment_id"] == first["run_id"]
+    assert lab.target.active["entry"] == "quirkbench-image-" + first["run_id"]
+    assert (lab.data / "quirkbench/image-deployments" / first["run_id"]).exists()

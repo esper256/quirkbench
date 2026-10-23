@@ -526,7 +526,7 @@ class Target:
             if action == "boot":
                 if not self.active.get("entry"):
                     raise ValueError(
-                        "Deployment is incomplete; discard it before deploying another candidate."
+                        "Boot preparation is incomplete; retry with update_boot=true or discard the experiment."
                     )
                 if not 1 <= request["startup_timeout"] <= 3600:
                     raise ValueError(

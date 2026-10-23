@@ -100,6 +100,9 @@ async def main(folder):
                 == b"system_u:object_r:bin_t:s0"
             )
             assert os.getxattr(probe, "user.quirkbench") == b"preserved"
+            assert os.getxattr(target / "var/owned", "system.posix_acl_access") == os.getxattr(
+                source / "var/owned", "system.posix_acl_access"
+            )
         finally:
             await command("sudo", "umount", target)
     print("File-tree metadata, delta matching and explicit whole-file transfer passed.")

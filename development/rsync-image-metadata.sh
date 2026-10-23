@@ -43,6 +43,7 @@ run
 mkfs ext4 /dev/sda
 mount /dev/sda /
 tar-in export.tar / xattrs:true selinux:true acls:true
+acl-set-file /var/owned access u::rw-,u:44:r--,g::---,m::r--,o::---
 sync
 umount-all
 shutdown

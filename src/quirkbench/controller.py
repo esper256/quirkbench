@@ -682,8 +682,12 @@ class Controller(InvestigationControls, Storage, CommandControl):
                         backend=selected_backend,
                         created_at=time.time(),
                         evidence=None,
-                        kernel_args=kernel_args,
-                        selinux=selinux,
+                        kernel_args=previous.get("kernel_args", [])
+                        if previous and not selected_options["update_boot"]
+                        else kernel_args,
+                        selinux=previous.get("selinux", "disabled")
+                        if previous and not selected_options["update_boot"]
+                        else selinux,
                         recovery_boot=self.targets[t]["boot_id"],
                     )
                 )

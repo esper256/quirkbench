@@ -44,7 +44,8 @@ API assumptions. Live rpm-ostree transactions are not supported in the ordinary
 root; prepare a new candidate for package changes.
 
 The controller opens the prepared source image as a read-only libguestfs/FUSE
-view only while selected. This preserves numeric ownership, hard links, ACLs,
+view only while selected. FUSE `use_ino` retains inode identity for hard links
+(see the [guestmount manual](https://libguestfs.org/guestmount.1.html)). This preserves numeric ownership, hard links, ACLs,
 capabilities and SELinux xattrs instead of losing them in a user-owned checkout.
 Native `guestmount` needs a usable appliance kernel and FUSE; these are optional
 controller dependencies, not Recovery services. The appliance remains part of
@@ -68,7 +69,7 @@ a new filesystem. `rsync_options` provides:
 - `mode="full"`: `--whole-file`, with no delta matching. This is the default.
 - `mode="delta"`: `--no-whole-file`, reusing matching destination blocks.
 - `ignore_times=true`: transfer every selected file, even when the quick check
-  matches. Full mode alone still skips unchanged files.
+  matches. It takes precedence over checksum selection. Full mode alone still skips unchanged files.
 - `checksum=true`: compare content rather than size/time when selecting changes.
 - `delete=true`: delete destination paths absent from the source. Default false.
 - `exclude=[...]`: ordinary rsync patterns; excluded destination paths are also
@@ -78,7 +79,8 @@ a new filesystem. `rsync_options` provides:
   and `update_boot=false`. The filesystem is mounted read-only without replay.
 - `update_boot=true`: after successful transfer, configure fstab and install the
   separately verified kernel/initramfs and boot entry. Default true. False keeps
-  existing boot artifacts; it does not implicitly exclude `/etc/fstab` or any
+  existing boot artifacts and their recorded kernel arguments/SELinux policy; new
+  boot-policy arguments are not applied. It does not implicitly exclude `/etc/fstab` or any
   other root files. For a userspace-only update, explicitly exclude `etc/fstab`
   if its existing target configuration should remain.
 

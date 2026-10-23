@@ -155,3 +155,36 @@ async def test_real_disconnected_stream_cannot_publish_boot(lab, monkeypatch):
     monkeypatch.setattr(rsync_stream, "serve_bundle", original)
     retry = await deploy(lab, software, "retry", destination_run_id=work["run_id"])
     assert (await lab.controller.wait(retry["work_id"], 5))["status"] == "ready"
+
+
+async def test_tree_completion_waits_for_source_view_release_before_boot_transfer(lab, monkeypatch):
+    from quirkbench import source_tree
+
+    real_transfer(lab, monkeypatch)
+    closing, release = asyncio.Event(), asyncio.Event()
+
+    @asynccontextmanager
+    async def delayed_view(image, parent):
+        try:
+            yield lab.root / "source-fixture"
+        finally:
+            closing.set()
+            await release.wait()
+
+    monkeypatch.setattr(source_tree, "image_view", delayed_view)
+    software = await candidate(lab)
+    work = await deploy(lab, software)
+    try:
+        async with asyncio.timeout(5):
+            await closing.wait()
+        # Completion must remain pending while the source appliance still owns
+        # the target's stream slot. Otherwise the boot-artifact phase gets 409.
+        with pytest.raises(TimeoutError):
+            async with asyncio.timeout(0.2):
+                await asyncio.shield(lab.target.deployment)
+        assert lab.controller.rsync_transfers
+    finally:
+        release.set()
+    result = await lab.controller.wait(work["work_id"], 5)
+    assert result["status"] == "ready", result
+    await lab.until(lambda: not lab.controller.rsync_transfers)

@@ -30,6 +30,8 @@ async def image_view(image, parent, *, read_only=True):
         process = await asyncio.create_subprocess_exec(
             "guestmount",
             "--no-fork",
+            "-o",
+            "use_ino",  # One filesystem: preserve inode identity for rsync hard links.
             "--fd=" + str(write_fd),
             "--ro" if read_only else "--rw",
             "--format=raw",
