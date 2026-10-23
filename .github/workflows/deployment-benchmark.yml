@@ -88,7 +88,7 @@ jobs:
             /etc/apt/sources.list.d/ubuntu.sources > "$RUNNER_TEMP/qb-ubuntu.sources"
           apt_options=(-o "Dir::Etc::sourcelist=$RUNNER_TEMP/qb-ubuntu.sources" -o Dir::Etc::sourceparts=- -o Acquire::Retries=2 -o Acquire::https::Timeout=30 -o Acquire::http::Timeout=30)
           sudo apt-get "${apt_options[@]}" update
-          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends podman uidmap slirp4netns fuse-overlayfs rsync guestmount libguestfs-tools qemu-system-x86 ovmf grub-common
+          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends podman uidmap slirp4netns fuse-overlayfs rsync guestmount libguestfs-tools qemu-system-x86 ovmf grub-common mtools dosfstools
       - name: Assemble locked workload and production Recovery outside candidate timing
         timeout-minutes: 20
         run: |
@@ -114,7 +114,7 @@ jobs:
           podman --root "$RUNNER_TEMP/workload/podman" --runroot "$runroot" \
             run --rm --user 0 --network=none --security-opt label=disable \
             -v "$RUNNER_TEMP/workload:/work" localhost/qb-benchmark-workload \
-            bash -c 'mkdir -p /work/appliance-modules; cd /work/appliance-modules; rpm2cpio /work/inputs/kernel-core-7.2.10-200.fc44.x86_64.rpm | cpio -idmu --quiet; rpm2cpio /work/inputs/kernel-modules-core-7.2.10-200.fc44.x86_64.rpm | cpio -idmu --quiet; rpm2cpio /work/inputs/kernel-modules-7.2.10-200.fc44.x86_64.rpm | cpio -idmu --quiet; depmod -b /work/appliance-modules 7.2.10-200.fc44.x86_64'
+            bash -c 'set -euo pipefail; mkdir -p /work/appliance-modules; cd /work/appliance-modules; rpm2cpio /work/inputs/kernel-core-7.2.10-200.fc44.x86_64.rpm | cpio -idmu --quiet; rpm2cpio /work/inputs/kernel-modules-core-7.2.10-200.fc44.x86_64.rpm | cpio -idmu --quiet; rpm2cpio /work/inputs/kernel-modules-7.2.10-200.fc44.x86_64.rpm | cpio -idmu --quiet; depmod -b /work/appliance-modules 7.2.10-200.fc44.x86_64'
           export SUPERMIN_MODULES="$RUNNER_TEMP/workload/appliance-modules/lib/modules/7.2.10-200.fc44.x86_64"
           export SUPERMIN_KERNEL="$SUPERMIN_MODULES/vmlinuz"
           image_id=$(python3 -c 'import json,os; print(json.load(open(os.environ["RUNNER_TEMP"]+"/recovery-prerequisite/latest-build.json"))["id"])')

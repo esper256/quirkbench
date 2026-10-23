@@ -16,11 +16,13 @@ The Recovery directory must contain the current production `image.json`,
 `recovery.img` and `BOOTX64.EFI`. Build it with the normal Recovery builder in
 separate disposable storage before running this command. It is a shared, recorded
 prerequisite, not part of candidate preparation timing. Install the normal
-controller build dependencies plus QEMU, OVMF, guestfish, guestmount, rsync and
+controller build dependencies plus QEMU, OVMF, guestfish, guestmount, mtools, dosfstools, rsync and
 GRUB's environment editor. The guest needs enough RAM for RAM-backed Recovery;
 the default is 8 GiB. Each backend receives a newly created 64 GiB sparse regular
 file, presented as USB media. No host block device or physical media is accepted.
-Libguestfs creates its filesystems without mounting them on the host. Allow ample
+Libguestfs creates the ext4 filesystems; mtools creates the EFI filesystem with
+hash-checked read-back. Neither requires host mounts. The guest receives an
+additional serial console argument for saved boot diagnostics. Allow ample
 real disk capacity for two separate container stores, OCI caches, OSTree
 repositories, root images and target disks. Nothing deletes an existing cache.
 

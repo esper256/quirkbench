@@ -81,6 +81,7 @@ async def test_failure_records_each_isolated_backend_without_claiming_boot(tmp_p
     assert set(results["errors"]) == {"ostree", "rsync", "comparability"}
     for rows in results["backends"].values():
         assert rows[0]["status"] == "failed"
+        assert rows[0]["preparation"] == "failed"
         assert rows[0]["boot"] == rows[0]["deployment"] == "unrun"
     with pytest.raises(FileExistsError):
         await bench.main(args)
@@ -126,3 +127,26 @@ def test_transfer_statistics_fail_closed_and_keep_actual_delta_counts():
     assert result["matched_data_bytes"] == 4192256
     with pytest.raises(ValueError, match="Missing rsync statistics"):
         bench.transfer_statistics("transfer failed before statistics")
+
+
+async def test_vm_exit_is_reported_without_waiting_for_boot_deadline():
+    import asyncio
+
+    controller = SimpleNamespace(changed=asyncio.Event(), targets={})
+    with pytest.raises(RuntimeError, match="QEMU exited"):
+        await bench.connected(controller, "recovery", 600, SimpleNamespace(returncode=1))
+
+
+async def test_media_never_overwrites_an_existing_disk(tmp_path):
+    recovery, output = tmp_path / "recovery", tmp_path / "output"
+    recovery.mkdir()
+    output.mkdir()
+    (recovery / "recovery.img").write_bytes(b"fixture")
+    (recovery / "image.json").write_text(
+        json.dumps({"files": {"recovery.img": bench.digest_file(recovery / "recovery.img")}})
+    )
+    disk = output / "target.raw"
+    disk.write_bytes(b"must remain unchanged")
+    with pytest.raises(FileExistsError):
+        await bench.make_disk(output, recovery, {}, None, 64)
+    assert disk.read_bytes() == b"must remain unchanged"

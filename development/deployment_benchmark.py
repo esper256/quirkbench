@@ -92,7 +92,7 @@ class MeasuredLinux(Linux):
     """Only instrument real commands; isolate every Podman invocation's storage."""
 
     def __init__(self, folder):
-        super().__init__(progress=print)
+        super().__init__(progress=lambda message: print(message, flush=True))
         self.folder = folder
         self.records = []
         # Podman requires a runroot shorter than 50 characters. Artifact storage
@@ -206,9 +206,11 @@ async def diagnostic(controller, run, request, script):
     return command
 
 
-async def connected(controller, mode, timeout):
+async def connected(controller, mode, timeout, vm=None):
     async with asyncio.timeout(timeout):
         while True:
+            if vm is not None and vm.returncode is not None:
+                raise RuntimeError(f"QEMU exited ({vm.returncode}); inspect serial.log")
             controller.changed.clear()
             for identifier, target in controller.targets.items():
                 if target.get("mode") == mode:
@@ -245,7 +247,20 @@ async def make_disk(folder, recovery, connection, linux, size_gib):
     connection = dict(connection)
     (folder / "controller.crt").write_text(connection.pop("ca"))
     save_json(folder / "connection.json", connection)
-    (folder / "grub.cfg").write_text(grub_config(media))
+    (folder / "grub.cfg").write_text(
+        grub_config(media).replace("console=tty1", "console=tty1 console=ttyS0,115200")
+    )
+    # mtools assembles FAT filesystems without depending on the appliance's
+    # filesystem-module selection, and without host mounts or loop devices.
+    esp = folder / "efi.img"
+    with esp.open("xb") as stream:
+        stream.truncate(256 * 1024**2)
+    await linux.command("mkfs.vfat", "-F", "32", esp)
+    await linux.command("mmd", "-i", esp, "::/EFI", "::/EFI/BOOT")
+    await linux.command("mcopy", "-i", esp, recovery / "BOOTX64.EFI", "::/EFI/BOOT/BOOTX64.EFI")
+    await linux.command("mcopy", "-i", esp, "::/EFI/BOOT/BOOTX64.EFI", folder / "efi-readback")
+    if digest_file(folder / "efi-readback") != record["files"]["BOOTX64.EFI"]:
+        raise ValueError("EFI file read-back hash mismatch")
     await linux.command(
         shutil.which("grub2-editenv") or "grub-editenv", folder / "grubenv", "create"
     )
@@ -264,17 +279,13 @@ async def make_disk(folder, recovery, connection, linux, size_gib):
     commands += [
         upload(recovery / "recovery.img", "/dev/sda2"),
         f"set-e2uuid /dev/sda2 {media['recovery_uuid']}",
-        "mkfs vfat /dev/sda1",
+        upload(esp, "/dev/sda1"),
         "mkfs ext4 /dev/sda3",
         "mkfs ext4 /dev/sda4",
         f"set-e2uuid /dev/sda3 {media['boot_uuid']}",
         f"set-e2uuid /dev/sda4 {media['data_uuid']}",
         "set-label /dev/sda3 QB-BOOT",
         "set-label /dev/sda4 QB-DATA",
-        "mount /dev/sda1 /",
-        "mkdir-p /EFI/BOOT",
-        upload(recovery / "BOOTX64.EFI", "/EFI/BOOT/BOOTX64.EFI"),
-        "umount-all",
         "mount /dev/sda3 /",
         upload(folder / "grub.cfg", "/grub.cfg"),
         upload(folder / "grubenv", "/grubenv"),
@@ -348,6 +359,8 @@ async def one_backend(args, spec, backend, report):
     report["backends"][backend] = rows = []
     controller = task = vm = None
     setup_started = time.monotonic()
+    stages = {"media": "unrun", "recovery_boot": "unrun"}
+    report.setdefault("setup", {})[backend] = stages
     try:
         if not args.prepare_only:
             setup(root, Config(url="https://10.0.2.2:17443", ssh_port=17444, mcp_port=17442))
@@ -355,6 +368,8 @@ async def one_backend(args, spec, backend, report):
             task = asyncio.create_task(controller.serve())
             async with asyncio.timeout(30):
                 await controller.ready.wait()
+            stages["media"] = "running"
+            print(f"{backend}: creating disposable Recovery media", flush=True)
             disk = await make_disk(
                 folder,
                 args.recovery,
@@ -362,8 +377,11 @@ async def one_backend(args, spec, backend, report):
                 linux,
                 args.disk_gib,
             )
+            stages["media"] = "passed"
+            stages["recovery_boot"] = "running"
             vm = await boot_vm(folder, disk, args.firmware, args.firmware_vars, args.memory_mib)
-            await connected(controller, "recovery", args.boot_timeout)
+            await connected(controller, "recovery", args.boot_timeout, vm)
+            stages["recovery_boot"] = "passed"
             await controller.start_investigation(
                 "benchmark", "benchmark", "Disposable deployment comparison"
             )
@@ -375,11 +393,13 @@ async def one_backend(args, spec, backend, report):
                 "kind": step["kind"],
                 "artifact_cache": "empty" if index == 0 else "retained",
                 "status": "running",
+                "preparation": "running",
                 "boot": "unrun",
                 "deployment": "unrun",
                 "command_range_start": len(linux.records),
             }
             rows.append(row)
+            print(f"{backend}: step {index + 1} {step['kind']}", flush=True)
             save_json(args.output / "results.json", report)
             started = time.monotonic()
             try:
@@ -423,6 +443,7 @@ async def one_backend(args, spec, backend, report):
                         progress,
                     )
                 row["prepare_seconds"] = time.monotonic() - started
+                row["preparation"] = "passed"
                 row["candidate_commit"] = candidate["commit"]
                 row["preparation_metrics"] = candidate["preparation_metrics"]
                 row["candidate"] = candidate
@@ -433,6 +454,7 @@ async def one_backend(args, spec, backend, report):
                     raise ValueError("No-op preparation changed the published candidate commit")
 
                 if controller:
+                    row["deployment"] = "running"
                     transfer_start = time.monotonic()
                     pcap_before = (folder / "network.pcap").stat().st_size
                     options = (
@@ -452,6 +474,7 @@ async def one_backend(args, spec, backend, report):
                             f"deploy-{index}",
                             destination_run_id=retained if backend == "rsync" else None,
                             rsync_options=options,
+                            kernel_args=["console=ttyS0,115200"],
                         ),
                     )
                     retained = work["run_id"]
@@ -462,6 +485,7 @@ async def one_backend(args, spec, backend, report):
                     row["deploy_guest_network_capture_bytes"] = (
                         folder / "network.pcap"
                     ).stat().st_size - pcap_before
+                    row["boot"] = "running"
                     work = await finished(
                         controller,
                         await controller.retained_action(
@@ -518,7 +542,7 @@ async def one_backend(args, spec, backend, report):
                     await finished(
                         controller, await controller.return_recovery(retained, f"return-{index}")
                     )
-                    await connected(controller, "recovery", args.boot_timeout)
+                    await connected(controller, "recovery", args.boot_timeout, vm)
                     row["results"] = await controller.run_results(retained)
                     # OSTree creates a distinct deployment each time. Discard it, retaining its repository cache.
                     if backend == "ostree":
@@ -530,6 +554,9 @@ async def one_backend(args, spec, backend, report):
                         )
                 row["status"] = "passed"
             except BaseException as error:
+                for phase in ("preparation", "deployment", "boot"):
+                    if row[phase] == "running":
+                        row[phase] = "failed"
                 row.update(status="failed", error=type(error).__name__ + ": " + str(error))
                 raise
             finally:
@@ -538,6 +565,9 @@ async def one_backend(args, spec, backend, report):
                 row["storage"] = await asyncio.to_thread(space, folder)
                 save_json(args.output / "results.json", report)
     finally:
+        for phase in stages:
+            if stages[phase] == "running":
+                stages[phase] = "failed"
         if vm and vm.returncode is None:
             vm.terminate()
             try:
