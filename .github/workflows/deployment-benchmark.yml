@@ -1,0 +1,42 @@
+name: Optional deployment preparation probe
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+jobs:
+  probe:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-deployment-probe'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked --python 3.12
+      - name: Record resources and install ordinary tools
+        run: |
+          df -h
+          free -h
+          ls -l /dev/kvm /dev/fuse || true
+          sed 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
+            /etc/apt/sources.list.d/ubuntu.sources > "$RUNNER_TEMP/qb-ubuntu.sources"
+          apt_options=(-o "Dir::Etc::sourcelist=$RUNNER_TEMP/qb-ubuntu.sources" -o Dir::Etc::sourceparts=- -o Acquire::Retries=2 -o Acquire::https::Timeout=30)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends podman uidmap slirp4netns fuse-overlayfs rsync guestmount
+      - name: Attempt real cold preparation in separate stores
+        run: |
+          uv run --no-sync python development/deployment_benchmark.py \
+            "$RUNNER_TEMP/deployment-probe" --backend-timeout 1200 \
+            --probe-base ghcr.io/ublue-os/bazzite@sha256:d1617c7098adb290bdf37e1b6661fa68467fced5771336425cfa985db4ded7e6
+      - name: Retain reports and preparation logs (no controller credentials)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-preparation-probe
+          path: |
+            ${{ runner.temp }}/deployment-probe/results.json
+            ${{ runner.temp }}/deployment-probe/report.md
+            ${{ runner.temp }}/deployment-probe/*/commands.json
+            ${{ runner.temp }}/deployment-probe/*/controller/logs/*
+          retention-days: 7
