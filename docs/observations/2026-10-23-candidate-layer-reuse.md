@@ -35,6 +35,26 @@ The ordinary OSTree import and publication path remains in place. The remaining
 25–29 seconds of import is now a more useful optimization target than repeated
 export of the base image. Target transfer was not measured in this check.
 
+## Compression follow-up
+
+This is a local container export limitation, not an OSTree requirement to disable
+compression. Upstream's [OCI directory writer](https://github.com/containers/image/blob/main/oci/layout/oci_dest.go)
+checks for an exact blob digest. Its [registry writer](https://github.com/containers/image/blob/main/docker/docker_image_dest.go)
+also looks up equivalent compressed copies. That difference explains the observed
+repeated copying. Quirkbench still publishes a compressed OSTree archive repository
+to targets; only the intermediate local OCI cache is uncompressed.
+
+Adding layers to a maintained base is an [upstream-supported workflow](https://coreos.github.io/rpm-ostree/container/#using-custom-builds).
+CoreOS's [chunkah tool](https://github.com/coreos/chunkah#output-options) also defaults
+to uncompressed local output to avoid compression immediately followed by decompression.
+Repacking the whole image or running a registry is not needed to fix this export.
+
+A separate potential improvement is avoiding `COPY` of RPM installers into image
+layers before deleting them in a later installation step. Those installer bytes
+remain in local image history. Build-only mounts could avoid this, but must first
+demonstrate that changed RPM bytes invalidate the build cache correctly. No such
+change or measurement is included here.
+
 ## Environment
 
 - Bazzite `44.20261012.1`, pinned image digest
