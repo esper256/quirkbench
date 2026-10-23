@@ -465,3 +465,34 @@ async def test_failed_cancellation_keeps_original_deployment_ownership(lab, monk
     assert lab.target.active["deployment_id"] == first["run_id"]
     assert lab.target.active["entry"] == "quirkbench-image-" + first["run_id"]
     assert (lab.data / "quirkbench/image-deployments" / first["run_id"]).exists()
+
+
+async def test_stale_prepared_status_cannot_revive_superseded_run(lab, monkeypatch):
+    from quirkbench import controller_log
+
+    image_tools(lab, monkeypatch)
+    software = await candidate(lab)
+    first = await deploy(lab, software)
+    assert (await lab.controller.wait(first["work_id"], 5))["status"] == "ready"
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = controller_log.status_response
+
+    async def delayed(*args, **kwargs):
+        result = await original(*args, **kwargs)
+        if (
+            not entered.is_set()
+            and result.get("work", {}).get(first["work_id"], {}).get("status") == "prepared"
+        ):
+            entered.set()
+            await release.wait()
+        return result
+
+    monkeypatch.setattr(controller_log, "status_response", delayed)
+    await entered.wait()
+    try:
+        update = await deploy(lab, software, "update", destination_run_id=first["run_id"])
+        assert (await lab.controller.store.get("run", first["run_id"]))["status"] == "finished"
+    finally:
+        release.set()
+    assert (await lab.controller.wait(update["work_id"], 5))["status"] == "ready"
+    assert (await lab.controller.store.get("run", first["run_id"]))["status"] == "finished"

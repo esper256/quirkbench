@@ -1088,15 +1088,22 @@ class Controller(InvestigationControls, Storage, CommandControl):
                                 )
                             )
                         elif action == "deploy" and remote.get("status") == "prepared":
-                            (await self.store.change("run", run["id"], status="prepared"))
-                            (
-                                await self.update_work(
-                                    run["work_id"],
-                                    status="ready",
-                                    stage="Deployed; use recovery_boot_ostree to boot",
-                                    target_mode="recovery",
+                            async with self.store.admission():
+                                current = await self.store.get("run", run["id"])
+                                if (
+                                    current["status"] in ("finished", "failed")
+                                    or current["work_id"] != run["work_id"]
+                                ):
+                                    continue
+                                (await self.store.change("run", run["id"], status="prepared"))
+                                (
+                                    await self.update_work(
+                                        run["work_id"],
+                                        status="ready",
+                                        stage="Deployed; use recovery_boot_ostree to boot",
+                                        target_mode="recovery",
+                                    )
                                 )
-                            )
                         elif action == "discard" and remote.get("status") == "finished":
                             (
                                 await self.store.change(

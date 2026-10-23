@@ -198,7 +198,6 @@ class Target:
             "message": self.message,
             "retained_run": self.active,
             "capabilities": [
-                "rsync-deployment-v1",
                 "rsync-tree-v1",
                 "status-selection",
                 "deploy-only",
@@ -563,6 +562,8 @@ class Target:
                 from .root_bundle import validate_bundle
 
                 validate_bundle(request.get("bundle"), request["commit"])
+                if not {"rsync_options", "deployment_id", "previous_run"} <= request.keys():
+                    raise ValueError("Use a controller supporting rsync-tree-v1.")
                 from .rsync_options import options
 
                 options(request.get("rsync_options"))
