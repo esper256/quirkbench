@@ -79,6 +79,7 @@ async def test_storage_preview_preserves_retained_candidate_and_exports_bytes(la
     unused.mkdir(parents=True)
     (unused / "data").write_bytes(b"cache")
     preview = await lab.controller.local("storage", {"categories": ["cache"]})
+    assert any(i["path"] == "cache/candidate-oci" for i in preview["cleanup"])
     assert not any(
         i["path"] == "candidates/" + candidate["candidate_id"] for i in preview["cleanup"]
     )
@@ -91,6 +92,7 @@ async def test_storage_preview_preserves_retained_candidate_and_exports_bytes(la
     )
     exported = await lab.controller.export_investigation("wifi-case", tmp_path / "export")
     assert result["removed"] and not unused.exists() and evidence.exists()
+    assert not (lab.root / "cache/candidate-oci").exists()
     assert (
         Path(exported["directory"]) / "results" / prepared["run_id"] / "trace.bin"
     ).read_bytes() == bytes(range(256))
