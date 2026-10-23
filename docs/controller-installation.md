@@ -23,8 +23,10 @@ quirkbench recovery flash
 Flashing downloads the recovery chosen for that installed release, or reuses its
 cached download. `recovery download` downloads it ahead of time for offline use.
 Use a target-reachable HTTPS address in setup. Configure the agent with the MCP
-URL and Bearer token file printed by the controller. Keep the controller terminal
-open. There is no controller service manager.
+URL and Bearer token file shown under **C — Connections** in the controller
+dashboard. Keep the controller terminal open. Use `controller run --no-tui` for
+plain logs; redirected output also uses plain logs. **Q** asks before stopping;
+Ctrl+C and `controller stop` still work. There is no controller service manager.
 
 ## Development without host RPM installation
 

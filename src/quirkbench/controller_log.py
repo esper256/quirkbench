@@ -10,7 +10,7 @@ class QuietQueue(QueueHandler):
         pass  # A full diagnostic queue must not stop controller networking.
 
 
-def start_log(root):
+def start_log(root, *, console=None):
     folder = root / "logs"
     folder.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger(f"quirkbench.controller.{id(root)}")
@@ -20,8 +20,9 @@ def start_log(root):
     logger.addHandler(QuietQueue(records))
     file = RotatingFileHandler(folder / "controller.log", maxBytes=2 * 1024 * 1024, backupCount=3)
     file.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-    console = logging.StreamHandler()
-    console.setFormatter(logging.Formatter("%(message)s"))
+    if console is None:
+        console = logging.StreamHandler()
+        console.setFormatter(logging.Formatter("%(message)s"))
     listener = QueueListener(records, file, console)
     listener.start()
     return logger, listener, file
