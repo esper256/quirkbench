@@ -312,3 +312,8 @@ Operator journeys cover config errors, access refusal, status/stop, connection
 refresh, cleanup/export and notification. Hold a database call with test signals
 to check that SSH still responds. Run the actual boot generator against a test
 kernel command line; mock only privileged reboot. This does not prove firmware boot.
+
+The [optional deployment comparison](deployment-benchmark.md) uses real production
+preparation and disposable QEMU storage. It is manually requested, never part of
+the fast suite. Its small admission tests check reporting and isolation only;
+they do not supply performance evidence.

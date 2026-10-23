@@ -1,0 +1,107 @@
+"""Fast harness admission/reporting checks, never performance evidence."""
+
+import importlib.util
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+spec = importlib.util.spec_from_file_location(
+    "deployment_benchmark", Path(__file__).parents[1] / "development/deployment_benchmark.py"
+)
+bench = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(bench)
+
+
+def scenario(tmp_path):
+    rpm = tmp_path / "tools.rpm"
+    rpm.write_bytes(b"fixture, not an RPM or performance workload")
+    steps = []
+    for kind in bench.KINDS:
+        steps.append(
+            dict(
+                kind=kind,
+                packages=[dict(path="tools.rpm", sha256=bench.digest_file(rpm))],
+                replacements=[],
+                kernel_release="fixture",
+                kernel_build_id="a" * 40,
+                checks=[
+                    dict(role=role, path="/usr/" + role, sha256="b" * 64)
+                    for role in ("kernel", "module", "tool")
+                ],
+            )
+        )
+    path = tmp_path / "scenario.json"
+    path.write_text(
+        json.dumps(dict(format=1, base="ghcr.io/ublue-os/bazzite@sha256:" + "a" * 64, steps=steps))
+    )
+    return path
+
+
+def test_changed_input_rejected_before_creating_output(tmp_path):
+    path = scenario(tmp_path)
+    (tmp_path / "tools.rpm").write_bytes(b"changed")
+    with pytest.raises(ValueError, match="hash changed"):
+        bench.manifest(path)
+
+
+def test_noop_must_repeat_exact_payload_and_boot_identity(tmp_path):
+    path = scenario(tmp_path)
+    value = json.loads(path.read_text())
+    value["steps"][-1]["kernel_build_id"] = "c" * 40
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="no-op"):
+        bench.manifest(path)
+
+
+def test_boot_verifies_running_build_id_and_file_hashes(tmp_path):
+    script = bench.verification(bench.manifest(scenario(tmp_path))["steps"][0])
+    assert "readelf -n /sys/kernel/notes" in script
+    assert "Build ID: " + "a" * 40 in script
+    assert script.count("sha256sum -c -") == 3
+
+
+async def test_failure_records_each_isolated_backend_without_claiming_boot(tmp_path, monkeypatch):
+    async def failure(root, linux, work, progress):
+        assert not list(root.iterdir()) or all(p.name == "inputs" for p in root.iterdir())
+        raise RuntimeError("controlled preparation failure")
+
+    monkeypatch.setattr(bench, "prepare_candidate", failure)
+    args = SimpleNamespace(
+        manifest=scenario(tmp_path),
+        probe_base=None,
+        output=tmp_path / "result",
+        prepare_only=True,
+        order="ostree,rsync",
+        backend_timeout=10,
+    )
+    assert await bench.main(args) == 1
+    results = json.loads((args.output / "results.json").read_text())
+    assert set(results["errors"]) == {"ostree", "rsync"}
+    for rows in results["backends"].values():
+        assert rows[0]["status"] == "failed"
+        assert rows[0]["boot"] == rows[0]["deployment"] == "unrun"
+    with pytest.raises(FileExistsError):
+        await bench.main(args)
+    assert "unrun" in (args.output / "report.md").read_text()
+
+
+async def test_podman_instrumentation_preserves_operation_and_isolates_storage(
+    tmp_path, monkeypatch
+):
+    calls = []
+
+    async def actual(self, *args, **kwargs):
+        calls.append(args)
+        return {"exit_code": 0, "output": "recorded"}
+
+    monkeypatch.setattr(bench.Linux, "command", actual)
+    roots = [tmp_path / name for name in ("ostree", "rsync")]
+    for root in roots:
+        root.mkdir()
+        result = await bench.MeasuredLinux(root).command("podman", "pull", "pinned")
+        assert result["output"] == "recorded"
+    assert calls[0] != calls[1]
+    assert all(call[-2:] == ("pull", "pinned") for call in calls)
+    assert all(str(root / "podman") in call for root, call in zip(roots, calls))

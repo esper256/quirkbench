@@ -39,6 +39,8 @@ def manifest(path):
                 if not source.is_file() or digest_file(source) != item["sha256"]:
                     raise ValueError(f"Input missing or hash changed: {item['path']}")
                 item["path"] = str(source)
+        if not re.fullmatch(r"[a-f0-9]{16,128}", step.get("kernel_build_id", "")):
+            raise ValueError("Every step needs the expected running kernel ELF build ID.")
         if not step.get("kernel_release") or not step.get("checks"):
             raise ValueError("Every step needs expected kernel release and file hashes.")
         roles = set()
@@ -52,7 +54,10 @@ def manifest(path):
         if not {"kernel", "module", "tool"} <= roles:
             raise ValueError("Check at least one kernel, module and debugging tool per step.")
     a, b = value["steps"][-2:]
-    if any(a[k] != b[k] for k in ("packages", "replacements", "kernel_release", "checks")):
+    if any(
+        a[k] != b[k]
+        for k in ("packages", "replacements", "kernel_release", "kernel_build_id", "checks")
+    ):
         raise ValueError("The no-op must repeat exactly the preceding inputs and checks.")
     return value
 
@@ -109,6 +114,10 @@ class MeasuredLinux(Linux):
 
 def verification(step):
     lines = ["set -eu", f'test "$(uname -r)" = {shlex.quote(step["kernel_release"])}']
+    lines.append(
+        "readelf -n /sys/kernel/notes | grep -F -- "
+        + shlex.quote("Build ID: " + step["kernel_build_id"])
+    )
     for check in step["checks"]:
         line = check["sha256"] + "  " + check["path"]
         lines.append(f"printf '%s\\n' {shlex.quote(line)} | sha256sum -c -")
@@ -492,7 +501,8 @@ async def main(args):
                 async with asyncio.timeout(args.backend_timeout):
                     await one_backend(args, spec, backend, report)
             except Exception as error:
-                report.setdefault("errors", {})[backend] = str(error)
+                report.setdefault("errors", {})[backend] = type(error).__name__ + ": " + str(error)
+                print(backend + ": " + report["errors"][backend], flush=True)
     finally:
         save_json(args.output / "results.json", report)
         write_report(args.output, report)
