@@ -133,6 +133,14 @@ async def _build_recovery(root, linux, force, progress, update_base):
     tools_id = await tools_identity(linux, tools)
     progress("Checking selected recovery base packages")
     base_folder, base = await select_base(root, linux, tools_id, ASSETS, log, update_base)
+    selected_versions = [
+        p["identity"]
+        for p in base["packages"]
+        if p["file"].startswith(("kernel-core-", "linux-firmware-"))
+        and not p["file"].startswith("linux-firmware-whence-")
+    ]
+    progress("Selected recovery packages: " + (", ".join(selected_versions) or base["id"]))
+    progress("Use recovery build --update-base to select newer kernel and firmware packages.")
     key = hashlib.sha256(
         (base["id"] + recovery_hash() + files_hash(("image.py",)) + tools_id).encode()
     ).hexdigest()[:24]
@@ -150,6 +158,10 @@ async def _build_recovery(root, linux, force, progress, update_base):
         shutil.rmtree(stage)
     stage.mkdir(parents=True)
     stage_runtime(stage / "target-root")
+    shutil.copy2(
+        ASSETS / "quirkbench-boot-report",
+        stage / "target-root/usr/lib/quirkbench/quirkbench/assets/quirkbench-boot-report",
+    )
     save_json(
         stage / "target-root/usr/lib/quirkbench/quirkbench/recovery-base.json",
         {"id": base["id"], "release": base["release"], "architecture": base["architecture"]},

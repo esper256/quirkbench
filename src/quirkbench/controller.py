@@ -891,9 +891,24 @@ class Controller(InvestigationControls, Storage, CommandControl):
             return await self.work_result(work_id)
 
     async def connected(self, conn, public_key):
-        target = next(
-            iter([t for t in (await self.store.find("target")) if t["public_key"] == public_key])
-        )
+        try:
+            drive = next(d for d in await self.store.find("drive") if d["public_key"] == public_key)
+            # Identify before routing any commands or reconciling investigations.
+            response = await asyncio.wait_for(
+                conn.run(json.dumps({"action": "status"}), check=True), 30
+            )
+            initial = json.loads(response.stdout)
+            target = await self.store.get("target", drive["target"])
+            if (
+                initial.get("target_id") != target["id"]
+                or initial.get("computer", {}).get("id") != target["computer_id"]
+            ):
+                conn.close()
+                raise ValueError("Drive connection does not match the reported computer.")
+        except BaseException:
+            conn.close()
+            await conn.wait_closed()
+            raise
         tid = target["id"]
         old = self.connections.get(tid)
         if old:
@@ -927,7 +942,10 @@ class Controller(InvestigationControls, Storage, CommandControl):
                     target.get("name", tid),
                     warn_after=self.status_warn_after,
                 )
-                if result["target_id"] != tid:
+                if (
+                    result["target_id"] != tid
+                    or result.get("computer", {}).get("id") != target["computer_id"]
+                ):
                     raise ValueError("SSH identity does not match target status.")
                 identifier(result["boot_id"])
                 if not announced:
@@ -1283,7 +1301,7 @@ class Controller(InvestigationControls, Storage, CommandControl):
                         stage="Preparation interrupted. Use a new request to retry; cached downloads remain.",
                     )
                 )
-        self.paired_keys = {t["public_key"] for t in (await self.store.find("target"))}
+        self.paired_keys = {d["public_key"] for d in (await self.store.find("drive"))}
         controller = self
 
         class Client(asyncssh.SSHClient):

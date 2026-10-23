@@ -170,8 +170,6 @@ async def deploy_candidate(data: Path, boot: Path, linux, request, settings, pro
         "--karg=noresume",
         "--karg=rd.systemd.gpt_auto=0",
         "--karg=systemd.gpt_auto=0",
-        "--karg=rd.driver.blacklist=ahci,mmc_block",
-        "--karg=modprobe.blacklist=ahci,mmc_block",
         *(f"--karg={arg}" for arg in arguments),
         commit,
         log=log,
@@ -196,24 +194,21 @@ async def deploy_candidate(data: Path, boot: Path, linux, request, settings, pro
 
     await disk(configure_mounts)
 
-    def matching_entries():
-        return [
-            p
-            for p in (data / "boot" / "loader" / "entries").glob("*.conf")
-            if f"quirkbench.run={run_id}" in p.read_text()
-        ]
-
-    matching = await disk(matching_entries)
-    if len(matching) != 1:
-        raise ValueError(
-            "Expected one OSTree boot entry for the new run; recovery remains selected."
-        )
-    # Fedora GRUB reads the standard OSTree BLS entry. We do not generate kernel entries.
-    entry_id = matching[0].stem
-    identifier(entry_id)
+    entry_id = await disk(find_run_entry, data, run_id)
     await progress("Candidate files prepared")
     await linux.command("sync", log=log)
     return {"entry": entry_id, "run_id": run_id}
+
+
+def find_run_entry(data, run_id):
+    matches = [
+        p
+        for p in (data / "boot/loader/entries").glob("*.conf")
+        if f"quirkbench.run={run_id}" in p.read_text().split()
+    ]
+    if len(matches) != 1:
+        raise ValueError("Expected one boot entry for this run; recovery remains selected.")
+    return identifier(matches[0].stem)
 
 
 async def cleanup_run(data, linux, run_id):
@@ -244,12 +239,15 @@ async def cleanup_run(data, linux, run_id):
     await disk(remove_finished)
 
 
-async def select_run_entry(data, entry, run_id, startup_timeout=300):
+async def select_run_entry(
+    data, entry, run_id, startup_timeout=300, *, computer_id, manual_computer=False
+):
     """Retain OS files, but identify every boot attempt and its results separately."""
     from .files import atomic_write
 
     identifier(entry)
     identifier(run_id)
+    identifier(computer_id)
 
     def update():
         path = data / "boot" / "loader" / "entries" / (entry + ".conf")
@@ -258,9 +256,15 @@ async def select_run_entry(data, entry, run_id, startup_timeout=300):
         if count != 1:
             raise ValueError("Expected one run identifier in the prepared boot entry.")
         text = re.sub(r" quirkbench.connect_timeout=[^\s]+", "", text)
+        text = re.sub(r" quirkbench.computer=[^\s]+", "", text)
+        text = re.sub(r" quirkbench.computer-choice=[^\s]+", "", text)
         text = re.sub(
             r"(quirkbench.run=[^\s]+)",
-            r"\1 quirkbench.connect_timeout=" + str(int(startup_timeout)),
+            r"\1 quirkbench.computer="
+            + computer_id
+            + (" quirkbench.computer-choice=" + computer_id if manual_computer else "")
+            + " quirkbench.connect_timeout="
+            + str(int(startup_timeout)),
             text,
         )
         atomic_write(path, text)

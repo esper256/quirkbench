@@ -41,11 +41,13 @@ come through the SSH connection, including after reconnection.
 Recovery and candidate code use AsyncSSH `connect_reverse()`. The target initiates
 the network connection and acts as the SSH server; the controller acts as the SSH
 client. Commands and file transfers use standard SSH; interactive commands use the same command records and SSH connection.
-Pairing records the target's SSH public key and supplies the controller's public
-key. Keep the target's private pairing identity stable across reboots; use library
-key checks to recognize it. A friendly target reference and human authorization
-select agent access, without exposing the target secret to the agent. Boot IDs
-identify restarts, not new pairing identities. No per-run keys. Candidate root can
+Pairing records the recovery drive's SSH public key and supplies the controller's
+public key. The drive also reports the current computer's stable hardware identity.
+The controller records computers separately and routes commands by computer, never
+by the drive's previous target name. Investigations stay attached to their computer.
+A drive reconnects without another invitation; moving it registers or selects the
+new computer before SSH commands or evidence handling. Boot IDs identify restarts.
+No per-run keys. Candidate root can
 read its credentials and shared USB storage; a reported recovery identity is not
 proof against malicious candidate software.
 

@@ -5,6 +5,9 @@ and MCP interface here. One controller process serves MCP, HTTPS and target SSH
 connections. Its interactive terminal dashboard reads current work and connection
 status in the same process; plain-log mode keeps the same lifecycle. The target can run a clean fallback or an investigation's
 candidate. Recovery remains separate from the writable candidate.
+Recovery early boot authorizes attached USB4 devices before locating its filesystem;
+failure leaves local boot diagnostics available. Internal disks are protected by
+drive identity, not by excluding storage-driver families.
 The first candidate uses rpm-ostree; see [candidate deployment](candidate-deployment.md).
 
 ## Setup and connection
@@ -27,7 +30,8 @@ sequenceDiagram
     Human->>Target: Boot USB and connect network
     Target->>Target: Copy compressed recovery OS to RAM with dracut
     Target->>Target: Keep boot logs on tty1; display recovery menu on tty2
-    Target->>Quirkbench: Pair over HTTPS, then open reverse-direction SSH connection
+    Target->>Quirkbench: Authenticate recovery drive and identify current computer over HTTPS
+    Target->>Quirkbench: Open reverse-direction SSH connection
     Note over Target: Menu and connection status use RAM; storage work runs separately
     Quirkbench-->>Human: Target ready and local MCP URL/token-file instructions
     Human->>Quirkbench: Describe problem and authorize investigation
@@ -43,7 +47,7 @@ sequenceDiagram
     Agent->>Quirkbench: ssh_recovery_inspect
     Quirkbench->>Target: Run selected recovery diagnostic through SSH
     Target->>Target: Show received action and progress in recovery Activity
-    Note over Quirkbench,Target: Check advertised operations; identities need not match
+    Note over Quirkbench,Target: Check advertised operations; software versions may differ
     Target-->>Quirkbench: Command output and exit status
     Quirkbench-->>Agent: Bounded output and saved file
     opt Human requests Send report in recovery menu
@@ -205,3 +209,7 @@ sequenceDiagram
     Quirkbench->>Quirkbench: Remove investigation records
     Quirkbench-->>Human: Deletion complete
 ```
+
+Pairing credentials travel with the recovery drive. On each connection, the controller
+selects the reported computer before using investigation or run records. Moving the
+drive leaves other computers’ investigations and retained evidence unchanged.

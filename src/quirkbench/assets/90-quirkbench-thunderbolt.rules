@@ -1,0 +1,3 @@
+# Quirkbench trusts attached devices. Authorize before the external root is mounted.
+# This creates a PCIe tunnel, not a persistent firmware authorization record.
+ACTION=="add", SUBSYSTEM=="thunderbolt", ATTR{authorized}=="0", ATTR{authorized}="1"

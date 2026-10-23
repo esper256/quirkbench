@@ -14,6 +14,8 @@ COMMON = (
     "__init__.py",
     "target.py",
     "target_boot.py",
+    "computer.py",
+    "network.py",
     "files.py",
     "linux.py",
     "diagnostics.py",
@@ -28,8 +30,14 @@ COMMON = (
     "assets/quirkbench-target.service",
     "assets/quirkbench-console.service",
     "assets/quirkbench-startup-generator",
+    "assets/90-quirkbench-thunderbolt.rules",
 )
-RECOVERY = ("assets/build-recovery.sh", "assets/configure-recovery.sh", "assets/build-efi.sh")
+RECOVERY = (
+    "assets/build-recovery.sh",
+    "assets/configure-recovery.sh",
+    "assets/build-efi.sh",
+    "assets/quirkbench-boot-report",
+)
 
 
 def files_hash(names, root=None):
@@ -84,7 +92,9 @@ def stage_runtime(destination):
         mode=0o755,
     )
     configs = {
-        "modprobe.d/quirkbench.conf": "blacklist ahci\nblacklist mmc_block\n",
+        "udev/rules.d/90-quirkbench-thunderbolt.rules": (
+            ROOT / "assets/90-quirkbench-thunderbolt.rules"
+        ).read_text(),
         "sysctl.d/90-quirkbench.conf": "kernel.panic = 10\n",
         "systemd/system.conf.d/quirkbench.conf": "[Manager]\nRuntimeWatchdogSec=60s\nRebootWatchdogSec=2min\n",
     }

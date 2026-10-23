@@ -103,6 +103,12 @@ def parser():
     ca.add_parser(
         "check", help="Check config and saved format before stopping a working controller"
     )
+    reset = ca.add_parser(
+        "reset",
+        help="Delete pairing, investigation and work records; keep configuration and files",
+        description="Preview a reset. Stop the controller first. Example: quirkbench controller reset",
+    )
+    reset.add_argument("--yes", action="store_true", help="Confirm deleting controller records")
     commands.add_parser(
         "status", help="Show connected targets and work", description="Example: quirkbench status"
     )
@@ -236,6 +242,10 @@ async def execute(args):
     if args.command == "controller":
         from .controller_process import preflight, process_status
 
+        if args.action == "reset":
+            from .controller_process import reset
+
+            return reset(root, confirm=args.yes)
         if args.action == "check":
             return {**preflight(root), **process_status(root)}
         if args.action == "status":
@@ -244,7 +254,6 @@ async def execute(args):
                 return await local(root, "status")
             return {**status, "message": "Controller is stopped."}
         if args.action == "stop":
-            preflight(root)
             return await local(root, "controller-stop")
         from .controller import Controller
 

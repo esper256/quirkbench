@@ -287,6 +287,13 @@ async def partition_devices(
 
 
 def grub_config(media):
+    recovery_options = (
+        f"root=live:UUID={media['recovery_uuid']} rd.live.image rd.live.ram=1 "
+        "rd.live.overlay.overlayfs=1 rootflags=ro ro console=tty1 "
+        f"quirkbench.data={media['data_uuid']} "
+        "rd.shell=1 rd.retry=120 rd.timeout=180 noresume "
+        "rd.systemd.gpt_auto=0 systemd.gpt_auto=0 selinux=0"
+    )
     return f"""set timeout=3
 load_env -f ($qbboot)/grubenv
 if [ -n "$next_entry" ]; then
@@ -298,7 +305,13 @@ else
 fi
 menuentry 'Quirkbench recovery' --id recovery {{
   search --no-floppy --fs-uuid --set=root {media["recovery_uuid"]}
-  linux /boot/vmlinuz root=live:UUID={media["recovery_uuid"]} rd.live.image rd.live.ram=1 rd.live.overlay.overlayfs=1 rootflags=ro ro console=tty1 quirkbench.data={media["data_uuid"]} panic=10 rd.shell=0 rd.emergency=reboot rd.driver.blacklist=ahci,mmc_block modprobe.blacklist=ahci,mmc_block noresume rd.systemd.gpt_auto=0 systemd.gpt_auto=0 selinux=0
+  linux /boot/vmlinuz {recovery_options} panic=10
+  initrd /boot/initramfs.img
+}}
+menuentry 'Troubleshoot recovery (early boot shell)' --id recovery-debug {{
+  search --no-floppy --fs-uuid --set=root {media["recovery_uuid"]}
+  echo 'At the shell, run quirkbench-boot-report. Type exit to continue booting.'
+  linux /boot/vmlinuz {recovery_options} rd.break=initqueue rd.debug
   initrd /boot/initramfs.img
 }}
 function load_video {{

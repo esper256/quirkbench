@@ -31,7 +31,7 @@ async def test_cancelled_recovery_admission_keeps_its_saved_request(lab, monkeyp
 
     assert retried["status"] == "interrupted" and lab.tools.reboots == 0
     assert {
-        p.stem: read_json(p) for p in (lab.data / "quirkbench/actions").glob("*.json")
+        p.stem: read_json(p) for p in (lab.target.computer_home / "actions").glob("*.json")
     } == lab.target.work
     candidate = await lab.candidate()
     await lab.start_run(candidate["candidate_id"])
@@ -134,7 +134,7 @@ async def test_late_cancellation_preserves_returning_diagnostics(lab):
         await lab.target.dispatch(
             {"action": "cancel-deploy", "work_id": work["work_id"], "run_id": work["run_id"]}
         )
-    assert (lab.data / "quirkbench/active.json").exists()
+    assert lab.target.active_path.exists()
     lab.controller.allow_retry.set()
     await lab.until_record("run", work["run_id"], lambda record: record["status"] == "finished")
     assert (lab.root / "results" / work["run_id"] / "result.json").exists()

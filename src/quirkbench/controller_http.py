@@ -43,27 +43,81 @@ def https_app(controller):
         if not 32 <= len(token) <= 256:
             raise ValueError("Invalid target credential.")
         binding = {"public_key": pub, "token_hash": hashlib.sha256(token.encode()).hexdigest()}
+        computer = data.get("computer")
+        if not isinstance(computer, dict) or not all(
+            isinstance(computer.get(k), str) and 0 < len(computer[k]) <= 160
+            for k in ("id", "model")
+        ):
+            raise ValueError("Pairing requires this computer's identifier and model.")
+        identifier(computer["id"])
         async with controller.store.admission():
-            invite = await controller.store.get("invitation", data["invitation"])
-            if invite["binding"] and invite["binding"] != binding:
-                raise ValueError("Invitation has already been used by another target.")
-            if not invite["binding"]:
+            if data.get("drive_id"):
+                drive = await controller.store.get("drive", identifier(data["drive_id"]))
+                if any(drive[k] != v for k, v in binding.items()):
+                    raise web.HTTPForbidden()
+            else:
+                invite = await controller.store.get("invitation", data["invitation"])
+                if invite["binding"] and invite["binding"] != binding:
+                    raise ValueError("Invitation has already been used by another drive.")
+                if invite["binding"]:
+                    if "drive" not in invite:
+                        raise ValueError(
+                            "Create a fresh drive pairing; this invitation uses an old format."
+                        )
+                    drive = await controller.store.get("drive", invite["drive"])
+                else:
+                    drive = await controller.store.put(
+                        "drive", new_id("drive"), name=invite["name"], **binding
+                    )
+                    await controller.store.change(
+                        "invitation", invite["id"], binding=binding, drive=drive["id"]
+                    )
+            targets = await controller.store.find("target")
+            matches = [t for t in targets if t.get("computer_id") == computer["id"]]
+            if len(matches) > 1:
+                raise ValueError("Computer identity is ambiguous; inspect the target records.")
+            if matches:
+                target = matches[0]
+                if target.get("model") != computer["model"]:
+                    raise ValueError(
+                        "Firmware UUID is shared by different computer models. Set an explicit computer identifier."
+                    )
+            else:
+                import re
+
                 target_id = new_id("target")
-                await controller.store.put("target", target_id, name=invite["name"], **binding)
-                invite = await controller.store.change(
-                    "invitation", invite["id"], binding=binding, target=target_id
+                name = (
+                    drive["name"]
+                    if not drive.get("target")
+                    else (
+                        re.sub(r"[^a-z0-9]+", "-", computer["model"].lower()).strip("-")[:60]
+                        + "-"
+                        + target_id[-6:]
+                    )
                 )
+                if any(t["name"] == name for t in targets):
+                    name += "-" + target_id[-6:]
+                target = await controller.store.put(
+                    "target",
+                    target_id,
+                    name=name,
+                    computer_id=computer["id"],
+                    model=computer["model"],
+                )
+            await controller.store.change("drive", drive["id"], target=target["id"])
         controller.paired_keys.add(pub)
-        return web.json_response({"target_id": invite["target"], "name": invite["name"]})
+        return web.json_response(
+            {"drive_id": drive["id"], "target_id": target["id"], "name": target["name"]}
+        )
 
     async def authenticated_target(request):
         auth = request.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
             raise web.HTTPUnauthorized()
         digest = hashlib.sha256(auth[7:].encode()).hexdigest()
-        for target in await controller.store.find("target"):
-            if hmac.compare_digest(target["token_hash"], digest):
-                return target
+        for drive in await controller.store.find("drive"):
+            if hmac.compare_digest(drive["token_hash"], digest):
+                return await controller.store.get("target", drive["target"])
         raise web.HTTPUnauthorized()
 
     async def upload(request):

@@ -33,7 +33,9 @@ Build recovery as a compressed SquashFS image inside the recovery partition.
 Dracut's live-image support copies it into RAM before starting recovery
 (`rd.live.ram=1`). Mount the OS read-only; use RAM for temporary runtime files.
 Keep saved settings, downloads and diagnostics in shared data. Insufficient RAM
-is a boot failure, not a silent fallback to a disk-backed OS. Measure memory use
+is a boot failure, not a silent fallback to a disk-backed OS. Keep dracut’s
+standard free-memory check (image size plus its default 1 GiB reserve); do not
+lower it to force boot. It is not a guarantee of sufficient total runtime memory. Measure memory use
 and boot copying time with the built image.
 Prepare authentication and fixed system defaults during image creation. Network
 services write runtime configuration under `/run`, not read-only `/etc`. Generic
@@ -141,8 +143,8 @@ A full-width activity log below shows recovery events and incoming MCP actions,
 with timestamps and explicit RECOVERY/MCP labels. It follows new events without
 moving menu selection; Activity opens scrollable history and action details.
 Keep target label and a short stable target ID in current status; show the model
-and full ID in Target details. Use the flashed label before pairing, and say when no label
-is saved. Never use a new boot ID as the target's identity.
+and full ID in Target details. Show the computer model before the controller supplies
+its label. Never use a new boot ID as the target's identity.
 Show network name/interface and address separately from authenticated controller
 connection, address and last contact. Internet access is not a prerequisite.
 Show actual recovery mount and shared-storage status, including unknown values.
@@ -214,8 +216,8 @@ network requests. This cannot guarantee responsiveness when the kernel or system
 drive fails. The human terminal keeps a visible prompt and readable errors.
 
 Disable internal-disk automount/discovery, swap/resume, repair and firmware-update
-helpers. Exclude internal-storage drivers where practical. NVMe stays available
-for external USB4/Thunderbolt drives. Before connecting, mark other disks and their
+helpers. Keep storage drivers available: SATA, MMC and NVMe describe interfaces,
+not whether a drive is internal. Before connecting, mark other disks and their
 partitions read-only with `blockdev`; this is an accidental-write precaution, not
 containment of privileged code. Internal storage and
 persistent firmware changes remain outside investigation scope. Power handling
@@ -262,3 +264,51 @@ Warn about lost unsaved data and unchanged boot selection. Never escalate silent
 This improves the chance of recovery; it cannot fix a stuck kernel or guarantee
 that the kernel, network hardware or firmware keeps responding. Programs can
 still block on failed shared storage. Reboot needs working boot media again.
+
+## Early boot compatibility
+
+Use a generic Fedora kernel, firmware and non-host-specific dracut image. Include
+USB4/Thunderbolt authorization in the initramfs, before finding the recovery
+filesystem. Use the kernel’s documented udev auto-authorization rule; Quirkbench
+trusts attached Thunderbolt devices during use, including systems without DMA
+protection. This changes no firmware authorization records. The root OS also
+installs the rule for later connections. Candidate initramfs integration belongs
+to its OS preparation mechanism; installing a root-OS rule alone does not update
+an existing initramfs.
+
+Recovery waits up to three minutes for boot devices, then permits dracut’s local
+emergency shell rather than requesting an automatic reboot. GRUB also offers
+**Troubleshoot recovery (early boot shell)**. `quirkbench-boot-report` reads boot
+options, detected partitions, memory, USB4 authorization and recent kernel messages
+without mounting or writing disks. The human shell is unrestricted; agent access
+is unchanged. Candidate failures still request return to recovery.
+
+Build output identifies the selected kernel and firmware. `recovery build
+--update-base` selects newer packages explicitly; normal rebuilds retain their
+inputs. Current media is unsigned x86-64 UEFI, requiring Secure Boot disabled.
+Signed boot and other architectures need separate platform work, not guessed
+compatibility or machine-specific exceptions.
+
+## Moving the drive
+
+Pairing belongs to the recovery drive; investigations belong to the computer.
+The drive keeps controller credentials and saved Wi-Fi. Each boot reports the
+computer's firmware UUID and model. The controller reuses that computer's target
+record, or creates a separate one. A move never redirects an investigation.
+Firmware UUIDs identify ordinary machines, not hostile software. If missing or
+known to be duplicated, a human can set `/run/quirkbench-computer-id` before
+starting the target service. Recovery carries that choice into the candidate boot;
+choose it again on later recovery boots. This is a human assertion, not automatic
+hardware recognition, so do not move the drive while a manually identified
+candidate is selected to boot. Use the same explicit value for that computer.
+
+Retained runs and action records live in `computers/COMPUTER_ID` on shared data.
+Evidence remains under its original run ID. Moving the drive leaves another
+computer's retained run alone; its recovery upload resumes when that computer
+returns. Candidates and cached software can be shared. Resolve the current OSTree
+boot entry by run ID before booting, since adding a deployment can rename entries.
+
+Ordinary Wi-Fi profiles travel with their passwords, without an interface-name
+or adapter-MAC binding. Keep IP, access-point and enterprise settings unchanged.
+Network inspection lists selected nonsecret profile fields, never passwords.
+Hardware inspection includes the computer model and reports partial failures.

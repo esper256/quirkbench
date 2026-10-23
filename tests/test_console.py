@@ -38,7 +38,12 @@ async def test_console_human_terminal_returns_to_menu(lab):
     await asyncio.to_thread(console_terminal_roundtrip, lab.data)
 
     menu = grub_config({"recovery_uuid": "recovery", "data_uuid": "data"})
-    assert [arg for arg in menu.split() if arg.startswith("console=")] == ["console=tty1"]
+    boot_lines = [line for line in menu.splitlines() if line.strip().startswith("linux ")]
+    assert boot_lines
+    assert all(
+        [arg for arg in line.split() if arg.startswith("console=")] == ["console=tty1"]
+        for line in boot_lines
+    )
     service = (ASSETS / "quirkbench-console.service").read_text()
     assert "TTYPath=/dev/tty2" in service and "StandardError=journal" in service
 

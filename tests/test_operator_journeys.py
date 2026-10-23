@@ -35,6 +35,8 @@ async def test_operator_can_identify_check_and_stop_controller(lab):
     status = json.loads(output)
     assert code == 0 and status["directory_in_use"] and status["running"]["source"]
     assert (await cli(lab.root, "controller", "check"))[0] == 0
+    await lab.controller.store.put("target", "old-target", name="old-target")
+    assert (await cli(lab.root, "controller", "check"))[0] != 0
     stopped = await cli(lab.root, "controller", "stop")
     await asyncio.wait_for(lab.controller_task, 5)
     assert (
@@ -267,3 +269,27 @@ async def test_cli_reports_old_controller_before_reading_response_and_still_allo
     assert (await cli(lab.root, "controller", "stop"))[0] == 0
     await asyncio.wait_for(lab.controller_task, 5)
     assert requests == ["controller-stop"]
+
+
+async def test_controller_reset_previews_refuses_live_use_and_clears_old_records(tmp_path):
+    import fcntl
+    from quirkbench.store import Store
+
+    setup(tmp_path, Config())
+    store = Store(tmp_path)
+    store.put("target", "old-target", name="old-target")
+    store.close()
+    config = (tmp_path / "config.toml").read_bytes()
+    code, output, error = await cli(tmp_path, "controller", "check")
+    assert code != 0 and "Incompatible controller data" in output + error
+    assert "controller reset" in output + error
+    assert (await cli(tmp_path, "controller", "reset"))[0] == 0
+    assert (tmp_path / "work.sqlite").exists()
+    with (tmp_path / "controller.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert (await cli(tmp_path, "controller", "reset", "--yes"))[0] != 0
+        assert (tmp_path / "work.sqlite").exists()
+    assert (await cli(tmp_path, "controller", "reset", "--yes"))[0] == 0
+    assert not (tmp_path / "work.sqlite").exists()
+    assert (tmp_path / "config.toml").read_bytes() == config
+    assert (await cli(tmp_path, "controller", "check"))[0] == 0

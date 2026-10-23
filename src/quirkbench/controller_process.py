@@ -4,6 +4,7 @@ import fcntl
 import json
 import os
 import sqlite3
+import shlex
 
 from . import __version__
 from .files import read_json
@@ -16,13 +17,49 @@ def preflight(root):
     path = root / "work.sqlite"
     if path.exists():
         with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as db:
+            for (data,) in db.execute("SELECT data FROM records WHERE kind='target'"):
+                if "computer_id" not in json.loads(data):
+                    raise incompatible_data(root)
             for (data,) in db.execute("SELECT data FROM records WHERE kind='investigation'"):
                 investigation = json.loads(data)
                 if "problems" not in investigation or "status" not in investigation:
-                    raise ValueError(
-                        "Saved investigation format is unsupported by this version. Keep the running controller; choose fresh development state before restarting."
-                    )
+                    raise incompatible_data(root)
     return {"compatible": True}
+
+
+def incompatible_data(root):
+    command = f"quirkbench --data-dir {shlex.quote(str(root))} controller reset"
+    return ValueError(f"Incompatible controller data found. Run {command} to review and reset it.")
+
+
+def reset(root, *, confirm=False):
+    if not root.is_dir():
+        raise ValueError(f"Data directory does not exist: {root}")
+    with (root / "controller.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError("Stop the controller before resetting its data.") from None
+        if confirm:
+            for name in (
+                "work.sqlite",
+                "work.sqlite-wal",
+                "work.sqlite-shm",
+                "controller-process.json",
+            ):
+                (root / name).unlink(missing_ok=True)
+        return {
+            "message": (
+                (
+                    "Controller records deleted.\n"
+                    if confirm
+                    else f"Reset controller records in {root}.\n"
+                )
+                + "Pairing, investigations and work history are removed. Targets need fresh pairing.\n"
+                + "Configuration, controller keys, saved files and build caches are kept."
+                + ("" if confirm else "\nNothing deleted. Repeat with --yes to confirm.")
+            )
+        }
 
 
 def installed():

@@ -157,3 +157,28 @@ To remove an investigation, return/discard its retained runs, pause it, then run
 Shared software stays until no remaining investigation needs it. If deletion
 fails, correct the reported problem and retry the same command. These commands
 do not clear Podman storage or operate on target drives.
+
+## Recovery stops before the menu
+
+Choose **Troubleshoot recovery (early boot shell)** in GRUB, then run
+`quirkbench-boot-report`. Type `exit` to continue. Normal recovery boot failures
+also permit a local dracut shell. Record the missing filesystem identifier and
+USB4 authorization state before reflashing; slow device discovery is different
+from copying the OS into RAM.
+
+Recovery uses the retained kernel and firmware shown by `recovery build`. To
+select newer packages explicitly, use `recovery build --update-base`. RAM copying
+uses dracut’s normal free-memory check and does not fall back to running from disk.
+
+Moving a paired recovery drive keeps its Wi-Fi and controller connection. Each
+computer has its own target and investigations. Other computers' retained runs
+stay on the drive; return it to the original computer to finish their uploads.
+This pairing format needs fresh development records; old investigation history
+is not converted or reassigned. Do not erase owner data to update it.
+
+## Reset controller records
+
+If saved records are incompatible, run `quirkbench controller reset` to preview
+removal, then repeat with `--yes`. The controller must be stopped. This deletes
+pairing, investigation and work records; configuration, controller keys, saved
+files and build caches remain. Targets need fresh pairing afterwards.

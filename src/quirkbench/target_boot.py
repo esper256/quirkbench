@@ -62,6 +62,17 @@ async def prepare_boot():
     """Run before NetworkManager; failure must not remove local networking or the console."""
     linux = Linux()
     args = boot_args()
+    if "quirkbench.run" in args:
+        try:
+            same_computer = args.get("quirkbench.computer") == linux.computer()["id"]
+        except ValueError:
+            same_computer = False
+        if not same_computer:
+            # Do not write startup diagnostics into another computer's run.
+            await linux.command("systemctl", "--no-block", "reboot")
+            raise ValueError(
+                "Candidate belongs to a different or unidentified computer; returning to recovery."
+            )
     data = Path("/run/quirkbench-data")
     data.mkdir(parents=True, exist_ok=True)
     if "quirkbench.data" not in args:
@@ -90,10 +101,9 @@ async def prepare_boot():
         if "quirkbench.run" not in args
         else Path("/etc/NetworkManager/system-connections")
     )
-    network.mkdir(parents=True, exist_ok=True)
-    for p in (settings / "network").glob("*"):
-        if p.is_file():
-            atomic_write(network / p.name, p.read_bytes())
+    from .network import copy_profiles
+
+    copy_profiles(settings / "network", network)
     print("Quirkbench startup: network settings copied; mounting boot files", flush=True)
     await mount_boot_files(
         data,

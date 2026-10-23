@@ -56,3 +56,23 @@ $ ./dev package --development
 Package files: /home/sam/dev/quirkbench/dist/release
 Nothing was published or installed on the host.
 ```
+
+## Reset incompatible records
+
+Illustrative example; the directory depends on the user.
+
+```text
+$ quirkbench controller run
+Incompatible controller data found. Run quirkbench --data-dir /home/user/.quirkbench controller reset to review and reset it.
+
+$ quirkbench controller reset
+Reset controller records in /home/user/.quirkbench.
+Pairing, investigations and work history are removed. Targets need fresh pairing.
+Configuration, controller keys, saved files and build caches are kept.
+Nothing deleted. Repeat with --yes to confirm.
+
+$ quirkbench controller reset --yes
+Controller records deleted.
+Pairing, investigations and work history are removed. Targets need fresh pairing.
+Configuration, controller keys, saved files and build caches are kept.
+```

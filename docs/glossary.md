@@ -57,7 +57,7 @@ that a feature exists. Keep entries short and change them with the designs.
 | Recovery partition | The USB partition holding the recovery system, separate from writable experimental software. |
 | Shared data partition | USB storage shared by candidates, recovery settings, evidence and temporary files. |
 | Watchdog | A timer that restarts the target if the running system stops keeping it alive. |
-| Pairing | Connecting a target and controller so each can recognize the other. |
+| Pairing | Saving credentials so a recovery drive and controller recognize each other. |
 | Evidence | Logs, measurements and observations collected from a run. |
 | Quirkbench internal debugging report | Logs and facts about failures in Quirkbench itself, separate from experiment evidence. |
 | Investigation patch | Code changes developed during an investigation to fix or diagnose the target's problem. |
