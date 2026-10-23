@@ -1,4 +1,4 @@
-name: Optional deployment preparation probe
+name: Optional deployment comparison
 on:
   workflow_dispatch:
   pull_request:
@@ -136,13 +136,24 @@ jobs:
             ${{ runner.temp }}/comparison/*/media.log
             ${{ runner.temp }}/comparison/*/controller/logs/*
             ${{ runner.temp }}/workload/scenario.json
+            ${{ runner.temp }}/recovery-prerequisite/logs/*
+          retention-days: 7
+      - name: Publish replayable workload separately from small diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-comparison-workload
+          path: |
+            ${{ runner.temp }}/workload/scenario.json
             ${{ runner.temp }}/workload/build.log
             ${{ runner.temp }}/workload/output/toolchain-packages.txt
             ${{ runner.temp }}/workload/output/rpmbuild/RPMS/**/*.rpm
             ${{ runner.temp }}/workload/inputs/*.rpm
-            ${{ runner.temp }}/recovery-prerequisite/logs/*
           retention-days: 7
       - name: Print short comparison report
         if: always()
         run: |
           if test -f "$RUNNER_TEMP/comparison/report.md"; then cat "$RUNNER_TEMP/comparison/report.md"; fi
+          for log in "$RUNNER_TEMP"/comparison/*/serial.log; do
+            if test -f "$log"; then tail -c 65536 "$log"; fi
+          done

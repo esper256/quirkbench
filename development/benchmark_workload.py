@@ -132,6 +132,8 @@ async def build(folder):
                     )
                 ],
                 remove_packages=[
+                    "gcadapter_oc",
+                    "hid-fanatecff-akmod-modules",
                     "kernel-devel-matched",
                     "kmod-evdi",
                     "kmod-gcadapter_oc",

@@ -136,7 +136,8 @@ The first candidate replaces the Bazzite kernel with the first official Fedora
 kernel and adds the controlled payload. The second uses the next matching kernel
 and module. The VM workload explicitly removes `kernel-devel-matched`,
 `kmod-evdi`, `kmod-gcadapter_oc` and `kmod-hid-fanatecff`, which bind the pinned
-Bazzite base to its original kernel. These removals run through production
+Bazzite base to its original kernel. It also removes their dependent packages `gcadapter_oc` and `hid-fanatecff-akmod-modules`; the RPM solver
+identified these dependencies in run 40006119074. These removals run through production
 preparation, are timed for each backend, and remain part of candidate identity.
 This is a VM workload, not qualification of those removed hardware modules.
 Dependency failures remain errors; the harness never forces broken RPM dependencies.
@@ -173,3 +174,12 @@ matched bytes. No-op checks require the same published commit and expected guest
 content; they do not assert that boot left every writable file unchanged.
 
 The first full attempt at `dd62f0c`, [run 40002508189](https://github.com/esper256/quirkbench/actions/runs/40002508189), created both media files. One Recovery VM connected (setup 99.17 seconds); the other failed its preparation service. Candidate preparation then exposed kernel-bound RPM dependencies after 230.71 seconds. Deployment and experiment boot were unrun. These are failure-stage observations, not comparable performance measurements. The next revision adds explicit package removals and serial journal forwarding for diagnosis.
+
+Run 40006119074 reached production preparation on OSTree, but the RPM solver
+identified two further dependents of the removed drivers. Its other Recovery VM
+failed drive identification before mounting shared data. Recovery now waits up to
+30 seconds for udev to initialize the specific data UUID link before the existing
+unique-drive check; it does not wait for the global device queue or prepare either
+deployment backend. This addresses an initialization race, not an absent or
+ambiguous device. Such failures still stop startup before changing other disks.
+Small diagnostic artifacts are uploaded separately from the replay RPM archive.
