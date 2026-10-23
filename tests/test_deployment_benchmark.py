@@ -105,6 +105,8 @@ async def test_podman_instrumentation_preserves_operation_and_isolates_storage(
     assert calls[0] != calls[1]
     assert all(call[-2:] == ("pull", "pinned") for call in calls)
     assert all(str(root / "podman") in call for root, call in zip(roots, calls))
+    for call in calls:
+        assert len(call[call.index("--runroot") + 1]) < 50
 
 
 def test_raw_kernel_notes_have_no_elf_header():

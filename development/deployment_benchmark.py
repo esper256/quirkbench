@@ -11,6 +11,7 @@ import re
 import shlex
 import shutil
 import time
+import tempfile
 
 from quirkbench.bazzite import prepare_candidate
 from quirkbench.config import Config, setup
@@ -65,17 +66,26 @@ def manifest(path):
 def space(path):
     # du counts hardlinks once and distinguishes allocated storage from logical bytes.
     seen, allocated, apparent = set(), 0, 0
-    for p in path.rglob("*"):
-        try:
-            st = p.lstat()
-        except FileNotFoundError:
-            continue
-        key = (st.st_dev, st.st_ino)
-        if key not in seen:
-            seen.add(key)
-            allocated += st.st_blocks * 512
-            apparent += st.st_size
-    return {"allocated_bytes": allocated, "apparent_bytes": apparent}
+    failures = []
+    for directory, names, files in os.walk(path, onerror=failures.append):
+        for name in names + files:
+            p = Path(directory) / name
+            try:
+                st = p.lstat()
+            except OSError as error:
+                failures.append(error)
+                continue
+            key = (st.st_dev, st.st_ino)
+            if key not in seen:
+                seen.add(key)
+                allocated += st.st_blocks * 512
+                apparent += st.st_size
+    return {
+        "allocated_bytes": allocated,
+        "apparent_bytes": apparent,
+        "complete": not failures,
+        "unreadable_entries": len(failures),
+    }
 
 
 class MeasuredLinux(Linux):
@@ -85,6 +95,10 @@ class MeasuredLinux(Linux):
         super().__init__(progress=print)
         self.folder = folder
         self.records = []
+        # Podman requires a runroot shorter than 50 characters. Artifact storage
+        # stays below the requested output; only volatile runtime files use /tmp.
+        self.runroot = Path(tempfile.mkdtemp(prefix="qb-run-", dir="/tmp"))
+        save_json(folder / "runtime.json", {"podman_runroot": str(self.runroot)})
 
     async def command(self, *args, **kwargs):
         original = args
@@ -94,7 +108,7 @@ class MeasuredLinux(Linux):
                 "--root",
                 str(self.folder / "podman"),
                 "--runroot",
-                str(self.folder / "podman-run"),
+                str(self.runroot),
                 *args[1:],
             )
         started = time.monotonic()
@@ -289,6 +303,8 @@ async def boot_vm(folder, disk, firmware, firmware_vars, memory):
             "q35",
             "-accel",
             "kvm" if os.access("/dev/kvm", os.R_OK | os.W_OK) else "tcg",
+            "-cpu",
+            "host" if os.access("/dev/kvm", os.R_OK | os.W_OK) else "max",
             "-m",
             str(memory),
             "-smp",
@@ -436,6 +452,7 @@ async def one_backend(args, spec, backend, report):
                         ),
                     )
                     retained = work["run_id"]
+                    row["deployment_id"] = work["deployment_id"]
                     row["deployment"] = "passed"
                     row["deploy_seconds"] = time.monotonic() - transfer_start
                     row["prepare_deploy_seconds"] = row["prepare_seconds"] + row["deploy_seconds"]
@@ -456,6 +473,25 @@ async def one_backend(args, spec, backend, report):
                     row["time_to_validated_boot_seconds"] = time.monotonic() - started
                     row["verification"] = command
                     if backend == "rsync":
+                        backing = (
+                            "/run/quirkbench-data/quirkbench/image-deployments/"
+                            + row["deployment_id"]
+                            + "/rootfs.img"
+                        )
+                        inode = await diagnostic(
+                            controller,
+                            retained,
+                            f"backing-{index}",
+                            shlex.join(["stat", "-c", "%i", backing]),
+                        )
+                        row["backing_inode"] = int(inode["output"].strip())
+                        if index and (
+                            row["deployment_id"] != rows[0]["deployment_id"]
+                            or row["backing_inode"] != rows[0]["backing_inode"]
+                        ):
+                            raise ValueError(
+                                "Rsync update replaced its persistent backing filesystem"
+                            )
                         log_path = (
                             "/run/quirkbench-data/quirkbench/logs/" + retained + "-deploy.log"
                         )
@@ -537,6 +573,8 @@ def write_report(output, report):
                 )
                 + " |"
             )
+    for backend, error in report.get("errors", {}).items():
+        lines += ["", f"{backend}: {error[:2000]}"]
     lines += [
         "",
         "OS page caches were not dropped. Empty artifact caches do not imply cold RAM caches.",
