@@ -41,6 +41,8 @@ that a feature exists. Keep entries short and change them with the designs.
 | RPM | A software package containing files and information about dependencies and installation. |
 | rpm-ostree | A tool that assembles RPMs and configuration into an OSTree system. |
 | OSTree | A tool for storing system versions, sharing unchanged files and deploying them. |
+| OCI image | A standard container image made of named metadata and reusable file layers. |
+| Image layer | An unchanged set of filesystem changes that multiple container images can share. |
 | Writable layer | Temporary changes over the candidate OS; plain OSTree unlock changes disappear on reboot. |
 | GRUB | The bootloader first selected to start recovery or a one-time candidate run. |
 | SELinux | Linux policy controls that can restrict even privileged programs. |

@@ -482,6 +482,13 @@ class Controller(InvestigationControls, Storage, CommandControl):
                     self.root, self.linux, work, lambda stage: self.update_work(key, stage=stage)
                 )
                 (await self.store.put("candidate", key, **candidate))
+                await self.store.event(
+                    "candidate-preparation",
+                    key,
+                    work["scope"],
+                    "Candidate preparation profile",
+                    **candidate["preparation_metrics"],
+                )
                 (
                     await self.update_work(
                         key, status="ready", stage="Candidate available", candidate_id=key

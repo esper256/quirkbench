@@ -99,7 +99,9 @@ build output on the controller. Startup probes can save evidence before networki
 
 Use `investigation_problem_update` to track several symptoms together, and
 `investigation_timeline` to inspect observed delays. Neither requires a particular
-reasoning format. `ssh_candidate_inventory` reports tools, kernel/build files and
+reasoning format. Candidate results and timeline events include preparation timings,
+image-layer reuse and bytes written; whole-candidate reuse is reported separately.
+`ssh_candidate_inventory` reports tools, kernel/build files and
 storage without implying that every listed facility works. Internal disks are
 intentionally excluded from experiments; unmounted does not prove never modified.
 The recovery `services` view lists **failed units**, not every service.
