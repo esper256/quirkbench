@@ -40,8 +40,22 @@ class Sequences:
                 backend,
             )
 
-        async def deploy(candidate, kernel_args=None, selinux="disabled"):
-            return await c.deploy(investigation, candidate, request_id, kernel_args, selinux)
+        async def deploy(
+            candidate,
+            kernel_args=None,
+            selinux="disabled",
+            destination_run_id=None,
+            rsync_options=None,
+        ):
+            return await c.deploy(
+                investigation,
+                candidate,
+                request_id,
+                kernel_args,
+                selinux,
+                destination_run_id,
+                rsync_options,
+            )
 
         async def boot(run_id, startup_connect_timeout_seconds=300):
             return await c.retained_action(

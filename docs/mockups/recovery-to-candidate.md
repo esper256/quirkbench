@@ -243,5 +243,15 @@ recovery_discard_candidate(run_id=<run ID>, request_id="discard-1")
 ```
 
 Use `recovery_cancel_deployment(work_id=<deployment work ID>)` to stop an active
-transfer. If interrupted preparation retains incomplete files, use explicit
-discard in Recovery before submitting another deployment.
+transfer. Partial files remain available for inspection and retry. Illustrative
+userspace update after return, retaining target fstab and boot artifacts:
+
+```text
+recovery_deploy_candidate(investigation="first-boot", candidate=<next candidate ID>, request_id="sync-2", destination_run_id=<retained run ID>, rsync_options={"mode":"delta", "checksum":true, "exclude":["etc/fstab"], "update_boot":false})
+controller_work_wait(work_id=<sync work ID>)
+recovery_boot_candidate(run_id=<new prepared run ID>, request_id="boot-2")
+```
+
+For forced full transfer, use `{"mode":"full", "ignore_times":true}`. For a dry
+run into a retained experiment use `{"dry_run":true, "update_boot":false}`.
+Deletion is opt-in with `delete`; exclusions also protect destination paths.

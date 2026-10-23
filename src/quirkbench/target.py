@@ -199,6 +199,7 @@ class Target:
             "retained_run": self.active,
             "capabilities": [
                 "rsync-deployment-v1",
+                "rsync-tree-v1",
                 "status-selection",
                 "deploy-only",
                 "deploy-boot-id",
@@ -537,7 +538,15 @@ class Target:
             self.spawn(self.boot_prepared(request) if action == "boot" else self.discard(request))
             return {"status": "accepted"}
         if action == "deploy" and self.mode == "recovery":
-            if set(request) - {"kernel_args", "selinux", "backend", "bundle"} != {
+            if set(request) - {
+                "kernel_args",
+                "selinux",
+                "backend",
+                "bundle",
+                "rsync_options",
+                "deployment_id",
+                "previous_run",
+            } != {
                 "work_id",
                 "run_id",
                 "commit",
@@ -554,6 +563,10 @@ class Target:
                 from .root_bundle import validate_bundle
 
                 validate_bundle(request.get("bundle"), request["commit"])
+                from .rsync_options import options
+
+                options(request.get("rsync_options"))
+                identifier(request.get("deployment_id", request["run_id"]))
                 self.linux.require_tools("rsync")
             elif "bundle" in request:
                 raise ValueError("OSTree deployment does not accept a root image bundle.")
@@ -574,8 +587,26 @@ class Target:
                 raise ValueError(
                     "Recovery restarted before deployment. Refresh target status and submit a new request."
                 )
-            if self.busy or self.active:
-                raise ValueError("Finish the existing run before deploying another candidate.")
+            updating = request.get("previous_run")
+            if updating:
+                if (
+                    not self.active
+                    or self.active["run_id"] != updating
+                    or self.active.get("backend") != "rsync"
+                    or backend(request) != "rsync"
+                    or self.active["deployment_id"] != request.get("deployment_id")
+                ):
+                    raise ValueError("The requested experiment is not retained on this target.")
+                if self.active.get("launched") and not self.active.get("evidence_received"):
+                    raise ValueError(
+                        "Wait for diagnostics to reach the controller before updating."
+                    )
+            elif (
+                self.active or request.get("deployment_id", request["run_id"]) != request["run_id"]
+            ):
+                raise ValueError("Select the retained experiment explicitly before updating it.")
+            if self.busy or self.boot_committed:
+                raise ValueError("Wait for existing target work to finish.")
             self.busy = True
             try:
                 await self.admit(key, request, "deploying")
@@ -656,9 +687,13 @@ class Target:
             if request.get("backend") == "rsync":
                 # Persist ownership before any image or mount is created. Failed
                 # cleanup remains visible and retryable through explicit discard.
+                previous_entry = (self.active or {}).get("entry")
+                request = dict(request, previous_entry=previous_entry)
+                if previous_entry:
+                    request["entry"] = previous_entry
                 self.active = dict(
                     request,
-                    deployment_id=request["run_id"],
+                    deployment_id=request.get("deployment_id", request["run_id"]),
                     recovery_boot=self.boot_id,
                     launched=False,
                     evidence_received=False,
@@ -676,7 +711,7 @@ class Target:
                 self.active = dict(
                     request,
                     **prepared,
-                    deployment_id=request["run_id"],
+                    deployment_id=request.get("deployment_id", request["run_id"]),
                     recovery_boot=self.boot_id,
                     launched=False,
                     evidence_received=False,
@@ -694,7 +729,12 @@ class Target:
         except Exception as e:
             if self.active and self.active["recovery_boot"] == self.boot_id:
                 try:
-                    await self.cancel_boot()
+                    if request.get("backend") == "rsync":
+                        await self.linux.command(
+                            "grub2-editenv", self.boot / "grubenv", "unset", "next_entry"
+                        )
+                    else:
+                        await self.cancel_boot()
                 except Exception as cleanup_error:
                     e = RuntimeError(
                         f"{e}; could not clear boot selection: {cleanup_error}. Use the local terminal before rebooting."
@@ -764,6 +804,13 @@ class Target:
             await self.linux.command("grub2-editenv", self.boot / "grubenv", "unset", "next_entry")
             from .deployment import cleanup_run
 
+            if request.get("backend") == "rsync":
+                await self.record(
+                    key,
+                    status="cancelled",
+                    stage="Transfer stopped; experiment retained for inspection or retry",
+                )
+                return
             await cleanup_run(self.data, self.boot, self.linux, request)
             if self.active and self.active["work_id"] == key:
                 await disk((self.home / "active.json").unlink, missing_ok=True)
@@ -771,7 +818,11 @@ class Target:
             await self.record(key, status="cancelled", stage="Deployment cancelled; recovery ready")
         except Exception as error:
             # Keep ownership until cleanup has succeeded or recovery restarts.
-            self.active = dict(request, deployment_id=request["run_id"], recovery_boot=self.boot_id)
+            self.active = dict(self.active or {}, **request)
+            self.active.update(
+                deployment_id=request.get("deployment_id", request["run_id"]),
+                recovery_boot=self.boot_id,
+            )
             await disk(save_json, self.home / "active.json", self.active)
             await self.record(
                 key,

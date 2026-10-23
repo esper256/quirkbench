@@ -54,7 +54,7 @@ class Controller(InvestigationControls, Storage, CommandControl):
         self.preparations = {}
         self.command_pages = {}
         self.upload_publish_lock = asyncio.Lock()
-        self.rsync_transfers = set()
+        self.rsync_transfers = {}
 
     def spawn(self, coro):
         task = asyncio.create_task(coro)
@@ -554,11 +554,21 @@ class Controller(InvestigationControls, Storage, CommandControl):
         return completion(result)
 
     async def deploy(
-        self, investigation, candidate, request_id, kernel_args=None, selinux="disabled"
+        self,
+        investigation,
+        candidate,
+        request_id,
+        kernel_args=None,
+        selinux="disabled",
+        destination_run_id=None,
+        rsync_options=None,
     ):
         from .candidates import debugging_kernel_args
 
         kernel_args = debugging_kernel_args(kernel_args)
+        from .rsync_options import options
+
+        selected_options = options(rsync_options)
         timeout = 300
         if selinux not in ("disabled", "permissive", "enforcing"):
             raise ValueError("selinux must be disabled, permissive or enforcing.")
@@ -568,9 +578,14 @@ class Controller(InvestigationControls, Storage, CommandControl):
             from .deployment import backend
 
             selected_backend = backend(software)
+            if selected_backend != "rsync" and (destination_run_id or rsync_options is not None):
+                raise ValueError("Tree synchronization options require an rsync candidate.")
+            previous = None
+            if destination_run_id:
+                previous = await self.store.get("run", destination_run_id)
             if selected_backend == "rsync":
-                self.linux.require_tools("rsync")
-                if "rsync-deployment-v1" not in self.targets.get(inv["target"], {}).get(
+                self.linux.require_tools("rsync", "guestmount", "guestunmount")
+                if "rsync-tree-v1" not in self.targets.get(inv["target"], {}).get(
                     "capabilities", []
                 ):
                     raise ValueError("Update Recovery before deploying an rsync root image.")
@@ -592,10 +607,30 @@ class Controller(InvestigationControls, Storage, CommandControl):
                     "deploy",
                     investigation,
                     request_id,
-                    {"candidate": candidate, "kernel_args": kernel_args, "selinux": selinux},
+                    {
+                        "candidate": candidate,
+                        "kernel_args": kernel_args,
+                        "selinux": selinux,
+                        "destination_run_id": destination_run_id,
+                        "rsync_options": selected_options if selected_backend == "rsync" else None,
+                    },
                 )
                 if not fresh:
                     return await self.work_result(work["id"])
+                if previous:
+                    target = self.targets.get(inv["target"], {})
+                    if (
+                        previous["investigation"] != investigation
+                        or previous.get("backend") != "rsync"
+                        or previous["status"] not in ("prepared", "finished", "failed")
+                        or (target.get("retained_run") or {}).get("run_id") != destination_run_id
+                    ):
+                        await self.update_work(
+                            work["id"],
+                            status="failed",
+                            stage="Select the retained rsync experiment in this investigation.",
+                        )
+                        return await self.work_result(work["id"])
                 t = inv["target"]
                 if "deploy-boot-id" not in self.targets.get(t, {}).get("capabilities", []):
                     (
@@ -617,7 +652,9 @@ class Controller(InvestigationControls, Storage, CommandControl):
                     return await self.work_result(work["id"])
                 if any(
                     [
-                        r["target"] == t and r["status"] not in ("finished", "failed")
+                        r["target"] == t
+                        and r["id"] != destination_run_id
+                        and r["status"] not in ("finished", "failed")
                         for r in (await self.store.find("run"))
                     ]
                 ):
@@ -639,7 +676,9 @@ class Controller(InvestigationControls, Storage, CommandControl):
                         candidate=candidate,
                         status="preparing",
                         work_id=work["id"],
-                        deployment_id=run,
+                        deployment_id=previous["deployment_id"] if previous else run,
+                        previous_run=destination_run_id,
+                        rsync_options=selected_options if selected_backend == "rsync" else None,
                         backend=selected_backend,
                         created_at=time.time(),
                         evidence=None,
@@ -648,6 +687,8 @@ class Controller(InvestigationControls, Storage, CommandControl):
                         recovery_boot=self.targets[t]["boot_id"],
                     )
                 )
+                if previous:
+                    await self.store.change("run", previous["id"], status="finished")
                 (
                     await self.update_work(
                         work["id"],
@@ -668,7 +709,13 @@ class Controller(InvestigationControls, Storage, CommandControl):
                 run_id=run,
                 commit=software["commit"],
                 **(
-                    {"backend": "rsync", "bundle": software["bundle"]}
+                    {
+                        "backend": "rsync",
+                        "bundle": software["bundle"],
+                        "rsync_options": (await self.store.get("run", run))["rsync_options"],
+                        "deployment_id": (await self.store.get("run", run))["deployment_id"],
+                        "previous_run": (await self.store.get("run", run)).get("previous_run"),
+                    }
                     if software.get("backend") == "rsync"
                     else {}
                 ),

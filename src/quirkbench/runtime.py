@@ -25,6 +25,7 @@ COMMON = (
     "image_deployment.py",
     "root_bundle.py",
     "rsync_stream.py",
+    "rsync_options.py",
     "commands.py",
     "transfer.py",
     "console.py",

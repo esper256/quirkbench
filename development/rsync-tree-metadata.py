@@ -1,4 +1,4 @@
-"""Bounded real FUSE/rsync proof on disposable images; no host privilege."""
+"""Bounded unprivileged source / root Recovery receiver proof on disposable images."""
 
 import asyncio
 import os
@@ -37,20 +37,51 @@ async def main(folder):
     # Writable source is only for this fixture's controlled change between transfers.
     async with image_view(image, folder, read_only=False) as source:
         (source / "blob").write_bytes(bytes(range(256)) * 16384)
-        async with image_view(destination, folder, read_only=False) as target:
-            common = ["rsync", "-aHAX", "--numeric-ids", "--super", "--checksum", "--stats"]
-            first = await command(*common, "--whole-file", str(source) + "/", str(target) + "/")
+        target = folder / "receiver"
+        target.mkdir(exist_ok=True)
+        helper = folder / "receiver-shell"
+        helper.write_text('#!/bin/sh\nshift\nexec sudo -- "$@"\n')
+        helper.chmod(0o700)
+        await command("sudo", "mount", "-o", "loop", destination, target)
+        try:
+            common = [
+                "rsync",
+                "-aHAX",
+                "--numeric-ids",
+                "--super",
+                "--stats",
+                "--rsh=" + str(helper),
+            ]
+            first = await command(
+                *common, "--whole-file", str(source) + "/", "receiver:" + str(target) + "/"
+            )
             assert count(first, "Literal data") >= 4194304
-            same = await command(*common, "--no-whole-file", str(source) + "/", str(target) + "/")
+            same = await command(
+                *common,
+                "--checksum",
+                "--no-whole-file",
+                str(source) + "/",
+                "receiver:" + str(target) + "/",
+            )
             assert count(same, "Literal data") == 0
             with (source / "blob").open("r+b") as stream:
                 stream.seek(123456)
                 stream.write(b"changed bytes")
-            delta = await command(*common, "--no-whole-file", str(source) + "/", str(target) + "/")
+            delta = await command(
+                *common,
+                "--checksum",
+                "--no-whole-file",
+                str(source) + "/",
+                "receiver:" + str(target) + "/",
+            )
             assert 0 < count(delta, "Literal data") < 4194304
             assert count(delta, "Matched data") > 0
             full = await command(
-                *common, "--whole-file", "--ignore-times", str(source) + "/", str(target) + "/"
+                *common,
+                "--whole-file",
+                "--ignore-times",
+                str(source) + "/",
+                "receiver:" + str(target) + "/",
             )
             assert count(full, "Literal data") >= 4194304
             assert count(full, "Matched data") == 0
@@ -69,6 +100,8 @@ async def main(folder):
                 == b"system_u:object_r:bin_t:s0"
             )
             assert os.getxattr(probe, "user.quirkbench") == b"preserved"
+        finally:
+            await command("sudo", "umount", target)
     print("File-tree metadata, delta matching and explicit whole-file transfer passed.")
 
 

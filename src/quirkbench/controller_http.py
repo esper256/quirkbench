@@ -190,20 +190,46 @@ def https_app(controller):
             if target["id"] in controller.rsync_transfers:
                 raise web.HTTPConflict(text="An rsync transfer is already active for this target.")
             controller.linux.require_tools("rsync")
-            controller.rsync_transfers.add(target["id"])
+            token = object()
+            controller.rsync_transfers[target["id"]] = token
         try:
             # Reader ownership prevents pruning without blocking preparation,
             # uploads, or transfers for other targets for the stream's lifetime.
             from .rsync_stream import serve_bundle
 
-            return await controller.spawn(
-                serve_bundle(
-                    request,
-                    controller.root / "candidates" / identifier(run["candidate"]) / "root-image",
-                )
-            )
+            folder = controller.root / "candidates" / identifier(run["candidate"]) / "root-image"
+            phase = request.query.get("phase", "bundle")
+            if phase == "tree":
+                from .source_tree import image_view
+                from .rsync_options import sender_arguments
+
+                async def transfer_tree():
+                    from contextlib import AsyncExitStack
+
+                    async with AsyncExitStack() as stack:
+                        tree = await stack.enter_async_context(
+                            image_view(folder / "rootfs.img", controller.root / "tree-views")
+                        )
+
+                        async def completed():
+                            await stack.aclose()
+                            if controller.rsync_transfers.get(target["id"]) is token:
+                                del controller.rsync_transfers[target["id"]]
+
+                        return await serve_bundle(
+                            request,
+                            tree,
+                            sender_args=sender_arguments(run["rsync_options"]),
+                            on_complete=completed,
+                        )
+
+                return await controller.spawn(transfer_tree())
+            if phase != "bundle":
+                raise web.HTTPBadRequest(text="Unknown transfer phase.")
+            return await controller.spawn(serve_bundle(request, folder))
         finally:
-            controller.rsync_transfers.discard(target["id"])
+            if controller.rsync_transfers.get(target["id"]) is token:
+                del controller.rsync_transfers[target["id"]]
 
     app.add_routes(
         [

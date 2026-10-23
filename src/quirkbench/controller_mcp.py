@@ -35,6 +35,38 @@ SequenceTool = Literal[
 ]
 
 
+class RsyncOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["full", "delta"] = Field(
+        default="full",
+        description="full disables block matching; delta reuses matching destination blocks. Both skip unchanged files unless ignore_times is true.",
+    )
+    delete: bool = Field(
+        default=False,
+        description="Delete destination files absent from source; excluded paths are protected.",
+    )
+    exclude: list[str] = Field(
+        default_factory=list,
+        description="Rsync exclusion patterns relative to the candidate root; no external filter files.",
+    )
+    checksum: bool = Field(
+        default=False,
+        description="Compare content checksums instead of size and modification time when deciding which files changed.",
+    )
+    ignore_times: bool = Field(
+        default=False,
+        description="Transfer all selected files even when size and modification time match.",
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="Report changes without writing files. Requires an existing experiment and update_boot=false.",
+    )
+    update_boot: bool = Field(
+        default=True,
+        description="After transfer, configure /boot in fstab and replace verified kernel/initramfs and boot entry. Does not select boot or reboot. Set false to preserve existing boot artifacts.",
+    )
+
+
 class SequenceStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$")]
@@ -323,9 +355,19 @@ def mcp_app(controller):
         request_id: RequestID,
         kernel_args: list[str] | None = None,
         selinux: Literal["disabled", "permissive", "enforcing"] = "disabled",
+        destination_run_id: str | None = None,
+        rsync_options: RsyncOptions | None = None,
     ) -> ActionResult:
-        """Use the candidate's explicit backend to transfer and prepare fresh run files, with debugging kernel_args and explicit SELinux policy retained on repeat boots. Default disabled differs from a normal Bazzite install. Permissive/enforcing require a correctly labelled candidate and its SELinux policy; boot/connectivity must be checked. Boot/recovery arguments are managed by Quirkbench. Discard retained run files first if replacing them; preparation itself does not require discard. Does not select a boot or reboot. Inspect progress with controller_work_wait, then use recovery_boot_candidate."""
-        return await controller.deploy(investigation, candidate, request_id, kernel_args, selinux)
+        """Transfer a prepared candidate from the controller into an experiment in Recovery. OSTree preserves its existing fresh-deployment behavior. Rsync copies ordinary files with ownership, permissions, hard links, ACLs and xattrs; destination_run_id explicitly selects the retained experiment to update. Omit it to create a new filesystem. rsync_options controls full/delta transfer and file selection. Cancellation or failure retains partial rsync changes for inspection/retry; use recovery_discard_candidate to remove them. Updates are not atomic and have no automatic rollback. Logs include itemized changes and transfer statistics. Explicit boot remains separate."""
+        return await controller.deploy(
+            investigation,
+            candidate,
+            request_id,
+            kernel_args,
+            selinux,
+            destination_run_id,
+            rsync_options.model_dump() if rsync_options else None,
+        )
 
     @mcp.tool(structured_output=True)
     async def recovery_boot_candidate(

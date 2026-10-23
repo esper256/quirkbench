@@ -216,10 +216,14 @@ sequenceDiagram
     Controller->>Appliance: Export exact commit as PAX; assemble and label root image
     Appliance-->>Controller: Root image, kernel, matching live initramfs
     Controller->>Controller: Record artifact hashes and build provenance
-    Agent->>Controller: Deploy candidate
+    Agent->>Controller: Full transfer or delta update; optional retained destination
     Controller->>Recovery: Exact bundle identity; require supported backend
-    Recovery->>Controller: On-demand authenticated rsync stream
-    Recovery->>Recovery: Verify bytes; create fresh image; publish boot entry
+    Controller->>Controller: Open read-only source filesystem view on demand
+    Recovery->>Controller: Authenticated rsync file-tree stream
+    Recovery->>Recovery: Create backing filesystem once; sync files into it
+    opt Explicit boot-artifact update
+        Recovery->>Recovery: Verify kernel/initramfs; publish boot entry
+    end
     Agent->>Controller: Explicit boot request
     Controller->>Recovery: Select one-time entry using shared boot lifecycle
 ```

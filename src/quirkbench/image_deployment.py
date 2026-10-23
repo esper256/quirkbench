@@ -9,8 +9,9 @@ import shutil
 import sys
 
 from .candidates import debugging_kernel_args
-from .files import atomic_write, contained, disk, identifier, read_json
-from .root_bundle import validate_bundle, verify_bundle
+from .files import atomic_write, contained, disk, identifier, read_json, digest_file
+from .root_bundle import validate_bundle
+from .rsync_options import options as rsync_options, arguments as rsync_arguments
 
 
 def owned(root, name):
@@ -36,7 +37,11 @@ async def mounted(data, linux, run_id, *, writable=False):
         raise ValueError("Deployment image is already mounted; retain it for inspection.")
     try:
         await linux.command(
-            "mount", "-o", "loop,rw" if writable else "loop,ro,noload", folder / "rootfs.img", point
+            "mount",
+            "-o",
+            "loop,rw" if writable else "loop,ro,noload",
+            owned(folder, "rootfs.img"),
+            point,
         )
         yield point
     finally:
@@ -60,7 +65,8 @@ async def mounted(data, linux, run_id, *, writable=False):
 async def deploy_candidate(data, boot, linux, request, settings, progress):
     del settings
     bundle = validate_bundle(request["bundle"], request["commit"])
-    run_id = identifier(request["run_id"])
+    run_id = identifier(request.get("deployment_id", request["run_id"]))
+    selected = rsync_options(request.get("rsync_options"))
     arguments = debugging_kernel_args(request.get("kernel_args"))
     selinux = request.get("selinux", "disabled")
     if selinux not in ("disabled", "permissive", "enforcing"):
@@ -72,59 +78,58 @@ async def deploy_candidate(data, boot, linux, request, settings, progress):
     for key in ("data_uuid", "boot_uuid"):
         identifier(media[key])
     folder = deployment(data, run_id)
-    if await disk(folder.exists):
-        raise ValueError(
-            "This deployment already has files. Cancel interrupted work before retrying."
+    image = owned(folder, "rootfs.img")
+    exists = await disk(image.exists)
+    if selected["dry_run"] and not exists:
+        raise ValueError("A dry run requires an existing experiment filesystem.")
+    if not exists:
+        await disk(folder.mkdir, parents=True, exist_ok=True)
+        creating = owned(folder, "rootfs.img.creating")
+        await linux.command("truncate", "-s", str(bundle["files"]["rootfs.img"]["bytes"]), creating)
+        await linux.command("mkfs.ext4", "-F", creating)
+        await linux.command("sync")
+        await disk(os.replace, creating, image)
+    log = data / "quirkbench/logs" / (request["run_id"] + "-deploy.log")
+
+    def helper(phase):
+        return shlex.join(
+            [
+                sys.executable,
+                str(Path(__file__).with_name("rsync_stream.py")),
+                str(data / "quirkbench/settings"),
+                request["run_id"],
+                phase,
+            ]
         )
-    cache = owned(data, "quirkbench/image-cache/" + bundle["id"])
-    await disk(cache.mkdir, parents=True, exist_ok=True)
-    if any(p.is_symlink() for p in await disk(lambda: list(cache.rglob("*")))):
-        raise ValueError("Root image cache contains a symbolic link.")
-    log = data / "quirkbench/logs" / (run_id + "-deploy.log")
-    helper = shlex.join(
-        [
-            sys.executable,
-            str(Path(__file__).with_name("rsync_stream.py")),
-            str(data / "quirkbench/settings"),
-            run_id,
-        ]
-    )
-    await progress("Transferring the selected root image and boot artifacts")
-    await linux.command(
-        "rsync",
-        "--recursive",
-        "--checksum",
-        "--sparse",
-        "--no-links",
-        "--no-specials",
-        "--no-devices",
-        "--timeout=120",
-        "--rsh=" + helper,
-        "controller:bundle/",
-        str(cache) + "/",
-        log=log,
-    )
-    await progress("Verifying complete root image artifacts")
-    await disk(verify_bundle, cache, bundle)
-    await disk(folder.mkdir, parents=True)
-    await progress("Creating fresh writable run files")
-    await linux.command(
-        "cp",
-        "--reflink=auto",
-        "--sparse=always",
-        cache / "rootfs.img",
-        folder / "rootfs.img",
-        log=log,
-    )
-    async with mounted(data, linux, run_id, writable=True) as root:
+
+    await progress("Synchronizing candidate files into the experiment filesystem")
+    async with mounted(data, linux, run_id, writable=not selected["dry_run"]) as root:
+        await linux.command(
+            "rsync",
+            *rsync_arguments(selected),
+            "--timeout=120",
+            "--rsh=" + helper("tree"),
+            "controller:tree/",
+            str(root) + "/",
+            log=log,
+        )
+        if not selected["update_boot"]:
+            await linux.command("sync", log=log)
+            return {
+                "run_id": request["run_id"],
+                **({"entry": request["previous_entry"]} if request.get("previous_entry") else {}),
+            }
 
         def configure_mounts():
             fstab = owned(root, "etc/fstab")
             if not fstab.is_file():
                 raise ValueError("Root image must contain an ordinary /etc/fstab.")
+            stat = fstab.stat()
             existing = fstab.read_text()
+            boot_line = f"UUID={media['boot_uuid']} /boot ext4 defaults 0 0"
             if any(
-                line.strip() and not line.lstrip().startswith("#") for line in existing.splitlines()
+                line.strip() and not line.lstrip().startswith("#") and line.strip() != boot_line
+                for line in existing.splitlines()
             ):
                 raise ValueError("Candidate includes filesystem mounts; review before deployment.")
             attrs = {name: os.getxattr(fstab, name) for name in os.listxattr(fstab)}
@@ -132,15 +137,44 @@ async def deploy_candidate(data, boot, linux, request, settings, progress):
                 raise ValueError("Enabled SELinux requires a labelled candidate fstab.")
             atomic_write(
                 fstab,
-                existing + f"\nUUID={media['boot_uuid']} /boot ext4 defaults 0 0\n",
-                mode=0o644,
+                existing
+                if boot_line in existing.splitlines()
+                else existing + "\n" + boot_line + "\n",
+                mode=stat.st_mode & 0o7777,
             )
+            os.chown(fstab, stat.st_uid, stat.st_gid)
             for name, value in attrs.items():
                 os.setxattr(fstab, name, value)
 
         await disk(configure_mounts)
+    cache = owned(data, "quirkbench/image-cache/" + bundle["id"])
+    await disk(cache.mkdir, parents=True, exist_ok=True)
+    await linux.command(
+        "rsync",
+        "--recursive",
+        "--checksum",
+        "--no-links",
+        "--no-specials",
+        "--no-devices",
+        "--exclude=rootfs.img",
+        "--exclude=bundle.json",
+        "--timeout=120",
+        "--rsh=" + helper("bundle"),
+        "controller:bundle/",
+        str(cache) + "/",
+        log=log,
+    )
+    for name in ("vmlinuz", "initramfs.img"):
+        path = owned(cache, name)
+        item = bundle["files"][name]
+        if (
+            not path.is_file()
+            or path.stat().st_size != item["bytes"]
+            or await disk(digest_file, path) != item["sha256"]
+        ):
+            raise ValueError("Incomplete or corrupt boot artifact: " + name)
     boot_files = owned(boot, "quirkbench-images/" + run_id)
-    await disk(boot_files.mkdir, parents=True)
+    await disk(boot_files.mkdir, parents=True, exist_ok=True)
     for name in ("vmlinuz", "initramfs.img"):
         await linux.command("cp", cache / name, boot_files / name, log=log)
     # Shared boot-entry editing expects the ordinary data/boot bind.
@@ -162,7 +196,7 @@ async def deploy_candidate(data, boot, linux, request, settings, progress):
         "console=tty1",
         "rd.shell=0",
         "rd.emergency=reboot",
-        f"quirkbench.run={run_id}",
+        f"quirkbench.run={request['run_id']}",
         f"quirkbench.data={media['data_uuid']}",
         "noresume",
         "rd.systemd.gpt_auto=0",
@@ -181,7 +215,7 @@ async def deploy_candidate(data, boot, linux, request, settings, progress):
         mode=0o644,
     )
     await linux.command("sync", log=log)
-    return {"entry": entry, "run_id": run_id}
+    return {"entry": entry, "run_id": request["run_id"]}
 
 
 async def cleanup_run(data, boot, linux, run_id):

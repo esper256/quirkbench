@@ -24,7 +24,7 @@ async def stop_process(proc):
     await proc.wait()
 
 
-async def serve_bundle(request, bundle):
+async def serve_bundle(request, bundle, *, sender_args=None, on_complete=None):
     ws = web.WebSocketResponse(max_msg_size=256 * 1024, heartbeat=30)
     await ws.prepare(request)
     proc = None
@@ -35,8 +35,7 @@ async def serve_bundle(request, bundle):
                 "rsync",
                 "--server",
                 "--sender",
-                "-rce.iLsfxCIvu",
-                "--timeout=120",
+                *(sender_args or ["-rce.iLsfxCIvu", "--timeout=120"]),
                 ".",
                 str(bundle) + "/",
                 stdin=asyncio.subprocess.PIPE,
@@ -62,6 +61,8 @@ async def serve_bundle(request, bundle):
                 while data := await proc.stdout.read(65536):
                     await ws.send_bytes(data)
                 code = await proc.wait()
+                if on_complete:
+                    await on_complete()
                 await ws.send_json({"exit_code": code})
 
             tasks = [asyncio.create_task(receive()), asyncio.create_task(send())]
@@ -86,11 +87,11 @@ async def serve_bundle(request, bundle):
     return ws
 
 
-async def remote_shell(settings_dir, run_id):
+async def remote_shell(settings_dir, run_id, phase="bundle"):
     # Credentials are read from the existing settings, never argv or tool output.
     settings = json.loads((settings_dir / "connection.json").read_text())
     tls = ssl.create_default_context(cafile=str(settings_dir / "controller.crt"))
-    url = settings["url"] + "/api/v1/runs/" + run_id + "/rsync"
+    url = settings["url"] + "/api/v1/runs/" + run_id + "/rsync?phase=" + phase
     loop = asyncio.get_running_loop()
     reader = asyncio.StreamReader()
     input_transport, _ = await loop.connect_read_pipe(
@@ -143,7 +144,7 @@ if __name__ == "__main__":
     try:
         # The remaining arguments are rsync's generated remote command. The
         # controller never executes client-supplied commands or accepts a path.
-        code = asyncio.run(remote_shell(Path(sys.argv[1]), sys.argv[2]))
+        code = asyncio.run(remote_shell(Path(sys.argv[1]), sys.argv[2], sys.argv[3]))
     except Exception as error:
         print(f"Rsync HTTPS connection failed: {type(error).__name__}", file=sys.stderr)
         code = 1

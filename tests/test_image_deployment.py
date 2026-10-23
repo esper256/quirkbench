@@ -38,9 +38,15 @@ def image_tools(lab, monkeypatch):
             state["started"].set()
             await state["release"].wait()
             source = next(lab.root.glob("candidates/*/root-image"))
-            shutil.copytree(source, args[-1], dirs_exist_ok=True)
-            if state["corrupt"]:
-                atomic_write(Path(args[-1]) / "rootfs.img", b"corrupt")
+            if args[-2] == "controller:bundle/":
+                for name in ("vmlinuz", "initramfs.img"):
+                    shutil.copyfile(source / name, Path(args[-1]) / name)
+                if state["corrupt"]:
+                    atomic_write(Path(args[-1]) / "vmlinuz", b"corrupt")
+        elif args[0] == "truncate":
+            atomic_write(Path(args[-1]), b"empty filesystem")
+        elif args[0] == "mkfs.ext4":
+            pass
         elif args[0] == "cp":
             shutil.copyfile(args[-2], args[-1])
         elif args[:2] == ["mount", "-o"]:
@@ -82,12 +88,13 @@ async def candidate(lab):
     return await lab.call("controller_work_wait", work_id=work["work_id"], timeout_seconds=5)
 
 
-async def deploy(lab, software, request_id="deploy"):
+async def deploy(lab, software, request_id="deploy", **kwargs):
     return await lab.call(
         "recovery_deploy_candidate",
         investigation="wifi-case",
         candidate=software["candidate_id"],
         request_id=request_id,
+        **kwargs,
     )
 
 
@@ -167,14 +174,14 @@ async def test_corruption_retry_and_cancel_never_select_partial_boot(lab, monkey
     state["corrupt"] = False
     state["started"].clear()
     state["release"].clear()
-    retry = await deploy(lab, software, "retry")
+    retry = await deploy(lab, software, "retry", destination_run_id=work["run_id"])
     await state["started"].wait()
     await lab.call("recovery_cancel_deployment", work_id=retry["work_id"])
     cancelled = await lab.call("controller_work_wait", work_id=retry["work_id"], timeout_seconds=5)
     assert cancelled["status"] == "cancelled", cancelled
     assert not state["mounted"]
     state["release"].set()
-    retry = await deploy(lab, software, "retry-after-cancel")
+    retry = await deploy(lab, software, "retry-after-cancel", destination_run_id=retry["run_id"])
     ready = await lab.call("controller_work_wait", work_id=retry["work_id"], timeout_seconds=5)
     assert ready["status"] == "ready", ready
 
@@ -185,7 +192,7 @@ async def test_lazy_startup_and_capability_rejection(lab, monkeypatch):
     image_tools(lab, monkeypatch)
     software = await candidate(lab)
     status = lab.target.status()
-    status["capabilities"].remove("rsync-deployment-v1")
+    status["capabilities"].remove("rsync-tree-v1")
     monkeypatch.setattr(lab.target, "status", lambda: status)
     lab.controller.targets[lab.target.settings["target_id"]] = status
     with pytest.raises(AssertionError, match="Update Recovery"):
@@ -338,7 +345,7 @@ async def test_missing_selinux_metadata_rejected_without_running_candidate_code(
     assert failed["status"] == "failed", failed
     assert not any(c[0] == "chroot" for c in lab.tools.calls)
     assert not list((lab.boot / "loader/entries").glob("*.conf"))
-    assert lab.target.active is None
+    assert lab.target.active is not None
 
 
 async def test_cancel_during_unmount_waits_and_does_not_publish_boot(lab, monkeypatch):
@@ -361,19 +368,19 @@ async def test_cancel_during_unmount_waits_and_does_not_publish_boot(lab, monkey
     release.set()
     done = await lab.controller.wait(work["work_id"], 5)
     assert done["status"] == "cancelled", done
-    assert not state["mounted"] and lab.target.active is None
+    assert not state["mounted"] and lab.target.active is not None
     assert not list((lab.boot / "loader/entries").glob("*.conf"))
 
 
-async def test_interrupted_copy_retains_ownership_across_recovery_restart(lab, monkeypatch):
+async def test_interrupted_transfer_retains_ownership_across_recovery_restart(lab, monkeypatch):
     image_tools(lab, monkeypatch)
     software = await candidate(lab)
     original = lab.tools.command
     entered = asyncio.Event()
 
     async def partial(*args, **kwargs):
-        if args[0] == "cp" and str(args[-1]).endswith("rootfs.img"):
-            atomic_write(Path(args[-1]), b"interrupted copy")
+        if args[0] == "rsync":
+            atomic_write(Path(args[-1]) / "partial", b"interrupted transfer")
             entered.set()
             await asyncio.Future()
         return await original(*args, **kwargs)

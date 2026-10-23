@@ -66,9 +66,14 @@ async def image_view(image, parent, *, read_only=True):
                     unmount = await asyncio.create_subprocess_exec(
                         "guestunmount", str(mount), stdout=asyncio.subprocess.DEVNULL, stderr=errors
                     )
-                    async with asyncio.timeout(30):
-                        if await unmount.wait():
-                            raise RuntimeError("Could not release candidate tree view.")
+                    try:
+                        async with asyncio.timeout(30):
+                            if await unmount.wait():
+                                raise RuntimeError("Could not release candidate tree view.")
+                    finally:
+                        if unmount.returncode is None:
+                            unmount.kill()
+                        await unmount.wait()
                 if process is not None:
                     async with asyncio.timeout(30):
                         await process.wait()
