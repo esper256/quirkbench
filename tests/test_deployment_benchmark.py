@@ -78,7 +78,7 @@ async def test_failure_records_each_isolated_backend_without_claiming_boot(tmp_p
     )
     assert await bench.main(args) == 1
     results = json.loads((args.output / "results.json").read_text())
-    assert set(results["errors"]) == {"ostree", "rsync"}
+    assert set(results["errors"]) == {"ostree", "rsync", "comparability"}
     for rows in results["backends"].values():
         assert rows[0]["status"] == "failed"
         assert rows[0]["boot"] == rows[0]["deployment"] == "unrun"
@@ -115,3 +115,12 @@ def test_raw_kernel_notes_have_no_elf_header():
     for invalid in (note[:-1], note + note, b"", b"ELF", b"x" * 65537):
         with pytest.raises(ValueError):
             bench.kernel_build_id(invalid)
+
+
+def test_transfer_statistics_fail_closed_and_keep_actual_delta_counts():
+    text = "Literal data: 2,048 bytes\nMatched data: 4,192,256 bytes\nTotal transferred file size: 4,194,304 bytes\n"
+    result = bench.transfer_statistics(text)
+    assert result["literal_data_bytes"] == 2048
+    assert result["matched_data_bytes"] == 4192256
+    with pytest.raises(ValueError, match="Missing rsync statistics"):
+        bench.transfer_statistics("transfer failed before statistics")

@@ -173,6 +173,25 @@ async def finished(controller, work):
     return work
 
 
+def transfer_statistics(text):
+    values = {}
+    for label in ("Literal data", "Matched data", "Total transferred file size"):
+        match = re.search(r"^" + label + r": ([0-9,]+) bytes", text, re.MULTILINE)
+        if not match:
+            raise ValueError("Missing rsync statistics: " + label)
+        values[label.lower().replace(" ", "_") + "_bytes"] = int(match[1].replace(",", ""))
+    return values
+
+
+async def diagnostic(controller, run, request, script):
+    command = await controller.command_start(run, request, None, "/", {}, 120, 65536, script=script)
+    while not command.get("complete"):
+        command = await controller.command_wait(command["command_id"], 25)
+    if command["outcome"] != "succeeded":
+        raise RuntimeError(f"Guest verification failed: {command}")
+    return command
+
+
 async def connected(controller, mode, timeout):
     async with asyncio.timeout(timeout):
         while True:
@@ -385,6 +404,12 @@ async def one_backend(args, spec, backend, report):
                 row["candidate_commit"] = candidate["commit"]
                 row["preparation_metrics"] = candidate["preparation_metrics"]
                 row["candidate"] = candidate
+                row["resolved_packages"] = (
+                    (root / candidate["packages_file"]).read_text().splitlines()
+                )
+                if step["kind"] == "no-op" and candidate["commit"] != rows[-2]["candidate_commit"]:
+                    raise ValueError("No-op preparation changed the published candidate commit")
+
                 if controller:
                     transfer_start = time.monotonic()
                     pcap_before = (folder / "network.pcap").stat().st_size
@@ -421,23 +446,33 @@ async def one_backend(args, spec, backend, report):
                         ),
                     )
                     retained = work["run_id"]
-                    command = await controller.command_start(
-                        retained,
-                        f"verify-{index}",
-                        None,
-                        "/",
-                        {},
-                        120,
-                        65536,
-                        script=verification(step),
+                    command = await diagnostic(
+                        controller, retained, f"verify-{index}", verification(step)
                     )
-                    while not command.get("complete"):
-                        command = await controller.command_wait(command["command_id"], 25)
-                    if command["outcome"] != "succeeded":
-                        raise RuntimeError(f"Booted file verification failed: {command}")
                     row["boot"] = "passed"
                     row["time_to_validated_boot_seconds"] = time.monotonic() - started
                     row["verification"] = command
+                    if backend == "rsync":
+                        log_path = (
+                            "/run/quirkbench-data/quirkbench/logs/" + retained + "-deploy.log"
+                        )
+                        transfer = await diagnostic(
+                            controller,
+                            retained,
+                            f"statistics-{index}",
+                            shlex.join(["tail", "-c", "32768", log_path]),
+                        )
+                        row["rsync_statistics"] = transfer_statistics(transfer["output"])
+                        if index == 0 and row["rsync_statistics"]["matched_data_bytes"] != 0:
+                            raise ValueError("Full transfer unexpectedly used delta matches")
+                        if (
+                            step["kind"] == "modules"
+                            and row["rsync_statistics"]["matched_data_bytes"] == 0
+                        ):
+                            raise ValueError(
+                                "Changed-module delta transfer did not reuse any matched bytes"
+                            )
+
                     await finished(
                         controller, await controller.return_recovery(retained, f"return-{index}")
                     )
@@ -525,6 +560,11 @@ async def main(args):
         "manifest": spec,
         "manifest_sha256": digest_file(args.manifest) if args.manifest else None,
         "scope": "initial preparation probe only" if args.probe_base else "debugging sequence",
+        "recovery": json.loads((args.recovery / "image.json").read_text())
+        if not args.prepare_only
+        else None,
+        "firmware_sha256": digest_file(args.firmware) if not args.prepare_only else None,
+        "backend_order": args.order.split(","),
         "environment": {
             "uname": platform.uname()._asdict(),
             "free_bytes": shutil.disk_usage(args.output).free,
@@ -544,6 +584,17 @@ async def main(args):
             except Exception as error:
                 report.setdefault("errors", {})[backend] = type(error).__name__ + ": " + str(error)
                 print(backend + ": " + report["errors"][backend], flush=True)
+        if not args.probe_base and len(report["backends"]) == 2:
+            left, right = report["backends"]["ostree"], report["backends"]["rsync"]
+            report["same_resolved_packages"] = len(left) == len(right) == 5 and all(
+                a.get("resolved_packages") == b.get("resolved_packages")
+                and a.get("resolved_packages")
+                for a, b in zip(left, right)
+            )
+            if not report["same_resolved_packages"]:
+                report.setdefault("errors", {})["comparability"] = (
+                    "Incomplete or different resolved package inventories; not a comparable full sequence"
+                )
     finally:
         save_json(args.output / "results.json", report)
         write_report(args.output, report)

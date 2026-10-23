@@ -61,9 +61,86 @@ jobs:
           name: deployment-workload
           path: |
             ${{ runner.temp }}/workload/scenario.json
+            ${{ runner.temp }}/workload/inputs/*.rpm
             ${{ runner.temp }}/workload/build.log
             ${{ runner.temp }}/workload/commands.json
             ${{ runner.temp }}/workload/output/toolchain-packages.txt
             ${{ runner.temp }}/workload/output/rpmbuild/RPMS/**/*.rpm
             ${{ runner.temp }}/workload/output/extracted/*/notes.txt
           retention-days: 7
+  comparison:
+    if: github.event_name == 'pull_request' && github.event.label.name == 'run-deployment-comparison'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked --python 3.12
+      - name: Install VM prerequisites in the disposable runner
+        timeout-minutes: 15
+        run: |
+          df -h
+          free -h
+          ls -l /dev/kvm /dev/fuse || true
+          sed 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
+            /etc/apt/sources.list.d/ubuntu.sources > "$RUNNER_TEMP/qb-ubuntu.sources"
+          apt_options=(-o "Dir::Etc::sourcelist=$RUNNER_TEMP/qb-ubuntu.sources" -o Dir::Etc::sourceparts=- -o Acquire::Retries=2 -o Acquire::https::Timeout=30)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends podman uidmap slirp4netns fuse-overlayfs rsync guestmount libguestfs-tools qemu-system-x86 ovmf grub-common
+      - name: Assemble locked workload and production Recovery outside candidate timing
+        timeout-minutes: 20
+        run: |
+          uv run --no-sync python development/benchmark_workload.py "$RUNNER_TEMP/workload"
+          uv run --no-sync python - <<'PY'
+          import asyncio, os, sys
+          from pathlib import Path
+          sys.path.insert(0, 'development')
+          from deployment_benchmark import MeasuredLinux
+          from quirkbench.image import build_recovery
+          root = Path(os.environ['RUNNER_TEMP']) / 'recovery-prerequisite'
+          root.mkdir()
+          asyncio.run(build_recovery(root, MeasuredLinux(root)))
+          PY
+      - name: Run bounded full debugging sequence through production APIs
+        timeout-minutes: 52
+        env:
+          LIBGUESTFS_BACKEND_SETTINGS: force_tcg
+        run: |
+          # Use the public kernel from our disposable Fedora workload tools image.
+          # Never change host /boot permissions or host security settings.
+          podman --root "$RUNNER_TEMP/workload/podman" --runroot "$RUNNER_TEMP/workload/podman-run" \
+            run --rm --user 0 --network=none --security-opt label=disable \
+            -v "$RUNNER_TEMP/workload:/work" localhost/qb-benchmark-workload \
+            bash -c 'mkdir -p /work/appliance-modules; cd /work/appliance-modules; rpm2cpio /work/inputs/kernel-core-7.2.10-200.fc44.x86_64.rpm | cpio -idmu --quiet; rpm2cpio /work/inputs/kernel-modules-core-7.2.10-200.fc44.x86_64.rpm | cpio -idmu --quiet'
+          export SUPERMIN_MODULES="$RUNNER_TEMP/workload/appliance-modules/lib/modules/7.2.10-200.fc44.x86_64"
+          export SUPERMIN_KERNEL="$SUPERMIN_MODULES/vmlinuz"
+          image_id=$(python3 -c 'import json,os; print(json.load(open(os.environ["RUNNER_TEMP"]+"/recovery-prerequisite/latest-build.json"))["id"])')
+          uv run --no-sync python development/deployment_benchmark.py \
+            "$RUNNER_TEMP/workload/scenario.json" "$RUNNER_TEMP/comparison" \
+            --recovery "$RUNNER_TEMP/recovery-prerequisite/images/$image_id" \
+            --firmware /usr/share/OVMF/OVMF_CODE_4M.fd --backend-timeout 1500
+      - name: Publish measurements and failure evidence without credentials
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-comparison
+          path: |
+            ${{ runner.temp }}/comparison/results.json
+            ${{ runner.temp }}/comparison/report.md
+            ${{ runner.temp }}/comparison/*/commands.json
+            ${{ runner.temp }}/comparison/*/serial.log
+            ${{ runner.temp }}/comparison/*/media.log
+            ${{ runner.temp }}/comparison/*/controller/logs/*
+            ${{ runner.temp }}/workload/scenario.json
+            ${{ runner.temp }}/workload/build.log
+            ${{ runner.temp }}/workload/output/toolchain-packages.txt
+            ${{ runner.temp }}/workload/output/rpmbuild/RPMS/**/*.rpm
+            ${{ runner.temp }}/workload/inputs/*.rpm
+            ${{ runner.temp }}/recovery-prerequisite/logs/*
+          retention-days: 7
+      - name: Print short comparison report
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/comparison/report.md"; then cat "$RUNNER_TEMP/comparison/report.md"; fi

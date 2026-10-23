@@ -306,7 +306,7 @@ avoid repeated client setup; keep MCP sessions within their calling tasks and
 close the pool on controller restart. Do not share mutable state between tests.
 
 Use Ruff for basic Python errors and formatting. CI lists the slowest tests and
-allows a 120-second outer limit to accommodate runner variation; retain the fast
+allows a 180-second outer limit to accommodate runner variation; retain the fast
 suite goal, not a new target duration. Test deadlines still catch hangs.
 Operator journeys cover config errors, access refusal, status/stop, connection
 refresh, cleanup/export and notification. Hold a database call with test signals
