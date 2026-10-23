@@ -46,7 +46,15 @@ jobs:
           PYTHONPATH: src
           LIBGUESTFS_BACKEND_SETTINGS: force_tcg
           LIBGUESTFS_DEBUG: "1"
-        run: python3 development/rsync-tree-metadata.py "$RUNNER_TEMP/qb-image-proof"
+        run: |
+          # Use the public kernel already installed in our disposable tools image.
+          # Do not change permissions on the runner's protected /boot kernel.
+          podman run --rm --user 0 --network=none --security-opt label=disable \
+            -v "$RUNNER_TEMP/qb-image-proof:/work" localhost/qb-metadata \
+            sh -c 'cp -a /usr/lib/modules /work/appliance-modules; chmod -R u+rX /work/appliance-modules'
+          export SUPERMIN_MODULES="$(find "$RUNNER_TEMP/qb-image-proof/appliance-modules" -mindepth 1 -maxdepth 1 -type d | head -n1)"
+          export SUPERMIN_KERNEL="$SUPERMIN_MODULES/vmlinuz"
+          python3 development/rsync-tree-metadata.py "$RUNNER_TEMP/qb-image-proof"
   transfer:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
