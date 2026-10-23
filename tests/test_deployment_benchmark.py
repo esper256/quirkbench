@@ -86,6 +86,7 @@ async def test_failure_records_each_isolated_backend_without_claiming_boot(tmp_p
     with pytest.raises(FileExistsError):
         await bench.main(args)
     assert "unrun" in (args.output / "report.md").read_text()
+    assert "KVM read/write access" in (args.output / "report.md").read_text()
 
 
 async def test_podman_instrumentation_preserves_operation_and_isolates_storage(

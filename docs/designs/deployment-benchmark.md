@@ -80,6 +80,10 @@ rsync updates the same retained filesystem. The first rsync transfer uses full
 mode and later transfers use delta mode, with checksums and deletion enabled.
 Normal rsync temporary-file/rename semantics apply. These updates are not atomic.
 
+The report records actual read/write access to `/dev/kvm`, not merely its
+presence. QEMU selects KVM when accessible and TCG software CPU emulation
+otherwise. TCG timings do not predict physical-hardware performance.
+
 OS page caches are **not** dropped. Cold artifact stores do not mean cold RAM
 caches. Record run order and repeat in reverse order if useful; one run supports
 no statistical claims. Host packages, Python dependencies, OVMF, the libguestfs

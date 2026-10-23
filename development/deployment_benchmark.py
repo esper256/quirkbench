@@ -604,6 +604,13 @@ def write_report(output, report):
         "",
         "Single run; no statistical conclusion. See results.json for inputs, environment and failures.",
         "",
+        (
+            "KVM read/write access available; QEMU selects KVM."
+            if report["environment"]["kvm"]
+            else "KVM read/write access unavailable; QEMU selects TCG software emulation. These timings do not predict physical-hardware performance."
+        ),
+        "Boot may be unrun or failed; inspect the recorded setup and per-step states.",
+        "",
         "| Backend | Step | Status | Prepare s | Deploy s | Validated boot s |",
         "|---|---|---|---:|---:|---:|",
     ]
