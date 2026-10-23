@@ -203,3 +203,67 @@ async def test_old_recovery_layout_is_refused_before_writing(tmp_path, monkeypat
         await usb.update(yes=True)
 
     assert usb.saved_files() == before
+
+
+async def test_boot_waits_for_data_identity_and_never_protects_disks_when_uncertain():
+    import json
+    import pytest
+    from quirkbench.target_boot import protect_other_disks
+
+    for outcome in ("ready", "missing", "ambiguous"):
+
+        class Devices:
+            initialized = False
+            protected = []
+
+            async def command(self, *args):
+                if args[0] == "udevadm":
+                    assert args == (
+                        "udevadm",
+                        "wait",
+                        "--timeout=30",
+                        "/dev/disk/by-uuid/recovery-data",
+                    )
+                    if outcome == "missing":
+                        raise RuntimeError("device initialization timed out")
+                    self.initialized = True
+                    return {"exit_code": 0, "output": ""}
+                if args[0] == "lsblk":
+                    assert self.initialized
+                    return {
+                        "exit_code": 0,
+                        "output": json.dumps(
+                            {
+                                "blockdevices": [
+                                    {
+                                        "path": "/dev/sda",
+                                        "type": "disk",
+                                        "children": [
+                                            {
+                                                "path": "/dev/sda4",
+                                                "type": "part",
+                                                "uuid": "recovery-data",
+                                            }
+                                        ],
+                                    },
+                                    {
+                                        "path": "/dev/nvme0n1",
+                                        "type": "disk",
+                                        "uuid": "recovery-data" if outcome == "ambiguous" else None,
+                                    },
+                                ]
+                            }
+                        ),
+                    }
+                assert args[:2] == ("blockdev", "--setro")
+                self.protected.append(args[2])
+                return {"exit_code": 0, "output": ""}
+
+        devices = Devices()
+        if outcome == "ready":
+            await protect_other_disks(devices, "recovery-data")
+            assert devices.protected == ["/dev/nvme0n1"]
+        else:
+            with pytest.raises((RuntimeError, ValueError)):
+                await protect_other_disks(devices, "recovery-data")
+            assert not devices.protected

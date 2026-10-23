@@ -204,6 +204,8 @@ class Storage:
         # Serialize against preparation and new candidate admissions. The deleting
         # status survives a failed cleanup so the same command can be retried.
         async with self.prepare_lock, self.candidate_files_lock:
+            if confirm and self.rsync_transfers:
+                raise ValueError("Wait for active rsync transfers before deleting investigations.")
             with build_lock(self.root):
                 async with self.store.admission():
                     inv = await self.store.get("investigation", name)

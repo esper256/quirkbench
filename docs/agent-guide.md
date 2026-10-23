@@ -109,7 +109,11 @@ The recovery `services` view lists **failed units**, not every service.
 Candidate preparation includes a small debugging toolkit by default; set
 `debugging_tools: false` when environment fidelity calls for omitting it.
 `repository_packages` selects packages from the candidate's repositories.
-`packages` and `replacements` still accept controller-local RPM files. Preparation
+`packages` and `replacements` still accept controller-local RPM files.
+`remove_packages` explicitly removes named base packages before additions and
+replacements, for example kernel-bound modules that are incompatible with a
+replacement kernel. Dependency errors stop preparation; nothing is removed
+automatically. These changes affect the candidate image only. Preparation
 records the requested changes and resolved packages. No tracing or stress tool is
 started automatically. Context reports whether Podman is visible to the running
 controller, separately from target availability and source versions.
@@ -174,3 +178,26 @@ After discarding retained deployment files, `recovery_prune_ostree_cache` explic
 removes downloaded candidate content from idle recovery. Use it when space is
 needed; later deployments will download that content again. It keeps diagnostics
 and connection settings. Follow completion with `controller_work_wait`.
+
+## Optional rsync experiment trees
+
+Prepare with `rpm_ostree_prepare_candidate(backend="rsync")`; omitted means OSTree.
+Use the backend-neutral deploy, boot, cancel and discard tools. The controller
+needs rsync and native guestmount/guestunmount; Recovery needs `rsync-tree-v1`.
+No backend service starts merely because Recovery boots.
+
+`recovery_deploy_candidate` without `destination_run_id` creates a filesystem.
+Supply the latest retained run ID to sync into that same experiment. Set
+`rsync_options.mode` to `full` to disable block matching or `delta` to reuse blocks.
+`ignore_times=true` forces retransmission of unchanged files too. The schema also
+exposes checksums, deletion, exclusion patterns, dry runs and boot-artifact updates.
+Cancellation retains partial changes; discard is explicit. Boot is always a
+separate request. A failed update has no automatic rollback.
+
+The source is the selected prepared candidate root; the destination is the selected
+experiment root. Preserve target edits with explicit exclusions. For updates with
+`update_boot=false`, exclude `etc/fstab` if its target-specific mount should remain.
+Rsync keeps ordinary writable `/usr` edits across boots. No per-update image copy
+is made; assembly and source access still use an appliance. See
+[rsync deployment](designs/rsync-deployment.md) for exact semantics and the pending
+complete Bazzite boot qualification.

@@ -167,6 +167,7 @@ async def test_candidate_without_first_connection_returns_and_reports_why(lab):
         linux=lab.tools,
     )
 
+    lab.target.workspace = lab.data / "test-workspace"
     lab.target_task = asyncio.create_task(lab.target.run())
     # The OS timer is independent of Target.run(). Exercise its real generator,
     # then substitute only the privileged reboot selected by systemd.

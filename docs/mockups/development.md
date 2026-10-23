@@ -56,3 +56,25 @@ $ ./dev package --development
 Package files: /home/sam/dev/quirkbench/dist/release
 Nothing was published or installed on the host.
 ```
+
+Optional comparison in disposable storage (illustrative; a full run is expensive):
+
+```console
+$ uv run --no-sync python development/benchmark_workload.py /scratch/workload-001
+/scratch/workload-001/scenario.json
+$ uv run --no-sync python development/deployment_benchmark.py /scratch/workload-001/scenario.json /scratch/comparison-001 --recovery /scratch/recovery/images/IMAGE_ID --firmware /usr/share/OVMF/OVMF_CODE_4M.fd --firmware-vars /usr/share/OVMF/OVMF_VARS_4M.fd
+Downloading and recording the selected Bazzite version
+```
+
+Read `comparison-001/results.json` and `comparison-001/report.md`. Failed and
+unrun stages remain explicit; a preparation-only probe supplies no boot result.
+
+Illustrative kernel replacement preparation options for a disposable VM workload:
+
+```json
+{"replacements": ["/work/kernel.rpm"], "remove_packages": ["kernel-devel-matched", "kmod-example"]}
+```
+
+The agent selects actual package names from the candidate inventory. Preparation
+records removals and rejects unresolved dependencies; this example is not a
+complete kernel package set.

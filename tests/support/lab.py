@@ -97,6 +97,8 @@ class ToolResults(Linux):
                     {k: v for k, v in disk.items() if k != "children"} for disk in inventory
                 ]
             result["output"] = json.dumps({"blockdevices": inventory})
+        elif args[:3] == ["udevadm", "wait", "--timeout=30"]:
+            assert len(args) == 4 and args[3].startswith("/dev/disk/by-uuid/")
         elif args[0] == "blockdev" and args[1] == "--setro":
             self.read_only_disks.add(args[2])
         elif args[0] == "podman":

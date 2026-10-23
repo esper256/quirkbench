@@ -1,0 +1,80 @@
+[
+  {
+    "url": "https://kojipkgs.fedoraproject.org/packages/kernel/7.2.9/200.fc44/x86_64/kernel-7.2.9-200.fc44.x86_64.rpm",
+    "path": "kernel-7.2.9-200.fc44.x86_64.rpm",
+    "sha256": "71985ad6faf492508a4c91d5cc4df2a25375f4dd6ad6f7189055c576447ebac3",
+    "bytes": 247217
+  },
+  {
+    "url": "https://kojipkgs.fedoraproject.org/packages/kernel/7.2.9/200.fc44/x86_64/kernel-core-7.2.9-200.fc44.x86_64.rpm",
+    "path": "kernel-core-7.2.9-200.fc44.x86_64.rpm",
+    "sha256": "bb4a1c192c9d81696e1b259764e32857a993f07ee18c3f00b154544739bf52fe",
+    "bytes": 21887881
+  },
+  {
+    "url": "https://kojipkgs.fedoraproject.org/packages/kernel/7.2.9/200.fc44/x86_64/kernel-modules-7.2.9-200.fc44.x86_64.rpm",
+    "path": "kernel-modules-7.2.9-200.fc44.x86_64.rpm",
+    "sha256": "1d7e8a1c0e123721d9f78e838d2a8b19c9132d151aa12726bf623815a02f1292",
+    "bytes": 78414233
+  },
+  {
+    "url": "https://kojipkgs.fedoraproject.org/packages/kernel/7.2.9/200.fc44/x86_64/kernel-modules-core-7.2.9-200.fc44.x86_64.rpm",
+    "path": "kernel-modules-core-7.2.9-200.fc44.x86_64.rpm",
+    "sha256": "2d70f64fb407130f378b0bdb9337d238a08b9ca0b19955b396f299265574e6d6",
+    "bytes": 50470933
+  },
+  {
+    "url": "https://kojipkgs.fedoraproject.org/packages/kernel/7.2.9/200.fc44/x86_64/kernel-modules-extra-7.2.9-200.fc44.x86_64.rpm",
+    "path": "kernel-modules-extra-7.2.9-200.fc44.x86_64.rpm",
+    "sha256": "81589ed47961d3abb5207ac95a586111527007dd495f8c909e9294866e037d16",
+    "bytes": 3038561
+  },
+  {
+    "url": "https://kojipkgs.fedoraproject.org/packages/kernel/7.2.9/200.fc44/x86_64/kernel-devel-7.2.9-200.fc44.x86_64.rpm",
+    "path": "kernel-devel-7.2.9-200.fc44.x86_64.rpm",
+    "sha256": "ead082944458d4fc9304078395ab06db5d4ee3a7a563f84b7cfda56707fc0216",
+    "bytes": 55884641
+  },
+  {
+    "url": "https://kojipkgs.fedoraproject.org/packages/kernel/7.2.10/200.fc44/x86_64/kernel-7.2.10-200.fc44.x86_64.rpm",
+    "path": "kernel-7.2.10-200.fc44.x86_64.rpm",
+    "sha256": "8df0a8fabaef07c914a0f02322d7278a153ce9fb9ab3da6c3f5ab8d4b17a1991",
+    "bytes": 250209
+  },
+  {
+    "url": "https://kojipkgs.fedoraproject.org/packages/kernel/7.2.10/200.fc44/x86_64/kernel-core-7.2.10-200.fc44.x86_64.rpm",
+    "path": "kernel-core-7.2.10-200.fc44.x86_64.rpm",
+    "sha256": "4a1ab60b58d46f6339836d5b931c96692a6aa942823c4474b010995b274f35eb",
+    "bytes": 21891297
+  },
+  {
+    "url": "https://kojipkgs.fedoraproject.org/packages/kernel/7.2.10/200.fc44/x86_64/kernel-modules-7.2.10-200.fc44.x86_64.rpm",
+    "path": "kernel-modules-7.2.10-200.fc44.x86_64.rpm",
+    "sha256": "d67eb01bc21fc4407311f47ce56a4fe898f0bd6756f47f6c3435243524f35755",
+    "bytes": 78389449
+  },
+  {
+    "url": "https://kojipkgs.fedoraproject.org/packages/kernel/7.2.10/200.fc44/x86_64/kernel-modules-core-7.2.10-200.fc44.x86_64.rpm",
+    "path": "kernel-modules-core-7.2.10-200.fc44.x86_64.rpm",
+    "sha256": "a6e7be7f025de2082e52d028f324fda85eeb9adfa6ceea12bf4631d6c0445b65",
+    "bytes": 50448341
+  },
+  {
+    "url": "https://kojipkgs.fedoraproject.org/packages/kernel/7.2.10/200.fc44/x86_64/kernel-modules-extra-7.2.10-200.fc44.x86_64.rpm",
+    "path": "kernel-modules-extra-7.2.10-200.fc44.x86_64.rpm",
+    "sha256": "55a1b450fb679b6d2ad4df7ee88dbaea124eb3f3a04b10d9205d86de8d415d03",
+    "bytes": 3041501
+  },
+  {
+    "url": "https://kojipkgs.fedoraproject.org/packages/kernel/7.2.10/200.fc44/x86_64/kernel-devel-7.2.10-200.fc44.x86_64.rpm",
+    "path": "kernel-devel-7.2.10-200.fc44.x86_64.rpm",
+    "sha256": "d9b62e7c3c72748b1d14cf6c1e4e540f141eb4e5637a8320980fd63abaf24577",
+    "bytes": 55901997
+  },
+  {
+    "url": "https://kojipkgs.fedoraproject.org/packages/strace/7.2/1.fc44/x86_64/strace-7.2-1.fc44.x86_64.rpm",
+    "path": "strace-7.2-1.fc44.x86_64.rpm",
+    "sha256": "79fdc3f556eda77dae351c13445cf061e2a78a89effd8ea5c8fd3c1dc6730138",
+    "bytes": 1625921
+  }
+]

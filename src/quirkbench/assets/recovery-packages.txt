@@ -26,6 +26,7 @@ nano
 e2fsprogs
 dosfstools
 ostree
+rsync
 grub2-tools
 python3-aiohttp
 python3-asyncssh

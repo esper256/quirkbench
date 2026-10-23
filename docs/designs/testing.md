@@ -306,9 +306,14 @@ avoid repeated client setup; keep MCP sessions within their calling tasks and
 close the pool on controller restart. Do not share mutable state between tests.
 
 Use Ruff for basic Python errors and formatting. CI lists the slowest tests and
-allows a 120-second outer limit to accommodate runner variation; retain the fast
+allows a 180-second outer limit to accommodate runner variation; retain the fast
 suite goal, not a new target duration. Test deadlines still catch hangs.
 Operator journeys cover config errors, access refusal, status/stop, connection
 refresh, cleanup/export and notification. Hold a database call with test signals
 to check that SSH still responds. Run the actual boot generator against a test
 kernel command line; mock only privileged reboot. This does not prove firmware boot.
+
+The [optional deployment comparison](deployment-benchmark.md) uses real production
+preparation and disposable QEMU storage. It is manually requested, never part of
+the fast suite. Its small admission tests check reporting and isolation only;
+they do not supply performance evidence.

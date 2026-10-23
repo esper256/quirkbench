@@ -110,7 +110,7 @@ sequenceDiagram
     opt Software change
         Agent->>Agent: Edit source
         Agent->>Agent: Build changed software with ordinary tools
-        Agent->>Quirkbench: rpm_ostree_prepare_candidate with captured package changes
+        Agent->>Quirkbench: rpm_ostree_prepare_candidate with captured RPMs and explicit package removals
         Note over Agent,Target: Return, discard, deploy and boot through recovery as shown above
         Target-->>Quirkbench: Current software and connection status
         Quirkbench-->>Agent: Ready for more inspection
@@ -204,4 +204,56 @@ sequenceDiagram
     Note over Quirkbench,Files: Keep software referenced by other investigations; prune OSTree with its own tools
     Quirkbench->>Quirkbench: Remove investigation records
     Quirkbench-->>Human: Deletion complete
+```
+
+## Explicit rsync candidate
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Controller
+    participant Appliance as Optional image-building appliance
+    participant Recovery
+    Agent->>Controller: Prepare candidate with backend rsync
+    Controller->>Appliance: Export exact commit as PAX; assemble and label root image
+    Appliance-->>Controller: Root image, kernel, matching live initramfs
+    Controller->>Controller: Record artifact hashes and build provenance
+    Agent->>Controller: Full transfer or delta update; optional retained destination
+    Controller->>Recovery: Exact bundle identity; require supported backend
+    Controller->>Controller: Open read-only source filesystem view on demand
+    Recovery->>Controller: Authenticated rsync file-tree stream
+    Recovery->>Recovery: Create backing filesystem once; sync files into it
+    opt Explicit boot-artifact update
+        Recovery->>Recovery: Verify kernel/initramfs; publish boot entry
+    end
+    Agent->>Controller: Explicit boot request
+    Controller->>Recovery: Select one-time entry using shared boot lifecycle
+```
+
+See [rsync deployment](rsync-deployment.md) for interrupted preparation and pending
+complete-image boot qualification. Merely booting Recovery starts no backend work.
+
+## Optional disposable deployment comparison
+
+The developer-only [comparison](deployment-benchmark.md) invokes the same
+controller and target lifecycle. It does not introduce another boot selector.
+
+```mermaid
+sequenceDiagram
+    actor Developer
+    participant Benchmark
+    participant Controller
+    participant VM as Disposable QEMU target
+    Developer->>Benchmark: Run locked five-step workload in new output directory
+    loop One isolated store and disk per backend
+        Benchmark->>VM: Boot production Recovery with production GRUB
+        loop Initial, kernel, modules, modules, no-op
+            Benchmark->>Controller: Prepare exact locked candidate inputs
+            Controller->>VM: Deploy with selected backend
+            Benchmark->>Controller: Select and boot retained experiment
+            VM->>Controller: Connect and report running kernel/files/module load
+            Benchmark->>Controller: Return to Recovery and receive evidence
+        end
+    end
+    Benchmark-->>Developer: JSON timings, identities, failures and comparison report
 ```

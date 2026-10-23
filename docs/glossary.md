@@ -95,3 +95,6 @@ that a feature exists. Keep entries short and change them with the designs.
 | Integration test | A test that checks real components working together. |
 | Smoke test | A small, fast check that basic behavior works. |
 | CI | Continuous integration: automated checks run for repository changes. |
+| Deployment backend | The selected implementation that transfers candidate content and prepares, retains and removes its bootable run files. |
+| Root image | A filesystem stored in a file. The rsync backend uses it as a prepared source or persistent experiment backing storage; updates transfer files inside it, not the whole image. |
+| rsync | A file-transfer tool that can reuse matching destination bytes; it does not itself provide OS boot, atomic deployment or rollback. |

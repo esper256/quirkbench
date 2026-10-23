@@ -1,0 +1,74 @@
+name: Rsync image assembly proof
+on:
+  pull_request:
+    paths:
+      - .github/workflows/rsync-image.yml
+      - development/rsync-image-metadata.sh
+      - development/rsync-tree-metadata.py
+      - src/quirkbench/source_tree.py
+      - src/quirkbench/assets/bazzite/**
+      - src/quirkbench/root_image.py
+      - src/quirkbench/root_bundle.py
+      - src/quirkbench/image_deployment.py
+      - src/quirkbench/rsync_stream.py
+      - tests/test_image_transfer.py
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ordinary distribution tools
+        run: |
+          # The runner's Azure mirror can throttle large optional dependency sets.
+          # Use Ubuntu's official archive for this job without changing host sources.
+          sed 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
+            /etc/apt/sources.list.d/ubuntu.sources > "$RUNNER_TEMP/qb-ubuntu.sources"
+          apt_options=(-o "Dir::Etc::sourcelist=$RUNNER_TEMP/qb-ubuntu.sources" -o Dir::Etc::sourceparts=- -o Acquire::Retries=2 -o Acquire::https::Timeout=30)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
+            podman uidmap slirp4netns fuse-overlayfs guestmount rsync qemu-system-x86
+      - name: Build isolated Fedora metadata tools
+        run: |
+          mkdir -p "$RUNNER_TEMP/qb-tools"
+          cat > "$RUNNER_TEMP/qb-tools/Containerfile" <<'EOF'
+          FROM registry.fedoraproject.org/fedora:43
+          RUN dnf -y install ostree ostree-devel libarchive-devel gcc e2fsprogs python3 libguestfs-tools-c kernel-core && dnf clean all
+          EOF
+          podman build -t localhost/qb-metadata "$RUNNER_TEMP/qb-tools"
+          podman image inspect localhost/qb-metadata --format '{{.Id}}'
+      - name: Check serialized metadata through an unprivileged appliance
+        run: |
+          mkdir -p "$RUNNER_TEMP/qb-image-proof"
+          podman run --rm --user 0 --network=none --security-opt label=disable \
+            -v "$RUNNER_TEMP/qb-image-proof:/work" \
+            -v "$PWD/src/quirkbench/assets/bazzite/export-root.c:/export-root.c:ro" \
+            -v "$PWD/development/rsync-image-metadata.sh:/check.sh:ro" \
+            localhost/qb-metadata bash /check.sh
+      - name: Check ordinary file-tree full and delta transfer with original metadata
+        env:
+          PYTHONPATH: src
+          LIBGUESTFS_BACKEND_SETTINGS: force_tcg
+          LIBGUESTFS_DEBUG: "1"
+        run: |
+          # Use the public kernel already installed in our disposable tools image.
+          # Do not change permissions on the runner's protected /boot kernel.
+          podman run --rm --user 0 --network=none --security-opt label=disable \
+            -v "$RUNNER_TEMP/qb-image-proof:/work" localhost/qb-metadata \
+            sh -c 'cp -a /usr/lib/modules /work/appliance-modules; chmod -R u+rX /work/appliance-modules'
+          export SUPERMIN_MODULES="$(find "$RUNNER_TEMP/qb-image-proof/appliance-modules" -mindepth 1 -maxdepth 1 -type d | head -n1)"
+          export SUPERMIN_KERNEL="$SUPERMIN_MODULES/vmlinuz"
+          python3 development/rsync-tree-metadata.py "$RUNNER_TEMP/qb-image-proof"
+  transfer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: sudo apt-get update && sudo apt-get install -y rsync
+      - run: uv sync --locked --python 3.12
+      - run: QUIRKBENCH_REAL_TRANSFER=1 uv run --no-sync pytest -q tests/test_image_transfer.py

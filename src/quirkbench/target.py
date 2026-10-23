@@ -198,6 +198,7 @@ class Target:
             "message": self.message,
             "retained_run": self.active,
             "capabilities": [
+                "rsync-tree-v1",
                 "status-selection",
                 "deploy-only",
                 "deploy-boot-id",
@@ -524,7 +525,7 @@ class Target:
             if action == "boot":
                 if not self.active.get("entry"):
                     raise ValueError(
-                        "Deployment is incomplete; discard it before deploying another candidate."
+                        "Boot preparation is incomplete; retry with update_boot=true or discard the experiment."
                     )
                 if not 1 <= request["startup_timeout"] <= 3600:
                     raise ValueError(
@@ -536,7 +537,15 @@ class Target:
             self.spawn(self.boot_prepared(request) if action == "boot" else self.discard(request))
             return {"status": "accepted"}
         if action == "deploy" and self.mode == "recovery":
-            if set(request) - {"kernel_args", "selinux"} != {
+            if set(request) - {
+                "kernel_args",
+                "selinux",
+                "backend",
+                "bundle",
+                "rsync_options",
+                "deployment_id",
+                "previous_run",
+            } != {
                 "work_id",
                 "run_id",
                 "commit",
@@ -547,6 +556,21 @@ class Target:
             from .candidates import debugging_kernel_args
 
             debugging_kernel_args(request.get("kernel_args"))
+            from .deployment import backend
+
+            if backend(request) == "rsync":
+                from .root_bundle import validate_bundle
+
+                validate_bundle(request.get("bundle"), request["commit"])
+                if not {"rsync_options", "deployment_id", "previous_run"} <= request.keys():
+                    raise ValueError("Use a controller supporting rsync-tree-v1.")
+                from .rsync_options import options
+
+                options(request.get("rsync_options"))
+                identifier(request.get("deployment_id", request["run_id"]))
+                self.linux.require_tools("rsync")
+            elif "bundle" in request:
+                raise ValueError("OSTree deployment does not accept a root image bundle.")
             key = identifier(request["work_id"])
             identifier(request["run_id"])
             if (
@@ -564,8 +588,26 @@ class Target:
                 raise ValueError(
                     "Recovery restarted before deployment. Refresh target status and submit a new request."
                 )
-            if self.busy or self.active:
-                raise ValueError("Finish the existing run before deploying another candidate.")
+            updating = request.get("previous_run")
+            if updating:
+                if (
+                    not self.active
+                    or self.active["run_id"] != updating
+                    or self.active.get("backend") != "rsync"
+                    or backend(request) != "rsync"
+                    or self.active["deployment_id"] != request.get("deployment_id")
+                ):
+                    raise ValueError("The requested experiment is not retained on this target.")
+                if self.active.get("launched") and not self.active.get("evidence_received"):
+                    raise ValueError(
+                        "Wait for diagnostics to reach the controller before updating."
+                    )
+            elif (
+                self.active or request.get("deployment_id", request["run_id"]) != request["run_id"]
+            ):
+                raise ValueError("Select the retained experiment explicitly before updating it.")
+            if self.busy or self.boot_committed:
+                raise ValueError("Wait for existing target work to finish.")
             self.busy = True
             try:
                 await self.admit(key, request, "deploying")
@@ -612,16 +654,23 @@ class Target:
     async def prune_cache(self, key):
         repo = self.data / "ostree/repo"
         try:
-            refs = await self.linux.command(
-                "ostree", f"--repo={repo}", "refs", "quirkbench/candidates"
-            )
-            for ref in refs["output"].splitlines():
-                if not ref.startswith("quirkbench/candidates/"):
-                    raise ValueError(
-                        "Unexpected cache reference; no further references were removed."
-                    )
-                await self.linux.command("ostree", f"--repo={repo}", "refs", "--delete", ref)
-            await self.linux.command("ostree", f"--repo={repo}", "prune", "--refs-only")
+            if await disk((repo / "config").exists):
+                refs = await self.linux.command(
+                    "ostree", f"--repo={repo}", "refs", "quirkbench/candidates"
+                )
+                for ref in refs["output"].splitlines():
+                    if not ref.startswith("quirkbench/candidates/"):
+                        raise ValueError(
+                            "Unexpected cache reference; no further references were removed."
+                        )
+                    await self.linux.command("ostree", f"--repo={repo}", "refs", "--delete", ref)
+                await self.linux.command("ostree", f"--repo={repo}", "prune", "--refs-only")
+            from .image_deployment import owned
+            import shutil
+
+            cache = owned(self.data, "quirkbench/image-cache")
+            if await disk(cache.exists):
+                await disk(shutil.rmtree, cache)
             await self.record(key, status="finished", stage="Unused candidate content removed")
         except Exception as error:
             await self.record(key, status="failed", error=str(error))
@@ -629,13 +678,28 @@ class Target:
             self.busy = False
 
     async def deploy(self, request):
-        from .candidates import deploy_candidate
+        from .deployment import deploy_candidate
 
         key = request["work_id"]
         self.deployment_started = True
         try:
             if self.work.get(key, {}).get("status") == "cancelling":
                 raise asyncio.CancelledError
+            if request.get("backend") == "rsync":
+                # Persist ownership before any image or mount is created. Failed
+                # cleanup remains visible and retryable through explicit discard.
+                previous_entry = (self.active or {}).get("entry")
+                request = dict(request, previous_entry=previous_entry)
+                if previous_entry:
+                    request["entry"] = previous_entry
+                self.active = dict(
+                    request,
+                    deployment_id=request.get("deployment_id", request["run_id"]),
+                    recovery_boot=self.boot_id,
+                    launched=False,
+                    evidence_received=False,
+                )
+                await disk(save_json, self.home / "active.json", self.active)
             prepared = await deploy_candidate(
                 self.data,
                 self.boot,
@@ -648,7 +712,7 @@ class Target:
                 self.active = dict(
                     request,
                     **prepared,
-                    deployment_id=request["run_id"],
+                    deployment_id=request.get("deployment_id", request["run_id"]),
                     recovery_boot=self.boot_id,
                     launched=False,
                     evidence_received=False,
@@ -666,7 +730,12 @@ class Target:
         except Exception as e:
             if self.active and self.active["recovery_boot"] == self.boot_id:
                 try:
-                    await self.cancel_boot()
+                    if request.get("backend") == "rsync":
+                        await self.linux.command(
+                            "grub2-editenv", self.boot / "grubenv", "unset", "next_entry"
+                        )
+                    else:
+                        await self.cancel_boot()
                 except Exception as cleanup_error:
                     e = RuntimeError(
                         f"{e}; could not clear boot selection: {cleanup_error}. Use the local terminal before rebooting."
@@ -734,17 +803,27 @@ class Target:
         key = request["work_id"]
         try:
             await self.linux.command("grub2-editenv", self.boot / "grubenv", "unset", "next_entry")
-            from .candidates import cleanup_run
+            from .deployment import cleanup_run
 
-            if await disk((self.data / "ostree" / "repo" / "config").exists):
-                await cleanup_run(self.data, self.linux, request["run_id"])
+            if request.get("backend") == "rsync":
+                await self.record(
+                    key,
+                    status="cancelled",
+                    stage="Transfer stopped; experiment retained for inspection or retry",
+                )
+                return
+            await cleanup_run(self.data, self.boot, self.linux, request)
             if self.active and self.active["work_id"] == key:
                 await disk((self.home / "active.json").unlink, missing_ok=True)
                 self.active = None
             await self.record(key, status="cancelled", stage="Deployment cancelled; recovery ready")
         except Exception as error:
             # Keep ownership until cleanup has succeeded or recovery restarts.
-            self.active = dict(request, deployment_id=request["run_id"], recovery_boot=self.boot_id)
+            self.active = dict(self.active or {}, **request)
+            self.active.update(
+                deployment_id=request.get("deployment_id", request["run_id"]),
+                recovery_boot=self.boot_id,
+            )
             await disk(save_json, self.home / "active.json", self.active)
             await self.record(
                 key,
@@ -796,9 +875,9 @@ class Target:
     async def cancel_boot(self):
         # Do not release ownership if clearing the one-time selection fails.
         await self.linux.command("grub2-editenv", self.boot / "grubenv", "unset", "next_entry")
-        from .candidates import cleanup_run
+        from .deployment import cleanup_run
 
-        await cleanup_run(self.data, self.linux, self.active["deployment_id"])
+        await cleanup_run(self.data, self.boot, self.linux, self.active)
         await disk((self.home / "active.json").unlink, missing_ok=True)
         self.active = None
         self.boot_committed = False
@@ -852,51 +931,64 @@ class Target:
             # A crash may leave no candidate-collected log. Collect what recovery can see.
             if not await disk((folder / "outcome.json").exists):
                 await self.collect(run_id, "interrupted")
-            journal = (
-                self.data
-                / "ostree"
-                / "deploy"
-                / self.active["deployment_id"]
-                / "var"
-                / "log"
-                / "journal"
-            )
-            attempt = await disk(read_json, self.home / "boot-attempts" / (run_id + ".json"), {})
-            await disk(
-                save_json,
-                folder / "boot-attempt.json",
-                attempt
-                or {
-                    "run_id": run_id,
-                    "boot_id": None,
-                    "note": "Candidate boot ID was not recorded. This alone does not establish whether userspace started.",
-                },
-            )
-            if await disk(journal.is_dir):
-                import uuid
+            from .deployment import journal_directory
 
-                try:
-                    selection = (
-                        ["-b", uuid.UUID(attempt["boot_id"]).hex] if attempt.get("boot_id") else []
+            try:
+                async with journal_directory(self.data, self.linux, self.active) as journal:
+                    attempt = await disk(
+                        read_json, self.home / "boot-attempts" / (run_id + ".json"), {}
                     )
-                except ValueError:
                     await disk(
                         save_json,
-                        folder / "candidate-journal-status.json",
-                        {"status": "failed", "error": "Recorded candidate boot ID is invalid."},
+                        folder / "boot-attempt.json",
+                        attempt
+                        or {
+                            "run_id": run_id,
+                            "boot_id": None,
+                            "note": "Candidate boot ID was not recorded. This alone does not establish whether userspace started.",
+                        },
                     )
-                else:
-                    filename = (
-                        "candidate-journal.log" if selection else "candidate-journal-all-boots.log"
-                    )
-                    await self.collect_journal(
-                        folder, filename, [f"--directory={journal}", *selection]
-                    )
-            else:
+                    if await disk(journal.is_dir):
+                        import uuid
+
+                        try:
+                            selection = (
+                                ["-b", uuid.UUID(attempt["boot_id"]).hex]
+                                if attempt.get("boot_id")
+                                else []
+                            )
+                        except ValueError:
+                            await disk(
+                                save_json,
+                                folder / "candidate-journal-status.json",
+                                {
+                                    "status": "failed",
+                                    "error": "Recorded candidate boot ID is invalid.",
+                                },
+                            )
+                        else:
+                            filename = (
+                                "candidate-journal.log"
+                                if selection
+                                else "candidate-journal-all-boots.log"
+                            )
+                            await self.collect_journal(
+                                folder, filename, [f"--directory={journal}", *selection]
+                            )
+                    else:
+                        await disk(
+                            save_json,
+                            folder / "candidate-journal-status.json",
+                            {
+                                "status": "unavailable",
+                                "reason": "No saved candidate journal directory.",
+                            },
+                        )
+            except Exception as error:
                 await disk(
                     save_json,
                     folder / "candidate-journal-status.json",
-                    {"status": "unavailable", "reason": "No saved candidate journal directory."},
+                    {"status": "failed", "error": str(error)},
                 )
             pstore = Path("/sys/fs/pstore")
             try:

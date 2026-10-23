@@ -14,6 +14,12 @@ def boot_args():
 
 async def protect_other_disks(linux, data_uuid):
     """Keep the external boot drive writable; other disks are outside investigations."""
+    # UUID properties may still be initializing after switching to RAM Recovery.
+    # Wait for this device only, not the global udev queue, before identifying
+    # which disk must remain writable. Missing/ambiguous identities still fail closed.
+    await linux.command(
+        "udevadm", "wait", "--timeout=30", f"/dev/disk/by-uuid/{identifier(data_uuid)}"
+    )
     result = await linux.command("lsblk", "--json", "--tree", "--paths", "-o", "PATH,TYPE,UUID")
     disks = json.loads(result["output"])["blockdevices"]
 

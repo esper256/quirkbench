@@ -171,6 +171,66 @@ def https_app(controller):
             raise web.HTTPNotFound()
         return web.FileResponse(path)
 
+    async def rsync(request):
+        target = await authenticated_target(request)
+        # Admit the reader under the same short lock used by destructive cleanup.
+        # Check saved work after acquiring it: cancellation may happen while waiting.
+        async with controller.candidate_files_lock:
+            run = await controller.store.get("run", identifier(request.match_info["run"]))
+            if run["target"] != target["id"]:
+                raise web.HTTPForbidden()
+            work = await controller.store.get("work", run["work_id"])
+            if (
+                run.get("backend", "ostree") != "rsync"
+                or work["action"] != "deploy"
+                or work["status"] not in ("starting", "running")
+                or work.get("cancel_requested")
+            ):
+                raise web.HTTPConflict(text="This run is not accepting an rsync transfer.")
+            if target["id"] in controller.rsync_transfers:
+                raise web.HTTPConflict(text="An rsync transfer is already active for this target.")
+            controller.linux.require_tools("rsync")
+            token = object()
+            controller.rsync_transfers[target["id"]] = token
+        try:
+            # Reader ownership prevents pruning without blocking preparation,
+            # uploads, or transfers for other targets for the stream's lifetime.
+            from .rsync_stream import serve_bundle
+
+            folder = controller.root / "candidates" / identifier(run["candidate"]) / "root-image"
+            phase = request.query.get("phase", "bundle")
+            if phase == "tree":
+                from .source_tree import image_view
+                from .rsync_options import sender_arguments
+
+                async def transfer_tree():
+                    from contextlib import AsyncExitStack
+
+                    async with AsyncExitStack() as stack:
+                        tree = await stack.enter_async_context(
+                            image_view(folder / "rootfs.img", controller.root / "tree-views")
+                        )
+
+                        async def completed():
+                            await stack.aclose()
+                            if controller.rsync_transfers.get(target["id"]) is token:
+                                del controller.rsync_transfers[target["id"]]
+
+                        return await serve_bundle(
+                            request,
+                            tree,
+                            sender_args=sender_arguments(run["rsync_options"]),
+                            on_complete=completed,
+                        )
+
+                return await controller.spawn(transfer_tree())
+            if phase != "bundle":
+                raise web.HTTPBadRequest(text="Unknown transfer phase.")
+            return await controller.spawn(serve_bundle(request, folder))
+        finally:
+            if controller.rsync_transfers.get(target["id"]) is token:
+                del controller.rsync_transfers[target["id"]]
+
     app.add_routes(
         [
             web.post("/api/v1/pair", pair),
@@ -178,6 +238,7 @@ def https_app(controller):
             web.put("/api/v1/runs/{run}/result", result),
             web.put("/api/v1/reports/{report}", upload),
             web.get("/ostree/{path:.+}", repository),
+            web.get("/api/v1/runs/{run}/rsync", rsync),
         ]
     )
     return app
