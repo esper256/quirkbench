@@ -52,6 +52,10 @@ Keep one persistent OCI image directory in the controller build cache. Export wi
 storage and unchanged layers can be skipped. Import the exact named candidate only
 after export succeeds, under the existing preparation lock. Keep the standard
 debugging toolkit in a build layer before investigation-specific packages and probes.
+Mount staged RPM installers read-only during installation instead of copying them
+into image layers. Use Podman's mount labeling on those staged copies; never
+relabel the agent's original files. Unchanged inputs reuse the build; changed
+RPM bytes must rebuild even when their names and timestamps stay the same.
 OSTree retains imported layers and shares unchanged files between candidate versions.
 Recovery continues to pull only missing OSTree objects; this changes no target protocol.
 

@@ -49,11 +49,25 @@ CoreOS's [chunkah tool](https://github.com/coreos/chunkah#output-options) also d
 to uncompressed local output to avoid compression immediately followed by decompression.
 Repacking the whole image or running a registry is not needed to fix this export.
 
-A separate potential improvement is avoiding `COPY` of RPM installers into image
-layers before deleting them in a later installation step. Those installer bytes
-remain in local image history. Build-only mounts could avoid this, but must first
-demonstrate that changed RPM bytes invalidate the build cache correctly. No such
-change or measurement is included here.
+## RPM installer refinement
+
+Replaced `COPY`/install/delete with read-only build mounts for the target RPM,
+additional RPMs and replacement RPMs. Podman's standard `z` option labels only the
+staged copies for container access; without it the real SELinux host denied access.
+
+A separate real check installed an 8 MiB test payload on the same Bazzite base:
+
+- The mounted installer removed one image layer and 8,398,793 bytes compared with
+  copying the 8,395,550-byte RPM into an earlier layer. Installed payloads matched.
+- Repeating the unchanged mounted build returned the identical image in 0.90 s.
+- A changed RPM with the same filename, size and timestamp rebuilt successfully;
+  the installed payload matched the new bytes. `override replace` also succeeded.
+- No custom cache invalidation or host permission workaround was needed.
+  This checks build behavior, not target boot. It is not a timing comparison for
+  large kernel packages.
+
+Thirty focused integration tests passed; the two RPM-input cases were rerun after
+adding mount labeling. Keep routine tests free of these real image builds.
 
 ## Environment
 

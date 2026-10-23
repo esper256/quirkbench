@@ -167,6 +167,30 @@ async def test_unchanged_preparation_reuses_completed_content(lab):
     )
 
 
+@pytest.mark.parametrize("kind", ["packages", "replacements"])
+async def test_rpm_build_inputs_are_temporary_and_changed_bytes_prepare_again(lab, tmp_path, kind):
+    rpm = tmp_path / "diagnostic.rpm"
+    rpm.write_bytes(b"first build")
+    first = await lab.candidate(request_id="first", **{kind: [str(rpm)]})
+    rpm.write_bytes(b"newer build")
+
+    changed = await lab.candidate(request_id="changed", **{kind: [str(rpm)]})
+    repeated = await lab.candidate(request_id="repeat", **{kind: [str(rpm)]})
+
+    staged = lab.root / "candidates" / changed["candidate_id"]
+    recipe = (staged / "Containerfile").read_text()
+    for source, target in (
+        ("target.rpm", "quirkbench-target.rpm"),
+        (f"{kind}-0.rpm", f"{kind}-0.rpm"),
+    ):
+        assert f"--mount=type=bind,source={source},target=/tmp/{target},ro,z" in recipe
+    assert not any(line.startswith("COPY ") and ".rpm" in line for line in recipe.splitlines())
+    assert (staged / f"{kind}-0.rpm").read_bytes() == b"newer build"
+    assert first["candidate"]["inputs"][kind] != changed["candidate"]["inputs"][kind]
+    assert not changed["candidate"]["preparation_metrics"]["prepared_candidate_cache_hit"]
+    assert repeated["candidate"]["preparation_metrics"]["prepared_candidate_cache_hit"]
+
+
 @pytest.mark.parametrize("rewrite", [False, True])
 async def test_changed_candidate_profiles_actual_layer_reuse(lab, rewrite):
     first = await lab.candidate()

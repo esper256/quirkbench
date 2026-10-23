@@ -524,9 +524,12 @@ class Lab:
             return result.structuredContent
         return json.loads(result.content[0].text)
 
-    async def candidate(self):
+    async def candidate(self, request_id="baseline", **inputs):
         work = await self.call(
-            "rpm_ostree_prepare_candidate", investigation="wifi-case", request_id="baseline"
+            "rpm_ostree_prepare_candidate",
+            investigation="wifi-case",
+            request_id=request_id,
+            **inputs,
         )
         return await self.call("controller_work_wait", work_id=work["work_id"], timeout_seconds=5)
 

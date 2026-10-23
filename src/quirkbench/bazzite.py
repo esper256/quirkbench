@@ -160,10 +160,9 @@ async def _prepare_candidate(root, linux, work, progress):
         folder / "Containerfile",
         load_builder
         + f"""FROM {selection["image"]}
-COPY target.rpm /tmp/quirkbench-target.rpm
 COPY health-report /usr/libexec/quirkbench-bazzite-health
 COPY quirkbench-bazzite-health.service /usr/lib/systemd/system/quirkbench-bazzite-health.service
-RUN rpm-ostree install /tmp/quirkbench-target.rpm && rm /tmp/quirkbench-target.rpm && \\
+RUN --mount=type=bind,source=target.rpm,target=/tmp/quirkbench-target.rpm,ro,z rpm-ostree install /tmp/quirkbench-target.rpm && \\
     chmod 755 /usr/libexec/quirkbench-bazzite-health && systemctl enable quirkbench-bazzite-health.service quirkbench-prepare.service quirkbench-target.service quirkbench-console.service && \\
     systemctl mask uupd.timer uupd.service bazzite-hardware-setup.service udisks2.service ublue-os-media-automount.service bootloader-update.service greenboot-healthcheck.service greenboot-rollback.service redboot-auto-reboot.service fwupd.service fwupd-refresh.service fwupd-refresh.timer rpm-ostreed-automatic.timer bootc-fetch-apply-updates.timer && \\
     ostree container commit
@@ -370,15 +369,15 @@ def stage_changes(root, folder, changes):
         )
     for kind, operation in (("packages", "install"), ("replacements", "override replace")):
         names = []
+        mounts = []
         for index, item in enumerate(changes.get(kind, [])):
             name = f"{kind}-{index}.rpm"
             shutil.copy2(root / "inputs" / item["sha256"], folder / name)
-            lines.append(f"COPY {name} /tmp/{name}")
+            mounts.append(f"--mount=type=bind,source={name},target=/tmp/{name},ro,z")
             names.append("/tmp/" + name)
         if names:
-            files = " ".join(names)
             lines.append(
-                f"RUN rpm-ostree {operation} {files} && rm {files} && ostree container commit"
+                f"RUN {' '.join(mounts)} rpm-ostree {operation} {' '.join(names)} && ostree container commit"
             )
     probe = changes.get("startup_probe")
     if probe:
