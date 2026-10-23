@@ -15,3 +15,12 @@ See [example screens and commands](../mockups/README.md) and the
 
 The first candidate uses Bazzite stable on x86-64/UEFI. This is a starting platform,
 not the product's identity. An example investigation never becomes a universal requirement.
+
+`controller run` shows the [controller console](../mockups/controller-console.md)
+when attached to an interactive terminal. It shows target contact age, active work
+and recent controller/MCP activity. Connections shows addresses and token-file
+location, never the token. The dashboard reads existing records; it starts no
+additional service and sends no target commands. Stop confirms before using the
+normal controller shutdown. Ctrl+C and `controller stop` remain available.
+Redirected output, `--json`, unsupported terminals and `--no-tui` retain plain
+output. Terminal resize and exit restore a usable terminal. File logging continues.
