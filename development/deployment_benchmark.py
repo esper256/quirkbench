@@ -347,6 +347,7 @@ async def one_backend(args, spec, backend, report):
     linux = MeasuredLinux(folder)
     report["backends"][backend] = rows = []
     controller = task = vm = None
+    setup_started = time.monotonic()
     try:
         if not args.prepare_only:
             setup(root, Config(url="https://10.0.2.2:17443", ssh_port=17444, mcp_port=17442))
@@ -366,6 +367,7 @@ async def one_backend(args, spec, backend, report):
             await controller.start_investigation(
                 "benchmark", "benchmark", "Disposable deployment comparison"
             )
+        report.setdefault("backend_setup_seconds", {})[backend] = time.monotonic() - setup_started
         retained = None
         for index, step in enumerate(spec["steps"]):
             row = {
@@ -375,6 +377,7 @@ async def one_backend(args, spec, backend, report):
                 "status": "running",
                 "boot": "unrun",
                 "deployment": "unrun",
+                "command_range_start": len(linux.records),
             }
             rows.append(row)
             save_json(args.output / "results.json", report)
@@ -531,6 +534,7 @@ async def one_backend(args, spec, backend, report):
                 raise
             finally:
                 row["elapsed_seconds"] = time.monotonic() - started
+                row["command_range_end"] = len(linux.records)
                 row["storage"] = await asyncio.to_thread(space, folder)
                 save_json(args.output / "results.json", report)
     finally:

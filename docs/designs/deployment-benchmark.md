@@ -64,8 +64,9 @@ This abbreviated example is a schema illustration, **not a runnable or measured
 workload**. Supply all five steps and actual artifact hashes. Paths to RPMs are
 relative to the manifest. Admission hashes every input before creating output.
 Boot validation checks `uname`, the running kernel's ELF build ID from
-`/sys/kernel/notes`, and each expected file SHA256. Module file checks establish
-installed content, not successful module loading or device behavior.
+`/sys/kernel/notes`, and each expected file SHA256. For custom manifests, module file checks establish installed content. The
+controlled workload additionally checks actual module loading, described below;
+neither check establishes behavior on physical devices.
 
 ## Cache and measurement scope
 
@@ -109,8 +110,7 @@ and resource failures, **not** for choosing between deployment backends.
 The optional GitHub workflow runs this bounded probe only on manual dispatch or
 when the `run-deployment-probe` label is explicitly added to the draft PR. Normal
 pushes do not request it. The pinned digest is in the workflow, both stores are
-fresh, and results/logs are retained for seven days. This workflow does not yet
-run the full five-step VM comparison. A successful preparation probe is not a
+fresh, and results/logs are retained for seven days. The separate comparison label requests the full five-step VM path. A successful preparation probe is not a
 boot qualification or a recommendation to merge rsync.
 
 ## Controlled Fedora workload acquisition
@@ -133,3 +133,28 @@ hardware interaction. The guest verifies its hash, loads it, checks its revision
 parameter, unloads it and executes the pinned strace binary. Matching vermagic is
 checked during assembly; successful guest loading is the final compatibility
 check. Do not claim compatibility merely because RPM acquisition succeeded.
+
+The `run-deployment-workload` label requests only the controlled module/RPM build.
+The `run-deployment-comparison` label requests the complete bounded hosted path:
+ordinary VM prerequisites, controlled workload, production Recovery, then the
+five-step comparison. It uses no self-hosted runner or additional credentials.
+The first successful workload assembly is recorded in
+[run 39998661982](https://github.com/esper256/quirkbench/actions/runs/39998661982).
+Assembly and matching vermagic are verified there; guest load/boot is a separate
+stage. Both input RPMs and generated payload RPMs are retained in later workflow
+artifacts so the manifest can be replayed without recompiling.
+
+Podman requires runtime directories shorter than 50 characters. Each store gets
+a fresh `/tmp/qb-run-*` directory recorded in its `runtime.json`; artifact data
+remain under the requested output. These are disposable runtime files, not shared
+container/image caches. On a persistent developer machine, retain the recorded
+runtime directory while using that store, then clean it with the disposable lab.
+
+The report records backend setup separately, including initial VM media creation
+and Recovery boot. Per-step command index ranges refer to that backend's
+`commands.json`. Storage measurements mark unreadable entries instead of claiming
+an exact total when permissions prevent a complete walk. Rsync verification also
+records stable deployment identity and backing-file inode across updates, and
+fails if full mode reports matched data or changed-module delta mode reports no
+matched bytes. No-op checks require the same published commit and expected guest
+content; they do not assert that boot left every writable file unchanged.
