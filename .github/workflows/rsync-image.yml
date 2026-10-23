@@ -4,6 +4,8 @@ on:
     paths:
       - .github/workflows/rsync-image.yml
       - development/rsync-image-metadata.sh
+      - development/rsync-tree-metadata.py
+      - src/quirkbench/source_tree.py
       - src/quirkbench/assets/bazzite/**
       - src/quirkbench/root_image.py
       - src/quirkbench/root_bundle.py
@@ -21,7 +23,7 @@ jobs:
       - name: Install ordinary distribution tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y podman
+          sudo apt-get install -y podman guestmount rsync
       - name: Build isolated Fedora metadata tools
         run: |
           mkdir -p "$RUNNER_TEMP/qb-tools"
@@ -39,6 +41,11 @@ jobs:
             -v "$PWD/src/quirkbench/assets/bazzite/export-root.c:/export-root.c:ro" \
             -v "$PWD/development/rsync-image-metadata.sh:/check.sh:ro" \
             localhost/qb-metadata bash /check.sh
+      - name: Check ordinary file-tree full and delta transfer with original metadata
+        env:
+          PYTHONPATH: src
+          LIBGUESTFS_BACKEND_SETTINGS: force_tcg
+        run: python3 development/rsync-tree-metadata.py "$RUNNER_TEMP/qb-image-proof"
   transfer:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
