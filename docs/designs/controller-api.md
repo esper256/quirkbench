@@ -136,7 +136,7 @@ Human CLI and monitor requests use a local controller interface, not target rout
 
 | Method and path | Purpose |
 | --- | --- |
-| `POST /api/v1/pair` | Bind an invitation to a target. |
+| `POST /api/v1/pair` | Pair the drive and identify its current computer. |
 | `PUT /api/v1/runs/{run}/evidence/{path}` | Store one completed evidence file. |
 | `PUT /api/v1/runs/{run}/result` | Report the run outcome and expected evidence files; the controller tracks which files it received. |
 | `PUT /api/v1/reports/{report}` | Store recovery's own debugging report without an investigation. |

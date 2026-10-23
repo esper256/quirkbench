@@ -57,7 +57,7 @@ async def test_disk_stall_leaves_mcp_and_report_upload_responsive(lab, monkeypat
         )
         await entered.wait()
         status = await lab.call("investigation_context", investigation="wifi-case")
-        report = await lab.call("ssh_recovery_inspect", target="unrelated-laptop", view="report")
+        report = await lab.call("ssh_recovery_inspect", target="example-workstation", view="report")
         uploaded = await Console(lab.data, lab.tools).report(upload=True)
         assert status["mode"] == "recovery" and lab.tools.reboots == 0
         assert "processes" in report["output"] and "services" in report["output"]
@@ -94,7 +94,7 @@ async def test_emergency_report_does_not_launch_programs_and_reads_are_bounded(l
     lab.tools.fail_diagnostics = True
     calls = len(lab.tools.calls)
 
-    report = await lab.call("ssh_recovery_inspect", target="unrelated-laptop", view="emergency")
+    report = await lab.call("ssh_recovery_inspect", target="example-workstation", view="emergency")
     output = await lab.call("saved_output_read", saved_file=report["saved_file"], limit=128)
 
     assert report["exit_code"] == 0 and "/proc/uptime" in report["output"]
@@ -108,9 +108,9 @@ async def test_recovery_report_retains_early_boot_diagnostics(lab):
     )
 
     preview = await lab.call(
-        "ssh_recovery_inspect", target="unrelated-laptop", view="boot-log", max_lines=80
+        "ssh_recovery_inspect", target="example-workstation", view="boot-log", max_lines=80
     )
-    report = await lab.call("ssh_recovery_inspect", target="unrelated-laptop", view="report")
+    report = await lab.call("ssh_recovery_inspect", target="example-workstation", view="report")
 
     assert "Early diagnostic" not in Path(preview["controller_path"]).read_text()
     assert (
@@ -131,7 +131,9 @@ async def test_stalled_evidence_does_not_hold_reconnection_or_emergency_inspecti
         await lab.until(
             lambda: lab.target.connection is not old_connection and lab.target.connected.is_set()
         )
-        report = await lab.call("ssh_recovery_inspect", target="unrelated-laptop", view="emergency")
+        report = await lab.call(
+            "ssh_recovery_inspect", target="example-workstation", view="emergency"
+        )
         assert "/proc/uptime" in report["output"] and report["exit_code"] == 0
         assert not lab.target.active.get("evidence_received")
 
@@ -149,14 +151,14 @@ async def test_recovery_inspections_have_no_arbitrary_parallel_limit(lab):
     lab.tools.release_diagnostic.clear()
     inspections = [
         asyncio.create_task(
-            lab.call("ssh_recovery_inspect", target="unrelated-laptop", view="hardware")
+            lab.call("ssh_recovery_inspect", target="example-workstation", view="hardware")
         )
         for _ in range(4)
     ]
     try:
         await lab.until(lambda: lab.target.inspections == 4)
         emergency = await lab.call(
-            "ssh_recovery_inspect", target="unrelated-laptop", view="emergency"
+            "ssh_recovery_inspect", target="example-workstation", view="emergency"
         )
         assert emergency["exit_code"] == 0
     finally:

@@ -28,7 +28,9 @@ async def test_short_script_schema_and_retry_without_reexecution(lab, tmp_path):
         timeout_seconds=5,
         wait_seconds=2,
     )
-    invalid = await lab.raw_call("ssh_recovery_inspect", target="unrelated-laptop", view="unknown")
+    invalid = await lab.raw_call(
+        "ssh_recovery_inspect", target="example-workstation", view="unknown"
+    )
     calls = await lab.call("controller_mcp_activity", investigation="wifi-case")
 
     assert result["complete"] and result["outcome"] == "succeeded" and result["output"] == "hello"
@@ -99,7 +101,9 @@ async def test_output_references_and_run_history_survive_return(lab):
     saved = await lab.call("ssh_command_read", command_id=command["command_id"], offset=65536)
     context = await lab.call("investigation_context", investigation="wifi-case")
     history = await lab.call("investigation_runs", investigation="wifi-case", limit=1)
-    inspection = await lab.call("ssh_recovery_inspect", target="unrelated-laptop", view="hardware")
+    inspection = await lab.call(
+        "ssh_recovery_inspect", target="example-workstation", view="hardware"
+    )
     output = await lab.call("saved_output_read", saved_file=inspection["saved_file"])
 
     assert saved["complete"] and saved["outcome"] == "succeeded" and not saved["more"]

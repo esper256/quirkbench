@@ -103,7 +103,7 @@ async def test_stale_packaging_blocks_preparation_but_not_inspection(lab, source
     prepare = await lab.raw_call(
         "rpm_ostree_prepare_candidate", investigation="wifi-case", request_id="changed"
     )
-    inspect = await lab.call("ssh_recovery_inspect", target="unrelated-laptop", view="hardware")
+    inspect = await lab.call("ssh_recovery_inspect", target="example-workstation", view="hardware")
     context = await lab.call("investigation_context", investigation="wifi-case")
 
     assert prepare.isError and "coordinate a restart" in str(prepare.content)

@@ -4,6 +4,7 @@ from quirkbench.files import atomic_write
 
 
 async def test_move_drive_and_return_preserves_computers_runs_and_evidence(lab):
+    assert lab.target.settings["name"] == "example-workstation"
     original = dict(lab.tools.computer_info)
     candidate = await lab.candidate()
     run = await lab.start_run(candidate["candidate_id"])
@@ -17,6 +18,7 @@ async def test_move_drive_and_return_preserves_computers_runs_and_evidence(lab):
     await lab.boot_target()
     second_target = lab.target.settings["target_id"]
     second_name = lab.target.settings["name"]
+    assert second_name == "different-desktop"
     await lab.call("ssh_recovery_inspect", target=second_name, view="hardware")
     wrong = await lab.raw_call(
         "recovery_boot_ostree", run_id=run["run_id"], request_id="wrong-computer"

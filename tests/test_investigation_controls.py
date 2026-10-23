@@ -229,8 +229,8 @@ async def test_failed_journal_is_not_reported_as_success_and_storage_includes_un
     lab.tools.disk_inventory = [
         {"name": "nvme0n1", "path": "/dev/nvme0n1", "type": "disk", "mountpoints": []}
     ]
-    storage = await lab.call("ssh_recovery_inspect", target="unrelated-laptop", view="storage")
-    services = await lab.call("ssh_recovery_inspect", target="unrelated-laptop", view="services")
+    storage = await lab.call("ssh_recovery_inspect", target="example-workstation", view="storage")
+    services = await lab.call("ssh_recovery_inspect", target="example-workstation", view="services")
     assert "/dev/nvme0n1" in storage["output"] and "intentionally excluded" in storage["output"]
     assert "Failed systemd units" in services["output"]
     monkeypatch.setattr(lab.tools, "tool_path", lambda _: None)

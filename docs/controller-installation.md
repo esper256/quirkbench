@@ -62,8 +62,8 @@ Never delete a lock file to bypass a running process.
 explicit build that reused cached results. Failed builds keep the previous
 selection. `recovery list` shows dates, sizes and release/local defaults; `--image ID`
 remains available for exact scripts. Unknown IDs fail without prompting. JSON
-flashing requires an explicit device and confirmation, plus a target name for
-new media. Human flashing lists drives by model, size and serial, then asks for
+flashing requires an explicit device and confirmation. Computers receive a name
+from their detected model when they connect. Human flashing lists drives by model, size and serial, then asks for
 one final write confirmation.
 
 Builds require rootless Podman. The build container supplies Fedora tools; no

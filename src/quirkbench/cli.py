@@ -140,7 +140,6 @@ def parser():
     selection.add_argument(
         "--built", action="store_true", help="Use the last successful local recovery build"
     )
-    f.add_argument("--target", help="Name for the target computer")
     f.add_argument(
         "--refresh-connection",
         action="store_true",
@@ -435,10 +434,7 @@ async def execute(args):
                     ca=(root / "controller.crt").read_text(),
                 )
         else:
-            if args.json and not args.target:
-                raise ValueError("Provide --target when preparing new media with --json.")
-            name = args.target or ask("Target name", "target-01")
-            connection = await local(root, "invitation", {"name": name})
+            connection = await local(root, "invitation", {})
         with tempfile.TemporaryDirectory(prefix="quirkbench-flash-request-") as tmp:
             path = Path(tmp) / "request.json"
             save_json(path, {"disk": disk_identity(disk), "connection": connection})

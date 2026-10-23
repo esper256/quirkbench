@@ -67,7 +67,7 @@ async def test_recovery_dashboard_follows_real_mcp_work_and_disconnection(lab, m
 
     reject_data_writes(monkeypatch, lab.data)
 
-    await lab.call("ssh_recovery_inspect", target="unrelated-laptop", view="hardware")
+    await lab.call("ssh_recovery_inspect", target="example-workstation", view="hardware")
     rows = console.lines()
 
     assert all(len(row) == 80 for row in rows)
@@ -123,7 +123,7 @@ async def test_recovery_dashboard_keeps_preparation_and_failure_visible(lab, mon
     lab.tools.diagnostic_started.clear()
     lab.tools.release_diagnostic.clear()
     probe = asyncio.create_task(
-        lab.call("ssh_recovery_inspect", target="unrelated-laptop", view="hardware")
+        lab.call("ssh_recovery_inspect", target="example-workstation", view="hardware")
     )
     try:
         await lab.tools.diagnostic_started.wait()

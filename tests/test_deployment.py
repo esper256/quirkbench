@@ -8,7 +8,9 @@ from quirkbench.files import read_json
 
 
 async def test_recovery_candidate_boot_and_return_with_diagnostics(lab):
-    inspection = await lab.call("ssh_recovery_inspect", target="unrelated-laptop", view="boot-log")
+    inspection = await lab.call(
+        "ssh_recovery_inspect", target="example-workstation", view="boot-log"
+    )
     candidate = await lab.candidate()
 
     work = await lab.start_run(candidate["candidate_id"])
@@ -92,7 +94,7 @@ async def test_controller_restart_during_deployment_does_not_repeat_it(lab):
 
 async def test_real_mcp_rejects_unknown_recovery_commands_and_changed_retry(lab):
     result = await lab.raw_call(
-        "ssh_recovery_inspect", target="unrelated-laptop", view="boot-log; reboot"
+        "ssh_recovery_inspect", target="example-workstation", view="boot-log; reboot"
     )
     candidate = await lab.candidate()
     conflict = await lab.raw_call(
@@ -132,7 +134,9 @@ async def test_separate_target_process_reconnects_with_existing_pairing(lab):
         await lab.until(
             lambda: any(t["boot_id"] == "separate-process" for t in lab.controller.targets.values())
         )
-        result = await lab.call("ssh_recovery_inspect", target="unrelated-laptop", view="boot-log")
+        result = await lab.call(
+            "ssh_recovery_inspect", target="example-workstation", view="boot-log"
+        )
         assert result["boot_id"] == "separate-process"
         assert "probe observed" in Path(result["controller_path"]).read_text()
         assert len((await lab.controller.store.find("target"))) == 1

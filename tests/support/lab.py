@@ -404,7 +404,7 @@ class Lab:
             str(self.ports[2]),
         )
         await self.start_controller()
-        connection = await self.controller.invitation("unrelated-laptop")
+        connection = await self.controller.invitation()
         settings = self.data / "quirkbench" / "settings"
         atomic_write(settings / "controller.crt", connection.pop("ca"))
         save_json(settings / "connection.json", connection)
@@ -422,7 +422,7 @@ class Lab:
             "start",
             "wifi-case",
             "--target",
-            "unrelated-laptop",
+            "example-workstation",
             "--problem",
             "Observe a rare Wi-Fi disconnect",
             "--yes",

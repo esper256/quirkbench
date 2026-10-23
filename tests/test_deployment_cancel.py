@@ -115,7 +115,9 @@ async def test_cancel_waits_for_disk_but_recovery_inspection_works(lab, monkeypa
         await lab.call("recovery_cancel_ostree", work_id=work["work_id"])
         async with asyncio.timeout(5):
             await entered.wait()
-        report = await lab.call("ssh_recovery_inspect", target="unrelated-laptop", view="processes")
+        report = await lab.call(
+            "ssh_recovery_inspect", target="example-workstation", view="processes"
+        )
         pending = await lab.call("controller_work_wait", work_id=work["work_id"], timeout_seconds=0)
         assert pending["status"] == "cancelling" and report["exit_code"] == 0
     cancelled = await lab.call("controller_work_wait", work_id=work["work_id"], timeout_seconds=5)

@@ -302,6 +302,9 @@ choose it again on later recovery boots. This is a human assertion, not automati
 hardware recognition, so do not move the drive while a manually identified
 candidate is selected to boot. Use the same explicit value for that computer.
 
+Flashing asks for no computer name. On first connection, use the detected model
+as its name; add a short ID only when that name is already in use.
+
 Retained runs and action records live in `computers/COMPUTER_ID` on shared data.
 Evidence remains under its original run ID. Moving the drive leaves another
 computer's retained run alone; its recovery upload resumes when that computer

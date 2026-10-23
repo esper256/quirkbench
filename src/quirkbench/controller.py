@@ -90,16 +90,11 @@ class Controller(InvestigationControls, Storage, CommandControl):
         self.changed.set()
         return result
 
-    async def invitation(self, name):
-        identifier(name)
-        for target in await self.store.find("target"):
-            if target["name"] == name:
-                raise ValueError("This target name is already paired. Choose another name.")
+    async def invitation(self):
         invitation = secrets.token_urlsafe(32)
-        (await self.store.put("invitation", invitation, name=name, binding=None))
+        await self.store.put("invitation", invitation, binding=None)
         return {
             "invitation": invitation,
-            "name": name,
             "url": self.config.url,
             "ssh_port": self.config.ssh_port,
             "controller_key": (self.root / "controller.pub").read_text(),

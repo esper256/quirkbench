@@ -39,7 +39,6 @@ Recovery: x86_64 · 2026-10-22T12:00:00+00:00 · source 8e475fe431aa
 Select an external drive to install or update. Internal system disks are excluded.
 1. /dev/sdb SanDisk USB 32.0 GB Serial: example-drive-01
 Drive number (Enter cancels): 1
-Target name [target-01]: workshop-computer
 
 [sudo] password for sam:
 WARNING: This will erase the entire drive and all its partitions.

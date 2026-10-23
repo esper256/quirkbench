@@ -66,9 +66,7 @@ def https_app(controller):
                         )
                     drive = await controller.store.get("drive", invite["drive"])
                 else:
-                    drive = await controller.store.put(
-                        "drive", new_id("drive"), name=invite["name"], **binding
-                    )
+                    drive = await controller.store.put("drive", new_id("drive"), **binding)
                     await controller.store.change(
                         "invitation", invite["id"], binding=binding, drive=drive["id"]
                     )
@@ -87,13 +85,8 @@ def https_app(controller):
 
                 target_id = new_id("target")
                 name = (
-                    drive["name"]
-                    if not drive.get("target")
-                    else (
-                        re.sub(r"[^a-z0-9]+", "-", computer["model"].lower()).strip("-")[:60]
-                        + "-"
-                        + target_id[-6:]
-                    )
+                    re.sub(r"[^a-z0-9]+", "-", computer["model"].lower()).strip("-")[:60]
+                    or "computer"
                 )
                 if any(t["name"] == name for t in targets):
                     name += "-" + target_id[-6:]
