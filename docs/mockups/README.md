@@ -6,6 +6,7 @@
 > This example problem does not limit supported investigations. These examples
 > do not add product requirements.
 
+- [Controller console](controller-console.md)
 - [Recovery console](recovery-console.md)
 - [Installation to investigation patch](installation-to-patch.md)
 - [Development on the controller computer](development.md)

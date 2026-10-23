@@ -2,7 +2,8 @@
 
 Revisable [mockup](../mockups/README.md). Quirkbench combines the binary, controller
 and MCP interface here. One controller process serves MCP, HTTPS and target SSH
-connections. The target can run a clean fallback or an investigation's
+connections. Its interactive terminal dashboard reads current work and connection
+status in the same process; plain-log mode keeps the same lifecycle. The target can run a clean fallback or an investigation's
 candidate. Recovery remains separate from the writable candidate.
 The first candidate uses rpm-ostree; see [candidate deployment](candidate-deployment.md).
 

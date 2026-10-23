@@ -1241,7 +1241,7 @@ class Controller(InvestigationControls, Storage, CommandControl):
 
         return https_app(self)
 
-    async def serve(self):
+    async def serve(self, display=None):
         lock = (self.root / "controller.lock").open("a")
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1257,7 +1257,11 @@ class Controller(InvestigationControls, Storage, CommandControl):
 
         # AsyncSSH INFO logs describe every status channel. Keep failures visible.
         logging.getLogger("asyncssh").setLevel(logging.WARNING)
-        self.log, log_listener, log_file = start_log(self.root)
+        self.log, log_listener, log_file = start_log(
+            self.root, console=display.handler if display else None
+        )
+        if display:
+            logging.getLogger().handlers = self.log.handlers[:]
         self.log.info("Controller starting")
         self.store = await AsyncStore.open(self.root)
         from .sequences import Sequences
@@ -1328,6 +1332,7 @@ class Controller(InvestigationControls, Storage, CommandControl):
                     host="127.0.0.1",
                     port=self.config.mcp_port,
                     log_level="warning",
+                    **({"log_config": None} if display else {}),
                     timeout_graceful_shutdown=3,
                 )
             )
@@ -1357,19 +1362,27 @@ class Controller(InvestigationControls, Storage, CommandControl):
                 ),
             )
             self.ready.set()
-            print(
-                f"Controller: {self.config.url}\nAgent MCP: http://127.0.0.1:{self.config.mcp_port}/mcp\nMCP token file: {self.root / 'mcp-token'}\nController log: {self.root / 'logs/controller.log'}\nKeep this terminal open. Ctrl+C or quirkbench controller stop stops it.",
-                flush=True,
-            )
+            if display is None:
+                print(
+                    f"Controller: {self.config.url}\nAgent MCP: http://127.0.0.1:{self.config.mcp_port}/mcp\nMCP token file: {self.root / 'mcp-token'}\nController log: {self.root / 'logs/controller.log'}\nKeep this terminal open. Ctrl+C or quirkbench controller stop stops it.",
+                    flush=True,
+                )
+            display_task = asyncio.create_task(display.run(self)) if display else None
             stop_task = asyncio.create_task(self.stop_requested.wait())
             try:
                 done, _ = await asyncio.wait(
-                    [mcp_task, stop_task], return_when=asyncio.FIRST_COMPLETED
+                    [mcp_task, stop_task] + ([display_task] if display_task else []),
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
+                if display_task in done:
+                    await display_task
                 if mcp_task in done:
                     await mcp_task
             finally:
                 stop_task.cancel()
+                if display_task:
+                    display_task.cancel()
+                    await asyncio.gather(display_task, return_exceptions=True)
         except OSError as error:
             import errno
 

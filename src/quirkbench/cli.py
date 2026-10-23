@@ -90,7 +90,14 @@ def parser():
         "controller", help="Run the controller", description="Example: quirkbench controller run"
     )
     ca = c.add_subparsers(dest="action", required=True)
-    ca.add_parser("run", help="Run in this terminal; Ctrl+C stops it")
+    run = ca.add_parser(
+        "run",
+        help="Run in this terminal; Ctrl+C stops it",
+        description="Show a live dashboard in interactive terminals. Example: quirkbench controller run",
+    )
+    run.add_argument(
+        "--no-tui", action="store_true", help="Print ordinary logs instead of the dashboard"
+    )
     ca.add_parser("status", help="Show running and installed software identities")
     ca.add_parser("stop", help="Stop the foreground controller gracefully")
     ca.add_parser(
@@ -241,7 +248,13 @@ async def execute(args):
             return await local(root, "controller-stop")
         from .controller import Controller
 
-        await Controller(root).serve()
+        from .controller_console import interactive, run_controller
+
+        controller = Controller(root)
+        if not args.no_tui and not args.json and interactive():
+            await run_controller(controller)
+        else:
+            await controller.serve()
         return None
     if args.command == "status":
         from .controller_process import process_status

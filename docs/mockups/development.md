@@ -16,7 +16,7 @@ Address target computers will connect to [https://controller:7443]:
 Controller config saved: /home/sam/.quirkbench/config.toml
 Next: quirkbench controller run
 
-$ ./dev quirkbench controller run
+$ ./dev quirkbench controller run --no-tui
 Controller: https://controller:7443
 Agent MCP: http://127.0.0.1:7442/mcp
 MCP token file: /home/sam/.quirkbench/mcp-token
@@ -26,6 +26,8 @@ Target test-computer connected (recovery)
 Target test-computer has not answered its status request for 10 seconds
 Target test-computer is responding again after 12 seconds
 ```
+
+Without `--no-tui`, the interactive terminal shows the [controller console](controller-console.md).
 
 After editing controller code, stop it with Ctrl+C, then:
 

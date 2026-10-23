@@ -17,13 +17,15 @@ Address target computers will connect to [https://controller:7443]: https://192.
 Controller config saved: /home/sam/.quirkbench/config.toml
 Next: quirkbench controller run
 
-$ quirkbench controller run
+$ quirkbench controller run --no-tui
 Controller: https://192.168.1.20:7443
 Agent MCP: http://127.0.0.1:7442/mcp
 MCP token file: /home/sam/.quirkbench/mcp-token
 Controller log: /home/sam/.quirkbench/logs/controller.log
 Keep this terminal open. Ctrl+C or quirkbench controller stop stops it.
 ```
+
+Omit `--no-tui` for the [interactive controller console](controller-console.md).
 
 ## Controller computer · Prepare USB
 
