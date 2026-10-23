@@ -14,6 +14,11 @@ class Linux:
     def __init__(self, progress=None):
         self.progress = progress
 
+    def computer(self):
+        from .computer import computer_identity
+
+        return computer_identity()
+
     def tool_path(self, name):
         import shutil
 
@@ -221,16 +226,43 @@ class Linux:
                 result, output="Failed systemd units (not all services):\n" + result["output"]
             )
         if view == "hardware":
-            results = []
+            from .computer import hardware_description
+
+            results = [hardware_description()]
+            failures = []
             for command in (("lscpu",), ("lspci", "-nnk"), ("lsusb",)):
                 try:
                     result = await self.command(*command, timeout=10, check=False)
                     results.append(
                         f"=== {command[0]} (exit {result['exit_code']}) ===\n{result['output']}"
                     )
+                    if result["exit_code"] or "Error reading " in result["output"]:
+                        failures.append(command[0])
                 except (OSError, TimeoutError) as error:
                     results.append(f"{command[0]} unavailable: {error}")
-            return {"exit_code": 0, "output": "\n".join(results)}
+                    failures.append(command[0])
+            return {
+                "exit_code": 1 if failures else 0,
+                "partial": bool(failures),
+                "failed_tools": failures,
+                "output": "\n".join(results),
+            }
+        if view == "network":
+            result = await self.command(
+                "nmcli",
+                "-t",
+                "-f",
+                "DEVICE,TYPE,STATE,CONNECTION",
+                "device",
+                timeout=20,
+                check=False,
+            )
+            from .network import profile_summary
+
+            result["output"] += "\nSaved Wi-Fi profiles (no passwords):\n" + await disk(
+                profile_summary, Path("/run/NetworkManager/system-connections")
+            )
+            return result
         commands = {
             "network": ("nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device"),
             "processes": ("ps", "-eo", "pid,ppid,stat,wchan:30,comm"),

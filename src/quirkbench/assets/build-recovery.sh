@@ -13,6 +13,9 @@ kver=$(ls "$root/usr/lib/modules")
 dracut --sysroot "$root" --force --no-hostonly --no-hostonly-cmdline --kver "$kver" \
   --kmoddir "$root/usr/lib/modules/$kver" \
   --add dmsquash-live --filesystems 'squashfs overlay ext4' \
+  --include "$root/usr/lib/udev/rules.d/90-quirkbench-thunderbolt.rules" /usr/lib/udev/rules.d/90-quirkbench-thunderbolt.rules \
+  --include "$root/usr/lib/quirkbench/quirkbench/assets/quirkbench-boot-report" /usr/bin/quirkbench-boot-report \
+  --install "head tail dmesg" \
   --add-drivers 'xhci_pci uas usb_storage nvme thunderbolt' "$root/boot/initramfs.img"
 cp "$root/usr/lib/modules/$kver/vmlinuz" "$root/boot/vmlinuz"
 bash "$work"/configure-recovery.sh "$root"

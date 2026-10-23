@@ -113,7 +113,8 @@ async def check(image, work, firmware, timeout):
     proc = None
     try:
         await asyncio.wait_for(controller.ready.wait(), 10)
-        disk = await asyncio.to_thread(make_disk, work, image, controller.invitation('vm-recovery'))
+        invitation = await controller.invitation('vm-recovery')
+        disk = await asyncio.to_thread(make_disk, work, image, invitation)
         shutil.copyfile(firmware / 'OVMF_VARS.fd', work / 'vars.fd')
         # Short socket pathname also works when the chosen output directory is long.
         with tempfile.TemporaryDirectory(prefix='qb-qmp-') as socket_dir, (work/'qemu.log').open('wb') as log:
@@ -137,9 +138,9 @@ async def check(image, work, firmware, timeout):
                         await asyncio.sleep(.5)
                     storage = await controller.inspect('vm-recovery', 'storage', 1000)
                     report = await controller.inspect('vm-recovery', 'boot-log', 1000)
-                    storage_text = Path(storage['output_file']).read_text()
+                    storage_text = Path(storage['controller_path']).read_text()
                     (work/'storage.json').write_text(storage_text)
-                    (work/'boot.log').write_text(Path(report['output_file']).read_text())
+                    (work/'boot.log').write_text(Path(report['controller_path']).read_text())
                     mount_json = storage_text.split('findmnt (exit 0):\n', 1)[1]
                     filesystem_info, _ = json.JSONDecoder().raw_decode(mount_json)
                     entries = {m['target']: m for m in mounts(filesystem_info['filesystems'])}

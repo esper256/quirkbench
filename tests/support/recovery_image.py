@@ -78,6 +78,10 @@ def assemble_with_tools(folder):
     work = folder / "work"
     work.mkdir()
     stage_runtime(work / "target-root")
+    shutil.copy2(
+        ASSETS / "quirkbench-boot-report",
+        work / "target-root/usr/lib/quirkbench/quirkbench/assets/quirkbench-boot-report",
+    )
     for name in ("configure-recovery.sh", "build-efi.sh"):
         shutil.copy2(ASSETS / name, work / name)
     driver = folder / "tools.py"
@@ -89,6 +93,15 @@ if name == 'dnf' and 'install' in args:
     shutil.copytree(os.environ['BUILD_ROOT'], work/'root', dirs_exist_ok=True)
 elif name == 'dracut':
     assert 'dmsquash-live' in args
+    assert '--no-hostonly' in args and '--no-hostonly-cmdline' in args
+    includes = {args[i+2]: Path(args[i+1]) for i, arg in enumerate(args) if arg == '--include'}
+    assert all(source.is_relative_to(work/'root') for source in includes.values())
+    rule = includes['/usr/lib/udev/rules.d/90-quirkbench-thunderbolt.rules']
+    report = includes['/usr/bin/quirkbench-boot-report']
+    assert rule.read_bytes() == (work/'target-root/usr/lib/udev/rules.d/90-quirkbench-thunderbolt.rules').read_bytes()
+    assert report.is_file() and os.access(report, os.X_OK)
+    shutil.copy2(rule, work/'boot-authorization.rules')
+    shutil.copy2(report, work/'boot-report')
     assert Path(args[args.index('--kmoddir')+1]).is_dir()
     assert {'squashfs', 'overlay', 'ext4'} <= set(args[args.index('--filesystems')+1].split())
     Path(args[-1]).write_bytes(b'initramfs')

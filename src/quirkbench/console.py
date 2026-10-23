@@ -115,7 +115,12 @@ class Console:
         )
         if stale and status:
             current = "Target service not responding"
-        name = status.get("name") or settings.get("name") or "Not labelled"
+        name = (
+            status.get("name")
+            or status.get("computer", {}).get("model")
+            or settings.get("name")
+            or "Not labelled"
+        )
         tid = status.get("target_id") or settings.get("target_id")
         fields = [
             ("Target", name + (f" ({tid[-6:]})" if tid else "")),
@@ -218,10 +223,9 @@ class Console:
         source = Path("/run/NetworkManager/system-connections")
         destination = self.home / "settings" / "network"
         try:
-            destination.mkdir(parents=True, exist_ok=True)
-            for profile in source.glob("*"):
-                if profile.is_file():
-                    atomic_write(destination / profile.name, profile.read_bytes())
+            from .network import copy_profiles
+
+            copy_profiles(source, destination)
             self.notice = "Network settings saved for future boots."
         except OSError:
             self.notice = "Network settings are temporary. Data storage is unavailable."

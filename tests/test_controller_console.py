@@ -9,12 +9,12 @@ from tests.support.controller_terminal import ControllerTerminal
 
 async def test_dashboard_follows_real_target_and_mcp_work(lab):
     dashboard = Dashboard()
-    await lab.call("ssh_recovery_inspect", target="unrelated-laptop", view="hardware")
+    await lab.call("ssh_recovery_inspect", target="example-workstation", view="hardware")
 
     await dashboard.refresh(lab.controller)
     screen = "\n".join(dashboard.lines())
 
-    assert "unrelated-laptop" in screen and "recovery" in screen
+    assert "example-workstation" in screen and "recovery" in screen
     assert "ssh_recovery_inspect" in "\n".join(dashboard.activity())
     assert lab.controller.token not in screen
     assert all(len(line) == 100 for line in dashboard.lines())

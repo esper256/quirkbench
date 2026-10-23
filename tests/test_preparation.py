@@ -297,3 +297,17 @@ async def test_recovery_assembly_and_boot_menu_use_ram_live_image(tmp_path):
     assert (media / "LiveOS/squashfs.img").read_bytes() == b"compressed read-only OS"
     assert "root=live:UUID=unrelated-recovery" in menu and "rd.live.ram=1" in menu
     assert "rootflags=ro ro console=" in menu and "quirkbench.data=unrelated-data" in menu
+    assert "blacklist" not in menu and "rd.emergency=reboot" not in menu
+    assert "rd.shell=1" in menu and "rd.timeout=180" in menu
+    assert "Troubleshoot recovery" in menu and "rd.break=initqueue" in menu
+    assert "quirkbench-boot-report" in menu
+    import subprocess
+
+    rule = media.parent / "boot-authorization.rules"
+    checked = subprocess.run(["udevadm", "verify", str(rule)], capture_output=True, text=True)
+    assert checked.returncode == 0, checked.stderr
+    report = subprocess.run(
+        ["sh", str(media.parent / "boot-report")], capture_output=True, text=True
+    )
+    assert report.returncode == 0
+    assert "Detected disks" in report.stdout and "USB4 / Thunderbolt" in report.stdout

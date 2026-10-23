@@ -12,6 +12,14 @@ async def test_external_nvme_is_selectable_and_other_disks_are_read_only(tmp_pat
 
     tools = external_nvme_tools()
 
+    tools.disk_inventory += [
+        {"path": "/dev/sda", "type": "disk", "children": [{"path": "/dev/sda1", "type": "part"}]},
+        {
+            "path": "/dev/mmcblk0",
+            "type": "disk",
+            "children": [{"path": "/dev/mmcblk0p1", "type": "part"}],
+        },
+    ]
     disks = await usb_disks(tools)
     await protect_other_disks(tools, "recovery-data")
     selected = disks[0]
@@ -20,7 +28,14 @@ async def test_external_nvme_is_selectable_and_other_disks_are_read_only(tmp_pat
         await write_usb(selected["path"], disk_identity(selected), tmp_path, {}, tools)
 
     assert [d["path"] for d in disks] == ["/dev/nvme3n1"]
-    assert tools.read_only_disks == {"/dev/nvme0n1", "/dev/nvme0n1p1"}
+    assert tools.read_only_disks == {
+        "/dev/nvme0n1",
+        "/dev/nvme0n1p1",
+        "/dev/sda",
+        "/dev/sda1",
+        "/dev/mmcblk0",
+        "/dev/mmcblk0p1",
+    }
     assert not any(args[0] == "parted" for args in tools.calls)
 
 

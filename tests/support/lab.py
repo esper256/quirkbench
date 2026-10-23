@@ -53,6 +53,7 @@ class ToolResults(Linux):
     """Only OS/build commands are replaced. Unexpected commands fail loudly."""
 
     def __init__(self):
+        self.computer_info = {"id": "computer-a", "model": "Example Workstation"}
         self.rebooted = asyncio.Event()
         self.reboots = 0
         self.fail_deploy = False
@@ -79,6 +80,9 @@ class ToolResults(Linux):
         self.imported_layers = set()
         self.ostree_layer_summary = True
         self.tools_id = "sha256:" + "c" * 64
+
+    def computer(self):
+        return dict(self.computer_info)
 
     def tool_path(self, name):
         return "/test-tools/" + name
@@ -400,7 +404,7 @@ class Lab:
             str(self.ports[2]),
         )
         await self.start_controller()
-        connection = await self.controller.invitation("unrelated-laptop")
+        connection = await self.controller.invitation()
         settings = self.data / "quirkbench" / "settings"
         atomic_write(settings / "controller.crt", connection.pop("ca"))
         save_json(settings / "connection.json", connection)
@@ -418,7 +422,7 @@ class Lab:
             "start",
             "wifi-case",
             "--target",
-            "unrelated-laptop",
+            "example-workstation",
             "--problem",
             "Observe a rare Wi-Fi disconnect",
             "--yes",
@@ -653,7 +657,7 @@ async def stalled_target_write(monkeypatch, lab):
     original = save_json
 
     def write(path, value):
-        if path.parent == lab.data / "quirkbench/actions" and not release.is_set():
+        if path.parent == lab.target.computer_home / "actions" and not release.is_set():
             loop.call_soon_threadsafe(entered.set)
             release.wait()
         original(path, value)

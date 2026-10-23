@@ -31,7 +31,7 @@ async def test_cancelled_recovery_admission_keeps_its_saved_request(lab, monkeyp
 
     assert retried["status"] == "interrupted" and lab.tools.reboots == 0
     assert {
-        p.stem: read_json(p) for p in (lab.data / "quirkbench/actions").glob("*.json")
+        p.stem: read_json(p) for p in (lab.target.computer_home / "actions").glob("*.json")
     } == lab.target.work
     candidate = await lab.candidate()
     await lab.start_run(candidate["candidate_id"])
@@ -115,7 +115,9 @@ async def test_cancel_waits_for_disk_but_recovery_inspection_works(lab, monkeypa
         await lab.call("recovery_cancel_ostree", work_id=work["work_id"])
         async with asyncio.timeout(5):
             await entered.wait()
-        report = await lab.call("ssh_recovery_inspect", target="unrelated-laptop", view="processes")
+        report = await lab.call(
+            "ssh_recovery_inspect", target="example-workstation", view="processes"
+        )
         pending = await lab.call("controller_work_wait", work_id=work["work_id"], timeout_seconds=0)
         assert pending["status"] == "cancelling" and report["exit_code"] == 0
     cancelled = await lab.call("controller_work_wait", work_id=work["work_id"], timeout_seconds=5)
@@ -134,7 +136,7 @@ async def test_late_cancellation_preserves_returning_diagnostics(lab):
         await lab.target.dispatch(
             {"action": "cancel-deploy", "work_id": work["work_id"], "run_id": work["run_id"]}
         )
-    assert (lab.data / "quirkbench/active.json").exists()
+    assert lab.target.active_path.exists()
     lab.controller.allow_retry.set()
     await lab.until_record("run", work["run_id"], lambda record: record["status"] == "finished")
     assert (lab.root / "results" / work["run_id"] / "result.json").exists()

@@ -38,6 +38,12 @@ class Target:
         identifier(self.boot_id)
         self.linux = linux or Linux()
         self.settings = read_json(self.settings_dir / "connection.json")
+        self.settings.pop("target_id", None)
+        self.settings.pop("name", None)
+        self.computer = self.linux.computer()
+        self.computer_home = self.home / "computers" / self.computer["id"]
+        self.active_path = self.computer_home / "active.json"
+        self.paired = False
         self.software_source = read_json(Path(__file__).with_name("source.json"), {}).get(
             "source", "checkout"
         )
@@ -48,8 +54,10 @@ class Target:
         )
         self.record_lock = asyncio.Lock()
         self.action_lock = asyncio.Lock()
-        self.work = {path.stem: read_json(path) for path in (self.home / "actions").glob("*.json")}
-        self.active = read_json(self.home / "active.json")
+        self.work = {
+            path.stem: read_json(path) for path in (self.computer_home / "actions").glob("*.json")
+        }
+        self.active = read_json(self.active_path)
         self.tasks = set()
         self.deployment = None
         self.deployment_started = False
@@ -142,7 +150,9 @@ class Target:
             }
             # Acknowledgment must follow the durable write; status remains in memory.
             try:
-                await disk(save_json, self.home / "actions" / (identifier(key) + ".json"), updated)
+                await disk(
+                    save_json, self.computer_home / "actions" / (identifier(key) + ".json"), updated
+                )
             except asyncio.CancelledError:
                 # disk() only propagates cancellation after the write succeeds.
                 self.work[key] = updated
@@ -170,6 +180,7 @@ class Target:
     def status(self):
         return {
             "target_id": self.settings.get("target_id"),
+            "computer": self.computer,
             "name": self.settings.get("name"),
             "mode": self.mode,
             "boot_id": self.boot_id,
@@ -281,7 +292,7 @@ class Target:
         }
 
     async def pair(self, http):
-        if self.settings.get("target_id"):
+        if self.paired:
             return
         keypath = self.settings_dir / "target.key"
         if not await disk(keypath.exists):
@@ -300,6 +311,8 @@ class Target:
             json={
                 "invitation": self.settings["invitation"],
                 "public_key": public,
+                "computer": self.computer,
+                "drive_id": self.settings.get("drive_id"),
                 "token": self.settings["token"],
             },
         ) as response:
@@ -307,6 +320,7 @@ class Target:
             result = await response.json()
         self.settings.update(result)
         await disk(save_json, self.settings_dir / "connection.json", dict(self.settings))
+        self.paired = True
 
     async def dispatch(self, request):
         if request.get("action") in (
@@ -653,7 +667,7 @@ class Target:
                     launched=False,
                     evidence_received=False,
                 )
-                await disk(save_json, self.home / "active.json", self.active)
+                await disk(save_json, self.active_path, self.active)
                 await self.record(
                     key,
                     status="prepared",
@@ -681,10 +695,17 @@ class Target:
         key = request["work_id"]
         try:
             # Only edit the run argument of the retained OSTree boot entry.
-            from .candidates import select_run_entry
+            from .candidates import find_run_entry, select_run_entry
 
+            # OSTree can rename boot entries when another computer's deployment is added.
+            self.active["entry"] = await disk(find_run_entry, self.data, self.active["run_id"])
             await select_run_entry(
-                self.data, self.active["entry"], request["run_id"], request["startup_timeout"]
+                self.data,
+                self.active["entry"],
+                request["run_id"],
+                request["startup_timeout"],
+                computer_id=self.computer["id"],
+                manual_computer=self.computer.get("manual", False),
             )
             self.active = dict(
                 self.active,
@@ -695,7 +716,7 @@ class Target:
                 launched=True,
                 evidence_received=False,
             )
-            await disk(save_json, self.home / "active.json", self.active)
+            await disk(save_json, self.active_path, self.active)
             await self.linux.command(
                 "grub2-editenv", self.boot / "grubenv", "set", f"next_entry={self.active['entry']}"
             )
@@ -710,7 +731,7 @@ class Target:
             await self.linux.command("grub2-editenv", self.boot / "grubenv", "unset", "next_entry")
             self.boot_committed = False
             self.active.update(launched=False)
-            await disk(save_json, self.home / "active.json", self.active)
+            await disk(save_json, self.active_path, self.active)
             await self.record(key, status="failed", error=str(error))
         finally:
             self.busy = False
@@ -739,13 +760,13 @@ class Target:
             if await disk((self.data / "ostree" / "repo" / "config").exists):
                 await cleanup_run(self.data, self.linux, request["run_id"])
             if self.active and self.active["work_id"] == key:
-                await disk((self.home / "active.json").unlink, missing_ok=True)
+                await disk((self.active_path).unlink, missing_ok=True)
                 self.active = None
             await self.record(key, status="cancelled", stage="Deployment cancelled; recovery ready")
         except Exception as error:
             # Keep ownership until cleanup has succeeded or recovery restarts.
             self.active = dict(request, deployment_id=request["run_id"], recovery_boot=self.boot_id)
-            await disk(save_json, self.home / "active.json", self.active)
+            await disk(save_json, self.active_path, self.active)
             await self.record(
                 key,
                 status="failed",
@@ -799,7 +820,7 @@ class Target:
         from .candidates import cleanup_run
 
         await cleanup_run(self.data, self.linux, self.active["deployment_id"])
-        await disk((self.home / "active.json").unlink, missing_ok=True)
+        await disk((self.active_path).unlink, missing_ok=True)
         self.active = None
         self.boot_committed = False
 
@@ -962,7 +983,7 @@ class Target:
         await disk(shutil.rmtree, folder, ignore_errors=True)
         await disk(shutil.rmtree, self.home / "work" / run_id, ignore_errors=True)
         self.active["evidence_received"] = True
-        await disk(save_json, self.home / "active.json", self.active)
+        await disk(save_json, self.active_path, self.active)
         self.message = (
             "Diagnostics received. Run files retained; controller can boot again or discard them."
         )
@@ -988,7 +1009,7 @@ class Target:
             key = self.active["work_id"]
             await self.linux.command("grub2-editenv", self.boot / "grubenv", "unset", "next_entry")
             self.active["launched"] = False
-            await disk(save_json, self.home / "active.json", self.active)
+            await disk(save_json, self.active_path, self.active)
             await self.record(
                 key,
                 status="interrupted",
@@ -1027,6 +1048,10 @@ class Target:
                 )
         self.event("RECOVERY", f"{self.mode.capitalize()} started")
         if self.mode == "candidate":
+            if not self.active or self.active.get("run_id") != self.run_id:
+                raise ValueError(
+                    "This candidate belongs to another computer or an unknown run. Boot recovery."
+                )
             from .commands import Commands
 
             await disk(self.workspace.mkdir, parents=True, exist_ok=True)

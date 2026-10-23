@@ -78,7 +78,9 @@ async def test_different_runtime_is_usable_but_missing_operation_is_not_sent(lab
     )
 
     context = await lab.call("investigation_context", investigation="wifi-case")
-    inspection = await lab.call("ssh_recovery_inspect", target="unrelated-laptop", view="hardware")
+    inspection = await lab.call(
+        "ssh_recovery_inspect", target="example-workstation", view="hardware"
+    )
     work = await lab.call(
         "recovery_deploy_ostree",
         investigation="wifi-case",
