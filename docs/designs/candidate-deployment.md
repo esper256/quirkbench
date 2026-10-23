@@ -47,6 +47,18 @@ Import Bazzite inside the tools container as container root, using a bare OSTree
 cache so layered files retain their ownership and executable permissions. Publish
 the result through the controller's archive repository.
 
+Keep one persistent OCI image directory in the controller build cache. Export with
+`podman save --format oci-dir --uncompressed` so layer digests match Podman's local
+storage and unchanged layers can be skipped. Import the exact named candidate only
+after export succeeds, under the existing preparation lock. Keep the standard
+debugging toolkit in a build layer before investigation-specific packages and probes.
+OSTree retains imported layers and shares unchanged files between candidate versions.
+Recovery continues to pull only missing OSTree objects; this changes no target protocol.
+
+The uncompressed cache takes more local disk space than a compressed archive. It is
+disposable through ordinary build-cache cleanup, which does not delete published
+candidates or investigation results. Do not add a registry service or custom layer store.
+
 ## Where changes live
 
 These are storage areas, not additional partitions:
@@ -182,8 +194,17 @@ userspace diagnosis, not instrumentation before the kernel or initramfs starts.
 Kernel/initramfs instrumentation belongs in the supplied packages.
 
 Reuse completed preparation for the same selected base, target-tools source and
-captured inputs. Export and import are separate visible stages. This cache avoids
-repeating work; it does not replace retained investigation results.
+captured inputs, including when returning to an earlier candidate. Export and import
+are separate visible stages. This cache avoids repeating work; it does not replace
+retained investigation results. Reusing a candidate does not restore its previous
+run's writable files.
+
+Preparation results and timeline events record OCI layer hits/misses, reused/written
+layer bytes, export time, and OSTree import time and layer counts. OCI hits count
+layer files retained without rewriting, excluding image metadata. OSTree counts
+come from the importer; unavailable counts are unknown, not zero. Complete candidate
+reuse is a separate flag and does not repeat the original build's metrics.
+See the [measured repeated preparations](../observations/2026-10-23-candidate-layer-reuse.md).
 
 `recovery_deploy_ostree` accepts optional `kernel_args` for debugging. They are
 recorded with the deployment and survive repeat boots. Quirkbench retains control

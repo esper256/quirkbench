@@ -3,6 +3,7 @@
 import asyncio
 from contextlib import AsyncExitStack, suppress, asynccontextmanager
 import json
+import hashlib
 from pathlib import Path
 import shutil
 import socket
@@ -20,6 +21,32 @@ from quirkbench.target import Target
 from aiohttp import web
 
 COMMIT = "a" * 64
+
+
+def write_oci_image(layout, image, layers, rewrite=False):
+    """Small OCI files with the same shared-layer layout as Podman save."""
+
+    def blob(content):
+        digest = hashlib.sha256(content).hexdigest()
+        path = layout / "blobs/sha256" / digest
+        if rewrite or not path.exists():
+            atomic_write(path, content)
+        return {"digest": "sha256:" + digest, "size": len(content)}
+
+    manifest = blob(json.dumps({"layers": [blob(layer) for layer in layers]}).encode())
+    manifest["annotations"] = {"org.opencontainers.image.ref.name": image}
+    # Multiple named candidates coexist. Consumers must choose the requested one.
+    index = (
+        json.loads((layout / "index.json").read_text())
+        if (layout / "index.json").exists()
+        else {"manifests": []}
+    )
+    index["manifests"] = [
+        m
+        for m in index["manifests"]
+        if m["annotations"]["org.opencontainers.image.ref.name"] != image
+    ] + [manifest]
+    save_json(layout / "index.json", index)
 
 
 class ToolResults(Linux):
@@ -46,6 +73,11 @@ class ToolResults(Linux):
         self.package_version = "1"
         self.resolved_packages_text = "kernel-core-0:6.1-1.x86_64\nstrace-0:6.1-1.x86_64\n"
         self.fail_acquisition = False
+        self.fail_candidate_export = False
+        self.rewrite_candidate_layers = False
+        self.candidate_images = {}
+        self.imported_layers = set()
+        self.ostree_layer_summary = True
         self.tools_id = "sha256:" + "c" * 64
 
     def tool_path(self, name):
@@ -120,7 +152,24 @@ class ToolResults(Linux):
                         folder / "packages.tsv",
                         f"{name}\tkernel-core-0:{self.package_version}-1.x86_64\n",
                     )
-                elif args[-1] == "/work/import.sh":
+                elif "/work/import.sh" in args:
+                    selected = args[-1].removeprefix("ostree-unverified-image:oci:/oci:")
+                    layout = volumes["/oci"]
+                    index = json.loads((layout / "index.json").read_text())
+                    entry = next(
+                        m
+                        for m in index["manifests"]
+                        if m["annotations"]["org.opencontainers.image.ref.name"] == selected
+                    )
+                    manifest = json.loads(
+                        (layout / "blobs" / entry["digest"].replace(":", "/")).read_text()
+                    )
+                    layers = {layer["digest"] for layer in manifest["layers"]}
+                    if self.ostree_layer_summary:
+                        result["output"] = (
+                            f"layers already present: {len(layers & self.imported_layers)}; layers needed: {len(layers - self.imported_layers)} (small test image)\n"
+                        )
+                    self.imported_layers.update(layers)
                     atomic_write(folder / "commit", COMMIT)
                     atomic_write(
                         volumes["/publish"] / "refs/heads/quirkbench" / folder.name, COMMIT
@@ -160,7 +209,21 @@ class ToolResults(Linux):
             elif args[1:5] == ["unshare", "rm", "-rf", "--"]:
                 shutil.rmtree(args[-1])
             elif args[1] == "save":
-                atomic_write(Path(args[args.index("-o") + 1]), b"OCI fixture")
+                assert args[args.index("--format") + 1] == "oci-dir" and "--uncompressed" in args
+                layout = Path(args[args.index("-o") + 1])
+                write_oci_image(
+                    layout,
+                    args[-1],
+                    [b"base", self.candidate_images[args[-1]]],
+                    self.rewrite_candidate_layers,
+                )
+                if self.fail_candidate_export:
+                    raise ValueError("Candidate export failed")
+            elif args[1] == "build":
+                folder = Path(args[-1])
+                self.candidate_images[args[args.index("-t") + 1]] = b"".join(
+                    p.read_bytes() for p in sorted(folder.iterdir()) if p.is_file()
+                )
             elif args[1] not in ("build", "pull"):
                 raise AssertionError(args)
         elif args[0] == "mountpoint":

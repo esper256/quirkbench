@@ -3,6 +3,7 @@
 import asyncio
 import json
 import sys
+import pytest
 from quirkbench.image import build_recovery
 
 
@@ -159,10 +160,69 @@ async def test_unchanged_preparation_reuses_completed_content(lab):
     repeat = await lab.call("controller_work_wait", work_id=next_work["work_id"], timeout_seconds=5)
 
     assert repeat["candidate"]["commit"] == first["candidate"]["commit"]
+    assert repeat["candidate"]["preparation_metrics"] == {"prepared_candidate_cache_hit": True}
     assert not any(
         c[0] == "podman" and c[1] in ("run", "save") and "refs" not in c
         for c in lab.tools.calls[builds:]
     )
+
+
+@pytest.mark.parametrize("rewrite", [False, True])
+async def test_changed_candidate_profiles_actual_layer_reuse(lab, rewrite):
+    first = await lab.candidate()
+    lab.tools.rewrite_candidate_layers = rewrite
+
+    request = await lab.call(
+        "rpm_ostree_prepare_candidate",
+        investigation="wifi-case",
+        request_id="added-tool",
+        repository_packages=["tree"],
+    )
+    changed = await lab.call("controller_work_wait", work_id=request["work_id"], timeout_seconds=5)
+
+    assert first["candidate"]["preparation_metrics"]["oci_layer_hits"] == 0
+    metrics = changed["candidate"]["preparation_metrics"]
+    assert metrics["oci_layer_hits"] == (0 if rewrite else 1)
+    assert metrics["oci_layer_misses"] == (2 if rewrite else 1)
+    assert metrics["oci_layer_bytes_reused"] == (0 if rewrite else len(b"base"))
+    assert metrics["oci_layer_bytes_written"] > 0
+    assert metrics["ostree_layer_hits"] == metrics["ostree_layer_misses"] == 1
+    events = await lab.controller.store.events("wifi-case", 0, 100)
+    profile = next(
+        e for e in events if e["kind"] == "candidate-preparation" and e["id"] == request["work_id"]
+    )
+    assert profile["oci_layer_hits"] == metrics["oci_layer_hits"]
+    assert profile["oci_export_seconds"] >= 0 and profile["ostree_import_seconds"] >= 0
+
+
+async def test_failed_export_cannot_import_old_image_and_retry_reuses_layers(lab):
+    await lab.candidate()
+    lab.tools.fail_candidate_export = True
+    calls = len(lab.tools.calls)
+
+    request = await lab.call(
+        "rpm_ostree_prepare_candidate",
+        investigation="wifi-case",
+        request_id="failed-export",
+        repository_packages=["tree"],
+    )
+    failed = await lab.call("controller_work_wait", work_id=request["work_id"], timeout_seconds=5)
+
+    assert failed["status"] == "failed"
+    assert not any("/work/import.sh" in c for c in lab.tools.calls[calls:])
+    assert len(await lab.controller.store.find("candidate")) == 1
+    lab.tools.fail_candidate_export = False
+    lab.tools.ostree_layer_summary = False
+    retry = await lab.call(
+        "rpm_ostree_prepare_candidate",
+        investigation="wifi-case",
+        request_id="retry-export",
+        repository_packages=["tree"],
+    )
+    ready = await lab.call("controller_work_wait", work_id=retry["work_id"], timeout_seconds=5)
+    assert ready["status"] == "ready"
+    assert ready["candidate"]["preparation_metrics"]["oci_layer_hits"] == 2
+    assert ready["candidate"]["preparation_metrics"]["ostree_layer_hits"] is None
 
 
 async def test_prepare_replacement_while_retained_deployment_is_not_ready_for_deploy(lab):

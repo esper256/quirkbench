@@ -75,7 +75,7 @@ Output: {"work_id":"prepare-2","status":"preparing"}
 
 Tool: controller_work_wait
 Input: {"work_id":"prepare-2","timeout_seconds":50}
-Output: {"status":"ready","candidate_id":"candidate-2"}
+Output: {"status":"ready","candidate_id":"candidate-2","candidate":{"preparation_metrics":{"prepared_candidate_cache_hit":false,"oci_layer_hits":138,"oci_layer_misses":2,"oci_layer_bytes_reused":12000000000,"oci_layer_bytes_written":12000000,"oci_export_seconds":1.4,"ostree_layer_hits":138,"ostree_layer_misses":2,"ostree_import_seconds":45.2}}}
 
 Tool: recovery_discard_ostree
 Input: {"run_id":"run-1","request_id":"discard-1"}

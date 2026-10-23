@@ -50,6 +50,7 @@ sequenceDiagram
         Quirkbench-->>Target: Confirm report stored
     end
     Agent->>Quirkbench: rpm_ostree_prepare_candidate, then controller_work_wait
+    Note over Quirkbench: Reuse local image layers, import into OSTree and record reuse and timings
     Quirkbench-->>Agent: Prepared baseline with target connection support
     opt Replacing retained run files
         Agent->>Quirkbench: Retrieve needed results; confirm diagnostics receipt
