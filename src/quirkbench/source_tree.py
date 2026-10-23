@@ -51,7 +51,7 @@ async def image_view(image, parent, *, read_only=True):
             if not await ready:
                 errors.seek(0)
                 raise RuntimeError(
-                    "Could not open candidate tree: " + errors.read(4000).decode(errors="replace")
+                    "Could not open candidate tree: " + errors.read(32000).decode(errors="replace")
                 )
         yield mount
     finally:

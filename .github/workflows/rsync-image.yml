@@ -45,6 +45,7 @@ jobs:
         env:
           PYTHONPATH: src
           LIBGUESTFS_BACKEND_SETTINGS: force_tcg
+          LIBGUESTFS_DEBUG: "1"
         run: python3 development/rsync-tree-metadata.py "$RUNNER_TEMP/qb-image-proof"
   transfer:
     runs-on: ubuntu-24.04
