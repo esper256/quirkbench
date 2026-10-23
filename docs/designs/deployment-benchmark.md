@@ -9,7 +9,7 @@ The command takes one locked JSON workload and a **new** output directory:
 ```sh
 uv run --no-sync python development/deployment_benchmark.py scenario.json \
   /scratch/comparison-001 --recovery /scratch/recovery-build/images/IMAGE_ID \
-  --firmware /usr/share/OVMF/OVMF_CODE.fd
+  --firmware /usr/share/OVMF/OVMF_CODE_4M.fd --firmware-vars /usr/share/OVMF/OVMF_VARS_4M.fd
 ```
 
 The Recovery directory must contain the current production `image.json`,

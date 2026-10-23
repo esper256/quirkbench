@@ -279,7 +279,8 @@ async def make_disk(folder, recovery, connection, linux, size_gib):
     return disk
 
 
-async def boot_vm(folder, disk, firmware, memory):
+async def boot_vm(folder, disk, firmware, firmware_vars, memory):
+    shutil.copyfile(firmware_vars, folder / "firmware-vars.fd")
     log = (folder / "serial.log").open("wb")
     try:
         process = await asyncio.create_subprocess_exec(
@@ -292,8 +293,10 @@ async def boot_vm(folder, disk, firmware, memory):
             str(memory),
             "-smp",
             "2",
-            "-bios",
-            str(firmware),
+            "-drive",
+            f"if=pflash,format=raw,readonly=on,file={firmware}",
+            "-drive",
+            f"if=pflash,format=raw,file={folder / 'firmware-vars.fd'}",
             "-device",
             "qemu-xhci",
             "-drive",
@@ -342,7 +345,7 @@ async def one_backend(args, spec, backend, report):
                 linux,
                 args.disk_gib,
             )
-            vm = await boot_vm(folder, disk, args.firmware, args.memory_mib)
+            vm = await boot_vm(folder, disk, args.firmware, args.firmware_vars, args.memory_mib)
             await connected(controller, "recovery", args.boot_timeout)
             await controller.start_investigation(
                 "benchmark", "benchmark", "Disposable deployment comparison"
@@ -564,6 +567,7 @@ async def main(args):
         if not args.prepare_only
         else None,
         "firmware_sha256": digest_file(args.firmware) if not args.prepare_only else None,
+        "firmware_vars_sha256": digest_file(args.firmware_vars) if not args.prepare_only else None,
         "backend_order": args.order.split(","),
         "environment": {
             "uname": platform.uname()._asdict(),
@@ -620,6 +624,11 @@ if __name__ == "__main__":
         "--recovery", type=Path, help="Production Recovery build directory with image.json"
     )
     parser.add_argument("--firmware", type=Path, help="OVMF code firmware file")
+    parser.add_argument(
+        "--firmware-vars",
+        type=Path,
+        help="Pristine OVMF variables template; copied into disposable output",
+    )
     parser.add_argument("--order", choices=("ostree,rsync", "rsync,ostree"), default="ostree,rsync")
     parser.add_argument("--disk-gib", type=int, default=64)
     parser.add_argument("--memory-mib", type=int, default=8192)
@@ -632,6 +641,8 @@ if __name__ == "__main__":
         options.prepare_only = True
     elif not options.manifest:
         parser.error("Provide a locked scenario manifest")
-    if not options.prepare_only and (not options.recovery or not options.firmware):
-        parser.error("Full comparison requires --recovery and --firmware.")
+    if not options.prepare_only and (
+        not options.recovery or not options.firmware or not options.firmware_vars
+    ):
+        parser.error("Full comparison requires --recovery, --firmware and --firmware-vars.")
     raise SystemExit(asyncio.run(main(options)))

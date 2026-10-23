@@ -21,7 +21,7 @@ jobs:
           ls -l /dev/kvm /dev/fuse || true
           sed 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
             /etc/apt/sources.list.d/ubuntu.sources > "$RUNNER_TEMP/qb-ubuntu.sources"
-          apt_options=(-o "Dir::Etc::sourcelist=$RUNNER_TEMP/qb-ubuntu.sources" -o Dir::Etc::sourceparts=- -o Acquire::Retries=2 -o Acquire::https::Timeout=30)
+          apt_options=(-o "Dir::Etc::sourcelist=$RUNNER_TEMP/qb-ubuntu.sources" -o Dir::Etc::sourceparts=- -o Acquire::Retries=2 -o Acquire::https::Timeout=30 -o Acquire::http::Timeout=30)
           sudo apt-get "${apt_options[@]}" update
           sudo apt-get "${apt_options[@]}" install -y --no-install-recommends podman uidmap slirp4netns fuse-overlayfs rsync guestmount
       - name: Attempt real cold preparation in separate stores
@@ -86,7 +86,7 @@ jobs:
           ls -l /dev/kvm /dev/fuse || true
           sed 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
             /etc/apt/sources.list.d/ubuntu.sources > "$RUNNER_TEMP/qb-ubuntu.sources"
-          apt_options=(-o "Dir::Etc::sourcelist=$RUNNER_TEMP/qb-ubuntu.sources" -o Dir::Etc::sourceparts=- -o Acquire::Retries=2 -o Acquire::https::Timeout=30)
+          apt_options=(-o "Dir::Etc::sourcelist=$RUNNER_TEMP/qb-ubuntu.sources" -o Dir::Etc::sourceparts=- -o Acquire::Retries=2 -o Acquire::https::Timeout=30 -o Acquire::http::Timeout=30)
           sudo apt-get "${apt_options[@]}" update
           sudo apt-get "${apt_options[@]}" install -y --no-install-recommends podman uidmap slirp4netns fuse-overlayfs rsync guestmount libguestfs-tools qemu-system-x86 ovmf grub-common
       - name: Assemble locked workload and production Recovery outside candidate timing
@@ -120,7 +120,8 @@ jobs:
           uv run --no-sync python development/deployment_benchmark.py \
             "$RUNNER_TEMP/workload/scenario.json" "$RUNNER_TEMP/comparison" \
             --recovery "$RUNNER_TEMP/recovery-prerequisite/images/$image_id" \
-            --firmware /usr/share/OVMF/OVMF_CODE_4M.fd --backend-timeout 1500
+            --firmware /usr/share/OVMF/OVMF_CODE_4M.fd \
+            --firmware-vars /usr/share/OVMF/OVMF_VARS_4M.fd --backend-timeout 1500
       - name: Publish measurements and failure evidence without credentials
         if: always()
         uses: actions/upload-artifact@v4

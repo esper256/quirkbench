@@ -62,7 +62,7 @@ Optional comparison in disposable storage (illustrative; a full run is expensive
 ```console
 $ uv run --no-sync python development/benchmark_workload.py /scratch/workload-001
 /scratch/workload-001/scenario.json
-$ uv run --no-sync python development/deployment_benchmark.py /scratch/workload-001/scenario.json /scratch/comparison-001 --recovery /scratch/recovery/images/IMAGE_ID --firmware /usr/share/OVMF/OVMF_CODE.fd
+$ uv run --no-sync python development/deployment_benchmark.py /scratch/workload-001/scenario.json /scratch/comparison-001 --recovery /scratch/recovery/images/IMAGE_ID --firmware /usr/share/OVMF/OVMF_CODE_4M.fd --firmware-vars /usr/share/OVMF/OVMF_VARS_4M.fd
 Downloading and recording the selected Bazzite version
 ```
 
