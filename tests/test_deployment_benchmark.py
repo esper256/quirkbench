@@ -150,3 +150,12 @@ async def test_media_never_overwrites_an_existing_disk(tmp_path):
     with pytest.raises(FileExistsError):
         await bench.make_disk(output, recovery, {}, None, 64)
     assert disk.read_bytes() == b"must remain unchanged"
+
+
+def test_noop_cannot_change_declared_package_removals(tmp_path):
+    path = scenario(tmp_path)
+    value = json.loads(path.read_text())
+    value["steps"][-1]["remove_packages"] = ["kmod-example"]
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="no-op"):
+        bench.manifest(path)

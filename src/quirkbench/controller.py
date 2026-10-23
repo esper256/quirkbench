@@ -407,6 +407,7 @@ class Controller(InvestigationControls, Storage, CommandControl):
         repository_packages=None,
         debugging_tools=True,
         backend="ostree",
+        remove_packages=None,
     ):
         from .deployment import backend as validate_backend
 
@@ -431,6 +432,9 @@ class Controller(InvestigationControls, Storage, CommandControl):
             from .bazzite import package_requests
 
             changes["repository_packages"] = package_requests(repository_packages or [])
+            removals = package_requests(remove_packages or [])
+            if removals:
+                changes["remove_packages"] = removals
             changes["debugging_tools"] = debugging_tools
             if startup_probe:
                 changes["startup_probe_timeout_seconds"] = startup_probe_timeout_seconds

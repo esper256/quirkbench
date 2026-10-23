@@ -375,7 +375,12 @@ printf '%s\\n' "$commit" > /work/commit
 
 def stage_changes(root, folder, changes):
     """Bazzite/RPM-specific image edits; never execute agent probes on the controller."""
-    lines = []
+    removals = package_requests(changes.get("remove_packages", []))
+    lines = (
+        ["RUN rpm-ostree override remove " + " ".join(removals) + " && ostree container commit"]
+        if removals
+        else []
+    )
     packages = package_requests(changes.get("repository_packages", []))
     if changes.get("debugging_tools", True):
         source = Path(__file__).with_name("assets") / "load"
@@ -447,6 +452,7 @@ def change_summary(changes):
     ]
     if changes.get("debugging_tools", True):
         summary.append("Optional quirkbench-load utility (audio and GPU off unless selected)")
+    summary += ["Removed package: " + name for name in changes.get("remove_packages", [])]
     summary += ["Repository package: " + name for name in changes.get("repository_packages", [])]
     for kind in ("packages", "replacements"):
         summary += [

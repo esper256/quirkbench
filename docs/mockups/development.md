@@ -68,3 +68,13 @@ Downloading and recording the selected Bazzite version
 
 Read `comparison-001/results.json` and `comparison-001/report.md`. Failed and
 unrun stages remain explicit; a preparation-only probe supplies no boot result.
+
+Illustrative kernel replacement preparation options for a disposable VM workload:
+
+```json
+{"replacements": ["/work/kernel.rpm"], "remove_packages": ["kernel-devel-matched", "kmod-example"]}
+```
+
+The agent selects actual package names from the candidate inventory. Preparation
+records removals and rejects unresolved dependencies; this example is not a
+complete kernel package set.

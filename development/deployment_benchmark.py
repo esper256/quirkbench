@@ -13,7 +13,7 @@ import shutil
 import time
 import tempfile
 
-from quirkbench.bazzite import prepare_candidate
+from quirkbench.bazzite import prepare_candidate, package_requests
 from quirkbench.config import Config, setup
 from quirkbench.controller import Controller
 from quirkbench.files import digest_file, save_json
@@ -34,6 +34,7 @@ def manifest(path):
     if [s["kind"] for s in value["steps"]] != KINDS:
         raise ValueError(f"Expected fixed debugging sequence: {KINDS}")
     for step in value["steps"]:
+        step["remove_packages"] = package_requests(step.get("remove_packages", []))
         for group in ("packages", "replacements"):
             for item in step[group]:
                 source = (path.parent / item["path"]).resolve()
@@ -57,7 +58,14 @@ def manifest(path):
     a, b = value["steps"][-2:]
     if any(
         a[k] != b[k]
-        for k in ("packages", "replacements", "kernel_release", "kernel_build_id", "checks")
+        for k in (
+            "packages",
+            "replacements",
+            "remove_packages",
+            "kernel_release",
+            "kernel_build_id",
+            "checks",
+        )
     ):
         raise ValueError("The no-op must repeat exactly the preceding inputs and checks.")
     return value
@@ -248,7 +256,10 @@ async def make_disk(folder, recovery, connection, linux, size_gib):
     (folder / "controller.crt").write_text(connection.pop("ca"))
     save_json(folder / "connection.json", connection)
     (folder / "grub.cfg").write_text(
-        grub_config(media).replace("console=tty1", "console=tty1 console=ttyS0,115200")
+        grub_config(media).replace(
+            "console=tty1",
+            "console=tty1 console=ttyS0,115200 systemd.journald.forward_to_console=1",
+        )
     )
     # mtools assembles FAT filesystems without depending on the appliance's
     # filesystem-module selection, and without host mounts or loop devices.
@@ -418,12 +429,15 @@ async def one_backend(args, spec, backend, report):
                             debugging_tools=False,
                             repository_packages=["dracut-live"],
                             backend=backend,
+                            remove_packages=step.get("remove_packages", []),
                         ),
                     )
                     candidate = work["candidate"]
                 else:
                     changes = capture_inputs(root, packages, replacements, None)
                     changes.update(repository_packages=["dracut-live"], debugging_tools=False)
+                    if step.get("remove_packages"):
+                        changes["remove_packages"] = step["remove_packages"]
 
                     async def progress(message):
                         print(message, flush=True)
@@ -565,6 +579,9 @@ async def one_backend(args, spec, backend, report):
                 row["storage"] = await asyncio.to_thread(space, folder)
                 save_json(args.output / "results.json", report)
     finally:
+        report.setdefault("backend_setup_seconds", {}).setdefault(
+            backend, time.monotonic() - setup_started
+        )
         for phase in stages:
             if stages[phase] == "running":
                 stages[phase] = "failed"
@@ -600,9 +617,9 @@ def write_report(output, report):
                         backend,
                         row["kind"],
                         row["status"],
-                        row.get("prepare_seconds", "unrun"),
-                        row.get("deploy_seconds", "unrun"),
-                        row.get("time_to_validated_boot_seconds", "unrun"),
+                        row.get("prepare_seconds", row.get("preparation", "unrun")),
+                        row.get("deploy_seconds", row.get("deployment", "unrun")),
+                        row.get("time_to_validated_boot_seconds", row.get("boot", "unrun")),
                     )
                 )
                 + " |"

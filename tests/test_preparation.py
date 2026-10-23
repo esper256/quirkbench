@@ -297,3 +297,42 @@ async def test_recovery_assembly_and_boot_menu_use_ram_live_image(tmp_path):
     assert (media / "LiveOS/squashfs.img").read_bytes() == b"compressed read-only OS"
     assert "root=live:UUID=unrelated-recovery" in menu and "rd.live.ram=1" in menu
     assert "rootflags=ro ro console=" in menu and "quirkbench.data=unrelated-data" in menu
+
+
+async def test_explicit_package_removals_are_recorded_and_change_preparation_identity(
+    lab, tmp_path
+):
+    baseline = await lab.candidate(debugging_tools=False)
+    rpm = tmp_path / "kernel.rpm"
+    rpm.write_bytes(b"controlled RPM fixture")
+    changed = await lab.candidate(
+        request_id="remove-kernel-dependents",
+        debugging_tools=False,
+        replacements=[str(rpm)],
+        remove_packages=["kmod-example", "kernel-devel-matched"],
+    )
+    recipe = (lab.root / "candidates" / changed["candidate_id"] / "Containerfile").read_text()
+    assert recipe.index(
+        "rpm-ostree override remove kernel-devel-matched kmod-example"
+    ) < recipe.index("rpm-ostree override replace")
+    assert changed["candidate"]["inputs"]["remove_packages"] == [
+        "kernel-devel-matched",
+        "kmod-example",
+    ]
+    assert "remove_packages" not in baseline["candidate"]["inputs"]
+    assert not changed["candidate"]["preparation_metrics"]["prepared_candidate_cache_hit"]
+    repeated = await lab.candidate(
+        request_id="same-removals",
+        debugging_tools=False,
+        replacements=[str(rpm)],
+        remove_packages=["kernel-devel-matched", "kmod-example"],
+    )
+    assert repeated["candidate"]["preparation_metrics"]["prepared_candidate_cache_hit"]
+    with pytest.raises(ValueError, match="not URLs, paths or flags"):
+        await lab.controller.prepare(
+            "wifi-case",
+            "ghcr.io/ublue-os/bazzite:stable",
+            "bad",
+            "bad-removal",
+            remove_packages=["--all"],
+        )

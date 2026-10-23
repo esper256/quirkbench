@@ -131,6 +131,12 @@ async def build(folder):
                         "kernel-modules-extra",
                     )
                 ],
+                remove_packages=[
+                    "kernel-devel-matched",
+                    "kmod-evdi",
+                    "kmod-gcadapter_oc",
+                    "kmod-hid-fanatecff",
+                ],
                 kernel_release=release,
                 kernel_build_id=build_id,
                 checks=checks,

@@ -300,8 +300,9 @@ def mcp_app(controller):
         repository_packages: list[str] | None = None,
         debugging_tools: bool = True,
         backend: Literal["ostree", "rsync"] = "ostree",
+        remove_packages: list[str] | None = None,
     ) -> ActionResult:
-        """Prepare Bazzite with explicit backend ostree (default) or rsync (independent writable root image). Rsync image assembly uses an on-demand unprivileged appliance; complete converted Bazzite boot qualification is pending. Prepare with a small optional debugging toolkit, repository_packages from its own repositories, local RPM additions/replacements and an optional executable startup probe. Preparation can run while a target retains an earlier deployment. Paths are on the controller; files are captured before building. The resulting commit is unchanged; kernel replacements must be RPMs, not raw kernel images. Probe runs before networking with an explicit timeout (default 60 seconds); output goes to the boot journal. Kernel changes require a new boot. Wait with controller_work_wait."""
+        """Prepare Bazzite with explicit backend ostree (default) or rsync (independent writable root image). Rsync image assembly uses an on-demand unprivileged appliance; complete converted Bazzite boot qualification is pending. Prepare with a small optional debugging toolkit, repository_packages from its own repositories, local RPM additions/replacements, explicit remove_packages before additions/replacements, and an optional executable startup probe. Removals apply only to the candidate image and are recorded; dependency failures remain errors. Preparation can run while a target retains an earlier deployment. Paths are on the controller; files are captured before building. The resulting commit is unchanged; kernel replacements must be RPMs, not raw kernel images. Probe runs before networking with an explicit timeout (default 60 seconds); output goes to the boot journal. Kernel changes require a new boot. Wait with controller_work_wait."""
         return await controller.prepare(
             investigation,
             base,
@@ -314,6 +315,7 @@ def mcp_app(controller):
             repository_packages,
             debugging_tools,
             backend,
+            remove_packages,
         )
 
     @mcp.tool(structured_output=True)

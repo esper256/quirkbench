@@ -22,14 +22,15 @@ the default is 8 GiB. Each backend receives a newly created 64 GiB sparse regula
 file, presented as USB media. No host block device or physical media is accepted.
 Libguestfs creates the ext4 filesystems; mtools creates the EFI filesystem with
 hash-checked read-back. Neither requires host mounts. The guest receives an
-additional serial console argument for saved boot diagnostics. Allow ample
+additional serial console argument and journald console forwarding for saved boot diagnostics. Allow ample
 real disk capacity for two separate container stores, OCI caches, OSTree
 repositories, root images and target disks. Nothing deletes an existing cache.
 
 ## Locked workload
 
 Use five steps with kinds `initial`, `kernel`, `modules`, `modules`, `no-op`.
-Every step describes its complete intended additional/replacement RPM set, not a
+Every step describes its complete intended additional/replacement RPM set and
+explicit `remove_packages` list, not a
 patch to the previous recipe. The last two recipes and checks must be identical.
 Use prebuilt kernel and module RPMs; their acquisition or compilation belongs
 outside the timed experiment. Debugging tools are explicit RPM payloads in
@@ -129,7 +130,13 @@ same workload; rebuilding the toolchain is not promised to be bit-reproducible.
 
 The first candidate replaces the Bazzite kernel with the first official Fedora
 kernel and adds the controlled payload. The second uses the next matching kernel
-and module. Two further steps change the module revision while retaining that
+and module. The VM workload explicitly removes `kernel-devel-matched`,
+`kmod-evdi`, `kmod-gcadapter_oc` and `kmod-hid-fanatecff`, which bind the pinned
+Bazzite base to its original kernel. These removals run through production
+preparation, are timed for each backend, and remain part of candidate identity.
+This is a VM workload, not qualification of those removed hardware modules.
+Dependency failures remain errors; the harness never forces broken RPM dependencies.
+Two further steps change the module revision while retaining that
 kernel and strace binary; the last repeats exactly. The diagnostic module has no
 hardware interaction. The guest verifies its hash, loads it, checks its revision
 parameter, unloads it and executes the pinned strace binary. Matching vermagic is
@@ -160,3 +167,5 @@ records stable deployment identity and backing-file inode across updates, and
 fails if full mode reports matched data or changed-module delta mode reports no
 matched bytes. No-op checks require the same published commit and expected guest
 content; they do not assert that boot left every writable file unchanged.
+
+The first full attempt at `dd62f0c`, [run 40002508189](https://github.com/esper256/quirkbench/actions/runs/40002508189), created both media files. One Recovery VM connected (setup 99.17 seconds); the other failed its preparation service. Candidate preparation then exposed kernel-bound RPM dependencies after 230.71 seconds. Deployment and experiment boot were unrun. These are failure-stage observations, not comparable performance measurements. The next revision adds explicit package removals and serial journal forwarding for diagnosis.

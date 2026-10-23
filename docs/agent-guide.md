@@ -109,7 +109,11 @@ The recovery `services` view lists **failed units**, not every service.
 Candidate preparation includes a small debugging toolkit by default; set
 `debugging_tools: false` when environment fidelity calls for omitting it.
 `repository_packages` selects packages from the candidate's repositories.
-`packages` and `replacements` still accept controller-local RPM files. Preparation
+`packages` and `replacements` still accept controller-local RPM files.
+`remove_packages` explicitly removes named base packages before additions and
+replacements, for example kernel-bound modules that are incompatible with a
+replacement kernel. Dependency errors stop preparation; nothing is removed
+automatically. These changes affect the candidate image only. Preparation
 records the requested changes and resolved packages. No tracing or stress tool is
 started automatically. Context reports whether Podman is visible to the running
 controller, separately from target availability and source versions.

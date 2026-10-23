@@ -110,7 +110,7 @@ sequenceDiagram
     opt Software change
         Agent->>Agent: Edit source
         Agent->>Agent: Build changed software with ordinary tools
-        Agent->>Quirkbench: rpm_ostree_prepare_candidate with captured package changes
+        Agent->>Quirkbench: rpm_ostree_prepare_candidate with captured RPMs and explicit package removals
         Note over Agent,Target: Return, discard, deploy and boot through recovery as shown above
         Target-->>Quirkbench: Current software and connection status
         Quirkbench-->>Agent: Ready for more inspection

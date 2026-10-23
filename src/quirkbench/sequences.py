@@ -25,6 +25,7 @@ class Sequences:
             repository_packages=None,
             debugging_tools=True,
             backend="ostree",
+            remove_packages=None,
         ):
             return await c.prepare(
                 investigation,
@@ -38,6 +39,7 @@ class Sequences:
                 repository_packages,
                 debugging_tools,
                 backend,
+                remove_packages,
             )
 
         async def deploy(
