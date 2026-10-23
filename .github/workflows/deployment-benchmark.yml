@@ -40,3 +40,30 @@ jobs:
             ${{ runner.temp }}/deployment-probe/*/commands.json
             ${{ runner.temp }}/deployment-probe/*/controller/logs/*
           retention-days: 7
+  workload:
+    if: github.event_name == 'pull_request' && github.event.label.name == 'run-deployment-workload'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked --python 3.12
+      - name: Build controlled matching-kernel workload
+        run: |
+          podman --version
+          uv run --no-sync python development/benchmark_workload.py "$RUNNER_TEMP/workload"
+      - name: Retain locked workload and assembly evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-workload
+          path: |
+            ${{ runner.temp }}/workload/scenario.json
+            ${{ runner.temp }}/workload/build.log
+            ${{ runner.temp }}/workload/commands.json
+            ${{ runner.temp }}/workload/output/toolchain-packages.txt
+            ${{ runner.temp }}/workload/output/rpmbuild/RPMS/**/*.rpm
+            ${{ runner.temp }}/workload/output/extracted/*/notes.txt
+          retention-days: 7

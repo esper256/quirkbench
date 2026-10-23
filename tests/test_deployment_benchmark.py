@@ -57,8 +57,8 @@ def test_noop_must_repeat_exact_payload_and_boot_identity(tmp_path):
 
 def test_boot_verifies_running_build_id_and_file_hashes(tmp_path):
     script = bench.verification(bench.manifest(scenario(tmp_path))["steps"][0])
-    assert "readelf -n /sys/kernel/notes" in script
-    assert "Build ID: " + "a" * 40 in script
+    assert "/sys/kernel/notes" in script
+    assert "a" * 40 in script
     assert script.count("sha256sum -c -") == 3
 
 
@@ -105,3 +105,13 @@ async def test_podman_instrumentation_preserves_operation_and_isolates_storage(
     assert calls[0] != calls[1]
     assert all(call[-2:] == ("pull", "pinned") for call in calls)
     assert all(str(root / "podman") in call for root, call in zip(roots, calls))
+
+
+def test_raw_kernel_notes_have_no_elf_header():
+    import struct
+
+    note = struct.pack("<III", 4, 20, 3) + b"GNU\0" + bytes.fromhex("ab" * 20)
+    assert bench.kernel_build_id(note) == "ab" * 20
+    for invalid in (note[:-1], note + note, b"", b"ELF", b"x" * 65537):
+        with pytest.raises(ValueError):
+            bench.kernel_build_id(invalid)

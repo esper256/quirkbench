@@ -232,3 +232,28 @@ sequenceDiagram
 
 See [rsync deployment](rsync-deployment.md) for interrupted preparation and pending
 complete-image boot qualification. Merely booting Recovery starts no backend work.
+
+## Optional disposable deployment comparison
+
+The developer-only [comparison](deployment-benchmark.md) invokes the same
+controller and target lifecycle. It does not introduce another boot selector.
+
+```mermaid
+sequenceDiagram
+    actor Developer
+    participant Benchmark
+    participant Controller
+    participant VM as Disposable QEMU target
+    Developer->>Benchmark: Run locked five-step workload in new output directory
+    loop One isolated store and disk per backend
+        Benchmark->>VM: Boot production Recovery with production GRUB
+        loop Initial, kernel, modules, modules, no-op
+            Benchmark->>Controller: Prepare exact locked candidate inputs
+            Controller->>VM: Deploy with selected backend
+            Benchmark->>Controller: Select and boot retained experiment
+            VM->>Controller: Connect and report running kernel/files/module load
+            Benchmark->>Controller: Return to Recovery and receive evidence
+        end
+    end
+    Benchmark-->>Developer: JSON timings, identities, failures and comparison report
+```

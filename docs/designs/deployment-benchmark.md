@@ -112,3 +112,24 @@ pushes do not request it. The pinned digest is in the workflow, both stores are
 fresh, and results/logs are retained for seven days. This workflow does not yet
 run the full five-step VM comparison. A successful preparation probe is not a
 boot qualification or a recommendation to merge rsync.
+
+## Controlled Fedora workload acquisition
+
+`development/benchmark_workload.py NEW_DIRECTORY` acquires the exact official
+Fedora Koji RPM URLs and SHA256 values in `development/benchmark/inputs.json`.
+It uses Fedora 44 kernel 7.2.9 and 7.2.10 sets, including matching kernel-devel,
+and strace 7.2. It builds only a tiny hardware-independent diagnostic module,
+not the kernel, in a separate rootless Fedora container store. The container base
+is digest-pinned; its resolved toolchain inventory and built image ID are saved.
+The generated module/tool RPMs are then SHA256-locked in `scenario.json` before
+any timed candidate preparation. Keep these generated artifacts to replay the
+same workload; rebuilding the toolchain is not promised to be bit-reproducible.
+
+The first candidate replaces the Bazzite kernel with the first official Fedora
+kernel and adds the controlled payload. The second uses the next matching kernel
+and module. Two further steps change the module revision while retaining that
+kernel and strace binary; the last repeats exactly. The diagnostic module has no
+hardware interaction. The guest verifies its hash, loads it, checks its revision
+parameter, unloads it and executes the pinned strace binary. Matching vermagic is
+checked during assembly; successful guest loading is the final compatibility
+check. Do not claim compatibility merely because RPM acquisition succeeded.

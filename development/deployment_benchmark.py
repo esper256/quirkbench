@@ -112,15 +112,56 @@ class MeasuredLinux(Linux):
             save_json(self.folder / "commands.json", self.records)
 
 
+def kernel_build_id(data):
+    """Read raw x86_64 kernel notes, which have no ELF file header."""
+    import struct
+
+    if len(data) > 65536:
+        raise ValueError("Kernel notes exceed the read bound")
+    offset = 0
+    found = []
+    while offset < len(data):
+        if len(data) - offset < 12:
+            raise ValueError("Truncated kernel note header")
+        namesz, descsz, kind = struct.unpack_from("<III", data, offset)
+        offset += 12
+        name_end = offset + namesz
+        desc_start = (name_end + 3) & ~3
+        end = desc_start + descsz
+        next_offset = (end + 3) & ~3
+        if next_offset > len(data):
+            raise ValueError("Truncated kernel note payload")
+        if data[offset:name_end] == b"GNU\0" and kind == 3:
+            found.append(data[desc_start:end].hex())
+        offset = next_offset
+    if len(found) != 1 or not found[0]:
+        raise ValueError("Expected exactly one GNU kernel build ID")
+    return found[0]
+
+
 def verification(step):
     lines = ["set -eu", f'test "$(uname -r)" = {shlex.quote(step["kernel_release"])}']
-    lines.append(
-        "readelf -n /sys/kernel/notes | grep -F -- "
-        + shlex.quote("Build ID: " + step["kernel_build_id"])
+    import inspect
+
+    program = (
+        inspect.getsource(kernel_build_id)
+        + "\nimport sys\nwith open('/sys/kernel/notes', 'rb') as stream:\n    actual = kernel_build_id(stream.read(65537))\nassert actual == sys.argv[1], (actual, sys.argv[1])\n"
     )
+    lines.append(shlex.join(["python3", "-c", program, step["kernel_build_id"]]))
     for check in step["checks"]:
         line = check["sha256"] + "  " + check["path"]
         lines.append(f"printf '%s\\n' {shlex.quote(line)} | sha256sum -c -")
+    if "module_revision" in step:
+        revision = step["module_revision"]
+        if type(revision) is not int or revision not in (0, 1, 2):
+            raise ValueError("Controlled module revision must be 0, 1 or 2")
+        module = "/usr/lib/modules/" + step["kernel_release"] + "/extra/qb_benchmark_probe.ko"
+        lines += [
+            shlex.join(["insmod", module]),
+            f'test "$(cat /sys/module/qb_benchmark_probe/parameters/revision)" = {revision}',
+            "rmmod qb_benchmark_probe",
+            "/usr/libexec/qb-benchmark/strace --version",
+        ]
     return "\n".join(lines)
 
 
