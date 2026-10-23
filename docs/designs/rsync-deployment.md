@@ -31,6 +31,14 @@ byte-identical ext4 images across separate builds.
 ## Assembly and boot
 
 The Bazzite preparation still uses rpm-ostree and OSTree on the controller.
+Both backends share the reusable uncompressed OCI layer cache, exact named-image
+OSTree import, temporary RPM installer mounts and preparation profiling introduced
+by PR #228. Rsync conversion consumes that published commit; it does not restore
+per-candidate compressed exports or bypass reuse. `root_image_seconds` separately
+records the additional assembly/verification stage in candidate results and
+preparation events. A prepared-commit cache hit does not imply that a new
+candidate's ordinary root image was already assembled; that remains a separate
+cost. Target file-tree updates never make a per-update whole-image copy.
 For rsync, a small helper uses the public OSTree archive API with PAX format to
 retain security attributes. The CLI's GNU tar export lost them in a real test.
 Packaged libguestfs imports the archive inside an unprivileged, software-emulated

@@ -66,6 +66,7 @@ async def prepare_candidate(root, linux, work, progress):
         if work["inputs"].get("backend", "ostree") == "rsync":
             from .root_image import prepare_root_image
 
+            started = time.monotonic()
             log = root / "logs" / (work["id"] + ".log")
             tools = await build_tools(root, linux, log)
             tools = await tools_identity(linux, tools)
@@ -76,6 +77,10 @@ async def prepare_candidate(root, linux, work, progress):
                 candidate,
                 backend="rsync",
                 bundle=bundle,
+                preparation_metrics={
+                    **candidate["preparation_metrics"],
+                    "root_image_seconds": time.monotonic() - started,
+                },
                 changes=candidate["changes"]
                 + [
                     "Independent ext4 root and dracut live boot; all run files writable and retained until discard"

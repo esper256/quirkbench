@@ -496,3 +496,52 @@ async def test_stale_prepared_status_cannot_revive_superseded_run(lab, monkeypat
         release.set()
     assert (await lab.controller.wait(update["work_id"], 5))["status"] == "ready"
     assert (await lab.controller.store.get("run", first["run_id"]))["status"] == "finished"
+
+
+async def test_rsync_preparation_preserves_shared_layer_reuse_and_profiles(lab, monkeypatch):
+    image_tools(lab, monkeypatch)
+    first = await candidate(lab)
+    assert first["status"] == "ready", first
+    changed_work = await lab.call(
+        "rpm_ostree_prepare_candidate",
+        investigation="wifi-case",
+        request_id="changed",
+        backend="rsync",
+        repository_packages=["tree"],
+    )
+    changed = await lab.controller.wait(changed_work["work_id"], 5)
+    assert changed["status"] == "ready", changed
+    details = changed["candidate"]
+    metrics = details["preparation_metrics"]
+    assert metrics["oci_layer_hits"] == metrics["oci_layer_misses"] == 1
+    assert metrics["ostree_layer_hits"] == metrics["ostree_layer_misses"] == 1
+    assert metrics["root_image_seconds"] >= 0
+    assert details["bundle"]["commit"] == details["commit"]
+    assert details["inputs"]["repository_packages"] == ["dracut-live", "tree"]
+    recipe = (lab.root / "candidates" / changed["candidate_id"] / "Containerfile").read_text()
+    assert "source=target.rpm,target=/tmp/quirkbench-target.rpm,ro,z" in recipe
+    assert not any(line.startswith("COPY ") and ".rpm" in line for line in recipe.splitlines())
+    calls = len(lab.tools.calls)
+    repeat_work = await lab.call(
+        "rpm_ostree_prepare_candidate",
+        investigation="wifi-case",
+        request_id="repeat",
+        backend="rsync",
+        repository_packages=["tree"],
+    )
+    repeat = await lab.controller.wait(repeat_work["work_id"], 5)
+    assert repeat["status"] == "ready", repeat
+    assert repeat["candidate"]["commit"] == details["commit"]
+    assert repeat["candidate"]["preparation_metrics"]["prepared_candidate_cache_hit"]
+    assert repeat["candidate"]["preparation_metrics"]["root_image_seconds"] >= 0
+    assert not any(
+        c[:2] == ["podman", "save"] or "/work/import.sh" in c for c in lab.tools.calls[calls:]
+    )
+    events = await lab.controller.store.events("wifi-case", 0, 100)
+    event = next(
+        e
+        for e in events
+        if e["kind"] == "candidate-preparation" and e["id"] == changed_work["work_id"]
+    )
+    assert event["oci_layer_hits"] == 1
+    assert event["root_image_seconds"] == metrics["root_image_seconds"]
