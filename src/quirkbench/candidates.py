@@ -44,6 +44,15 @@ def debugging_kernel_args(arguments):
     return list(arguments)
 
 
+def download_progress(log, token):
+    from .diagnostics import tail, display_lines
+
+    if not log.exists():
+        return None
+    lines = [line for line in display_lines(tail(log, 4000)) if line.strip()]
+    return "Downloading: " + lines[-1][:300].replace(token, "[removed]") if lines else None
+
+
 async def deploy_candidate(data: Path, boot: Path, linux, request, settings, progress):
     arguments = debugging_kernel_args(request.get("kernel_args"))
     selinux = request.get("selinux", "disabled")
@@ -113,18 +122,12 @@ async def deploy_candidate(data: Path, boot: Path, linux, request, settings, pro
     )
 
     async def report_progress():
-        from .diagnostics import tail, display_lines
-
         while True:
             await asyncio.sleep(1)
-            if await disk(log.exists):
-                text = await disk(tail, log, 4000)
-                lines = [line for line in display_lines(text) if line.strip()]
-                if lines:
-                    # OSTree may revise object totals while discovering metadata.
-                    await progress(
-                        "Downloading: " + lines[-1][:300].replace(settings["token"], "[removed]")
-                    )
+            message = await disk(download_progress, log, settings["token"])
+            if message:
+                # OSTree revises totals as it discovers metadata.
+                await progress(message)
 
     monitor = asyncio.create_task(report_progress())
     try:

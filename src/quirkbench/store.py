@@ -93,6 +93,8 @@ class Store:
             values.extend(exclude_status)
         for name, value in filters.items():
             if name not in (
+                "id",
+                "request_id",
                 "action",
                 "status",
                 "scope",
@@ -135,7 +137,7 @@ class Store:
                     "DELETE FROM records WHERE kind=? AND id=?", [(kind, key) for key in ids]
                 )
             self.db.execute(
-                "DELETE FROM records WHERE kind='human-request' AND json_extract(data,'$.investigation')=?",
+                "DELETE FROM records WHERE kind IN ('human-request','incident','incident-config') AND json_extract(data,'$.investigation')=?",
                 (name,),
             )
             self.db.executemany(

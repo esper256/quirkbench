@@ -182,29 +182,20 @@ controller path, byte size and digest. Final recovery upload still controls targ
 cleanup. Recovery advertises `kernel-args` before optional debugging arguments may
 be sent; candidates advertise `sftp-download` before live evidence may be read.
 
-## Ordered operations and investigation controls
+## Preparation follow-ups and investigation controls
 
-`controller_sequence_start(investigation, request_id, steps)` records an ordered
-list before starting it. Each step names an existing supported tool and its
-arguments. `{ "from_step": "name", "field": "run_id" }` reads an earlier result.
-There are no loops, branches, implicit retries or general plugins. Individual
-calls remain available; a sequence is optional.
-
-Preparation, deployment, boot, return and transfers finish before the next step.
-`ssh_command_start` defaults to no brief wait inside a sequence; explicitly wait or stop each started
-command later. Wait checks exit codes, default `[0]`. Failure stops progression
-and requests cleanup only for this sequence's work. Cancellation cannot undo a
-committed boot. Uncertain actions need inspection, never automatic replay.
-
-Store steps/results with existing work records. After controller restart,
-`controller_sequence_resume` is required; already admitted work is observed rather
-than dispatched again. A step interrupted without an identifiable result stops
-for attention. `controller_sequence_cancel` stops progression and requests cleanup.
+`rpm_ostree_prepare_candidate(after_prepare="stop"|"deploy"|"boot")` and
+`recovery_deploy_ostree(boot=false|true)` reuse the existing operations.
+Defaults stop for inspection. Work results expose each phase and its work ID.
+Save intent and stable child request IDs before dispatch. Failed or uncertain
+phases stop; restart never automatically continues physical work. Cancellation
+stops future phases and cancels owned preparation/deployment, without undoing boot.
+The generic sequence tools and adapters are removed.
 
 `investigation_control` offers pause, force-stop and resume through the same service
 as the CLI. Pause stops new work, finishes bounded work, returns to recovery and
 waits for evidence. Force stop also cancels preparation/deployment and stops commands.
-Resume permits new work; it does not boot or resume a sequence. Read access and
+Resume permits new work; it does not boot or continue interrupted follow-ups. Read access and
 uploads remain available. A disconnected or frozen target can leave stopping or
 return pending. Recorded command stop requests are sent after reconnection.
 
@@ -217,10 +208,7 @@ Every successful MCP tool returns both JSON text and structured content. File an
 work references stay outside bounded output previews. Quiet-wait commands use the
 controller's Python executable, so a missing shell PATH entry does not break them.
 
-Repeated controls preserve completed outcomes: cancelling a finished sequence does
-nothing, and pause cannot downgrade an ongoing force stop. Keep operation sequences
-limited to the current explicit list until actual investigation use demonstrates a
-need for more. Prefer individual tools over adding another sequence language feature.
+Repeated controls preserve completed outcomes. Pause cannot downgrade a force stop.
 
 ## MCP arguments and results
 
@@ -243,9 +231,7 @@ need for more. Prefer individual tools over adding another sequence language fea
   through summaries, newest first. A stable `deployment_id` names retained files;
   each boot attempt has its own `run_id`. Boot replies return both. No new storage
   service or deployment mechanism is introduced.
-- Schemas publish fixed choices, existing bounds, sequence step names/tools and
-  common result fields. Sequence arguments still follow the selected tool; validate
-  them before work starts. Keep ordered lists optional, without loops or branches.
+- Schemas publish fixed choices, existing bounds and common result fields.
 - `controller_mcp_activity` reports call counts, elapsed time, successful response
   text bytes, errors and unchanged status/output positions. It includes read/wait
   calls and schema rejections, excludes internal polling, and persists in existing
@@ -279,10 +265,35 @@ Ambiguous graphical sessions require explicit ordinary commands instead.
 
 `sftp_upload_batch` uses existing single-file publication, stops at a failure and
 reports each outcome. Earlier files stay published. It is not an atomic batch.
-Sequences remain available; no competing orchestration is added.
+
 
 `ssh_human_request` records prepare/ready/cancel states with existing controller
 storage. The agent decides readiness. The human answers through the target menu or
 controller CLI; the same authenticated controller handles both. Responses after
 cancellation or a changed boot are late. Requests do not switch desktops, replay
 commands, or interpret measurements. A new request ID rearms a test.
+
+
+## Incident capture, observation and optional desktop control
+
+`ssh_incident_configure/capture/status` use an ordinary bounded candidate command,
+existing evidence files and SFTP. The controller saves the incident identity,
+run/boot, origin and collector configuration before dispatch. Initial snapshot
+and manifest remain separate from later analysis. Receipt does not imply successful
+collection. Partial originals remain eligible for final recovery upload. Lost
+replies reconcile existing commands; collectors are never automatically replayed.
+The human CLI uses the same capture service. Export includes incident records.
+
+`ssh_command_wait(reconnect=true)` observes the same command within the caller's
+wait deadline. Malformed SSH replies and saved metadata return observation errors
+with phase and identities, never experiment-success claims. A new boot ends old
+process observation.
+
+`ssh_human_request(login_session=...)` optionally delivers through libnotify on
+the selected user's session bus. Persist each delivery attempt before dispatch;
+only explicit redelivery tries again. Readiness/acknowledgment remain separate.
+No notification daemon of our own; unavailable desktops keep CLI/menu fallback.
+
+`ssh_keep_awake` starts, observes or releases an ordinary bounded command running
+`systemd-inhibit --what=idle:sleep`. Its suspend-aware deadline is target-owned.
+Only its own inhibitor is released. No persistent power settings or global timeout.

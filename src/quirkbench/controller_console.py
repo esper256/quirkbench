@@ -74,7 +74,7 @@ def work_title(work):
         "boot": "Boot candidate",
         "return": "Return to recovery",
         "discard": "Discard retained files",
-        "sequence": "Ordered actions",
+        "candidate-followup": "Candidate preparation and boot",
         "prune-cache": "Clear candidate cache",
     }.get(action, action)
 

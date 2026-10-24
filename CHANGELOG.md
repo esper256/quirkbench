@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.3 — 2026-10-24
+
+Source tag `v1.3`; Python and RPM package version `1.3.0`.
+See [release notes](docs/release-notes/1.3.md).
+
+- Replace generic command sequences with explicit, optional prepare/deploy/boot
+  follow-ups. Show each phase; stop on failure without replaying uncertain work.
+- Correct login-session discovery and report inspection failures clearly.
+- Distinguish invalid command observations from failed experiments. Add optional
+  bounded waiting across reconnection.
+- Capture named incidents with investigation-owned collectors, initial snapshots,
+  hashes and separate collection/receipt status. Human CLI triggers use the same
+  service; partial original files survive for recovery upload.
+- Deliver human requests to a selected existing desktop session, with explicit
+  redelivery and CLI/menu fallback.
+- Offer bounded keep-awake commands with visible ownership, expiry and release.
+- Render OSTree cursor-save/restore progress without accumulating escape-code text.
+- Update agent instructions and examples; retain generic investigation behavior.
+
 ## 1.2 — 2026-10-23
 
 Source release `v1.2`; Python and RPM package version `1.2.0`.

@@ -172,6 +172,27 @@ class Controller(InvestigationControls, Storage, CommandControl):
             ),
             "run_count": len(runs),
             "history_tool": "investigation_runs",
+            "incidents": [
+                {
+                    k: r[k]
+                    for k in ("id", "run_id", "status", "classification", "command_id", "receipt")
+                    if k in r
+                }
+                for r in await self.store.find("incident", investigation=investigation)
+            ],
+            "keep_awake": [
+                dict(
+                    command_id=w["id"],
+                    run_id=w["run_id"],
+                    boot_id=w["boot_id"],
+                    status=w["status"],
+                    duration_seconds=float(w["inputs"]["argv"][-1]),
+                    observe_tool="ssh_keep_awake",
+                )
+                for w in await self.store.find("work", action="ssh-command")
+                if w.get("run_id") in {r["id"] for r in runs}
+                and w.get("request_id", "").startswith("awake-")
+            ],
             "working_directory": "/var/tmp",
             "command_environment": {
                 "QUIRKBENCH_RUN_ID": "Current run ID",
@@ -256,9 +277,36 @@ class Controller(InvestigationControls, Storage, CommandControl):
             else 30
         ):
             response = await conn.run(payload, check=True)
-        result = json.loads(response.stdout)
+        from .errors import ObservationError
+
+        try:
+            result = json.loads(response.stdout)
+            if not isinstance(result, dict):
+                raise ValueError("Expected a JSON object")
+        except ValueError as error:
+            raise ObservationError(
+                "ssh-response",
+                "Target returned invalid JSON; command outcome is unknown.",
+                action=action,
+                target=target_id,
+                run_id=fields.get("run_id"),
+                boot_id=fields.get("boot_id"),
+                command_id=fields.get("command_id"),
+                response_bytes=len(response.stdout.encode()),
+                parse_error=str(error)[:200],
+            ) from error
         if "error" in result and "status" not in result:
             raise RequestRejected(result["error"], not_started=result.get("not_started") is True)
+        if action.startswith("command-"):
+            from .controller_commands import validate_observation
+
+            validate_observation(
+                result,
+                fields.get("command_id"),
+                fields.get("run_id"),
+                fields.get("boot_id"),
+                "ssh-response",
+            )
         return result
 
     async def inspect(self, target, view, max_lines=80):
@@ -354,7 +402,15 @@ class Controller(InvestigationControls, Storage, CommandControl):
         repository_packages=None,
         debugging_tools=True,
         removals=None,
+        after_prepare="stop",
+        kernel_args=None,
+        selinux="disabled",
+        startup_connect_timeout_seconds=300,
     ):
+        from .followups import options
+
+        choices = options(after_prepare, kernel_args, selinux, startup_connect_timeout_seconds)
+        parent = None
         inv = await self.require_active(investigation)
         readiness = self.preparation_readiness()
         if not readiness["ready"]:
@@ -381,12 +437,25 @@ class Controller(InvestigationControls, Storage, CommandControl):
                 changes["startup_probe_timeout_seconds"] = startup_probe_timeout_seconds
             async with self.store.admission():
                 (await self.require_active(investigation))
-                work, fresh = await self.store.request(
-                    "prepare",
-                    investigation,
-                    request_id,
-                    {"base": base, "name": name, "changes": changes},
+                await self.followups.check_request(
+                    investigation, request_id, "prepare", after_prepare != "stop"
                 )
+                inputs = {"base": base, "name": name, "changes": changes}
+                if after_prepare != "stop":
+                    parent, new_parent = await self.followups.admit(
+                        inv, request_id, "prepare", inputs, choices
+                    )
+                    if not new_parent:
+                        return await self.work_result(parent["id"])
+                    request_id = parent["id"] + ":prepare"
+                work, fresh = await self.store.request("prepare", investigation, request_id, inputs)
+                if parent:
+                    await self.update_work(
+                        parent["id"],
+                        status="running",
+                        stage="Preparing candidate",
+                        phases={"prepare": work["id"]},
+                    )
         if fresh:
             task = self.spawn(self._prepare(work, inv))
             self.preparations[work["id"]] = task
@@ -405,7 +474,9 @@ class Controller(InvestigationControls, Storage, CommandControl):
                     )
 
             task.add_done_callback(lambda task: self.spawn(finished(task)))
-        return await self.work_result(work["id"])
+        if parent:
+            self.followups.launch(parent["id"])
+        return await self.work_result(parent["id"] if parent else work["id"])
 
     async def _prepare(self, work, inv):
         from .bazzite import prepare_candidate
@@ -450,6 +521,8 @@ class Controller(InvestigationControls, Storage, CommandControl):
         work = await self.store.get("work", key)
         result = {k: v for k, v in work.items() if k not in ("inputs", "scope", "action")}
         result["work_id"] = result.pop("id")
+        if work["action"] == "candidate-followup":
+            result["phases"] = await self.followups.result(work)
         result["next_tool"] = "controller_work_wait"
         if work_finished(work["status"]):
             result["next_tool"] = {
@@ -501,8 +574,24 @@ class Controller(InvestigationControls, Storage, CommandControl):
         return completion(result)
 
     async def deploy(
-        self, investigation, candidate, request_id, kernel_args=None, selinux="disabled"
+        self,
+        investigation,
+        candidate,
+        request_id,
+        kernel_args=None,
+        selinux="disabled",
+        boot=False,
+        startup_connect_timeout_seconds=300,
     ):
+        if boot:
+            from .followups import options
+
+            return await self.followups.deploy(
+                investigation,
+                candidate,
+                request_id,
+                options("boot", kernel_args, selinux, startup_connect_timeout_seconds),
+            )
         from .candidates import debugging_kernel_args
 
         kernel_args = debugging_kernel_args(kernel_args)
@@ -526,6 +615,7 @@ class Controller(InvestigationControls, Storage, CommandControl):
                 raise ValueError("Update recovery before selecting an enabled SELinux policy.")
             async with self.store.admission():
                 inv = await self.require_active(investigation)
+                await self.followups.check_request(investigation, request_id, "deploy", False)
                 work, fresh = await self.store.request(
                     "deploy",
                     investigation,
@@ -1164,6 +1254,18 @@ class Controller(InvestigationControls, Storage, CommandControl):
             if work["scope"] != data["name"]:
                 raise ValueError("Work does not belong to this investigation.")
             return await self.wait(work["id"], data["timeout_seconds"], maximum=86400)
+        if action == "incident-capture":
+            from .incidents import capture
+
+            inv = await self.store.get("investigation", data["name"])
+            target = self.targets.get(inv["target"], {})
+            run_id = target.get("run_id")
+            if target.get("mode") != "candidate" or not run_id:
+                raise ValueError("Connect this investigation's candidate before capture.")
+            run = await self.store.get("run", run_id)
+            if run["investigation"] != data["name"]:
+                raise ValueError("Another investigation owns this candidate.")
+            return await capture(self, run_id, data["request_id"], "unknown", "human")
         if action == "human-response":
             from .human_requests import key, respond
 
@@ -1237,10 +1339,16 @@ class Controller(InvestigationControls, Storage, CommandControl):
             logging.getLogger().handlers = self.log.handlers[:]
         self.log.info("Controller starting")
         self.store = await AsyncStore.open(self.root)
-        from .sequences import Sequences
+        from .followups import Followups
 
-        self.sequences = Sequences(self)
-        (await self.sequences.reconcile_restart())
+        self.followups = Followups(self)
+        for work in await self.store.find("work"):
+            if work["action"] == "candidate-followup" and not work_finished(work["status"]):
+                await self.update_work(
+                    work["id"],
+                    status="interrupted",
+                    stage="Controller restarted. Inspect phase work; request any remaining standalone action explicitly.",
+                )
         for work in await self.store.find("work"):
             if work["action"] in ("deploy", "boot", "discard", "return") and work["status"] in (
                 "starting",

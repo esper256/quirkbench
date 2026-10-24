@@ -68,7 +68,7 @@ that a feature exists. Keep entries short and change them with the designs.
 | Hash | A value calculated from bytes to detect changes or identify content. |
 | Fingerprint | A short representation of a public key or certificate used to check identity. |
 | MCP | Model Context Protocol: the standard interface through which the agent discovers and calls Quirkbench tools. |
-| Operation sequence | An optional ordered list of tool calls that stops on failure. |
+| Incident capture | A named snapshot of experiment evidence collected before intervention. |
 | MCP tool | A named action the agent can call through MCP, with defined arguments and results. |
 | Skill | An agent guide for carrying out a particular workflow using tools. |
 | SSH | Secure Shell: the protocol carrying target commands and terminal input/output. |

@@ -16,6 +16,21 @@ def login_session(lab, monkeypatch):
         if args[:2] == ("loginctl", "list-sessions"):
             return dict(exit_code=0, output=json.dumps([dict(session="c2", uid=account.pw_uid)]))
         if args[:2] == ("loginctl", "show-session"):
+            assert args[4:] == tuple(
+                option
+                for field in (
+                    "Id",
+                    "User",
+                    "Name",
+                    "Active",
+                    "Type",
+                    "Class",
+                    "Remote",
+                    "State",
+                    "Display",
+                )
+                for option in ("-p", field)
+            )
             return dict(
                 exit_code=0,
                 output=f"Id=c2\nUser={account.pw_uid}\nName={account.pw_name}\nActive={state['active']}\nType=wayland\nState=active\n",

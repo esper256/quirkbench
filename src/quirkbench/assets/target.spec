@@ -1,5 +1,5 @@
 Name: quirkbench-target
-Version: 1.2.0
+Version: 1.3.0
 Release: 1
 Summary: Quirkbench target connection and recovery tools
 License: LicenseRef-Quirkbench
@@ -26,6 +26,7 @@ cp -a /work/root/. %{buildroot}/
 /usr/lib/quirkbench
 /usr/bin/quirkbench-target
 /usr/bin/quirkbench-console
+/usr/bin/quirkbench-run-helper
 /usr/lib/systemd/system/quirkbench-*.service
 /usr/lib/systemd/system-generators/quirkbench-startup-generator
 /usr/lib/udev/rules.d/90-quirkbench-thunderbolt.rules

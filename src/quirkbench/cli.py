@@ -209,6 +209,15 @@ def parser():
     }.items():
         command = acts.add_parser(action, help=help_text, description=help_text)
         command.add_argument("name", help="Investigation name")
+    capture = acts.add_parser(
+        "capture", help="Capture a configured incident on the current candidate"
+    )
+    capture.add_argument("name", help="Investigation name")
+    capture.add_argument(
+        "--request-id",
+        required=True,
+        help="Reuse this ID to inspect an uncertain trigger, not repeat it",
+    )
     response = acts.add_parser(
         "respond",
         help="Answer a human test request",
@@ -325,6 +334,10 @@ async def execute(args):
                 "investigation-export",
                 {"name": args.name, "destination": str(Path(args.destination).absolute())},
                 timeout=3600,
+            )
+        if args.action == "capture":
+            return await local(
+                root, "incident-capture", {"name": args.name, "request_id": args.request_id}
             )
         if args.action == "respond":
             return await local(

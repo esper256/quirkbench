@@ -102,20 +102,20 @@ class InvestigationControls:
     async def advance_pause(self, inv):
         name, force = inv["id"], inv["status"] == "stopping"
         if force:
-            for sequence in await self.store.find("work"):
+            for followup in await self.store.find("work"):
                 if (
-                    sequence["action"] == "sequence"
-                    and sequence["scope"] == name
-                    and sequence["status"] in ("running", "paused")
+                    followup["action"] == "candidate-followup"
+                    and followup["scope"] == name
+                    and followup["status"] in ("accepted", "running", "paused", "interrupted")
                 ):
-                    await self.sequences.cancel(sequence["id"])
+                    await self.followups.cancel(followup["id"])
         works = await self.store.find("work")
         runs = {r["id"]: r for r in (await self.store.find("run")) if r["investigation"] == name}
         pending = False
         for work in works:
             if work["scope"] != name and work.get("run_id") not in runs:
                 continue
-            if work["action"] == "sequence":
+            if work["action"] == "candidate-followup":
                 continue
             if work["action"] == "ssh-command":
                 if work.get("run_id") not in runs:

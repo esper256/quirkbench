@@ -18,28 +18,6 @@ WaitSeconds = Annotated[float, Field(ge=0, le=50, allow_inf_nan=False)]
 BriefWait = Annotated[float, Field(ge=0, le=5, allow_inf_nan=False)]
 PositiveSeconds = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 PageSize = Annotated[int, Field(ge=1, le=100)]
-SequenceTool = Literal[
-    "rpm_ostree_prepare_candidate",
-    "recovery_deploy_ostree",
-    "recovery_boot_ostree",
-    "recovery_discard_ostree",
-    "recovery_return",
-    "sftp_upload",
-    "sftp_download",
-    "ssh_command_start",
-    "ssh_command_wait",
-    "ssh_command_stop",
-]
-
-
-class SequenceStep(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    name: Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$")]
-    tool: SequenceTool
-    arguments: dict[str, Any] = Field(
-        description='Arguments of the selected tool; use {"from_step":"earlier-name","field":"run_id"} for a prior result. Retry IDs are supplied by the sequence. Command starts default to no brief wait.'
-    )
-    expected_exit_codes: Annotated[list[int], Field(min_length=1)] = [0]
 
 
 class UploadFile(BaseModel):
@@ -125,25 +103,52 @@ def mcp_app(controller):
         return await controller.timeline(investigation, after, limit)
 
     @mcp.tool(structured_output=True)
-    async def controller_sequence_start(
-        investigation: str,
+    async def controller_candidate_cancel(work_id: str) -> ActionResult:
+        """Cancel remaining preparation/deployment follow-up phases. A committed boot cannot be undone; inspect phase work for cleanup and outcome."""
+        return await controller.followups.cancel(work_id)
+
+    @mcp.tool(structured_output=True)
+    async def ssh_incident_configure(
+        run_id: str,
+        argv: list[str],
+        timeout_seconds: PositiveSeconds = 60,
+        max_bytes: Annotated[int, Field(ge=1, le=1099511627776)] = 268435456,
+    ) -> dict[str, Any]:
+        """Configure an investigation-owned collector. It writes to its supplied QUIRKBENCH_EVIDENCE_DIR and closes writers before exit. Trigger separately; no diagnosis or automatic intervention."""
+        from .incidents import configure
+
+        return await configure(controller, run_id, argv, timeout_seconds, max_bytes)
+
+    @mcp.tool(structured_output=True)
+    async def ssh_incident_capture(
+        run_id: str,
         request_id: RequestID,
-        steps: Annotated[list[SequenceStep], Field(min_length=1, max_length=100)],
-    ) -> ActionResult:
-        """Execute ordered operations. Each step has name, tool, arguments and optional expected_exit_codes (default [0]). Reference an earlier result with {from_step: name, field: field}. Supported: rpm_ostree_prepare_candidate, recovery_deploy_ostree, recovery_boot_ostree, recovery_discard_ostree, recovery_return, sftp_upload/download, ssh_command_start/wait/stop. Start is immediate; every started command needs an explicit later wait or stop. Other steps finish before continuing. No loops, automatic retries or restart continuation."""
-        return await controller.sequences.start(
-            investigation, request_id, [step.model_dump() for step in steps]
-        )
+        classification: Literal["observed", "injected", "unknown"] = "unknown",
+        trigger: str = "agent",
+    ) -> dict[str, Any]:
+        """Run the configured bounded collector once and preserve an initial snapshot. Identical retries observe it, never replay uncertain collection. Human CLI uses the same operation."""
+        from .incidents import capture
+
+        return await capture(controller, run_id, request_id, classification, trigger)
 
     @mcp.tool(structured_output=True)
-    async def controller_sequence_resume(work_id: str) -> ActionResult:
-        """Explicitly resume a paused sequence after inspecting its progress. Completed actions are not repeated; uncertain effects stop for attention."""
-        return await controller.sequences.resume(work_id)
+    async def ssh_incident_status(incident_id: str) -> dict[str, Any]:
+        """Observe collection and retrieve completed snapshot/manifest. Receipt is separate from collection success and never deletes target files."""
+        from .incidents import status
+
+        return await status(controller, incident_id)
 
     @mcp.tool(structured_output=True)
-    async def controller_sequence_cancel(work_id: str) -> ActionResult:
-        """Cancel ordered operations and stop only their own commands/preparation. Inspect child work for cleanup or uncertain physical outcomes."""
-        return await controller.sequences.cancel(work_id)
+    async def ssh_keep_awake(
+        run_id: str,
+        request_id: RequestID,
+        action: Literal["start", "status", "release"],
+        duration_seconds: PositiveSeconds | None = None,
+    ) -> dict[str, Any]:
+        """Opt-in bounded candidate sleep inhibitor. Blocks idle AND deliberate logind sleep; release before suspend tests. Allows screen blanking. No renewal after disconnect/restart; release only this command's inhibitor."""
+        from .keep_awake import control
+
+        return await control(controller, run_id, request_id, action, duration_seconds)
 
     @mcp.tool(structured_output=True)
     async def ssh_human_request(
@@ -152,11 +157,15 @@ def mcp_app(controller):
         action: Literal["prepare", "ready", "status", "cancel"],
         message: str | None = None,
         chime: bool = False,
+        login_session: str | None = None,
+        redeliver: bool = False,
     ) -> dict[str, Any]:
         """Coordinate one human action. Agent verifies collector readiness before ready; prepare does not display. The human responds in target TUI or controller CLI. Status reports response and whether it arrived late. Cancel before closing the collector; rearm with a new ID. Does not switch desktops or infer test success."""
         from .human_requests import request
 
-        return await request(controller, investigation, request_id, action, message, chime)
+        return await request(
+            controller, investigation, request_id, action, message, chime, login_session, redeliver
+        )
 
     @mcp.tool(structured_output=True)
     async def ssh_target_notify(
@@ -289,10 +298,13 @@ def mcp_app(controller):
 
     @mcp.tool(structured_output=True)
     async def ssh_command_wait(
-        command_id: str, timeout_seconds: WaitSeconds = 25, offset: Offset = 0
+        command_id: str,
+        timeout_seconds: WaitSeconds = 25,
+        offset: Offset = 0,
+        reconnect: bool = False,
     ) -> CommandResult:
-        """Wait quietly for completion, connection loss or a wait deadline (maximum 50 seconds). Does not stop work."""
-        return await controller.command_wait(command_id, timeout_seconds, offset)
+        """Wait quietly for completion or a wait deadline (maximum 50 seconds). By default return on connection loss; reconnect=true waits for observation to resume within the same deadline. Invalid observations need attention; no command is replayed or stopped."""
+        return await controller.command_wait(command_id, timeout_seconds, offset, reconnect)
 
     @mcp.tool(structured_output=True)
     async def ssh_command_stop(command_id: str) -> CommandResult:
@@ -312,6 +324,10 @@ def mcp_app(controller):
         repository_packages: list[str] | None = None,
         debugging_tools: bool = True,
         removals: list[str] | None = None,
+        after_prepare: Literal["stop", "deploy", "boot"] = "stop",
+        kernel_args: list[str] | None = None,
+        selinux: Literal["disabled", "permissive", "enforcing"] = "disabled",
+        startup_connect_timeout_seconds: Annotated[int, Field(ge=1, le=3600)] = 300,
     ) -> ActionResult:
         """Prepare Bazzite with a small optional debugging toolkit, repository_packages from its own repositories, local RPM additions/replacements, explicit base-package removals and an optional executable startup probe. Removals and replacements are solved together; dependencies are never bypassed. Preparation can run while a target retains an earlier deployment. Paths are on the controller; files are captured before building. The resulting commit is unchanged; kernel replacements must be RPMs, not raw kernel images. Probe runs before networking with an explicit timeout (default 60 seconds); output goes to the boot journal. Kernel changes require a new boot. Wait with controller_work_wait."""
         return await controller.prepare(
@@ -326,6 +342,10 @@ def mcp_app(controller):
             repository_packages,
             debugging_tools,
             removals,
+            after_prepare,
+            kernel_args,
+            selinux,
+            startup_connect_timeout_seconds,
         )
 
     @mcp.tool(structured_output=True)
@@ -335,9 +355,19 @@ def mcp_app(controller):
         request_id: RequestID,
         kernel_args: list[str] | None = None,
         selinux: Literal["disabled", "permissive", "enforcing"] = "disabled",
+        boot: bool = False,
+        startup_connect_timeout_seconds: Annotated[int, Field(ge=1, le=3600)] = 300,
     ) -> ActionResult:
-        """Transfer and prepare fresh run files, with debugging kernel_args and explicit SELinux policy retained on repeat boots. Default disabled differs from a normal Bazzite install. Permissive/enforcing require a correctly labelled candidate and its SELinux policy; boot/connectivity must be checked. Boot/recovery arguments are managed by Quirkbench. Discard retained run files first if replacing them; preparation itself does not require discard. Does not select a boot or reboot. Inspect progress with controller_work_wait, then use recovery_boot_ostree."""
-        return await controller.deploy(investigation, candidate, request_id, kernel_args, selinux)
+        """Transfer and prepare fresh run files, with debugging kernel_args and explicit SELinux policy retained on repeat boots. Default disabled differs from a normal Bazzite install. Permissive/enforcing require a correctly labelled candidate and its SELinux policy; boot/connectivity must be checked. Boot/recovery arguments are managed by Quirkbench. Discard retained run files first if replacing them; preparation itself does not require discard. Stops before boot by default. Set boot=true for one boot after successful deployment; failures stop progression. Inspect each phase with controller_work_wait. Standalone recovery_boot_ostree remains available."""
+        return await controller.deploy(
+            investigation,
+            candidate,
+            request_id,
+            kernel_args,
+            selinux,
+            boot,
+            startup_connect_timeout_seconds,
+        )
 
     @mcp.tool(structured_output=True)
     async def recovery_boot_ostree(
