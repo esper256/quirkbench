@@ -184,6 +184,7 @@ async def test_rpm_build_inputs_are_temporary_and_changed_bytes_prepare_again(la
     recipe = (staged / "Containerfile").read_text()
     for source, target in (
         ("target.rpm", "quirkbench-target.rpm"),
+        ("build-initramfs", "quirkbench-build-initramfs"),
         (f"{kind}-0.rpm", f"{kind}-0.rpm"),
     ):
         assert f"--mount=type=bind,source={source},target=/tmp/{target},ro,z" in recipe

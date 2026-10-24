@@ -37,6 +37,9 @@ information and verification limits.
 
 ### Recovery and correctness
 
+- Relabel the temporary initramfs build-script mount for SELinux container access,
+  matching the RPM input mounts (#234).
+
 - Pair the recovery drive separately from the computer. Moving it preserves saved
   networking while keeping computers and investigations distinct.
 - Improve early USB4 discovery in recovery and candidate startup. Keep internal-disk
