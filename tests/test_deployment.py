@@ -278,7 +278,7 @@ async def test_retained_run_reboots_without_transfer_then_explicit_discard(lab):
     await lab.until(lambda: lab.tools.reboots == 2)
     retry = await lab.call("recovery_boot_ostree", run_id=work["run_id"], request_id="again")
     await lab.boot_target("candidate", again["run_id"])
-    old = await lab.call("run_results", run_id=work["run_id"])
+    old = await lab.call("run_results", run_id=work["run_id"], view="commands")
     await lab.boot_target()
     await lab.until_record("run", again["run_id"], lambda record: record["status"] == "finished")
     assert again["run_id"] != work["run_id"] and retry["work_id"] == again["work_id"]

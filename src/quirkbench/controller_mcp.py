@@ -42,6 +42,12 @@ class SequenceStep(BaseModel):
     expected_exit_codes: Annotated[list[int], Field(min_length=1)] = [0]
 
 
+class UploadFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    controller_path: str
+    target_name: str
+
+
 class ActionResult(BaseModel):
     model_config = ConfigDict(extra="allow")
     status: str
@@ -140,6 +146,19 @@ def mcp_app(controller):
         return await controller.sequences.cancel(work_id)
 
     @mcp.tool(structured_output=True)
+    async def ssh_human_request(
+        investigation: str,
+        request_id: RequestID,
+        action: Literal["prepare", "ready", "status", "cancel"],
+        message: str | None = None,
+        chime: bool = False,
+    ) -> dict[str, Any]:
+        """Coordinate one human action. Agent verifies collector readiness before ready; prepare does not display. The human responds in target TUI or controller CLI. Status reports response and whether it arrived late. Cancel before closing the collector; rearm with a new ID. Does not switch desktops or infer test success."""
+        from .human_requests import request
+
+        return await request(controller, investigation, request_id, action, message, chime)
+
+    @mcp.tool(structured_output=True)
     async def ssh_target_notify(
         investigation: str,
         message: Annotated[str, Field(min_length=1, max_length=500)],
@@ -148,6 +167,14 @@ def mcp_app(controller):
         """Show one human request on the target console. Optional chime plays once for half a second if an audio device is available. Never changes volume or mixers. No response means delivery is uncertain; do not repeat sound automatically."""
         inv = await controller.require_active(investigation)
         return await controller.rpc(inv["target"], "notify", message=message, chime=chime)
+
+    @mcp.tool(structured_output=True)
+    async def ssh_login_sessions(run_id: str) -> dict[str, Any]:
+        """Inspect existing login sessions and sleep inhibitors. Select an active session ID for ssh_command_start(login_session=...). Does not switch VT, create users, inhibit sleep or start a desktop."""
+        run, target = await controller.command_run(run_id)
+        return await controller.rpc(
+            run["target"], "login-sessions", run_id=run_id, boot_id=target["boot_id"]
+        )
 
     @mcp.tool(structured_output=True)
     async def ssh_candidate_inventory(run_id: str) -> dict[str, Any]:
@@ -175,15 +202,30 @@ def mcp_app(controller):
 
     @mcp.tool(structured_output=True)
     async def saved_output_read(
-        saved_file: str, offset: Offset = 0, limit: Annotated[int, Field(ge=1, le=32768)] = 8192
+        saved_file: str,
+        offset: Offset = 0,
+        limit: Annotated[int, Field(ge=1, le=32768)] = 8192,
+        tail: bool = False,
     ) -> dict[str, Any]:
         """Read saved diagnostics by controller-relative path, with a byte cursor. Maximum 32 KiB per response."""
-        return await controller.saved_output(saved_file, offset, limit)
+        return await controller.saved_output(saved_file, offset, limit, tail)
 
     @mcp.tool(structured_output=True)
-    async def run_results(run_id: str) -> dict[str, Any]:
-        """Show run outcome, evidence receipt, command results and saved files without database access."""
-        return await controller.run_results(run_id)
+    async def run_results(
+        run_id: str,
+        view: Literal["summary", "files", "commands", "transfers", "collections"] = "summary",
+        offset: Offset = 0,
+        limit: PageSize = 50,
+    ) -> dict[str, Any]:
+        """Read a compact outcome and receipt summary. Select a view for paginated details; next_offset continues that view. Files can grow until final receipt. Read files with saved_output_read."""
+        return await controller.run_results(run_id, view, offset, limit)
+
+    @mcp.tool(structured_output=True)
+    async def sftp_upload_batch(
+        run_id: str, files: Annotated[list[UploadFile], Field(min_length=1, max_length=32)]
+    ) -> dict[str, Any]:
+        """Upload files in order to one candidate boot. Stop on failure and report each file as uploaded, failed or not-attempted. Earlier files remain; a batch is not atomic. Nothing is executed."""
+        return await controller.upload_files(run_id, [f.model_dump() for f in files])
 
     @mcp.tool(structured_output=True)
     async def sftp_upload(run_id: str, controller_path: str, target_name: str) -> dict[str, Any]:
@@ -210,8 +252,9 @@ def mcp_app(controller):
         stop_grace_seconds: Annotated[float, Field(ge=0, le=300)] = 10,
         interactive: bool = False,
         description: Annotated[str, Field(min_length=1, max_length=120)] | None = None,
+        login_session: str | None = None,
     ) -> CommandResult:
-        """Start a candidate command as root. Optional description is a short human-readable intent shown in the controller; omit secrets. Provide exactly one of argv (no shell expansion) or script (executed by shell -c). A script starts a new shell, not a persistent session. timeout_seconds stops execution; wait_seconds only waits briefly before returning an ID or completed output. Each command has its own cwd/env; files and services are shared. Output is saved on target. Use ssh_command_wait/read/stop. Output defaults to 16 MiB; increase max_output_bytes explicitly if needed. interactive allocates a terminal; send input and resize with ssh_terminal_input. Each terminal is independent. Stop allows stop_grace_seconds for cleanup before SIGKILL."""
+        """Start a candidate command as root, or as the explicitly selected login_session user. Session execution uses its user-manager environment and separate user-owned evidence/work directories; no desktop is started. Optional description is a short human-readable intent shown in the controller; omit secrets. Provide exactly one of argv (no shell expansion) or script (executed by shell -c). A script starts a new shell, not a persistent session. timeout_seconds stops execution; wait_seconds only waits briefly before returning an ID or completed output. Each command has its own cwd/env; files and services are shared. Output is saved on target. Use ssh_command_wait/read/stop. Output defaults to 16 MiB; increase max_output_bytes explicitly if needed. interactive allocates a terminal; send input and resize with ssh_terminal_input. Each terminal is independent. Stop allows stop_grace_seconds for cleanup before SIGKILL."""
         return await controller.command_start(
             run_id,
             request_id,
@@ -226,6 +269,7 @@ def mcp_app(controller):
             stop_grace_seconds=stop_grace_seconds,
             interactive=interactive,
             description=description,
+            login_session=login_session,
         )
 
     @mcp.tool(structured_output=True)

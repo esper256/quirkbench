@@ -1,5 +1,5 @@
 Name: quirkbench-target
-Version: 1.1.0
+Version: 1.2.0
 Release: 1
 Summary: Quirkbench target connection and recovery tools
 License: LicenseRef-Quirkbench

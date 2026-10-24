@@ -225,3 +225,63 @@ Output includes: {"exit_code":0,"page":"home","width":100,"height":30,
 
 The example package list is illustrative: supply the actual matching kernel package
 set and select removals only when appropriate for the investigation.
+
+## Optional session, files and human action examples
+
+These illustrative calls are alternatives, not a required procedure.
+
+```text
+Tool: ssh_login_sessions
+Input: {"run_id":"run-1"}
+Output: {"sessions":[{"Id":"c2","Name":"sam","Active":"yes","Type":"wayland"}],
+ "inhibitors":"collector blocks sleep", "inhibitor_expiry":"Not reported by logind; consult the owning command's deadline."}
+
+Tool: sftp_upload_batch
+Input: {"run_id":"run-1","files":[
+ {"controller_path":"/home/sam/work/probe.py","target_name":"probe.py"},
+ {"controller_path":"/home/sam/work/settings.json","target_name":"settings.json"}]}
+Output: {"complete":true,"files":[{"target_path":"/var/tmp/quirkbench/probe.py","status":"uploaded"},
+ {"target_path":"/var/tmp/quirkbench/settings.json","status":"uploaded"}]}
+
+Tool: ssh_command_start
+Input: {"run_id":"run-1","request_id":"probe-1","login_session":"c2",
+ "argv":["python3","/var/tmp/quirkbench/probe.py"],"timeout_seconds":180}
+Output: {"command_id":"command-1","status":"running","complete":false,"outcome":"pending"}
+```
+
+The agent checks the collector's readiness using its own diagnostic output.
+
+```text
+Tool: ssh_human_request
+Input: {"investigation":"intermittent-fault","request_id":"key-1","action":"ready",
+ "message":"Press the test key once, then choose Done."}
+Output: {"request_id":"key-1","status":"ready"}
+
+$ quirkbench investigation respond intermittent-fault key-1 done
+
+Tool: ssh_human_request
+Input: {"investigation":"intermittent-fault","request_id":"key-1","action":"status"}
+Output: {"request_id":"key-1","status":"answered","response":"done","late":false}
+
+Tool: run_results
+Input: {"run_id":"run-1"}
+Output: {"run_id":"run-1","evidence":"received","file_count":1006,"total_bytes":42600,
+ "command_count":4,"transfer_count":2,"collection_problem_count":0}
+
+Tool: run_results
+Input: {"run_id":"run-1","view":"files","limit":2}
+Output: {"files":[{"saved_file":"results/run-1/probe.log","bytes":1024},
+ {"saved_file":"results/run-1/timing.json","bytes":96}],"next_offset":2,"total":1006}
+```
+
+```text
+Tool: controller_sequence_start
+Input: {"investigation":"intermittent-fault","request_id":"upload-and-probe-1","steps":[
+ {"name":"upload","tool":"sftp_upload","arguments":{"run_id":"run-1",
+  "controller_path":"/home/sam/work/probe.py","target_name":"probe.py"}},
+ {"name":"probe","tool":"ssh_command_start","arguments":{"run_id":"run-1",
+  "argv":["python3","/var/tmp/quirkbench/probe.py"],"timeout_seconds":60}},
+ {"name":"finished","tool":"ssh_command_wait","arguments":{
+  "command_id":{"from_step":"probe","field":"command_id"}}}]}
+Output: {"work_id":"sequence-2","status":"running","next_tool":"controller_work_wait"}
+```

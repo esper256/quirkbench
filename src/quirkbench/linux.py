@@ -229,22 +229,37 @@ class Linux:
             from .computer import hardware_description
 
             results = [hardware_description()]
-            failures = []
+            failures, tools = [], []
             for command in (("lscpu",), ("lspci", "-nnk"), ("lsusb",)):
                 try:
                     result = await self.command(*command, timeout=10, check=False)
-                    results.append(
-                        f"=== {command[0]} (exit {result['exit_code']}) ===\n{result['output']}"
+                    warnings = [
+                        line for line in result["output"].splitlines() if "Error reading " in line
+                    ]
+                    tools.append(
+                        dict(
+                            tool=command[0],
+                            exit_code=result["exit_code"],
+                            warnings=warnings[:10],
+                            partial=bool(warnings or result["exit_code"]),
+                        )
                     )
-                    if result["exit_code"] or "Error reading " in result["output"]:
+                    results.append(
+                        f"=== {command[0]} (exit {result['exit_code']}; {'partial output' if tools[-1]['partial'] else 'complete'}) ===\n{result['output']}"
+                    )
+                    if tools[-1]["partial"]:
                         failures.append(command[0])
                 except (OSError, TimeoutError) as error:
                     results.append(f"{command[0]} unavailable: {error}")
+                    tools.append(
+                        dict(tool=command[0], exit_code=None, partial=True, error=str(error))
+                    )
                     failures.append(command[0])
             return {
                 "exit_code": 1 if failures else 0,
                 "partial": bool(failures),
-                "failed_tools": failures,
+                "failed_tools": [t["tool"] for t in tools if t["exit_code"] != 0],
+                "tools": tools,
                 "output": "\n".join(results),
             }
         if view == "network":

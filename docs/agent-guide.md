@@ -63,8 +63,8 @@ candidate. Make another preparation request for different software.
   may be unavailable; it does not change volume or imply the human has responded.
 - `sftp_upload` transfers candidate files; `sftp_download` retrieves completed
   experiment evidence while the candidate runs.
-- `recovery_return` requests return and diagnostic upload. `run_results` lists
-  received files; `saved_output_read` reads bounded portions.
+- `recovery_return` requests return and diagnostic upload. `run_results` summarizes
+  received evidence; `saved_output_read` reads bounded portions.
 - Repeat boot keeps persistent edits but receives a new run ID. Plain
   `ostree admin unlock` edits disappear on reboot. `recovery_discard_ostree`
   removes retained files explicitly before a fresh deployment.
@@ -80,7 +80,7 @@ update recovery settings. Save reusable software changes in a prepared candidate
 not just a retained disk. The agent owns reasoning, code edits and patch generation.
 
 The [agent examples](mockups/agent-experiment.md) illustrate these tools.
-Explicit user-session selection and dedicated live-package helpers are not available. Other mockups may show future screens; check the running
+Explicit session selection requires updated target tools. Dedicated live-package helpers are not provided. Other mockups may show future screens; check the running
 controller's tool list. See the [1.1 changelog](../CHANGELOG.md) for recent changes.
 See [installation and observed checks](controller-installation.md) for build status.
 
@@ -115,16 +115,29 @@ records the requested changes and resolved packages. No tracing or stress tool i
 started automatically. Context reports whether Podman is visible to the running
 controller, separately from target availability and source versions.
 
-When the next actions are already known, `controller_sequence_start` can perform
-an explicit ordered list of supported tools. Start collectors and probes separately,
-then explicitly wait or stop them. Each command keeps its own deadline. Sequences
-stop on errors; inspect progress before explicitly resuming after a controller
-restart. Ordinary individual tool calls remain equally supported.
+### Optional sequences: fewer agent round trips
+
+When the next actions are already known, `controller_sequence_start` runs supported
+tools in order without asking the agent to dispatch each one. Useful examples are
+upload → start → wait, or prepare → deploy → boot when no inspection is needed
+between those actions. See the [worked example](mockups/agent-experiment.md)
+and the tool schema for step arguments and references to earlier results.
+
+Each command keeps its own deadline. A command start does not wait for completion:
+include an explicit wait or stop later in the sequence. Transfers and deployment
+actions finish before the next step. Failures stop progression; there are no loops
+or automatic retries. Inspect progress before explicitly resuming after a controller
+restart. Cancellation cannot undo a boot already committed.
+
+Use individual calls when the next decision depends on output or human feedback.
+Sequences are optional, not a preferred workflow for every investigation. When
+reporting platform feedback, mention whether they saved effort or why you avoided
+them; do not use them merely to satisfy a checklist.
 
 Humans can use `quirkbench investigation pause NAME`, `force-stop NAME`, and
 `resume NAME`; agents use `investigation_control`. Pause finishes bounded work and
 returns to recovery. Resume permits work but never boots or resumes a sequence.
-Review `run_results` collection status: received files do not establish that all
+Review `run_results` collection problems and the collections view: received files do not establish that all
 requested diagnostics were available or that the experiment succeeded.
 
 ### Optional load utility
@@ -211,3 +224,44 @@ frame through the normal diagnostic output path. It requires recovery advertisin
 `console-snapshot`; older recovery needs updating. The frame includes its age and
 size, not colors. Stale frames and external programs (including the terminal and
 network password UI) are unavailable, not captured as current recovery screens.
+
+## Compact results and existing login sessions
+
+`run_results(run_id)` returns counts, receipt and collection problems. Select
+`view="files"`, `"commands"`, `"transfers"` or `"collections"` for details; pass
+`next_offset` as `offset` until it is null. Listings can grow before final receipt.
+`saved_output_read(saved_file, tail=true)` reads the last bounded portion of a log.
+Collection records identify the boot and environment when known; a missing candidate
+journal is not replaced by recovery logs.
+
+`ssh_login_sessions(run_id)` lists existing sessions and sleep inhibitors.
+`ssh_command_start(login_session="c2", ...)` explicitly runs as that active user,
+with its desktop environment and user-owned evidence/work subdirectories. It does
+not start a desktop or switch VT. Multiple graphical sessions for the same user
+can make the user-manager environment ambiguous; use ordinary commands with an
+explicit environment in that case. Root remains the default when no session is
+selected. An inhibitor's expiry is not generally supplied by logind; consult the
+owning command's deadline. Do not inhibit a deliberate suspend test.
+
+`sftp_upload_batch` accepts up to 32 controller_path/target_name pairs. It stops on
+the first failure and reports uploaded, failed and not-attempted files. Earlier
+files remain published; nothing is executed. Individual uploads work in sequences.
+
+## Human actions and preparation time
+
+Use `ssh_human_request` with a unique request ID. `prepare` records the short
+instruction without displaying it. Verify your collector is ready, then use
+`ready`. The human responds from the target's **Human request** menu or
+`quirkbench investigation respond NAME REQUEST done|unable` on the controller.
+Read `status`; acknowledgment is not proof the measurement succeeded. Cancel before
+closing the collector. Late responses are marked; rearm with a new request ID.
+This never switches away from a visible desktop. Chimes remain optional and require
+appropriate playback authorization; they do not repeat automatically.
+
+Prepare candidates and keep incremental build output before borrowing the target
+when its exact software is already known. Record workload file hashes and options
+with evidence, especially after changing a sample or detector threshold. Stop
+writers before making an archive. A command stop controls its process group,
+not detached containers or services it started. For example, an investigation's
+container-launch script can use `trap 'podman stop "$container"' EXIT` and verify
+cleanup afterward. These are suggestions, not a required investigation procedure.

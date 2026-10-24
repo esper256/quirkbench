@@ -83,7 +83,7 @@ async def _prepare_candidate(root, linux, work, progress):
     # A baseline selection is reused across retries, not re-resolved to a newer OS.
     selection_file = root / "baselines" / identifier(work["scope"]) / "selection.json"
     selection = read_json(selection_file)
-    if selection and selection["requested"] != base:
+    if selection and base not in (selection["requested"], selection["image"]):
         raise ValueError(
             "This investigation already selected a different baseline. Start a new investigation to change it."
         )

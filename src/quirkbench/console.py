@@ -15,7 +15,7 @@ import time
 
 import aiohttp
 
-from .files import atomic_write, read_json, save_json
+from .files import atomic_write, read_json, save_json, disk
 from .linux import Linux
 from .recovery_runtime import EmergencyPower, network_facts
 from .diagnostics import emergency_report, recovery_report, display_lines
@@ -26,6 +26,7 @@ MENU = [
     ("a", "Activity"),
     ("l", "Logs & reports"),
     ("i", "Target details"),
+    ("h", "Human request"),
     ("t", "Open terminal"),
     ("p", "Power"),
 ]
@@ -102,6 +103,7 @@ class Console:
         self.network_save = None
         self.emergency_report_task = None
         self.last_snapshot = 0
+        self.human_response_task = None
 
     def state(self):
         status = snapshot(self.screen)
@@ -272,6 +274,27 @@ class Console:
             self.notice = f"Report saved{' in RAM until power off' if basic else ''}: {path}"
         return path
 
+    async def respond(self, request, answer):
+        _, status, _ = self.state()
+        settings = await disk(read_json, self.screen.parent / "report-connection.json", {})
+        if not settings.get("token"):
+            raise ValueError("Connect to the controller before sending a response.")
+        tls = ssl.create_default_context(cafile=self.screen.parent / "controller.crt")
+        async with aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=tls), timeout=aiohttp.ClientTimeout(total=10)
+        ) as client:
+            async with client.post(
+                settings["url"] + "/api/v1/human/" + request["id"] + "/response",
+                json=dict(answer=answer, boot_id=status.get("boot_id")),
+                headers={"Authorization": "Bearer " + settings["token"]},
+            ) as response:
+                response.raise_for_status()
+                saved = await response.json()
+        self.notice = (
+            "Response saved (late; test may have ended)." if saved["late"] else "Response saved."
+        )
+        return saved
+
     def open_page(self, page):
         self.page, self.choice, self.scroll = page, 0, 0
         self.follow = True
@@ -288,6 +311,7 @@ class Console:
                 "Send report to controller",
                 "Send emergency report",
             ],
+            "human": ["Back", "Done", "Unable to do this"],
             "power": ["Back", reboot, "Shut down", "Force reboot", "Force power off"],
             "emergency-confirm": [
                 "Cancel",
@@ -303,6 +327,23 @@ class Console:
 
     def page_lines(self, width=80):
         fields, status, settings = self.state()
+        if self.page == "human":
+            request = status.get("human_request")
+            if not request:
+                return ["HUMAN REQUEST", "", "No request is waiting."]
+            return [
+                "HUMAN REQUEST",
+                "",
+                *textwrap.wrap(text(request["message"]), max(20, width - 2)),
+                "",
+                f"Request: {request['request_id']}",
+                f"Status: {request['status']}",
+                "",
+                *[
+                    ("> " if i == self.choice else "  ") + label
+                    for i, label in enumerate(self.options())
+                ],
+            ]
         if self.page == "emergency-confirm":
             return [
                 "EMERGENCY POWER",
@@ -438,7 +479,14 @@ class Console:
             self.child(screen, self.terminal)
         else:
             self.open_page(
-                {"a": "activity", "l": "logs", "i": "details", "c": "controller", "p": "power"}[key]
+                {
+                    "a": "activity",
+                    "l": "logs",
+                    "i": "details",
+                    "c": "controller",
+                    "p": "power",
+                    "h": "human",
+                }[key]
             )
 
     def power_command(self, command, check=True):
@@ -564,7 +612,18 @@ class Console:
         elif self.page == "activity" and key in (ord("f"), ord("F")):
             self.follow = True
         elif key in (10, 13, curses.KEY_ENTER):
-            if self.page == "logs":
+            if self.page == "human":
+                if self.choice == 0:
+                    self.open_page("home")
+                elif not self.human_response_task:
+                    request = self.state()[1].get("human_request")
+                    if request and request["status"] == "ready":
+                        answer = "done" if self.choice == 1 else "unable"
+                        self.human_response_task = self.workers.submit(
+                            lambda: asyncio.run(self.respond(request, answer))
+                        )
+                        self.notice = "Sending response..."
+            elif self.page == "logs":
                 if self.choice < 2:
                     command = ["journalctl", "-b"]
                     if self.choice == 1:
@@ -741,7 +800,7 @@ class Console:
             switched = False
             while True:
                 self.update_power()
-                for name in ("network_save", "emergency_report_task"):
+                for name in ("network_save", "emergency_report_task", "human_response_task"):
                     task = getattr(self, name)
                     if task and task.done():
                         try:

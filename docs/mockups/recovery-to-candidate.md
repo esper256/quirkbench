@@ -202,7 +202,11 @@ Output: {"work_id":"boot-2","status":"starting","stage":"Deploying candidate on 
 ```text
 Tool: run_results
 Input: {"run_id":"run-1"}
-Output: {"evidence":"received","files":["results/run-1/candidate-journal.log"],"next_tool":"saved_output_read"}
+Output: {"run_id":"run-1","evidence":"received","file_count":12,"total_bytes":44000,"collection_problem_count":0}
+
+Tool: run_results
+Input: {"run_id":"run-1","view":"files","limit":10}
+Output: {"files":[{"saved_file":"results/run-1/candidate-journal.log","bytes":12000}],"next_offset":10,"total":12}
 
 Tool: saved_output_read
 Input: {"saved_file":"results/run-1/candidate-journal.log","limit":4096}

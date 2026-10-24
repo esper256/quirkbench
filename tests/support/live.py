@@ -21,6 +21,7 @@ async def start_python(lab, run, code, request="probe", timeout=10):
         request_id=request,
         argv=[sys.executable, "-c", code],
         timeout_seconds=timeout,
+        wait_seconds=0,
     )
 
 

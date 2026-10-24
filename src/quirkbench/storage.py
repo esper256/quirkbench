@@ -322,6 +322,7 @@ class Storage:
         candidates = [
             await self.store.get("candidate", key) for key in sorted({r["candidate"] for r in runs})
         ]
+        human_requests = await self.store.find("human-request", investigation=name)
         timeline = []
         cursor = 0
         while page := await self.store.events(name, cursor, 1000):
@@ -341,6 +342,7 @@ class Storage:
                 save_json(temporary / "runs.json", runs)
                 save_json(temporary / "candidates.json", candidates)
                 save_json(temporary / "timeline.json", timeline)
+                save_json(temporary / "human-requests.json", human_requests)
                 for run in runs:
                     source = self.root / "results" / run["id"]
                     if source.exists():

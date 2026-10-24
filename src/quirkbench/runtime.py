@@ -24,6 +24,7 @@ COMMON = (
     "recovery_runtime.py",
     "candidates.py",
     "commands.py",
+    "sessions.py",
     "transfer.py",
     "console.py",
     "assets/quirkbench-prepare.service",

@@ -87,6 +87,8 @@ class Commands:
         max_output_bytes,
         stop_grace_seconds=10,
         interactive=False,
+        login_session=None,
+        linux=None,
     ):
         identifier(key)
         if (
@@ -132,6 +134,8 @@ class Commands:
             timeout_seconds=timeout_seconds,
             max_output_bytes=max_output_bytes,
         )
+        if login_session is not None:
+            inputs["login_session"] = login_session
         previous = self.records.get(key)
         if previous:
             if previous["inputs"] != inputs:
@@ -163,7 +167,7 @@ class Commands:
             raise error
         self.stop_events[key] = asyncio.Event()
         self.finished[key] = asyncio.Event()
-        self.tasks[key] = asyncio.create_task(self.execute(record))
+        self.tasks[key] = asyncio.create_task(self.execute(record, linux))
         self.tasks[key].add_done_callback(lambda _: self.tasks.pop(key, None))
         return await self.read(key)
 
@@ -179,15 +183,41 @@ class Commands:
         with (self.folder / (key + ".txt")).open("ab", buffering=0) as output:
             os.fsync(output.fileno())
 
-    async def execute(self, record):
+    async def execute(self, record, linux=None):
         key, inputs = record["command_id"], record["inputs"]
         process = collector = stopped = terminal = None
         status, error = "failed", None
+        deadline = asyncio.get_running_loop().time() + inputs["timeout_seconds"]
         try:
             terminal = Terminal() if inputs["interactive"] else None
             if terminal:
                 self.terminals[key] = terminal
             argv = inputs["argv"]
+            session_env, credentials = {}, {}
+            if inputs.get("login_session") is not None:
+                from .sessions import execution_context
+
+                preparing = asyncio.create_task(
+                    execution_context(linux, inputs["login_session"], self.evidence, self.workspace)
+                )
+                stopped = asyncio.create_task(self.stop_events[key].wait())
+                try:
+                    done, _ = await asyncio.wait(
+                        [preparing, stopped],
+                        timeout=max(0, deadline - asyncio.get_running_loop().time()),
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if stopped in done or preparing not in done:
+                        status = "stopped" if stopped in done else "timed-out"
+                        return
+                    context = await preparing
+                finally:
+                    preparing.cancel()
+                    await asyncio.gather(preparing, return_exceptions=True)
+                    stopped.cancel()
+                session_env = context["environment"]
+                credentials = {k: context[k] for k in ("user", "group", "extra_groups")}
+                await self.save(record, login_session=context["session"])
             if terminal:
                 argv = [
                     sys.executable,
@@ -208,7 +238,9 @@ class Commands:
                         "QUIRKBENCH_RUN_ID": self.run_id,
                         "QUIRKBENCH_EVIDENCE_DIR": str(self.evidence),
                         "QUIRKBENCH_WORK_DIR": str(self.workspace),
+                        **session_env,
                     },
+                    **credentials,
                     stdin=terminal.slave if terminal else asyncio.subprocess.DEVNULL,
                     stdout=terminal.slave if terminal else asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
@@ -242,7 +274,7 @@ class Commands:
             stopped = asyncio.create_task(self.stop_events[key].wait())
             done, _ = await asyncio.wait(
                 [collector, stopped],
-                timeout=inputs["timeout_seconds"],
+                timeout=max(0, deadline - asyncio.get_running_loop().time()),
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if collector in done:

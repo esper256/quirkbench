@@ -1,30 +1,61 @@
 # Changelog
 
-## Unreleased
+## 1.2 — 2026-10-23
 
-- Detect CLI/controller software mismatches before requests and explain how to restart, instead of failing on an incompatible response.
+Source release `v1.2`; Python and RPM package version `1.2.0`.
+Changes since `v1.1`. See [release notes](docs/release-notes/1.2.md) for upgrade
+information and verification limits.
 
-- Group storage by cleanup action and support deleting paused investigations while preserving shared software.
+### Faster agent investigations
 
-- Replace `--state` with `--data-dir`, remove `doctor`, and check build/flash tools where needed.
-- Keep status output factual and replace routine SSH messages with target connection health reports.
+- Reuse candidate container layers across preparation runs through a persistent OCI
+  cache; avoid retaining RPM installers in candidate layers. Record reuse and timings.
+- Summarize run evidence by default. Page files, commands, transfers and collection
+  reports; read bounded log tails without downloading whole responses.
+- Inspect login sessions and sleep inhibitors. Run commands as an explicitly selected
+  active session's user, with normal deadlines, output and evidence handling.
+- Upload up to 32 files in one SFTP call, reporting each outcome and stopping on failure.
+- Coordinate human actions with explicit readiness, acknowledgment and cancellation.
+  Late replies cannot hide a newer request; investigation exports include responses.
+- Support interactive command terminals and graceful process-group cleanup.
+- Improve agent examples for sequences, session access, preparation and evidence.
+  Sequences remain optional; evaluate their usefulness again before 1.3.
 
-- Native controller RPM packaging and release recovery download preparation.
-- Human recovery defaults, readable image listings and `flash --built` for local development.
-- Host development launcher with private Python dependencies and no host RPM installation.
-- Clearer controller status, setup and host-tool reporting; explicit noninteractive choices.
+### Human-facing tools
 
-- Graceful command cleanup, interactive terminals and optional human notifications.
-- Whole-file evidence uploads survive slow links; confirmed receipts still control deletion.
-- Candidate startup fallback runs independently of target preparation and Python startup.
-- Controller status, stop and update checks; bounded operator logs and clearer config errors.
-- Explicit connection refresh on existing media, keeping pairing and network settings.
-- Asynchronous SQLite access, filtered status reads and completed command output caching.
-- Storage cleanup previews, investigation export and selectable candidate SELinux policy.
-- Normalize terminal progress in recovery Activity; keep original logs unchanged.
+- Add an interactive controller dashboard with readable command intent and work
+  summaries, while retaining plain-log operation.
+- Simplify installation and development commands. Add native controller RPM packaging
+  support and recovery release-download preparation without requiring host RPM layers
+  for development.
+- Use `--data-dir`, remove `doctor`, and check required tools at the relevant operation.
+- Add readable recovery listings, human flash defaults and `flash --built`.
+- Group storage by cleanup action. Preview cleanup, export and delete investigations
+  while preserving software used elsewhere.
+- Add controller status, stop and update checks. Explain CLI/controller mismatches
+  instead of failing on incompatible replies; replace SSH logspam with connection health.
 
-New target action records use individual files. No migration or owner-state reset is
-included. Updated boot behavior and SELinux modes still need separate image/hardware checks.
+### Recovery and correctness
+
+- Pair the recovery drive separately from the computer. Moving it preserves saved
+  networking while keeping computers and investigations distinct.
+- Improve early USB4 discovery in recovery and candidate startup. Keep internal-disk
+  protection based on identity rather than excluding whole driver families.
+- Run candidate startup fallback independently of Python preparation. Support explicit
+  candidate package removals, replacements and SELinux choices.
+- Keep evidence uploads working across slow links and lost replies; delete target
+  evidence only after confirmed receipt.
+- Expose the recovery TUI's last rendered screen for remote inspection; normalize
+  progress display while retaining original logs.
+- Accept a recorded baseline's digest and original reference as the same selection.
+  Distinguish inventory warnings from exit failures and label diagnostic boot origins.
+- Preserve failed command outcomes when first read after return to recovery. Session
+  discovery obeys command stop and deadline controls.
+- Use asynchronous SQLite access and bounded/cached reads. Limit unchanged-response
+  metrics to read/wait calls.
+- Replace the load tool's white-noise-like audio with a more recognizable sample.
+- Reduce avoidable waits in integration tests, including controller terminal Escape
+  handling; retain real connections, restarts and process-stop checks.
 
 ## 1.1 — 2026-10-21
 

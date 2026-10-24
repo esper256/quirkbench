@@ -263,3 +263,26 @@ Recovery `console-snapshot` support adds inspection view `console`: the last ren
 TUI frame, bounded and stored in RAM. Report age, dimensions and truncation. Do not
 capture external programs or claim a stale frame is live. Use existing report storage
 and output-reading tools; add no remote terminal service.
+
+## 1.2 evidence and interaction
+
+`run_results` defaults to a compact receipt/count summary. Its files, commands,
+transfers and collections views page details; only the files view lists file paths.
+`saved_output_read` supports a bounded tail. Inventory distinguishes process exit
+codes from partial reads; collection records identify environment and boot when known.
+
+`ssh_login_sessions` inspects logind sessions and inhibitors. Optional
+`ssh_command_start.login_session` selects an active user explicitly, using the
+user-manager display environment, normal process credentials and separate user-owned
+work/evidence directories. No account creation, display switching or sleep changes.
+Ambiguous graphical sessions require explicit ordinary commands instead.
+
+`sftp_upload_batch` uses existing single-file publication, stops at a failure and
+reports each outcome. Earlier files stay published. It is not an atomic batch.
+Sequences remain available; no competing orchestration is added.
+
+`ssh_human_request` records prepare/ready/cancel states with existing controller
+storage. The agent decides readiness. The human answers through the target menu or
+controller CLI; the same authenticated controller handles both. Responses after
+cancellation or a changed boot are late. Requests do not switch desktops, replay
+commands, or interpret measurements. A new request ID rearms a test.

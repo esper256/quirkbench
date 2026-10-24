@@ -209,6 +209,14 @@ def parser():
     }.items():
         command = acts.add_parser(action, help=help_text, description=help_text)
         command.add_argument("name", help="Investigation name")
+    response = acts.add_parser(
+        "respond",
+        help="Answer a human test request",
+        description="Answer a request after completing the described action, or say you cannot do it.",
+    )
+    response.add_argument("name", help="Investigation name")
+    response.add_argument("request", help="Request ID shown by the agent")
+    response.add_argument("answer", choices=("done", "unable"))
     return p
 
 
@@ -317,6 +325,12 @@ async def execute(args):
                 "investigation-export",
                 {"name": args.name, "destination": str(Path(args.destination).absolute())},
                 timeout=3600,
+            )
+        if args.action == "respond":
+            return await local(
+                root,
+                "human-response",
+                {"name": args.name, "request": args.request, "answer": args.answer},
             )
         if args.action in ("pause", "resume", "force-stop"):
             return await local(
