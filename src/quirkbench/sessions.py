@@ -5,6 +5,11 @@ import os
 import pwd
 from .files import disk
 
+
+class SessionEnded(ValueError):
+    pass
+
+
 GUI_ENV = frozenset(
     ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE")
 )
@@ -19,7 +24,7 @@ async def inspect_sessions(linux):
     for row in rows[:100]:
         try:
             sessions.append(await session_properties(linux, str(row["session"])))
-        except ValueError:
+        except SessionEnded:
             continue  # A login can end between listing and inspection.
     inhibitors = await linux.command(
         "systemd-inhibit", "--list", "--no-pager", timeout=10, check=False
@@ -40,12 +45,37 @@ async def session_properties(linux, session):
         "show-session",
         session,
         "--no-pager",
-        "--property=Id,User,Name,Active,Type,Class,Remote,State,Display",
+        *[
+            option
+            for field in (
+                "Id",
+                "User",
+                "Name",
+                "Active",
+                "Type",
+                "Class",
+                "Remote",
+                "State",
+                "Display",
+            )
+            for option in ("-p", field)
+        ],
+        check=False,
         timeout=10,
     )
+    if result["exit_code"]:
+        # Confirm disappearance instead of hiding tool failures as an empty list.
+        listing = await linux.command(
+            "loginctl", "list-sessions", "--json=short", "--no-pager", timeout=10
+        )
+        if session not in {str(row["session"]) for row in json.loads(listing["output"])}:
+            raise SessionEnded("The selected login session ended.")
+        raise ValueError("Could not inspect login session: " + result["output"][:1000])
     fields = dict(line.split("=", 1) for line in result["output"].splitlines() if "=" in line)
-    if fields.get("Id") != session or fields.get("State") == "closing":
-        raise ValueError("The selected login session is unavailable.")
+    if fields.get("State") == "closing":
+        raise SessionEnded("The selected login session ended.")
+    if fields.get("Id") != session or not fields.get("User", "").isdigit():
+        raise ValueError("Invalid loginctl session properties; session availability is unknown.")
     return fields
 
 
@@ -110,8 +140,9 @@ async def execution_context(linux, session, evidence, workspace):
             paths.append(str(path))
         return paths
 
-    evidence_path, work_path = await disk(directories)
-    env.update(QUIRKBENCH_EVIDENCE_DIR=evidence_path, QUIRKBENCH_WORK_DIR=work_path)
+    if evidence is not None:
+        evidence_path, work_path = await disk(directories)
+        env.update(QUIRKBENCH_EVIDENCE_DIR=evidence_path, QUIRKBENCH_WORK_DIR=work_path)
     return dict(
         environment=env,
         user=account.pw_uid,

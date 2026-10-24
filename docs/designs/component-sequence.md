@@ -55,6 +55,7 @@ sequenceDiagram
         Target->>Quirkbench: HTTPS report upload, independently of SSH
         Quirkbench-->>Target: Confirm report stored
     end
+    Note over Agent,Quirkbench: Optional follow-ups request deploy and boot after preparation; defaults still stop
     Agent->>Quirkbench: rpm_ostree_prepare_candidate, then controller_work_wait
     Note over Quirkbench: Reuse local image layers, import into OSTree and record reuse and timings
     Quirkbench-->>Agent: Prepared baseline with target connection support
@@ -154,7 +155,7 @@ sequenceDiagram
     Target->>Quirkbench: Return safely and upload remaining evidence
     Quirkbench-->>Human: Paused, with any missing evidence reported
     Human->>Quirkbench: Resume investigation
-    Note over Quirkbench: Permit new work; no automatic boot or sequence resume
+    Note over Quirkbench: Permit new work; no automatic boot or follow-up
 ```
 
 Recovery collects diagnostics and deploys the next prepared candidate. Interrupted
@@ -231,4 +232,22 @@ sequenceDiagram
     Quirkbench->>Quirkbench: Save answer; mark late replies explicitly
     Agent->>Quirkbench: Read answer and bounded command evidence
     Note over Quirkbench,Target: Experiment files follow the existing recovery upload path
+```
+
+
+## Optional incident capture
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Quirkbench
+    participant Candidate
+    Agent->>Quirkbench: Configure collector; request incident capture
+    Quirkbench->>Quirkbench: Record incident and command identities
+    Quirkbench->>Candidate: Start bounded collector once
+    Candidate->>Candidate: Save initial evidence and snapshot
+    Agent->>Quirkbench: Read incident status
+    Quirkbench->>Candidate: Download completed snapshot and manifest
+    Quirkbench-->>Agent: Capture outcome and receipt separately
+    Note over Candidate: Recovery uploads surviving files after return
 ```

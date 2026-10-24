@@ -11,10 +11,20 @@ def key(investigation, request_id):
     return "human-" + hashlib.sha256((investigation + "\0" + request_id).encode()).hexdigest()[:24]
 
 
-async def request(controller, investigation, request_id, action, message=None, chime=False):
+async def request(
+    controller,
+    investigation,
+    request_id,
+    action,
+    message=None,
+    chime=False,
+    login_session=None,
+    redeliver=False,
+):
     inv = await controller.store.get("investigation", investigation)
     identity = key(investigation, request_id)
     newly_ready = False
+    deliver_desktop = False
     async with controller.store.admission():
         existing = [
             r
@@ -40,6 +50,11 @@ async def request(controller, investigation, request_id, action, message=None, c
                     message=message,
                     status="prepared",
                     created_at=time.time(),
+                    login_session=login_session,
+                )
+            elif login_session is not None and login_session != record.get("login_session"):
+                raise ValueError(
+                    "This request ID already selects a different session. Use a new ID."
                 )
             elif message is not None and message != record["message"]:
                 raise ValueError("This request ID already has a different message. Use a new ID.")
@@ -69,12 +84,30 @@ async def request(controller, investigation, request_id, action, message=None, c
             raise ValueError("Choose prepare, ready, status or cancel.")
         if not record:
             raise ValueError("Human request not found.")
+        if (
+            action == "ready"
+            and record["status"] == "ready"
+            and record.get("login_session")
+            and (not record.get("desktop_attempt") or redeliver)
+        ):
+            record = await controller.store.change(
+                "human-request", identity, desktop_attempt=record.get("desktop_attempt", 0) + 1
+            )
+            deliver_desktop = True
     # No VT changes. A lost delivery never repeats a sound automatically.
     if action in ("ready", "cancel"):
         try:
             shown = await controller.rpc(
-                inv["target"], "human-request", request=record, chime=chime and newly_ready
+                inv["target"],
+                "human-request",
+                request=record,
+                chime=chime and newly_ready,
+                desktop=deliver_desktop,
             )
+            if deliver_desktop and "desktop" not in shown:
+                shown["desktop"] = dict(
+                    status="unavailable", message="Use the target menu or controller CLI."
+                )
             record = dict(record, delivery=shown)
         except (RequestRejected, OSError, TimeoutError) as error:
             record = dict(record, delivery_error=str(error))

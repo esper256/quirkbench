@@ -78,6 +78,7 @@ class Target:
         self.workspace = Path("/var/tmp/quirkbench")
         self.human_message = None
         self.human_request = None
+        self.notifications = {}
         self.progress_label = None
         self.progress_started = None
 
@@ -197,6 +198,9 @@ class Target:
                 else [
                     "candidate-inventory",
                     "login-sessions",
+                    "desktop-notification",
+                    "incident-capture",
+                    "keep-awake",
                     "command-start",
                     "command-read",
                     "command-stop",
@@ -388,7 +392,35 @@ class Target:
                 from .notification import chime
 
                 sound = await chime(self.linux)
-            return dict(displayed=record["status"] == "ready", chime=sound)
+            delivery = dict(status="not-requested")
+            if record.get("login_session") and self.mode == "candidate":
+                from .notification import desktop
+
+                previous = self.notifications.get(record["id"], {})
+                if (
+                    request.get("desktop")
+                    and record["status"] == "ready"
+                    and record.get("desktop_attempt", 0) > previous.get("attempt", 0)
+                ):
+                    # Remember attempt before notification; uncertain delivery is not repeated.
+                    self.notifications[record["id"]] = dict(attempt=record["desktop_attempt"])
+                    delivery = await desktop(
+                        self.linux,
+                        record["login_session"],
+                        record["message"],
+                        previous.get("notification_id"),
+                    )
+                    self.notifications[record["id"]].update(delivery)
+                elif record["status"] != "ready" and previous.get("notification_id"):
+                    delivery = await desktop(
+                        self.linux,
+                        record["login_session"],
+                        "Request " + record["status"],
+                        previous["notification_id"],
+                    )
+                elif request.get("desktop"):
+                    delivery = previous
+            return dict(displayed=record["status"] == "ready", chime=sound, desktop=delivery)
         if action == "notify":
             message = request.get("message")
             if (

@@ -47,7 +47,7 @@ it cannot deliver. Prefer completion waits over repeated status reads.
 The longer-term goal is one wait for relevant completion or failure, including
 across several commands. Interactive commands use a terminal and `ssh_terminal_input` for text, control characters
 and size changes. Input is never replayed. Target-process restart cannot reattach
-a terminal; explicit user-session selection remains later work. They must not change ordinary
+a terminal. Existing-session selection uses explicit logind properties and reports inspection failures. These features must not change ordinary
 command semantics or require another persistent service.
 
 Investigation pause finishes bounded work and returns to recovery. Force stop

@@ -150,6 +150,7 @@ class Commands:
             inputs=inputs,
             status="accepted",
             started=time.time(),
+            started_boottime=time.clock_gettime(time.CLOCK_BOOTTIME),
         )
         self.records[key] = record
         try:
@@ -339,7 +340,16 @@ class Commands:
             pass
 
     def summary(self, key):
-        return {k: v for k, v in self.record(key).items() if k not in ("inputs", "pid")}
+        record = self.record(key)
+        result = {k: v for k, v in record.items() if k not in ("inputs", "pid")}
+        argv = record["inputs"]["argv"]
+        if len(argv) == 3 and argv[:2] == ["quirkbench-run-helper", "keep-awake"]:
+            result["keep_awake_remaining_seconds"] = max(
+                0,
+                float(argv[-1])
+                - (time.clock_gettime(time.CLOCK_BOOTTIME) - record.get("started_boottime", 0)),
+            )
+        return result
 
     async def wait(self, key, seconds):
         self.record(key)

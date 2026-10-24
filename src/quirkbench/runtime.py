@@ -25,6 +25,7 @@ COMMON = (
     "candidates.py",
     "commands.py",
     "sessions.py",
+    "run_helpers.py",
     "transfer.py",
     "console.py",
     "assets/quirkbench-prepare.service",
@@ -75,11 +76,15 @@ def stage_runtime(destination):
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / name, target)
     save_json(package / "source.json", {"source": runtime_hash()})
-    for item in ("target", "console"):
+    for item, module in (
+        ("target", "target"),
+        ("console", "console"),
+        ("run-helper", "run_helpers"),
+    ):
         atomic_write(
             destination / f"usr/bin/quirkbench-{item}",
             "#!/usr/bin/python3\nimport sys\nsys.path.insert(0, '/usr/lib/quirkbench')\n"
-            f"from quirkbench.{item} import main\nmain()\n",
+            f"from quirkbench.{module} import main\nsys.exit(main())\n",
             mode=0o755,
         )
     for name in COMMON:

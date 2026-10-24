@@ -1,10 +1,34 @@
 """Candidate commands and file transfers through the connected target."""
 
+import asyncio
 import asyncssh
-from .errors import RequestRejected
+from .errors import RequestRejected, ObservationError
 from .files import disk, identifier, contained, read_json
 from .store import new_id
 from .work_status import COMMAND_DONE, completion, command_finished
+
+
+def validate_observation(result, command_id, run_id, boot_id, phase):
+    valid = (
+        isinstance(result, dict)
+        and result.get("command_id") == command_id
+        and result.get("run_id") == run_id
+        and result.get("boot_id", boot_id) == boot_id
+        and result.get("status") in COMMAND_DONE | {"accepted", "running", "stopping"}
+        and (
+            result.get("status") != "finished"
+            or result.get("saving_pending")
+            or type(result.get("exit_code")) is int
+        )
+    )
+    if not valid:
+        raise ObservationError(
+            phase,
+            "Command observation is incomplete or belongs to different work; outcome is unknown.",
+            command_id=command_id,
+            run_id=run_id,
+            boot_id=boot_id,
+        )
 
 
 class CommandControl:
@@ -222,7 +246,13 @@ class CommandControl:
         return result
 
     async def command_read(self, command_id, offset=0, stop=False, status_only=False):
-        return self.command_result(await self._command_read(command_id, offset, stop, status_only))
+        try:
+            result = await self._command_read(command_id, offset, stop, status_only)
+        except ObservationError as error:
+            result = dict(
+                command_id=command_id, status="observation-error", observation_error=error.details
+            )
+        return self.command_result(result)
 
     async def _command_read(self, command_id, offset=0, stop=False, status_only=False):
         if not stop and not status_only and (command_id, offset) in self.command_pages:
@@ -289,7 +319,23 @@ class CommandControl:
         folder = self.root / "results" / run["id"] / "commands"
 
         def read_saved():
-            saved = read_json(folder / (command_id + ".json"), {})
+            try:
+                metadata = folder / (command_id + ".json")
+                saved = read_json(metadata, {})
+                if metadata.exists():
+                    validate_observation(
+                        saved, command_id, run["id"], work["boot_id"], "saved-command"
+                    )
+                if not isinstance(saved, dict):
+                    raise ValueError("Expected a JSON object")
+            except ValueError as error:
+                raise ObservationError(
+                    "saved-command",
+                    "Saved command metadata is invalid; outcome is unknown.",
+                    command_id=command_id,
+                    saved_file=f"results/{run['id']}/commands/{command_id}.json",
+                    parse_error=str(error)[:200],
+                ) from error
             path = folder / (command_id + ".txt")
             if not path.exists():
                 return saved, b"", 0
@@ -360,7 +406,44 @@ class CommandControl:
         )
         return self.command_result(result)
 
-    async def command_wait(self, command_id, timeout_seconds=25, offset=0):
+    async def command_wait(self, command_id, timeout_seconds=25, offset=0, reconnect=False):
+        if not 0 <= timeout_seconds <= 50:
+            raise ValueError("Wait timeout must be between 0 and 50 seconds.")
+        if timeout_seconds == 0:
+            return await self.command_read(command_id, offset)
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        result = None
+        try:
+            async with asyncio.timeout(timeout_seconds):
+                result = await self.command_read(command_id, offset)
+                if command_finished(result) or result["status"] == "observation-error":
+                    return result
+                while True:
+                    result = await self._command_wait_once(
+                        command_id, max(0, deadline - asyncio.get_running_loop().time()), offset
+                    )
+                    if not reconnect or result["status"] != "connection-lost":
+                        return result
+                    await asyncio.sleep(
+                        min(1, max(0, deadline - asyncio.get_running_loop().time()))
+                    )
+        except TimeoutError:
+            pass
+        if result is not None:
+            return dict(result, wait_expired=True)
+        return self.command_result(
+            dict(
+                command_id=command_id,
+                status="observation-error",
+                observation_error=dict(
+                    phase="wait-deadline",
+                    message="No observation arrived before the wait deadline.",
+                ),
+                wait_expired=True,
+            )
+        )
+
+    async def _command_wait_once(self, command_id, timeout_seconds=25, offset=0):
         if not 0 <= timeout_seconds <= 50:
             raise ValueError(
                 "Wait timeout must be between 0 and 50 seconds; it does not stop the command."
@@ -381,6 +464,14 @@ class CommandControl:
                     boot_id=work["boot_id"],
                     command_id=command_id,
                     seconds=timeout_seconds,
+                )
+            except ObservationError as error:
+                return self.command_result(
+                    dict(
+                        command_id=command_id,
+                        status="observation-error",
+                        observation_error=error.details,
+                    )
                 )
             except (asyncssh.Error, OSError, TimeoutError):
                 pass

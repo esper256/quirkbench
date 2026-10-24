@@ -115,28 +115,23 @@ records the requested changes and resolved packages. No tracing or stress tool i
 started automatically. Context reports whether Podman is visible to the running
 controller, separately from target availability and source versions.
 
-### Optional sequences: fewer agent round trips
+### Optional preparation and boot shortcuts
 
-When the next actions are already known, `controller_sequence_start` runs supported
-tools in order without asking the agent to dispatch each one. Useful examples are
-upload → start → wait, or prepare → deploy → boot when no inspection is needed
-between those actions. See the [worked example](mockups/agent-experiment.md)
-and the tool schema for step arguments and references to earlier results.
+Preparation stops for inspection by default. When the next actions are already
+known, set `rpm_ostree_prepare_candidate(after_prepare="deploy"|"boot")`.
+Or use `recovery_deploy_ostree(boot=true)` for an existing candidate.
+Deployment options and the boot connection timeout are explicit arguments.
 
-Each command keeps its own deadline. A command start does not wait for completion:
-include an explicit wait or stop later in the sequence. Transfers and deployment
-actions finish before the next step. Failures stop progression; there are no loops
-or automatic retries. Inspect progress before explicitly resuming after a controller
-restart. Cancellation cannot undo a boot already committed.
-
-Use individual calls when the next decision depends on output or human feedback.
-Sequences are optional, not a preferred workflow for every investigation. When
-reporting platform feedback, mention whether they saved effort or why you avoided
-them; do not use them merely to satisfy a checklist.
+The returned work ID shows each phase separately. A failed or uncertain phase
+stops progression. Inspect child work after an interruption; request any remaining
+standalone action explicitly. Nothing replays automatically after a controller
+restart. `controller_candidate_cancel` stops future phases and requests cleanup of
+its preparation/deployment; it cannot undo a committed boot. Use separate tools
+when the next decision depends on results. Generic sequence tools are removed.
 
 Humans can use `quirkbench investigation pause NAME`, `force-stop NAME`, and
 `resume NAME`; agents use `investigation_control`. Pause finishes bounded work and
-returns to recovery. Resume permits work but never boots or resumes a sequence.
+returns to recovery. Resume permits work but never boots or resumes interrupted preparation.
 Review `run_results` collection problems and the collections view: received files do not establish that all
 requested diagnostics were available or that the experiment succeeded.
 
@@ -245,7 +240,7 @@ owning command's deadline. Do not inhibit a deliberate suspend test.
 
 `sftp_upload_batch` accepts up to 32 controller_path/target_name pairs. It stops on
 the first failure and reports uploaded, failed and not-attempted files. Earlier
-files remain published; nothing is executed. Individual uploads work in sequences.
+files remain published; nothing is executed.
 
 ## Human actions and preparation time
 
@@ -265,3 +260,44 @@ writers before making an archive. A command stop controls its process group,
 not detached containers or services it started. For example, an investigation's
 container-launch script can use `trap 'podman stop "$container"' EXIT` and verify
 cleanup afterward. These are suggestions, not a required investigation procedure.
+
+
+## Optional incident capture and sleep control
+
+For a fleeting problem, configure `ssh_incident_configure(run_id, argv,
+timeout_seconds, max_bytes)` with your own collector. The collector writes into
+its supplied `QUIRKBENCH_EVIDENCE_DIR`; finish writers before it exits. The argument
+order defines collection order. Quirkbench does not decide which probes alter the
+system, nor intervene after capture.
+
+Call `ssh_incident_capture(run_id, request_id, classification)` with classification
+`observed`, `injected` or `unknown`. A human can trigger the same collector with
+`quirkbench investigation capture NAME --request-id ID`.
+Use `ssh_incident_status(incident_id)` to retrieve the original snapshot and
+manifest. Receipt and capture success are separate: failed collectors can still
+produce useful files. Original files survive in experiment evidence even if the
+collector is stopped. Recovery uploads surviving files on return. Keep later
+analysis in separate files; do not overwrite the initial capture. Reusing a request
+ID observes the same capture, never runs the collector again.
+
+`ssh_keep_awake(run_id, request_id, action="start", duration_seconds=N)` runs a
+bounded sleep inhibitor. Use `status` or `release` with the same IDs. Its deadline
+includes suspended time; it ends on expiry, process termination or reboot. It
+blocks both idle and deliberate logind sleep, so release it before a suspend test.
+It does not change persistent power settings or keep the display lit. Controller
+disconnection does not renew it.
+
+To wait across a planned network interruption, use
+`ssh_command_wait(reconnect=true, timeout_seconds=...)`. The wait remains bounded;
+the command's own deadline is separate. An invalid observation returns
+`observation-error`, not a failed experiment. Inspect its phase and IDs. Neither
+waiting nor reconnecting replays the command.
+
+Human requests may select `login_session` for a desktop notification in an
+existing graphical session. Delivery is not acknowledgment. Failure leaves the
+target menu and controller CLI response available. Notifications are not retried
+automatically; `redeliver=true` explicitly requests another delivery. Cancellation
+updates a delivered notification where supported. No desktop is started or switched.
+
+These helpers are optional. Older target software must be updated for incident
+capture and keep-awake; existing command and transfer tools remain available.

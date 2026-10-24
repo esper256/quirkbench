@@ -7,11 +7,12 @@ Start with the short [product requirements](requirements/product.md). Changes to
 See the [example screens and commands](mockups/README.md) for the intended experience,
 from installation to an investigation patch.
 For current use, start with the [agent guide](agent-guide.md) or
-[installation](controller-installation.md). Package maintainers use [release packaging](releases.md). See the [1.1 changelog](../CHANGELOG.md)
+[installation](controller-installation.md). Package maintainers use [release packaging](releases.md). See the [changelog](../CHANGELOG.md)
 for changes since the first agent investigation.
 
-The [1.2 plan](designs/1.2-plan.md) prioritizes the next improvements from real
-investigation feedback and recorded use.
+The [1.3 roadmap](designs/1.3-plan.md) prioritizes reliability and small investigation
+helpers from overnight feedback. The [1.2 plan](designs/1.2-plan.md) records the
+previous release scope.
 
 Then read only the design relevant to the task. Designs describe **how Quirkbench should work**, not a claim that the current code implements them. Agents may improve them without approval except for suspect changes: massive added complexity or a substantial loss of capability, performance or ease of use. Explain such a change and ask the human first.
 

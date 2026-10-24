@@ -10,8 +10,11 @@ def display_lines(value):
     """Normalize terminal progress for text display; leave raw log bytes alone."""
     import re
 
+    # OSTree saves/restores the cursor with ESC 7/8, not just CSI sequences.
+    value = str(value).replace("\x1b8", "\n").replace("\x1b[u", "\n")
     text = re.sub(r"\x1b\][^\x07]*(?:\x07|\x1b\\)", "", str(value))
     text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+    text = re.sub(r"\x1b[^\[]", "", text)
     return text.replace("\r\n", "\n").replace("\r", "\n").splitlines()
 
 
