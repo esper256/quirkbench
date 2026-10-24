@@ -31,7 +31,7 @@ class ControllerTerminal:
             stdin=slave,
             stdout=slave,
             stderr=slave,
-            env=dict(os.environ, TERM=term),
+            env=dict(os.environ, TERM=term, ESCDELAY="25"),
             start_new_session=True,
         )
         os.close(slave)

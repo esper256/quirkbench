@@ -182,7 +182,7 @@ async def test_preparation_summary_inventory_and_journal_collection(lab, tmp_pat
     await lab.until(lambda: lab.tools.reboots == 2)
     await lab.boot_target()
     await lab.call("controller_work_wait", work_id=returned["work_id"], timeout_seconds=5)
-    results = await lab.call("run_results", run_id=run["run_id"])
+    results = await lab.call("run_results", run_id=run["run_id"], view="files")
     assert any("9876543212344321abcd123456789abc" in call for call in lab.tools.calls)
     assert (
         read_json(lab.root / "results" / run["run_id"] / "candidate-journal.log.status.json")[
@@ -190,7 +190,7 @@ async def test_preparation_summary_inventory_and_journal_collection(lab, tmp_pat
         ]
         == "collected"
     )
-    assert any(f["bytes"] > 0 for f in results["file_details"])
+    assert any(f["bytes"] > 0 for f in results["files"])
     discarded = await lab.call(
         "recovery_discard_ostree", run_id=run["run_id"], request_id="discard"
     )
@@ -336,6 +336,8 @@ async def test_rejected_command_does_not_block_pause_or_results(lab):
     results = await lab.call("run_results", run_id=run)
 
     assert results["evidence"] == "received"
-    assert results["commands"][0]["not_started"]
+    commands = await lab.call("run_results", run_id=run, view="commands")
+    collections = await lab.call("run_results", run_id=run, view="collections")
+    assert commands["commands"][0]["not_started"]
     assert (lab.root / "results" / run / "files/probe.status.json").read_text() == "[]"
-    assert not any("/files/" in report["report_file"] for report in results["collections"])
+    assert not any("/files/" in report["report_file"] for report in collections["collections"])

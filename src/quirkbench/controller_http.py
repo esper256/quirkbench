@@ -218,9 +218,27 @@ def https_app(controller):
             raise web.HTTPNotFound()
         return web.FileResponse(path)
 
+    async def human_response(request):
+        from .human_requests import respond
+
+        target = await authenticated_target(request)
+        data = await request.json()
+        try:
+            record = await respond(
+                controller,
+                request.match_info["request"],
+                data["answer"],
+                target=target["id"],
+                boot_id=data["boot_id"],
+            )
+        except (ValueError, KeyError) as error:
+            raise web.HTTPBadRequest(text=str(error)) from error
+        return web.json_response(record)
+
     app.add_routes(
         [
             web.post("/api/v1/pair", pair),
+            web.post("/api/v1/human/{request}/response", human_response),
             web.put("/api/v1/runs/{run}/evidence/{path:.+}", upload),
             web.put("/api/v1/runs/{run}/result", result),
             web.put("/api/v1/reports/{report}", upload),

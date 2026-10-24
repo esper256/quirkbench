@@ -19,6 +19,11 @@ def show(args, result):
         print(result["message"])
         return
     action = getattr(args, "action", None)
+    if args.command == "investigation" and action == "respond":
+        print(
+            "Response recorded: " + result["response"] + (" (late)" if result.get("late") else "")
+        )
+        return
     if args.command == "recovery":
         if action == "list":
             if not result["images"]:

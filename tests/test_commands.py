@@ -53,7 +53,11 @@ async def test_parallel_candidate_commands_timeout_stop_and_separate_environment
     work = await lab.start_run(candidate["candidate_id"])
     await lab.boot_target("candidate", work["run_id"])
     await lab.call("controller_work_wait", work_id=work["work_id"], timeout_seconds=5)
-    slow = dict(run_id=work["run_id"], argv=[sys.executable, "-c", "import time; time.sleep(60)"])
+    slow = dict(
+        run_id=work["run_id"],
+        argv=[sys.executable, "-c", "import time; time.sleep(60)"],
+        wait_seconds=0,
+    )
 
     first = await lab.call(
         "ssh_command_start", **slow, request_id="slow", timeout_seconds=1, env={"ONLY_FIRST": "yes"}
@@ -103,6 +107,7 @@ async def test_candidate_output_limit_and_repeated_stop_are_safe(lab):
         request_id="stubborn",
         timeout_seconds=60,
         stop_grace_seconds=0.05,
+        wait_seconds=0,
         argv=[sys.executable, "-c", code],
         cwd=str(lab.data),
     )
@@ -223,7 +228,7 @@ async def test_file_upload_does_not_block_commands_or_publish_partial_files(
 
     assert "connected" in finished["output"]
     assert (lab.target.workspace / "probe.py").read_bytes() == probe.read_bytes()
-    results = await lab.call("run_results", run_id=run["run_id"])
+    results = await lab.call("run_results", run_id=run["run_id"], view="transfers")
     assert results["transfers"][0]["name"] == "probe.py"
 
 
@@ -279,4 +284,4 @@ async def test_terminal_input_resize_and_graceful_collector_stop(lab):
     assert (await lab.call("ssh_command_read", command_id=collector["command_id"]))[
         "output"
     ] == saved["output"]
-    assert (await lab.call("run_results", run_id=run))["commands"]
+    assert (await lab.call("run_results", run_id=run, view="commands"))["commands"]

@@ -15,7 +15,7 @@ import asyncssh
 import uvicorn
 
 from .config import Config
-from .files import disk, atomic_write, contained, identifier, read_json, save_json
+from .files import disk, atomic_write, contained, identifier, save_json
 from .linux import Linux
 from .investigations import InvestigationControls
 from .work_status import WORK_DONE, COMMAND_DONE, work_finished, wait_finished, completion
@@ -308,7 +308,7 @@ class Controller(InvestigationControls, Storage, CommandControl):
             next_tool="saved_output_read",
         )
 
-    async def saved_output(self, file, offset=0, limit=8192):
+    async def saved_output(self, file, offset=0, limit=8192, tail=False):
         if not isinstance(offset, int) or offset < 0 or not 1 <= limit <= 32768:
             raise ValueError("Use a nonnegative byte offset and a limit between 1 and 32768.")
         if not Path(file).parts or Path(file).parts[0] not in ("results", "reports", "logs"):
@@ -320,78 +320,26 @@ class Controller(InvestigationControls, Storage, CommandControl):
             raise ValueError("Controller logs are for the operator, not experiment evidence.")
 
         def read():
+            start = max(0, path.stat().st_size - limit) if tail else offset
             with path.open("rb") as stream:
-                stream.seek(offset)
+                stream.seek(start)
                 value = stream.read(limit)
                 more = bool(stream.read(1))
             return dict(
                 saved_file=file,
                 output=value.decode(errors="replace"),
-                offset=offset,
-                next_offset=offset + len(value),
+                offset=start,
+                next_offset=start + len(value),
                 output_bytes=path.stat().st_size,
                 more=more,
             )
 
         return await disk(read)
 
-    async def run_results(self, run_id):
-        run = await self.store.get("run", run_id)
-        folder = self.root / "results" / run_id
-        files = await disk(
-            lambda: sorted(
-                p.relative_to(self.root).as_posix()
-                for p in folder.rglob("*")
-                if p.is_file() and not p.name.startswith(".upload-")
-            )
-        )
+    async def run_results(self, run_id, view="summary", offset=0, limit=50):
+        from .results import run_results
 
-        def collection_reports():
-            reports = []
-            for file in files:
-                path = self.root / file
-                if path.parent != folder or not (
-                    path.name.endswith(".log.status.json")
-                    or path.name == "candidate-journal-status.json"
-                ):
-                    continue
-                try:
-                    report = read_json(path)
-                    if not isinstance(report, dict):
-                        raise ValueError("Expected a collection report object.")
-                except ValueError as error:
-                    report = dict(status="failed", error=f"Cannot read collection report: {error}")
-                reports.append(dict(report, report_file=file))
-            return reports
-
-        collections = await disk(collection_reports)
-        commands = []
-        for work in await self.store.find("work", action="ssh-command", run_id=run_id):
-            if work["action"] == "ssh-command" and work.get("run_id") == run_id:
-                result = await self.command_read(work["id"], status_only=True)
-                commands.append({k: v for k, v in result.items() if k != "output"})
-        return dict(
-            run=run,
-            evidence="received" if run.get("evidence") else "pending",
-            files=files,
-            collections=collections,
-            file_details=await disk(
-                lambda: [
-                    dict(
-                        file=f,
-                        bytes=(self.root / f).stat().st_size,
-                        run_id=run_id,
-                        boot_id=run.get("boot_id"),
-                    )
-                    for f in files
-                    if not Path(f).name.startswith(".upload-")
-                ]
-            ),
-            commands=commands,
-            transfers=[t for t in (await self.store.find("transfer")) if t["run_id"] == run_id],
-            next_tool="saved_output_read",
-            cause="Not inferred. Inspect the saved journal; a return to recovery alone does not establish a crash.",
-        )
+        return await run_results(self, run_id, view, offset, limit)
 
     async def prepare(
         self,
@@ -1216,6 +1164,10 @@ class Controller(InvestigationControls, Storage, CommandControl):
             if work["scope"] != data["name"]:
                 raise ValueError("Work does not belong to this investigation.")
             return await self.wait(work["id"], data["timeout_seconds"], maximum=86400)
+        if action == "human-response":
+            from .human_requests import key, respond
+
+            return await respond(self, key(data["name"], data["request"]), data["answer"])
         if action == "investigation-control":
             return await self.investigation_control(data["name"], data["control"])
         if action == "investigation-timeline":

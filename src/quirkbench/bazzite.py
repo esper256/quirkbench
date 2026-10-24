@@ -83,7 +83,7 @@ async def _prepare_candidate(root, linux, work, progress):
     # A baseline selection is reused across retries, not re-resolved to a newer OS.
     selection_file = root / "baselines" / identifier(work["scope"]) / "selection.json"
     selection = read_json(selection_file)
-    if selection and selection["requested"] != base:
+    if selection and base not in (selection["requested"], selection["image"]):
         raise ValueError(
             "This investigation already selected a different baseline. Start a new investigation to change it."
         )
@@ -175,7 +175,7 @@ RUN --mount=type=bind,source=target.rpm,target=/tmp/quirkbench-target.rpm,ro,z r
     systemctl mask uupd.timer uupd.service bazzite-hardware-setup.service udisks2.service ublue-os-media-automount.service bootloader-update.service greenboot-healthcheck.service greenboot-rollback.service redboot-auto-reboot.service fwupd.service fwupd-refresh.service fwupd-refresh.timer rpm-ostreed-automatic.timer bootc-fetch-apply-updates.timer && \\
     ostree container commit
 {additions}
-RUN --mount=type=bind,source=build-initramfs,target=/tmp/quirkbench-build-initramfs,ro bash /tmp/quirkbench-build-initramfs && ostree container commit
+RUN --mount=type=bind,source=build-initramfs,target=/tmp/quirkbench-build-initramfs,ro,z bash /tmp/quirkbench-build-initramfs && ostree container commit
 """,
     )
     tag = "localhost/quirkbench-candidate:" + work["id"]

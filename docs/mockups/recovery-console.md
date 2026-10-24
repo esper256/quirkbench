@@ -328,3 +328,28 @@ First computer
   Controller      Connected
   Current work    Uploading evidence
 ```
+
+## Optional human request
+
+```text
+H Human request
+
+HUMAN REQUEST
+
+Press the test key once, then choose Done.
+
+Request: key-1
+Status: ready
+
+  Back
+> Done
+  Unable to do this
+
+↑↓ Select   Enter Confirm   Esc Back
+```
+
+The human can instead answer from the controller while leaving a desktop visible.
+
+```console
+$ quirkbench investigation respond intermittent-fault key-1 done
+```

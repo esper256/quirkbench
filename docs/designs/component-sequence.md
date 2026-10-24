@@ -214,3 +214,21 @@ sequenceDiagram
 Pairing credentials travel with the recovery drive. On each connection, the controller
 selects the reported computer before using investigation or run records. Moving the
 drive leaves other computers’ investigations and retained evidence unchanged.
+
+## Human-assisted tests
+
+```mermaid
+sequenceDiagram
+    participant Agent as User's agent
+    participant Quirkbench
+    participant Target
+    actor Human
+    Agent->>Quirkbench: Inspect sessions; start collector as selected user
+    Quirkbench->>Target: Launch bounded command with selected session environment
+    Agent->>Quirkbench: Confirm collector is ready; mark human request ready
+    Quirkbench->>Target: Display request without switching desktops
+    Human->>Quirkbench: Answer through target menu or controller CLI
+    Quirkbench->>Quirkbench: Save answer; mark late replies explicitly
+    Agent->>Quirkbench: Read answer and bounded command evidence
+    Note over Quirkbench,Target: Experiment files follow the existing recovery upload path
+```

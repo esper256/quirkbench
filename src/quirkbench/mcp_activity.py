@@ -90,6 +90,7 @@ class RecordedMCP(FastMCP):
                 )
                 unchanged = (
                     outcome == "returned"
+                    and name in ("ssh_command_read", "ssh_command_wait", "controller_work_wait")
                     and bool(observed)
                     and bool(previous)
                     and json.loads(previous[0][0]).get("observed") == observed

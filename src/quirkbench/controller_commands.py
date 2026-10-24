@@ -65,6 +65,37 @@ class CommandControl:
             "instructions": "File uploaded, not executed. Use chmod if executable permission is needed. Files survive repeat boots until deployment discard.",
         }
 
+    async def upload_files(self, run_id, files):
+        if not isinstance(files, list) or not 1 <= len(files) <= 32:
+            raise ValueError("Supply 1–32 files.")
+        names = [identifier(item["target_name"]) for item in files]
+        if len(set(names)) != len(names):
+            raise ValueError("Each target_name must be unique within the batch.")
+        _, initial = await self.command_run(run_id)
+        results = []
+        for item in files:
+            try:
+                _, current = await self.command_run(run_id)
+                if current["boot_id"] != initial["boot_id"]:
+                    raise ValueError("Candidate boot changed during batch upload.")
+                result = await self.upload_file(
+                    run_id, item["controller_path"], item["target_name"]
+                )
+                results.append(dict(result, status="uploaded"))
+            except (ValueError, OSError, asyncssh.Error) as error:
+                results.append(
+                    dict(target_name=item["target_name"], status="failed", error=str(error))
+                )
+                # Earlier files stay published; never imply a batch is atomic.
+                break
+        results += [
+            dict(target_name=item["target_name"], status="not-attempted")
+            for item in files[len(results) :]
+        ]
+        return dict(
+            run_id=run_id, files=results, complete=all(r["status"] == "uploaded" for r in results)
+        )
+
     async def download_file(self, run_id, file):
         from .transfer import download
 
@@ -109,6 +140,7 @@ class CommandControl:
         stop_grace_seconds=10,
         interactive=False,
         description=None,
+        login_session=None,
     ):
         if description is not None and (
             not isinstance(description, str)
@@ -138,6 +170,9 @@ class CommandControl:
             stop_grace_seconds=stop_grace_seconds,
             interactive=interactive,
         )
+        if login_session is not None:
+            self.require_operation(run["target"], "login-sessions")
+            inputs["login_session"] = login_session
         async with self.store.admission():
             await self.require_active(run["investigation"])
             work, fresh = await self.store.request(
@@ -199,7 +234,7 @@ class CommandControl:
             return dict(
                 command_id=command_id, status="failed", error=work["error"], not_started=True
             )
-        if status_only and command_finished(work):
+        if status_only and command_finished(work) and "exit_code" in work:
             return dict(work, command_id=command_id)
         if stop:
             (await self.update_work(command_id, stop_requested=True))
@@ -260,7 +295,11 @@ class CommandControl:
                 return saved, b"", 0
             with path.open("rb") as stream:
                 stream.seek(offset)
-                return saved, stream.read(32768), __import__("os").fstat(stream.fileno()).st_size
+                return (
+                    saved,
+                    b"" if status_only else stream.read(32768),
+                    __import__("os").fstat(stream.fileno()).st_size,
+                )
 
         saved, output, output_bytes = await disk(read_saved)
         known = target or (await self.store.get("target", run["target"]))
@@ -276,6 +315,10 @@ class CommandControl:
                 await self.update_work(
                     command_id,
                     status=status,
+                    exit_code=saved.get("exit_code"),
+                    output_bytes=output_bytes,
+                    saving_pending=saved.get("saving_pending", False),
+                    error=saved.get("error"),
                     stop_requested=False
                     if status in COMMAND_DONE
                     else work.get("stop_requested", False),

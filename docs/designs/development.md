@@ -29,9 +29,9 @@ See [installation](../controller-installation.md) and the
 
 ## Current implementation
 
-The [1.1 changelog](../../CHANGELOG.md) records work since the first agent
+The [changelog](../../CHANGELOG.md) records work since the first agent
 investigation. Use the [agent guide](../agent-guide.md) for available tools.
-User-session selection and dedicated live-package helpers remain later work. Do not rebuild completed stages or treat old milestone
+Existing-session selection is available. Dedicated live-package helpers are not provided. Do not rebuild completed stages or treat old milestone
 ordering as a restriction on useful fixes.
 
 Develop substantial connected changes with fast integration tests. Exercise actual

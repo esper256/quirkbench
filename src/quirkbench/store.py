@@ -134,6 +134,10 @@ class Store:
                 self.db.executemany(
                     "DELETE FROM records WHERE kind=? AND id=?", [(kind, key) for key in ids]
                 )
+            self.db.execute(
+                "DELETE FROM records WHERE kind='human-request' AND json_extract(data,'$.investigation')=?",
+                (name,),
+            )
             self.db.executemany(
                 "DELETE FROM events WHERE scope=?", [(key,) for key in runs | {name}]
             )

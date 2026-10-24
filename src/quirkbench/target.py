@@ -77,6 +77,7 @@ class Target:
         self.commands = None
         self.workspace = Path("/var/tmp/quirkbench")
         self.human_message = None
+        self.human_request = None
         self.progress_label = None
         self.progress_started = None
 
@@ -188,12 +189,14 @@ class Target:
             "target_source": self.software_source,
             "recovery_base": self.recovery_base,
             "human_message": self.human_message,
-            "operations": ["notify"]
+            "human_request": self.human_request,
+            "operations": ["notify", "human-request"]
             + (
                 ["inspect", "deploy", "boot", "discard", "cancel-deploy", "prune-cache"]
                 if self.mode == "recovery"
                 else [
                     "candidate-inventory",
+                    "login-sessions",
                     "command-start",
                     "command-read",
                     "command-stop",
@@ -365,6 +368,27 @@ class Target:
             self.busy = True
             self.spawn(self.prune_cache(key))
             return {"status": "accepted"}
+        if action == "human-request":
+            record = request["request"]
+            if record.get("target") != self.settings.get("target_id"):
+                raise ValueError("Human request belongs to another computer.")
+            repeat = self.human_request and self.human_request.get("id") == record["id"]
+            if record["status"] == "ready" and record.get("boot_id") != self.boot_id:
+                raise ValueError("Human request belongs to another boot.")
+            if self.human_request and not repeat:
+                if record["status"] != "ready" or record.get(
+                    "ready_at", 0
+                ) <= self.human_request.get("ready_at", 0):
+                    return dict(displayed=False, chime="not-requested")
+            self.human_request = record
+            self.human_message = record["message"] if record["status"] == "ready" else None
+            self.publish_screen()
+            sound = "not-requested"
+            if request.get("chime") and not repeat:
+                from .notification import chime
+
+                sound = await chime(self.linux)
+            return dict(displayed=record["status"] == "ready", chime=sound)
         if action == "notify":
             message = request.get("message")
             if (
@@ -410,6 +434,8 @@ class Target:
                         request["max_output_bytes"],
                         request.get("stop_grace_seconds", 10),
                         request.get("interactive", False),
+                        request.get("login_session"),
+                        self.linux,
                     )
                 except ValueError as error:
                     if key not in self.commands.records:
@@ -428,6 +454,14 @@ class Target:
                     key, request.get("text", ""), request.get("rows"), request.get("columns")
                 )
             return await self.commands.read(key, request.get("offset", 0))
+        if action == "login-sessions" and self.mode == "candidate":
+            if request.get("run_id") != self.run_id or request.get("boot_id") != self.boot_id:
+                raise ValueError("Candidate boot changed.")
+            from .sessions import inspect_sessions
+
+            return dict(
+                await inspect_sessions(self.linux), run_id=self.run_id, boot_id=self.boot_id
+            )
         if action == "candidate-inventory" and self.mode == "candidate":
             if request.get("run_id") != self.run_id or request.get("boot_id") != self.boot_id:
                 raise ValueError("Candidate boot changed; inspect current investigation context.")
@@ -788,7 +822,7 @@ class Target:
             self.busy = False
             self.publish_screen()
 
-    async def collect_journal(self, folder, filename, selection):
+    async def collect_journal(self, folder, filename, selection, *, environment=None, boot_id=None):
         """Save full journal output; keep collection failures separate from successful logs."""
         temporary = folder / (filename + ".partial")
         try:
@@ -813,6 +847,12 @@ class Target:
         except (OSError, ValueError, RuntimeError, TimeoutError) as error:
             status = dict(status="failed", error=str(error))
             await disk(temporary.unlink, missing_ok=True)
+        status.update(
+            run_id=folder.name,
+            environment=environment or self.mode,
+            boot_id=boot_id or (self.boot_id if not environment else None),
+            collected_from_boot=self.boot_id,
+        )
         await disk(save_json, folder / (filename + ".status.json"), status)
         return status
 
@@ -915,20 +955,38 @@ class Target:
                     await disk(
                         save_json,
                         folder / "candidate-journal-status.json",
-                        {"status": "failed", "error": "Recorded candidate boot ID is invalid."},
+                        dict(
+                            status="failed",
+                            error="Recorded candidate boot ID is invalid.",
+                            environment="candidate",
+                            run_id=folder.name,
+                            boot_id=None,
+                            collected_from_boot=self.boot_id,
+                        ),
                     )
                 else:
                     filename = (
                         "candidate-journal.log" if selection else "candidate-journal-all-boots.log"
                     )
                     await self.collect_journal(
-                        folder, filename, [f"--directory={journal}", *selection]
+                        folder,
+                        filename,
+                        [f"--directory={journal}", *selection],
+                        environment="candidate",
+                        boot_id=attempt.get("boot_id"),
                     )
             else:
                 await disk(
                     save_json,
                     folder / "candidate-journal-status.json",
-                    {"status": "unavailable", "reason": "No saved candidate journal directory."},
+                    {
+                        "status": "unavailable",
+                        "reason": "No saved candidate journal directory.",
+                        "environment": "candidate",
+                        "run_id": run_id,
+                        "boot_id": attempt.get("boot_id"),
+                        "collected_from_boot": self.boot_id,
+                    },
                 )
             pstore = Path("/sys/fs/pstore")
             try:

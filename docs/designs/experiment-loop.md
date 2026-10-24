@@ -41,8 +41,7 @@ durably and wake a waiting agent on completion, an agreed deadline or an error,
 without periodic model polling. Other commands can run concurrently. Each starts
 with its own explicit working directory and environment; files and services remain
 shared. See the [command rules](interactive-debugging.md#command-behavior).
-The intended human monitor is shown in the mockups; current use has CLI status
-and the recovery dashboard.
+The controller and target dashboards show current work; CLI status remains available.
 
 The agent chooses independent command timeouts; runs have no overall deadline.
 Investigation pause stops new work, lets bounded active work finish, then returns
