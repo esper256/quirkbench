@@ -39,7 +39,13 @@ DEBUGGING_PACKAGES = (
     "alsa-utils",
     "vulkan-loader",
 )
-LOAD_ASSETS = ("build.Containerfile", "quirkbench-load", "scene.shader_test")
+LOAD_ASSETS = (
+    "build.Containerfile",
+    "quirkbench-load",
+    "scene.shader_test",
+    "crickets.wav",
+    "AUDIO-LICENSE.md",
+)
 
 
 def package_requests(names):
@@ -103,6 +109,7 @@ async def _prepare_candidate(root, linux, work, progress):
         (
             "bazzite.py",
             "assets/bazzite/health-report",
+            "assets/bazzite/build-initramfs",
             "assets/bazzite/quirkbench-bazzite-health.service",
         )
         + tuple("assets/load/" + name for name in LOAD_ASSETS)
@@ -147,6 +154,7 @@ async def _prepare_candidate(root, linux, work, progress):
     shutil.copy2(rpm, folder / "target.rpm")
     assets = Path(__file__).with_name("assets") / "bazzite"
     shutil.copy2(assets / "health-report", folder / "health-report")
+    shutil.copy2(assets / "build-initramfs", folder / "build-initramfs")
     shutil.copy2(
         assets / "quirkbench-bazzite-health.service", folder / "quirkbench-bazzite-health.service"
     )
@@ -167,6 +175,7 @@ RUN --mount=type=bind,source=target.rpm,target=/tmp/quirkbench-target.rpm,ro,z r
     systemctl mask uupd.timer uupd.service bazzite-hardware-setup.service udisks2.service ublue-os-media-automount.service bootloader-update.service greenboot-healthcheck.service greenboot-rollback.service redboot-auto-reboot.service fwupd.service fwupd-refresh.service fwupd-refresh.timer rpm-ostreed-automatic.timer bootc-fetch-apply-updates.timer && \\
     ostree container commit
 {additions}
+RUN --mount=type=bind,source=build-initramfs,target=/tmp/quirkbench-build-initramfs,ro bash /tmp/quirkbench-build-initramfs && ostree container commit
 """,
     )
     tag = "localhost/quirkbench-candidate:" + work["id"]
@@ -356,29 +365,38 @@ def stage_changes(root, folder, changes):
         lines += [
             "COPY --from=qb-load /out/ /usr/libexec/quirkbench-load/",
             "COPY load/quirkbench-load /usr/bin/quirkbench-load",
+            "COPY load/crickets.wav load/AUDIO-LICENSE.md /usr/libexec/quirkbench-load/",
             "RUN chmod 755 /usr/bin/quirkbench-load && ostree container commit",
             "RUN rpm-ostree install --idempotent "
             + " ".join(DEBUGGING_PACKAGES)
             + " && ostree container commit",
         ]
-    if packages:
-        lines.append(
-            "RUN rpm-ostree install --idempotent "
-            + " ".join(packages)
-            + " && ostree container commit"
-        )
-    for kind, operation in (("packages", "install"), ("replacements", "override replace")):
-        names = []
-        mounts = []
+    removals = package_requests(changes.get("removals", []))
+    files = {"packages": [], "replacements": []}
+    mounts = []
+    for kind in files:
         for index, item in enumerate(changes.get(kind, [])):
             name = f"{kind}-{index}.rpm"
             shutil.copy2(root / "inputs" / item["sha256"], folder / name)
             mounts.append(f"--mount=type=bind,source={name},target=/tmp/{name},ro,z")
-            names.append("/tmp/" + name)
-        if names:
-            lines.append(
-                f"RUN {' '.join(mounts)} rpm-ostree {operation} {' '.join(names)} && ostree container commit"
-            )
+            files[kind].append("/tmp/" + name)
+    additions = packages + files["packages"]
+    if files["replacements"]:
+        operation = ["override", "replace", *files["replacements"]]
+        operation += ["--remove=" + name for name in removals]
+        operation += ["--install=" + name for name in additions]
+    elif removals:
+        operation = ["override", "remove", *removals]
+        operation += ["--install=" + name for name in additions]
+    elif additions:
+        operation = ["install", "--idempotent", *additions]
+    else:
+        operation = []
+    if operation:
+        # Names have a strict allowlist; local paths are generated above, never supplied shell text.
+        lines.append(
+            f"RUN {' '.join(mounts)} rpm-ostree {' '.join(operation)} && ostree container commit"
+        )
     probe = changes.get("startup_probe")
     if probe:
         shutil.copy2(root / "inputs" / probe["sha256"], folder / "startup-probe")
@@ -419,6 +437,7 @@ def change_summary(changes):
     if changes.get("debugging_tools", True):
         summary.append("Optional quirkbench-load utility (audio and GPU off unless selected)")
     summary += ["Repository package: " + name for name in changes.get("repository_packages", [])]
+    summary += ["Removed base package: " + name for name in changes.get("removals", [])]
     for kind in ("packages", "replacements"):
         summary += [
             f"Local RPM {kind}: {item['name']} (sha256 {item['sha256']})"

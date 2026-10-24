@@ -15,7 +15,7 @@ async def test_dashboard_follows_real_target_and_mcp_work(lab):
     screen = "\n".join(dashboard.lines())
 
     assert "example-workstation" in screen and "recovery" in screen
-    assert "ssh_recovery_inspect" in "\n".join(dashboard.activity())
+    assert "Inspect recovery" in "\n".join(dashboard.activity())
     assert lab.controller.token not in screen
     assert all(len(line) == 100 for line in dashboard.lines())
     dashboard.key(ord("q"), lab.controller)
@@ -102,6 +102,49 @@ async def test_dashboard_tracks_running_command_without_showing_its_inputs(lab):
     await wait_command(lab, command)
     await dashboard.refresh(lab.controller)
 
-    assert "ssh-command" in screen and "private-probe" not in screen
+    assert "arguments" in screen and "private-probe" not in screen
     assert not dashboard.work
-    assert any("ssh_command_stop" in line for line in dashboard.activity())
+    assert any(command["command_id"][:6] in line for line in dashboard.activity())
+
+
+async def test_dashboard_distinguishes_concurrent_intent_and_filters_polling(lab):
+    from tests.support.live import running_candidate, wait_command
+
+    run = await running_candidate(lab)
+    commands = []
+    for number, description in enumerate(("Collect device events", "Probe device state")):
+        commands.append(
+            await lab.call(
+                "ssh_command_start",
+                run_id=run,
+                request_id=f"display-{number}",
+                script="sleep 60 # private-value" + "\n" * 200,
+                description=description,
+                timeout_seconds=120,
+                wait_seconds=0,
+            )
+        )
+    dashboard = Dashboard()
+    await dashboard.refresh(lab.controller)
+    screen = "\n".join(dashboard.lines())
+    assert all(label in screen for label in ("Collect device events", "Probe device state"))
+    assert "private-value" not in screen
+    for command in commands:
+        await lab.call("ssh_command_read", command_id=command["command_id"])
+        await lab.call("ssh_command_stop", command_id=command["command_id"])
+        await wait_command(lab, command)
+    await dashboard.refresh(lab.controller)
+    activity = "\n".join(dashboard.activity())
+    assert "ssh_command_read" not in activity and "ssh_command_start" not in activity
+    assert all(command["command_id"][:6] in activity for command in commands)
+    assert not dashboard.work
+    assert all(len(row) == 45 for row in dashboard.lines(45, 16))
+    rejected = await lab.raw_call(
+        "ssh_command_start",
+        run_id=run,
+        request_id="bad-label",
+        argv=["true"],
+        description="hide\x1b[2J",
+        timeout_seconds=5,
+    )
+    assert rejected.isError

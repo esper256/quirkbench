@@ -6,6 +6,8 @@ import curses
 import json
 import logging
 import os
+from pathlib import Path
+import shlex
 import sys
 import time
 import unicodedata
@@ -35,6 +37,57 @@ def fit(value, width):
         result += char
         used += size
     return result + " " * max(0, width - used)
+
+
+def work_title(work):
+    action = work.get("action", "work")
+    inputs = work.get("inputs", {})
+    if action == "ssh-command":
+        if inputs.get("description"):
+            return inputs["description"]
+        argv = inputs.get("argv", [])
+        if (
+            len(argv) >= 3
+            and Path(argv[0]).name in ("sh", "bash", "dash", "zsh")
+            and argv[1] == "-c"
+        ):
+            script = argv[2]
+            try:
+                first = shlex.split(
+                    next(
+                        (
+                            line
+                            for line in script.splitlines()
+                            if line.strip() and not line.lstrip().startswith("#")
+                        ),
+                        "",
+                    )
+                )
+            except ValueError:
+                first = []
+            executable = Path(first[0]).name if first and "=" not in first[0] else "Shell"
+            return f"{executable} script · {len(script.splitlines())} lines"
+        return (Path(argv[0]).name if argv else "Command") + f" · {max(0, len(argv) - 1)} arguments"
+    return {
+        "prepare": "Prepare candidate",
+        "deploy": "Transfer candidate",
+        "boot": "Boot candidate",
+        "return": "Return to recovery",
+        "discard": "Discard retained files",
+        "sequence": "Ordered actions",
+        "prune-cache": "Clear candidate cache",
+    }.get(action, action)
+
+
+def work_state(work, event=None):
+    event = event or work
+    state = event.get("status") or event.get("stage", "accepted").lower()
+    result = state.replace("-", " ").capitalize()
+    if state in COMMAND_DONE and work.get("exit_code") is not None:
+        result += f", exit {work['exit_code']}"
+    if work.get("saving_pending"):
+        result += " · saving output"
+    return result
 
 
 class ActivityHandler(logging.Handler):
@@ -74,16 +127,42 @@ class Dashboard:
             "work", exclude_status=tuple(WORK_DONE | COMMAND_DONE)
         )
         rows = await controller.store.query(
-            "SELECT at,kind,data FROM events ORDER BY cursor DESC LIMIT 100"
+            "SELECT e.at,e.kind,e.id,e.scope,e.data,r.data FROM events e "
+            "LEFT JOIN records r ON e.kind='work' AND r.kind='work' AND r.id=e.id "
+            "WHERE e.kind!='mcp-call' OR json_extract(e.data,'$.stage')!='returned' "
+            "OR json_extract(e.data,'$.tool') IN ('ssh_recovery_inspect','ssh_candidate_inventory','ssh_target_notify') "
+            "ORDER BY e.cursor DESC LIMIT 100"
         )
         self.events = []
-        for at, kind, data in rows:
+        seen = set()
+        for at, kind, key, scope, data, record in rows:
             data = json.loads(data)
-            if kind == "mcp-call":
-                # Tool names and outcomes only; no arguments, credentials or command output.
-                message = f"MCP {data.get('tool', '?')} · {data.get('stage', '')}"
+            if record:
+                work = json.loads(record)
+                state = work_state(work, data)
+                identity = (key, state, data.get("stage"))
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                message = f"{scope} · #{key[:6]} · {work_title(work)} · {state}"
+                stage = data.get("stage", "")
+                if stage and stage.lower() not in ("accepted", state.lower()):
+                    message += " · " + stage
+            elif kind == "mcp-call":
+                tool = data.get("tool", "?")
+                title = {
+                    "ssh_recovery_inspect": "Inspect recovery",
+                    "ssh_candidate_inventory": "Inspect candidate",
+                    "ssh_target_notify": "Notify human",
+                }.get(tool, tool)
+                outcome = (
+                    "Response received"
+                    if data.get("stage") == "returned"
+                    else data.get("stage", "")
+                )
+                message = f"{title} · {outcome}"
             else:
-                message = f"{kind} · {data.get('stage', '')}"
+                message = f"{scope or kind} · {data.get('stage', '')}"
             self.events.append((at, message))
         self.error = ""
         self.ready = True
@@ -107,10 +186,18 @@ class Dashboard:
         return result or ["No targets connected. Boot a paired recovery to connect."]
 
     def work_lines(self):
-        return [
-            f"{w.get('scope', '')} · {w.get('action', 'work')} · {w.get('status', '')} · {w.get('stage', '')}"
-            for w in self.work
-        ] or ["Idle — waiting for your agent."]
+        now = time.time()
+        lines = []
+        for work in self.work:
+            age = max(0, int(now - work.get("started_at", work.get("created_at", now))))
+            line = f"#{work['id'][:6]} · {work_title(work)} · {work_state(work)} · {age}s"
+            stage = work.get("stage", "")
+            if stage and stage.lower() not in ("accepted", work.get("status", "").lower()):
+                line += " · " + stage
+            if "output_bytes" in work:
+                line += f" · {work['output_bytes']} bytes"
+            lines.append(line)
+        return lines or ["Idle — waiting for your agent."]
 
     def lines(self, width=100, height=30):
         width = max(1, width)

@@ -11,19 +11,23 @@ $ quirkbench controller run
 │ MENU                    │ CURRENT STATUS                                                         │
 │ > O  Overview           │ Controller URL  https://controller:7443                                │
 │ A  Activity             │ Targets         1 connected / 1 paired                                 │
-│ C  Connections          │ Current work    1 active                                               │
+│ C  Connections          │ Current work    2 active                                               │
 │ Q  Stop controller      │ Running for     0 min                                                  │
 ├─────────────────────────┴────────────────────────────────────────────────────────────────────────┤
 │ TARGETS & CURRENT WORK                                                                           │
 │ test-computer  ·  candidate  ·  0s ago                                                           │
 │                                                                                                  │
-│ wifi-case · ssh-command · running · Collecting diagnostics                                       │
+│ #a12abc · Collect device events · Running · 12s · 8192 bytes                                     │
+│ #b34def · Probe device state · Running · 3s · 128 bytes                                          │
+│                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
 │ CONTROLLER & MCP ACTIVITY                                                                        │
-│ 09:14:04  MCP ssh_command_start · returned                                                       │
-│ 09:14:02  Target test-computer connected (candidate)                                             │
+│ 19:12:41  intermittent-fault · #b34def · Probe device state · Running                            │
+│ 19:12:40  intermittent-fault · #a12abc · Collect device events · Running                         │
+│                                                                                                  │
+│                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │

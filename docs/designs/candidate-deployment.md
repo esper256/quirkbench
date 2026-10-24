@@ -232,7 +232,7 @@ Different requested changes produce a different cache key. No promise that an
 extra tool leaves the investigated environment identical; the agent judges fidelity.
 
 The optional toolkit includes `quirkbench-load`: bounded frame-like CPU work,
-opt-in generated rain audio and opt-in headless Vulkan rendering. Use ordinary
+opt-in recorded cricket audio and opt-in headless Vulkan rendering. Use ordinary
 SSH commands to launch/stop it. No new MCP operation or always-running service.
 The small pinned VkRunner dependency renders offscreen; its compiler and shader
 compiler stay in the build stage. Recovery and the connection RPM exclude these
@@ -252,3 +252,14 @@ Deployment records an explicit `selinux` choice: `disabled` (the existing defaul
 that difference; inventory reports actual target policy. Enabled modes require the
 candidate's policy and correct file labels. Software tests check boot arguments;
 they do not establish a working enforcing boot. Recovery keeps its own policy.
+
+Candidate preparation rebuilds each installed kernel's initramfs after package
+changes. Include external-storage drivers and the USB4 authorization rule before
+root mounting, and verify the rule in the generated archive before publishing.
+A rule installed only in the final root cannot make that root reachable. Keep this
+step in the OS builder; the investigating agent need not repair boot prerequisites.
+
+Agents can explicitly request base-package `removals` with local RPM replacements.
+Solve them together using rpm-ostree override operations; record the removal list
+in request identity, cached preparation and environment differences. Never infer
+that all optional kernel modules should be removed or disable dependency checks.

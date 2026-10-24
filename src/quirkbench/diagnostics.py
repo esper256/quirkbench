@@ -114,3 +114,40 @@ def emergency_report():
     except OSError as error:
         sections.append(f"/dev/kmsg: {error}")
     return "\n\n".join(sections)
+
+
+def console_snapshot(path, boot_id, max_lines=80):
+    """Read the local TUI's last bounded RAM snapshot, never another program's terminal."""
+    import json
+    import time
+
+    if not 1 <= max_lines <= 1000:
+        raise ValueError("max_lines must be between 1 and 1000.")
+    try:
+        with path.open("rb") as source:
+            data = source.read(1024 * 1024 + 1)
+        if len(data) > 1024 * 1024:
+            raise ValueError("Oversized console snapshot")
+        saved = json.loads(data)
+        age = max(0, time.time() - saved["updated"])
+        unavailable = saved.get("unavailable")
+        stale = saved.get("boot_id") != boot_id or age > 5
+        if unavailable or stale:
+            return {
+                "exit_code": 1,
+                "output": unavailable
+                or "Recovery TUI snapshot is stale or belongs to another boot.",
+                "snapshot_age_seconds": age,
+            }
+        lines = saved["lines"][:max_lines]
+        return {
+            "exit_code": 0,
+            "output": "\n".join(lines) + "\n",
+            "page": saved["page"],
+            "width": saved["width"],
+            "height": saved["height"],
+            "snapshot_age_seconds": age,
+            "snapshot_truncated": saved.get("truncated", False) or len(saved["lines"]) > max_lines,
+        }
+    except (OSError, ValueError, KeyError, TypeError):
+        return {"exit_code": 1, "output": "Recovery TUI snapshot is unavailable."}

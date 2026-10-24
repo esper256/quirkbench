@@ -253,3 +253,13 @@ need for more. Prefer individual tools over adding another sequence language fea
   environment or output copy is stored. Omit investigation to see unscoped calls.
   Calls are recorded on return/cancellation; abrupt process loss can omit an
   in-flight call. An unchanged reply is a measurement, not proof of wasted effort.
+
+The controller TUI derives readable action summaries from existing work records.
+`ssh_command_start.description` is optional human-readable intent, not command
+verification. Keep arguments and environment values out of automatic previews;
+retain all MCP timing data while filtering routine successful polls from the TUI.
+
+Recovery `console-snapshot` support adds inspection view `console`: the last rendered
+TUI frame, bounded and stored in RAM. Report age, dimensions and truncation. Do not
+capture external programs or claim a stale frame is live. Use existing report storage
+and output-reading tools; add no remote terminal service.

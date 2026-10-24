@@ -212,3 +212,24 @@ print(asyncio.run(console.report(upload=True, basic=True)))
             await proc.wait()
     assert proc.returncode == 0, stderr.decode()
     return Path(stdout.decode().strip())
+
+
+class TextScreen:
+    """Record the text the real TUI draws without a terminal or real OS actions."""
+
+    def __init__(self, width=100, height=30):
+        self.width, self.height = width, height
+        self.erase()
+
+    def getmaxyx(self):
+        return self.height, self.width
+
+    def erase(self):
+        self.rows = [" " * self.width for _ in range(self.height)]
+
+    def addnstr(self, y, x, text, length, *args):
+        value = text[:length][: self.width - x]
+        self.rows[y] = self.rows[y][:x] + value + self.rows[y][x + len(value) :]
+
+    def refresh(self):
+        pass

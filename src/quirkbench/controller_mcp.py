@@ -166,10 +166,11 @@ def mcp_app(controller):
             "boot-log",
             "report",
             "emergency",
+            "console",
         ],
         max_lines: Annotated[int, Field(ge=1, le=1000)] = 80,
     ) -> dict[str, Any]:
-        """Read hardware, network, storage, processes, services (failed units only), boot-log, report or emergency (kernel memory; no subprocesses). No shell access."""
+        """Read hardware, network, storage, processes, services (failed units only), boot-log, report, console (last rendered TUI, not external programs) or emergency (kernel memory; no subprocesses). No shell access."""
         return await controller.inspect(target, view, max_lines)
 
     @mcp.tool(structured_output=True)
@@ -208,8 +209,9 @@ def mcp_app(controller):
         wait_seconds: BriefWait = 0.5,
         stop_grace_seconds: Annotated[float, Field(ge=0, le=300)] = 10,
         interactive: bool = False,
+        description: Annotated[str, Field(min_length=1, max_length=120)] | None = None,
     ) -> CommandResult:
-        """Start a candidate command as root. Provide exactly one of argv (no shell expansion) or script (executed by shell -c). A script starts a new shell, not a persistent session. timeout_seconds stops execution; wait_seconds only waits briefly before returning an ID or completed output. Each command has its own cwd/env; files and services are shared. Output is saved on target. Use ssh_command_wait/read/stop. Output defaults to 16 MiB; increase max_output_bytes explicitly if needed. interactive allocates a terminal; send input and resize with ssh_terminal_input. Each terminal is independent. Stop allows stop_grace_seconds for cleanup before SIGKILL."""
+        """Start a candidate command as root. Optional description is a short human-readable intent shown in the controller; omit secrets. Provide exactly one of argv (no shell expansion) or script (executed by shell -c). A script starts a new shell, not a persistent session. timeout_seconds stops execution; wait_seconds only waits briefly before returning an ID or completed output. Each command has its own cwd/env; files and services are shared. Output is saved on target. Use ssh_command_wait/read/stop. Output defaults to 16 MiB; increase max_output_bytes explicitly if needed. interactive allocates a terminal; send input and resize with ssh_terminal_input. Each terminal is independent. Stop allows stop_grace_seconds for cleanup before SIGKILL."""
         return await controller.command_start(
             run_id,
             request_id,
@@ -223,6 +225,7 @@ def mcp_app(controller):
             wait_seconds=wait_seconds,
             stop_grace_seconds=stop_grace_seconds,
             interactive=interactive,
+            description=description,
         )
 
     @mcp.tool(structured_output=True)
@@ -264,8 +267,9 @@ def mcp_app(controller):
         startup_probe_timeout_seconds: Annotated[int, Field(ge=1)] = 60,
         repository_packages: list[str] | None = None,
         debugging_tools: bool = True,
+        removals: list[str] | None = None,
     ) -> ActionResult:
-        """Prepare Bazzite with a small optional debugging toolkit, repository_packages from its own repositories, local RPM additions/replacements and an optional executable startup probe. Preparation can run while a target retains an earlier deployment. Paths are on the controller; files are captured before building. The resulting commit is unchanged; kernel replacements must be RPMs, not raw kernel images. Probe runs before networking with an explicit timeout (default 60 seconds); output goes to the boot journal. Kernel changes require a new boot. Wait with controller_work_wait."""
+        """Prepare Bazzite with a small optional debugging toolkit, repository_packages from its own repositories, local RPM additions/replacements, explicit base-package removals and an optional executable startup probe. Removals and replacements are solved together; dependencies are never bypassed. Preparation can run while a target retains an earlier deployment. Paths are on the controller; files are captured before building. The resulting commit is unchanged; kernel replacements must be RPMs, not raw kernel images. Probe runs before networking with an explicit timeout (default 60 seconds); output goes to the boot journal. Kernel changes require a new boot. Wait with controller_work_wait."""
         return await controller.prepare(
             investigation,
             base,
@@ -277,6 +281,7 @@ def mcp_app(controller):
             startup_probe_timeout_seconds,
             repository_packages,
             debugging_tools,
+            removals,
         )
 
     @mcp.tool(structured_output=True)

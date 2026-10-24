@@ -233,3 +233,29 @@ async def test_failed_media_keeps_console_emergency_report_and_power_available(l
             assert "Connected" in "\n".join(console.lines())
         finally:
             console.release_stop.set()
+
+
+async def test_controller_can_read_actual_console_frame_and_reject_stale_frames(lab, monkeypatch):
+    from quirkbench.console import Console
+    from quirkbench.files import read_json, save_json
+    from tests.support.terminal import TextScreen
+
+    monkeypatch.setattr("curses.color_pair", lambda _: 0)
+    console = Console(lab.data, lab.tools)
+    screen = TextScreen()
+    console.draw(screen)
+    result = await lab.call("ssh_recovery_inspect", target="example-workstation", view="console")
+    saved = (lab.root / result["saved_file"]).read_text()
+
+    assert result["exit_code"] == 0 and saved.splitlines() == screen.rows
+    assert "QUIRKBENCH / RECOVERY" in saved and lab.controller.token not in saved
+    path = console.screen.with_name("console.json")
+    record = read_json(path)
+    save_json(path, dict(record, updated=0))
+    stale = await lab.call("ssh_recovery_inspect", target="example-workstation", view="console")
+    assert stale["exit_code"] != 0 and "stale" in stale["output"]
+    console.publish_screen(
+        [], 0, 0, unavailable="An external program is open; its screen is not captured."
+    )
+    hidden = await lab.call("ssh_recovery_inspect", target="example-workstation", view="console")
+    assert hidden["exit_code"] != 0 and "not captured" in hidden["output"]

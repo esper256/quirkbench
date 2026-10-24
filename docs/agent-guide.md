@@ -80,8 +80,7 @@ update recovery settings. Save reusable software changes in a prepared candidate
 not just a retained disk. The agent owns reasoning, code edits and patch generation.
 
 The [agent examples](mockups/agent-experiment.md) illustrate these tools.
-Interactive terminal input, user-session selection and dedicated live-package
-helpers are not available. Other mockups may show future screens; check the running
+Explicit user-session selection and dedicated live-package helpers are not available. Other mockups may show future screens; check the running
 controller's tool list. See the [1.1 changelog](../CHANGELOG.md) for recent changes.
 See [installation and observed checks](controller-installation.md) for build status.
 
@@ -109,7 +108,9 @@ The recovery `services` view lists **failed units**, not every service.
 Candidate preparation includes a small debugging toolkit by default; set
 `debugging_tools: false` when environment fidelity calls for omitting it.
 `repository_packages` selects packages from the candidate's repositories.
-`packages` and `replacements` still accept controller-local RPM files. Preparation
+`packages` and `replacements` accept controller-local RPM files. `removals` lists
+explicit base packages to remove, solved with replacements in one transaction.
+No packages are removed automatically and dependency errors remain errors. Preparation
 records the requested changes and resolved packages. No tracing or stress tool is
 started automatically. Context reports whether Podman is visible to the running
 controller, separately from target availability and source versions.
@@ -130,10 +131,11 @@ requested diagnostics were available or that the experiment succeeded.
 
 Candidates with the debugging toolkit offer `quirkbench-load --help`. Use it only
 when a synthetic workload helps the investigation. `--seconds` is required;
-`--gpu` adds headless Vulkan rendering and `--audio rain` adds generated rain-like
+`--gpu` adds headless Vulkan rendering and `--audio crickets` adds a bundled cricket-loop
 playback. Both are off by default. Playback needs the human's authorization and a
 working ALSA device; `--audio-device` selects it without changing mixer settings.
-The seed makes workload choices repeatable, not execution timing or failures.
+The seed makes CPU/GPU workload choices repeatable, not execution timing or failures.
+The cricket recording is fixed and loops without a network download.
 GPU output identifies the device. A missing device, failed or skipped render, or
 playback failure is an error. The tool timestamps reported audio underruns, other playback messages, delayed
 feeding and late CPU frames, plus failures and counts. JSON lines go to stderr,
@@ -174,3 +176,38 @@ After discarding retained deployment files, `recovery_prune_ostree_cache` explic
 removes downloaded candidate content from idle recovery. Use it when space is
 needed; later deployments will download that content again. It keeps diagnostics
 and connection settings. Follow completion with `controller_work_wait`.
+
+## Starting and keeping useful notes
+
+One investigation can track several symptoms on the same computer. Use
+`investigation_problem_update` to keep their observations and outcomes distinct;
+one symptom improving does not establish that the others are fixed.
+Confirm the reported model, computer identity and current boot before writing.
+Pairing follows the drive, but an investigation remains attached to its computer.
+
+Ordinary Linux tools and local builds are valid alternatives to Quirkbench tools.
+Choose the quickest useful measurement. Preserve the relevant desktop session,
+software versions and workload when those affect reproduction; root commands do
+not automatically address a user's services. A synthetic load is a probe, not proof
+that it matches the reported workload. Record relevant differences in the candidate.
+
+Keep optional platform feedback in the investigation workspace, separate from target
+findings: attempted action, expected and actual result, command/work reference,
+relevant log path, workaround and time lost. Redact credentials. Do not edit
+Quirkbench or file public reports without permission; continue independent work
+when a platform problem only blocks one route.
+
+Candidate preparation includes early external-storage support. If a candidate
+fails before connecting, inspect the returned boot outcome; missing candidate logs
+are not proof of a particular cause. Report a missing boot prerequisite as a
+Quirkbench issue rather than repairing the platform in investigation scripts.
+
+Use an optional short `description` on `ssh_command_start` to show the human what
+you intend to do. Omit credentials and private values; it appears in the controller
+activity view. Without it, the view shows the executable or a script outline.
+
+`ssh_recovery_inspect` with `view="console"` saves the recovery TUI's latest text
+frame through the normal diagnostic output path. It requires recovery advertising
+`console-snapshot`; older recovery needs updating. The frame includes its age and
+size, not colors. Stale frames and external programs (including the terminal and
+network password UI) are unavailable, not captured as current recovery screens.

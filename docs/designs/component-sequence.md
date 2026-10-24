@@ -47,6 +47,7 @@ sequenceDiagram
     Agent->>Quirkbench: ssh_recovery_inspect
     Quirkbench->>Target: Run selected recovery diagnostic through SSH
     Target->>Target: Show received action and progress in recovery Activity
+    Note over Target: Console inspection reads the last rendered TUI frame from RAM
     Note over Quirkbench,Target: Check advertised operations; software versions may differ
     Target-->>Quirkbench: Command output and exit status
     Quirkbench-->>Agent: Bounded output and saved file

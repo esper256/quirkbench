@@ -265,6 +265,12 @@ class Controller(InvestigationControls, Storage, CommandControl):
         t = await self.target(target)
         if self.targets.get(t["id"], {}).get("mode") != "recovery":
             raise ValueError("Recovery inspection requires the target to be in recovery.")
+        if view == "console" and "console-snapshot" not in self.targets[t["id"]].get(
+            "capabilities", []
+        ):
+            raise ValueError(
+                "This recovery does not support TUI snapshots; update recovery to use this view."
+            )
         result = await self.rpc(t["id"], "inspect", view=view, max_lines=max_lines)
         boot = identifier(result["boot_id"])
         path = (
@@ -399,6 +405,7 @@ class Controller(InvestigationControls, Storage, CommandControl):
         startup_probe_timeout_seconds=60,
         repository_packages=None,
         debugging_tools=True,
+        removals=None,
     ):
         inv = await self.require_active(investigation)
         readiness = self.preparation_readiness()
@@ -420,6 +427,7 @@ class Controller(InvestigationControls, Storage, CommandControl):
             from .bazzite import package_requests
 
             changes["repository_packages"] = package_requests(repository_packages or [])
+            changes["removals"] = package_requests(removals or [])
             changes["debugging_tools"] = debugging_tools
             if startup_probe:
                 changes["startup_probe_timeout_seconds"] = startup_probe_timeout_seconds

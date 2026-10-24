@@ -15,7 +15,7 @@ import time
 
 import aiohttp
 
-from .files import atomic_write, read_json
+from .files import atomic_write, read_json, save_json
 from .linux import Linux
 from .recovery_runtime import EmergencyPower, network_facts
 from .diagnostics import emergency_report, recovery_report, display_lines
@@ -101,6 +101,7 @@ class Console:
         self.emergency = EmergencyPower()
         self.network_save = None
         self.emergency_report_task = None
+        self.last_snapshot = 0
 
     def state(self):
         status = snapshot(self.screen)
@@ -397,6 +398,9 @@ class Console:
         ]
 
     def child(self, screen, command):
+        self.publish_screen(
+            [], 0, 0, unavailable="An external program is open; its screen is not captured."
+        )
         curses.def_prog_mode()
         curses.endwin()
         try:
@@ -421,6 +425,7 @@ class Console:
                 input()
         finally:
             curses.reset_prog_mode()
+            self.last_snapshot = 0
             screen.clear()
 
     def activate(self, key, screen):
@@ -673,6 +678,31 @@ class Console:
             except curses.error:
                 pass  # Resizes can arrive between getmaxyx() and a draw.
         screen.refresh()
+        self.publish_screen(rows, width, height)
+
+    def publish_screen(self, rows, width, height, unavailable=None):
+        now = time.time()
+        if not unavailable and now - self.last_snapshot < 1:
+            return
+        self.last_snapshot = now
+
+        record = dict(
+            updated=now,
+            boot_id=snapshot(self.screen).get("boot_id"),
+            page=self.page,
+            width=width,
+            height=height,
+            unavailable=unavailable,
+            truncated=width > 500 or height > 200,
+            lines=[
+                text(line)[: min(width, 500)].ljust(min(width, 500))
+                for line in rows[: min(height, 200)]
+            ],
+        )
+        try:
+            save_json(self.screen.with_name("console.json"), record)
+        except OSError:
+            pass  # A diagnostics failure must not disable the local menu.
 
     def run(self, screen):
         with (

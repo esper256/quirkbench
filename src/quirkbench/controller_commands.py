@@ -108,7 +108,16 @@ class CommandControl:
         wait_seconds=0,
         stop_grace_seconds=10,
         interactive=False,
+        description=None,
     ):
+        if description is not None and (
+            not isinstance(description, str)
+            or not 1 <= len(description) <= 120
+            or not description.isprintable()
+        ):
+            raise ValueError(
+                "Command description must be 1–120 printable characters; omit secrets."
+            )
         if not 0 <= wait_seconds <= 5:
             raise ValueError("Brief start wait must be between 0 and 5 seconds.")
         if (argv is None) == (script is None):
@@ -131,7 +140,9 @@ class CommandControl:
         )
         async with self.store.admission():
             await self.require_active(run["investigation"])
-            work, fresh = await self.store.request("ssh-command", run_id, request_id, inputs)
+            work, fresh = await self.store.request(
+                "ssh-command", run_id, request_id, {**inputs, "description": description}
+            )
             if fresh:
                 (await self.update_work(work["id"], run_id=run_id, boot_id=target["boot_id"]))
         if work.get("boot_id", target["boot_id"]) != target["boot_id"]:

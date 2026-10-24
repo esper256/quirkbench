@@ -217,6 +217,7 @@ class Target:
                 "boot-prepared",
                 "discard-run",
                 "retain-run",
+                "console-snapshot",
             ],
             "ready_for_deploy": self.mode == "recovery" and not self.active and not self.busy,
         }
@@ -444,6 +445,7 @@ class Target:
                 "services",
                 "report",
                 "emergency",
+                "console",
             ):
                 raise ValueError(
                     "Choose hardware, network, storage, processes, services, boot-log or report."
@@ -451,7 +453,16 @@ class Target:
             self.inspections += 1
             self.event("MCP", f"Read {view}: received", "ssh_recovery_inspect")
             try:
-                if view == "emergency":
+                if view == "console":
+                    from .diagnostics import console_snapshot
+
+                    result = await disk(
+                        console_snapshot,
+                        self.data.parent / "quirkbench-runtime" / "console.json",
+                        self.boot_id,
+                        request.get("max_lines", 80),
+                    )
+                elif view == "emergency":
                     result = {"exit_code": 0, "output": emergency_report()}
                 elif view == "report":
                     from .diagnostics import recovery_report
@@ -471,7 +482,7 @@ class Target:
             self.event(
                 "MCP",
                 f"Read {view}: " + ("finished" if result["exit_code"] == 0 else "failed"),
-                result["output"],
+                "" if view == "console" else result["output"],
             )
             return {**result, "boot_id": self.boot_id}
         if action == "cancel-deploy":

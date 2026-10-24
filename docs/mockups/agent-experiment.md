@@ -23,7 +23,7 @@ Input: {"run_id":"run-1","controller_path":"/home/sam/investigation/collector.py
 Output: {"target_path":"/var/tmp/quirkbench/collector.py","next_tool":"ssh_command_start"}
 
 Tool: ssh_command_start
-Input: {"run_id":"run-1","request_id":"collect-1","argv":["python3","/var/tmp/quirkbench/collector.py"],"timeout_seconds":300}
+Input: {"run_id":"run-1","request_id":"collect-1","description":"Collect device events","argv":["python3","/var/tmp/quirkbench/collector.py"],"timeout_seconds":300}
 Output: {"command_id":"command-1","status":"running"}
 
 Tool: sftp_upload
@@ -206,3 +206,22 @@ Tool: ssh_target_notify
 Input: {"investigation":"intermittent-fault","message":"Please reconnect the external test peripheral, then tell your agent.","chime":false}
 Output: {"displayed":true,"chime":"not-requested"}
 ```
+
+## Optional package removals and recovery screen
+
+```text
+Tool: rpm_ostree_prepare_candidate
+Input: {"investigation":"intermittent-fault","request_id":"kernel-check-2",
+ "replacements":["/home/sam/build/kernel.rpm","/home/sam/build/kernel-core.rpm"],
+ "removals":["kmod-unused-device"]}
+Output includes: {"status":"accepted","next_tool":"controller_work_wait"}
+
+Tool: ssh_recovery_inspect
+Input: {"target":"test-computer","view":"console","max_lines":100}
+Output includes: {"exit_code":0,"page":"home","width":100,"height":30,
+ "snapshot_age_seconds":0.4,"saved_file":"reports/target-1/boot-1/console-example.txt",
+ "next_tool":"saved_output_read"}
+```
+
+The example package list is illustrative: supply the actual matching kernel package
+set and select removals only when appropriate for the investigation.

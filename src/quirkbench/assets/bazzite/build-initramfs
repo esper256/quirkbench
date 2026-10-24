@@ -1,0 +1,26 @@
+#!/bin/bash
+# Rebuild after package changes so the deployed kernel can reach external storage.
+set -euo pipefail
+modules=${1:-/usr/lib/modules}
+rule=${2:-/usr/lib/udev/rules.d/90-quirkbench-thunderbolt.rules}
+found=0
+for kernel in "$modules"/*; do
+    [ -f "$kernel/vmlinuz" ] || continue
+    found=1
+    image="$kernel/initramfs.img"
+    DRACUT_NO_XATTR=1 dracut --tmpdir /tmp --force --no-hostonly --no-hostonly-cmdline --reproducible --zstd \
+        --kver "${kernel##*/}" --add ostree --filesystems ext4 \
+        --add-drivers 'xhci_pci uas usb_storage nvme thunderbolt' \
+        --include "$rule" "$rule" "$image"
+    # Fail preparation instead of publishing a candidate missing early authorization.
+    contents=$(lsinitrd -f "${rule#/}" "$image")
+    if [ "$contents" != "$(cat "$rule")" ]; then
+        echo "Candidate initramfs is missing the external-storage authorization rule: $image" >&2
+        exit 1
+    fi
+    chmod 0600 "$image"
+done
+if [ "$found" = 0 ]; then
+    echo "No candidate kernel found in $modules" >&2
+    exit 1
+fi

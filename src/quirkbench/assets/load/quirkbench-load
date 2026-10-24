@@ -13,6 +13,7 @@ import re
 import signal
 import sys
 import tempfile
+import wave
 import time
 
 
@@ -48,13 +49,13 @@ def positive(value):
 
 
 def arguments():
-    p = argparse.ArgumentParser(description='Bounded frame, optional rain audio and headless Vulkan load. '
+    p = argparse.ArgumentParser(description='Bounded frame, optional cricket audio and headless Vulkan load. '
                                 'Audio and GPU load are off unless selected. No display is needed.')
     p.add_argument('--seconds', required=True, type=positive, help='Stop after this many seconds, including setup')
     p.add_argument('--fps', default=60, type=positive, help='CPU frame rate (default: 60)')
     p.add_argument('--late-ms', default=50, type=positive, help='Report CPU frame lateness beyond this tolerance (default: 50 ms); not proof of an audible glitch')
     p.add_argument('--seed', default=1, type=int, help='Repeatable workload seed (default: 1)')
-    p.add_argument('--audio', choices=('off', 'rain'), default='off', help='Generated continuous rain-like sound; playback requires permission')
+    p.add_argument('--audio', choices=('off', 'crickets'), default='off', help='Bundled cricket loop; playback requires permission')
     p.add_argument('--audio-device', default='default', help='ALSA playback device; does not change system mixer settings')
     p.add_argument('--volume', default=0.1, type=float, help='Signal amplitude 0–1 (default: 0.1); actual loudness depends on mixer')
     p.add_argument('--gpu', action='store_true', help='Render randomized offscreen Vulkan batches')
@@ -67,18 +68,15 @@ def arguments():
     return a
 
 
-def rain(seed, volume):
-    """Periodic rain-like noise, stereo signed 16-bit LE, no downloaded recordings."""
-    rng = random.Random(seed)
-    samples = array('h')
-    # Repeated noise with a short crossfade prevents a click at the loop boundary.
-    noise = [rng.uniform(-1, 1) for _ in range(48000)]
-    for i in range(480):
-        t = i / 480
-        noise[i] = noise[-480+i] * (1-t) + noise[i] * t
-    for n in noise[:-480]:
-        value = int(n * volume * 32767)
-        samples.extend((value, value))
+def cricket_audio(volume):
+    """Offline stereo PCM; the bundled sample has a crossfaded loop boundary."""
+    with wave.open(str(ASSETS / 'crickets.wav'), 'rb') as source:
+        if (source.getnchannels(), source.getsampwidth(), source.getframerate()) != (2, 2, 48000):
+            raise RuntimeError('Unsupported bundled audio format')
+        samples = array('h', source.readframes(source.getnframes()))
+    if sys.byteorder != 'little':
+        samples.byteswap()
+    samples = array('h', (round(value * volume) for value in samples))
     if sys.byteorder != 'little':
         samples.byteswap()
     return samples.tobytes()
@@ -101,26 +99,32 @@ async def child(*argv, input=None):
 
 
 async def audio(a, counts):
-    data = rain(a.seed, a.volume)
+    data = await asyncio.to_thread(cricket_audio, a.volume)
     process = await asyncio.create_subprocess_exec('aplay', '-D', a.audio_device,
         '-t', 'raw', '-f', 'S16_LE', '-r', '48000', '-c', '2',
         stdin=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         env={**os.environ, 'LC_ALL': 'C'})
+    # Drain each chunk rather than measuring several chunks of Python pipe buffering.
+    process.stdin.transport.set_write_buffer_limits(high=0, low=0)
     messages = asyncio.create_task(audio_messages(process.stderr, counts))
     previous = time.monotonic()
     try:
+        # Feed short chunks, so a blocked sink does not hide a long gap in one write.
+        offset = 0
         while True:
+            chunk = data[offset:offset + 19200]
+            offset = (offset + len(chunk)) % len(data)
             now = time.monotonic()
             gap = now - previous
-            if gap > len(data) / (48000 * 4) + 0.25:
+            if gap > len(chunk) / (48000 * 4) + 0.25:
                 counts['audio_feed_delays'] += 1
                 event('audio_feed_delay', elapsed_ms=round(gap * 1000, 3),
                       interval_start_monotonic_ns=int(previous * 1e9),
                       interpretation='Possible playback gap; pipe or device backpressure can also cause this delay')
             previous = now
-            process.stdin.write(data)
+            process.stdin.write(chunk)
             await process.stdin.drain()
-            counts['audio_bytes'] += len(data)
+            counts['audio_bytes'] += len(chunk)
     except (BrokenPipeError, ConnectionResetError):
         raise RuntimeError('Audio playback stopped; inspect the ALSA error above and selected device.') from None
     finally:

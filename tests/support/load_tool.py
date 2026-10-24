@@ -9,8 +9,8 @@ import os
 ASSETS = Path(__file__).resolve().parents[2] / "src/quirkbench/assets/load"
 
 
-def load_tool(tmp_path, *, gpu_result="pass", audio_failure=False, audio_message=""):
-    for name in ("quirkbench-load", "scene.shader_test"):
+def load_tool(tmp_path, *, gpu_result="pass", audio_failure=False, audio_message="", paced=False):
+    for name in ("quirkbench-load", "scene.shader_test", "crickets.wav"):
         shutil.copy2(ASSETS / name, tmp_path / name)
     runner = tmp_path / "vkrunner"
     runner.write_text(
@@ -35,17 +35,21 @@ else:
         + sys.executable
         + """
 import sys
+import time
 from pathlib import Path
 """
         + f"print({audio_message!r}, file=sys.stderr, flush=True)\n"
+        + f"paced = {paced!r}\n"
         + (
             "sys.exit(7)\n"
             if audio_failure
             else """
 with (Path(__file__).parent/'audio.raw').open('wb', buffering=0) as out:
-    while chunk := sys.stdin.buffer.read(8192):
+    while chunk := sys.stdin.buffer.read(1920):
         if out.tell() < 200000:
             out.write(chunk)
+        if paced:
+            time.sleep(len(chunk) / 192000)
 """
         )
     )

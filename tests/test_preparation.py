@@ -132,6 +132,9 @@ async def test_agent_files_and_changed_candidate_inputs(lab, tmp_path):
 
     assert ready["next_tool"] == "recovery_deploy_ostree"
     staged = lab.root / "candidates" / ready["candidate_id"]
+    recipe = (staged / "Containerfile").read_text()
+    assert recipe.rindex("quirkbench-build-initramfs") > recipe.index("packages-0.rpm")
+    assert (staged / "build-initramfs").is_file()
     assert (staged / "packages-0.rpm").read_bytes() == package.read_bytes()
     assert (staged / "startup-probe").read_bytes() == probe.read_bytes()
     assert "Before=NetworkManager.service" in (staged / "quirkbench-probe.service").read_text()
@@ -311,3 +314,64 @@ async def test_recovery_assembly_and_boot_menu_use_ram_live_image(tmp_path):
     )
     assert report.returncode == 0
     assert "Detected disks" in report.stdout and "USB4 / Thunderbolt" in report.stdout
+
+
+@pytest.mark.parametrize("omit_rule,fail_build", [(False, False), (True, False), (False, True)])
+def test_candidate_boot_image_build_checks_early_storage_support(tmp_path, omit_rule, fail_build):
+    from tests.support.candidate_initramfs import run_builder
+
+    result, arguments = run_builder(tmp_path, omit_rule=omit_rule, fail_build=fail_build)
+
+    assert (result.returncode == 0) == (not omit_rule and not fail_build)
+    assert arguments[arguments.index("--kver") + 1] == "test-kernel"
+    assert "thunderbolt" in arguments[arguments.index("--add-drivers") + 1]
+    assert "--no-hostonly" in arguments and "--no-hostonly-cmdline" in arguments
+    if omit_rule:
+        assert "missing" in result.stderr
+
+
+async def test_explicit_removals_share_replacement_transaction_and_retry_identity(lab, tmp_path):
+    kernel = tmp_path / "kernel.rpm"
+    kernel.write_bytes(b"test kernel RPM")
+    options = dict(replacements=[str(kernel)], removals=["kmod-example", "kmod-extra"])
+
+    ready = await lab.candidate(request_id="custom-kernel", **options)
+    repeated = await lab.candidate(request_id="custom-kernel", **options)
+    reused = await lab.candidate(request_id="same-kernel", **options)
+    changed = await lab.candidate(
+        request_id="other-kernel", **(options | {"removals": ["kmod-extra"]})
+    )
+
+    recipe = (lab.root / "candidates" / ready["candidate_id"] / "Containerfile").read_text()
+    transaction = next(line for line in recipe.splitlines() if "override replace" in line)
+    assert "--remove=kmod-example" in transaction and "--remove=kmod-extra" in transaction
+    assert "replacements-0.rpm" in transaction
+    assert ready["candidate_id"] == repeated["candidate_id"]
+    assert reused["candidate"]["preparation_metrics"]["prepared_candidate_cache_hit"]
+    assert not changed["candidate"]["preparation_metrics"]["prepared_candidate_cache_hit"]
+    assert ready["candidate"]["inputs"]["removals"] == options["removals"]
+    assert "Removed base package: kmod-example" in ready["candidate"]["changes"]
+    for removals in (["kmod-extra"], ["--nodeps"], ["foo; touch /tmp/no"]):
+        refused = await lab.raw_call(
+            "rpm_ostree_prepare_candidate",
+            investigation="wifi-case",
+            request_id="custom-kernel",
+            replacements=[str(kernel)],
+            removals=removals,
+        )
+        assert refused.isError
+
+
+async def test_removal_dependency_failure_stays_failed_without_deployment(lab, monkeypatch):
+    original = lab.tools.command
+
+    async def command(*args, **kwargs):
+        if args[:2] == ("podman", "build"):
+            raise ValueError("rpm-ostree: required package dependency cannot be removed")
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(lab.tools, "command", command)
+    result = await lab.candidate(removals=["required-package"])
+
+    assert result["status"] == "failed" and "dependency" in result["stage"]
+    assert lab.tools.reboots == 0 and not await lab.controller.store.find("candidate")
